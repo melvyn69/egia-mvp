@@ -4,19 +4,36 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
-import {
-  mockGoogleConnected,
-  mockKpis,
-  mockLocations
-} from "../mock/mockData";
+import { mockGoogleConnected, mockKpis } from "../mock/mockData";
 
 type DashboardProps = {
   session: Session | null;
   googleConnected: boolean | null;
   onConnect: () => void;
+  onSyncLocations: () => void;
+  locations: Array<{
+    id: string;
+    location_title: string | null;
+    location_resource_name: string;
+    address_json: unknown | null;
+    phone: string | null;
+    website_uri: string | null;
+  }>;
+  locationsLoading: boolean;
+  locationsError: string | null;
+  syncing: boolean;
 };
 
-const Dashboard = ({ session, googleConnected, onConnect }: DashboardProps) => {
+const Dashboard = ({
+  session,
+  googleConnected,
+  onConnect,
+  onSyncLocations,
+  locations,
+  locationsLoading,
+  locationsError,
+  syncing
+}: DashboardProps) => {
   const connectedStatus = googleConnected ?? mockGoogleConnected;
 
   return (
@@ -106,33 +123,61 @@ const Dashboard = ({ session, googleConnected, onConnect }: DashboardProps) => {
           <h2 className="text-2xl font-semibold text-slate-900">
             Lieux connectes
           </h2>
-          <Button variant="ghost">Voir tout</Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={onSyncLocations} disabled={syncing}>
+              {syncing ? "Synchronisation..." : "Synchroniser les lieux"}
+            </Button>
+          </div>
         </div>
+        {locationsError && (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+            {locationsError}
+          </div>
+        )}
         <div className="mt-4 grid gap-4 md:grid-cols-2">
-          {mockLocations.map((location) => (
-            <Card key={location.name}>
-              <CardContent className="flex items-center justify-between gap-4 pt-6">
-                <div>
-                  <p className="text-lg font-semibold text-slate-900">
-                    {location.name}
-                  </p>
-                  <div className="mt-2 flex items-center gap-2 text-sm text-slate-500">
-                    <MapPin size={14} />
-                    {location.city}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="flex items-center justify-end gap-1 text-sm font-semibold text-slate-900">
-                    <Star size={14} className="text-amber-500" />
-                    {location.rating.toFixed(1)}
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    {location.reviews} avis
-                  </p>
-                </div>
+          {locationsLoading &&
+            Array.from({ length: 2 }).map((_, index) => (
+              <Card key={`skeleton-${index}`}>
+                <CardContent className="space-y-3 pt-6">
+                  <Skeleton className="h-5 w-2/3" />
+                  <Skeleton className="h-4 w-1/2" />
+                </CardContent>
+              </Card>
+            ))}
+          {!locationsLoading && locations.length === 0 && (
+            <Card>
+              <CardContent className="space-y-2 pt-6 text-sm text-slate-500">
+                <p>Aucun lieu synchronise pour le moment.</p>
+                <p>Utilisez le bouton de synchronisation pour charger vos lieux.</p>
               </CardContent>
             </Card>
-          ))}
+          )}
+          {!locationsLoading &&
+            locations.map((location) => (
+              <Card key={location.id}>
+                <CardContent className="flex items-center justify-between gap-4 pt-6">
+                  <div>
+                    <p className="text-lg font-semibold text-slate-900">
+                      {location.location_title ??
+                        location.location_resource_name}
+                    </p>
+                    <div className="mt-2 flex items-center gap-2 text-sm text-slate-500">
+                      <MapPin size={14} />
+                      {location.phone ?? "Telephone non renseigne"}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="flex items-center justify-end gap-1 text-sm font-semibold text-slate-900">
+                      <Star size={14} className="text-amber-500" />
+                      Actif
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      {location.website_uri ?? "Site non renseigne"}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
         </div>
       </section>
     </div>

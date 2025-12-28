@@ -20,6 +20,19 @@ const App = () => {
   const [callbackError, setCallbackError] = useState<string | null>(null);
   const [callbackLoading, setCallbackLoading] = useState(false);
   const [callbackHandled, setCallbackHandled] = useState(false);
+  const [locations, setLocations] = useState<
+    Array<{
+      id: string;
+      location_title: string | null;
+      location_resource_name: string;
+      address_json: unknown | null;
+      phone: string | null;
+      website_uri: string | null;
+    }>
+  >([]);
+  const [locationsLoading, setLocationsLoading] = useState(false);
+  const [locationsError, setLocationsError] = useState<string | null>(null);
+  const [syncingLocations, setSyncingLocations] = useState(false);
   const envMissing = !supabaseUrl || !supabaseAnonKey;
   const isCallbackPath = location.pathname === "/google_oauth_callback";
 
@@ -202,6 +215,43 @@ const App = () => {
     };
   }, [session]);
 
+  const fetchLocations = async (userId: string) => {
+    if (!supabase) {
+      return;
+    }
+
+    setLocationsLoading(true);
+    setLocationsError(null);
+
+    const { data, error } = await supabase
+      .from("google_locations")
+      .select(
+        "id, location_title, location_resource_name, address_json, phone, website_uri"
+      )
+      .eq("user_id", userId)
+      .eq("provider", "google")
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      console.error("google_locations fetch error:", error);
+      setLocationsError("Impossible de charger les lieux Google.");
+      setLocations([]);
+    } else {
+      setLocations(data ?? []);
+    }
+
+    setLocationsLoading(false);
+  };
+
+  useEffect(() => {
+    if (!session) {
+      setLocations([]);
+      return;
+    }
+
+    void fetchLocations(session.user.id);
+  }, [session]);
+
   const handleSignIn = async () => {
     setAuthError(null);
 
@@ -263,6 +313,45 @@ const App = () => {
     } catch (error) {
       console.error(error);
       setGoogleError("Impossible de demarrer la connexion Google.");
+    }
+  };
+
+  const handleSyncLocations = async () => {
+    setLocationsError(null);
+
+    if (!supabase || !session || !supabaseUrl || !supabaseAnonKey) {
+      setLocationsError("Connexion Supabase requise.");
+      return;
+    }
+
+    try {
+      setSyncingLocations(true);
+      const res = await fetch(
+        `${supabaseUrl}/functions/v1/google_gbp_sync_locations`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: supabaseAnonKey,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ jwt: session.access_token })
+        }
+      );
+
+      const text = await res.text();
+      if (!res.ok) {
+        console.error("google_gbp_sync_locations error:", res.status, text);
+        setLocationsError("Impossible de synchroniser les lieux.");
+        return;
+      }
+
+      await fetchLocations(session.user.id);
+    } catch (error) {
+      console.error(error);
+      setLocationsError("Impossible de synchroniser les lieux.");
+    } finally {
+      setSyncingLocations(false);
     }
   };
 
@@ -334,6 +423,11 @@ const App = () => {
                       session={session}
                       googleConnected={googleConnected}
                       onConnect={handleConnectGoogle}
+                      onSyncLocations={handleSyncLocations}
+                      locations={locations}
+                      locationsLoading={locationsLoading}
+                      locationsError={locationsError}
+                      syncing={syncingLocations}
                     />
                   }
                 />
