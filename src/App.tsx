@@ -33,6 +33,16 @@ const App = () => {
   const [locationsLoading, setLocationsLoading] = useState(false);
   const [locationsError, setLocationsError] = useState<string | null>(null);
   const [syncingLocations, setSyncingLocations] = useState(false);
+  const [syncCooldownUntil, setSyncCooldownUntil] = useState<number | null>(
+    () => {
+      const stored = window.localStorage.getItem("gbp_sync_cooldown_until");
+      if (!stored) {
+        return null;
+      }
+      const parsed = Number(stored);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+  );
   const envMissing = !supabaseUrl || !supabaseAnonKey;
   const isCallbackPath = location.pathname === "/google_oauth_callback";
 
@@ -324,6 +334,15 @@ const App = () => {
       return;
     }
 
+    const now = Date.now();
+    if (syncCooldownUntil && syncCooldownUntil > now) {
+      const secondsLeft = Math.ceil((syncCooldownUntil - now) / 1000);
+      setLocationsError(
+        `Reessaie dans ${secondsLeft} secondes avant une nouvelle synchronisation.`
+      );
+      return;
+    }
+
     try {
       setSyncingLocations(true);
       const res = await fetch(
@@ -331,7 +350,7 @@ const App = () => {
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${session.access_token}`,
+            Authorization: `Bearer ${supabaseAnonKey}`,
             apikey: supabaseAnonKey,
             "Content-Type": "application/json"
           },
@@ -345,6 +364,13 @@ const App = () => {
         setLocationsError("Impossible de synchroniser les lieux.");
         return;
       }
+
+      const cooldown = Date.now() + 60_000;
+      window.localStorage.setItem(
+        "gbp_sync_cooldown_until",
+        cooldown.toString()
+      );
+      setSyncCooldownUntil(cooldown);
 
       await fetchLocations(session.user.id);
     } catch (error) {
