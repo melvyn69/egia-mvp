@@ -24,6 +24,56 @@ type DashboardProps = {
   syncing: boolean;
 };
 
+const getGreeting = (): string => {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) {
+    return "Bonjour";
+  } else if (hour >= 12 && hour < 18) {
+    return "Bon après-midi";
+  } else {
+    return "Bonsoir";
+  }
+};
+
+const getFirstName = (session: Session | null): string | null => {
+  if (!session?.user) {
+    return null;
+  }
+
+  const metadata = session.user.user_metadata;
+  if (metadata?.first_name) {
+    return metadata.first_name;
+  }
+
+  if (metadata?.full_name) {
+    const parts = metadata.full_name.trim().split(/\s+/);
+    if (parts.length > 0) {
+      return parts[0];
+    }
+  }
+
+  if (session.user.email) {
+    const emailPart = session.user.email.split("@")[0];
+    const parts = emailPart.split(/[._-]/);
+    if (parts.length > 0 && parts[0]) {
+      return parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase();
+    }
+  }
+
+  return null;
+};
+
+const formatKpiValue = (value: string | number | undefined | null): string => {
+  if (value === undefined || value === null || value === "") {
+    return "—";
+  }
+  const stringValue = String(value);
+  if (stringValue === "undefined%" || stringValue === "-" || stringValue.trim() === "") {
+    return "—";
+  }
+  return stringValue;
+};
+
 const Dashboard = ({
   session,
   googleConnected,
@@ -35,9 +85,16 @@ const Dashboard = ({
   syncing
 }: DashboardProps) => {
   const connectedStatus = googleConnected ?? mockGoogleConnected;
+  const greeting = getGreeting();
+  const firstName = getFirstName(session);
+  const greetingText = firstName ? `${greeting}, ${firstName}` : "Bienvenue";
 
   return (
     <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-semibold text-slate-900">{greetingText}</h2>
+      </div>
+
       <section className="grid gap-4 md:grid-cols-3">
         {mockKpis.map((kpi) => (
           <Card key={kpi.label}>
@@ -49,12 +106,12 @@ const Dashboard = ({
             <CardContent className="flex items-end justify-between">
               <div>
                 <p className="text-3xl font-semibold text-slate-900">
-                  {kpi.value}
+                  {formatKpiValue(kpi.value)}
                 </p>
-                <p className="text-xs text-slate-500">{kpi.caption}</p>
+                <p className="text-xs text-slate-500">{formatKpiValue(kpi.caption)}</p>
               </div>
               <Badge variant={kpi.trend === "up" ? "success" : "warning"}>
-                {kpi.delta}
+                {formatKpiValue(kpi.delta)}
               </Badge>
             </CardContent>
           </Card>
