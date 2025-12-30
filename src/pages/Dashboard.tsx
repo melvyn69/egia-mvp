@@ -220,6 +220,11 @@ const Dashboard = ({
   const sortedNotifications = notificationsWithStatus
     .slice()
     .sort((a, b) => {
+      const aRequiresAction = a.requiresAction === true;
+      const bRequiresAction = b.requiresAction === true;
+      if (aRequiresAction !== bRequiresAction) {
+        return aRequiresAction ? -1 : 1;
+      }
       if (a.status !== b.status) {
         return a.status === "unread" ? -1 : 1;
       }
@@ -510,9 +515,16 @@ const Dashboard = ({
 
                         <div className="flex-1">
                           <div className="flex items-start justify-between gap-3">
-                            <p className="text-sm font-semibold text-slate-900">
-                              {notif.title || "Notification"}
-                            </p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-semibold text-slate-900">
+                                {notif.title || "Notification"}
+                              </p>
+                              {notif.requiresAction && (
+                                <Badge className="border-red-600 bg-red-600 text-white">
+                                  Action requise
+                                </Badge>
+                              )}
+                            </div>
                             {notif.status === "unread" && (
                               <span className="mt-0.5 inline-flex h-2 w-2 rounded-full bg-amber-500" />
                             )}
@@ -540,7 +552,7 @@ const Dashboard = ({
                       <div className="flex flex-col gap-2 pt-1">
                         {notif.kind === "review" && (
                           <Button
-                            variant="outline"
+                            variant={notif.requiresAction ? "default" : "outline"}
                             size="sm"
                             onClick={(e) => {
                               e.stopPropagation();
