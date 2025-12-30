@@ -1,5 +1,5 @@
 import type { Session } from "@supabase/supabase-js";
-import { MapPin, RefreshCw, Star } from "lucide-react";
+import { CheckCircle, MapPin, RefreshCw, Shield, Star } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -72,6 +72,52 @@ const formatKpiValue = (value: string | number | undefined | null): string => {
     return "—";
   }
   return stringValue;
+};
+
+type ActivityEvent = {
+  id: string;
+  message: string;
+  timestamp: Date;
+  type: "connection" | "sync" | "review";
+};
+
+const mockActivityEvents: ActivityEvent[] = [
+  {
+    id: "1",
+    message: "Connexion Google réussie",
+    timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    type: "connection"
+  },
+  {
+    id: "2",
+    message: "Synchronisation lancée",
+    timestamp: new Date(Date.now() - 45 * 60 * 1000),
+    type: "sync"
+  },
+  {
+    id: "3",
+    message: "Aucun avis négatif détecté",
+    timestamp: new Date(Date.now() - 15 * 60 * 1000),
+    type: "review"
+  }
+];
+
+const formatRelativeTime = (date: Date): string => {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) {
+    return "Il y a moins d'une minute";
+  } else if (diffMins < 60) {
+    return `Il y a ${diffMins} minute${diffMins > 1 ? "s" : ""}`;
+  } else if (diffHours < 24) {
+    return `Il y a ${diffHours} heure${diffHours > 1 ? "s" : ""}`;
+  } else {
+    return `Il y a ${diffDays} jour${diffDays > 1 ? "s" : ""}`;
+  }
 };
 
 const Dashboard = ({
@@ -236,6 +282,45 @@ const Dashboard = ({
               </Card>
             ))}
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-2xl font-semibold text-slate-900">Flux d'activité</h2>
+        <Card className="mt-4">
+          <CardContent className="pt-6">
+            {mockActivityEvents.length === 0 ? (
+              <p className="text-sm text-slate-500">Aucune activité récente</p>
+            ) : (
+              <div className="space-y-4">
+                {mockActivityEvents
+                  .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+                  .map((event) => (
+                    <div key={event.id} className="flex items-start gap-3 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0">
+                      <div className="mt-0.5">
+                        {event.type === "connection" && (
+                          <CheckCircle size={16} className="text-green-600" />
+                        )}
+                        {event.type === "sync" && (
+                          <RefreshCw size={16} className="text-blue-600" />
+                        )}
+                        {event.type === "review" && (
+                          <Shield size={16} className="text-amber-600" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-slate-900">
+                          {event.message ?? "Événement"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {formatRelativeTime(event.timestamp)}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </section>
     </div>
   );
