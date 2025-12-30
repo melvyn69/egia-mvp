@@ -18,7 +18,8 @@ import {
   type AppNotification,
   type NotificationKind,
   type NotificationSeverity,
-  mockNotifications,
+  getNotifications,
+  resolveNotificationAction,
   STORAGE_KEY_READ_NOTIFICATIONS,
   getReadNotificationIds,
   dispatchNotificationsUpdated
@@ -208,7 +209,7 @@ const Dashboard = ({
     }
   }, [readNotificationIds]);
 
-  const notificationsWithStatus: AppNotification[] = mockNotifications.map((notif) => ({
+  const notificationsWithStatus: AppNotification[] = getNotifications().map((notif) => ({
     ...notif,
     status: readNotificationIds.has(notif.id) ? ("read" as const) : ("unread" as const)
   }));
@@ -575,6 +576,19 @@ const Dashboard = ({
                       </div>
 
                       <div className="flex flex-col gap-2 pt-1">
+                        {notif.requiresAction && (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              markAsRead(notif.id);
+                              resolveNotificationAction(notif.id);
+                            }}
+                          >
+                            Marquer comme traité
+                          </Button>
+                        )}
                         {notif.kind === "review" && (
                           <Button
                             variant={notif.requiresAction ? "default" : "outline"}

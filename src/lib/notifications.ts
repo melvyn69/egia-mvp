@@ -21,6 +21,7 @@ export type AppNotification = AppNotificationBase & {
 };
 
 export const STORAGE_KEY_READ_NOTIFICATIONS = "egia_read_notifications";
+export const STORAGE_KEY_NOTIFICATIONS = "egia_notifications";
 
 export const NOTIFICATIONS_UPDATED_EVENT = "notifications-updated";
 
@@ -114,4 +115,49 @@ export const getUnreadNotificationCount = (
 
 export const dispatchNotificationsUpdated = (): void => {
   window.dispatchEvent(new CustomEvent(NOTIFICATIONS_UPDATED_EVENT));
+};
+
+export const getNotifications = (): AppNotificationBase[] => {
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY_NOTIFICATIONS);
+    if (stored) {
+      const parsed = JSON.parse(stored) as AppNotificationBase[];
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch {
+    return mockNotifications;
+  }
+  return mockNotifications;
+};
+
+export const setNotifications = (notifications: AppNotificationBase[]): void => {
+  try {
+    window.localStorage.setItem(
+      STORAGE_KEY_NOTIFICATIONS,
+      JSON.stringify(notifications)
+    );
+  } catch {
+    return;
+  }
+  dispatchNotificationsUpdated();
+};
+
+export const updateNotification = (
+  id: string,
+  patch: Partial<AppNotificationBase>
+): void => {
+  const notifications = getNotifications();
+  const index = notifications.findIndex((notif) => notif.id === id);
+  if (index === -1) {
+    return;
+  }
+  const updated = notifications.slice();
+  updated[index] = { ...notifications[index], ...patch };
+  setNotifications(updated);
+};
+
+export const resolveNotificationAction = (id: string): void => {
+  updateNotification(id, { requiresAction: false });
 };
