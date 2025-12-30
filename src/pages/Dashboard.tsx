@@ -258,6 +258,19 @@ const Dashboard = ({
     }
   };
 
+  const getLocationName = (locationId?: string | null): string => {
+    if (!locationId) {
+      return "—";
+    }
+
+    const location = locations.find((loc) => loc.id === locationId);
+    if (!location) {
+      return "—";
+    }
+
+    return location.location_title ?? location.location_resource_name ?? "—";
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -508,6 +521,12 @@ const Dashboard = ({
                           <p className="mt-1 text-sm text-slate-600">
                             {notif.message || "—"}
                           </p>
+
+                          {notif.locationId && (
+                            <p className="mt-2 text-xs text-slate-500">
+                              Lieu : {getLocationName(notif.locationId)}
+                            </p>
+                          )}
 
                           <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
                             <span>
