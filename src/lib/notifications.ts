@@ -11,6 +11,7 @@ export type AppNotificationBase = {
   message: string;
   severity: NotificationSeverity;
   createdAt: string; // ISO
+  requiresAction?: boolean;
   rating?: number | null;
   locationId?: string | null;
 };
@@ -23,6 +24,24 @@ export const STORAGE_KEY_READ_NOTIFICATIONS = "egia_read_notifications";
 
 export const NOTIFICATIONS_UPDATED_EVENT = "notifications-updated";
 
+export const deriveReviewMeta = (
+  rating: number | null
+): {
+  severity: NotificationSeverity;
+  requiresAction: boolean;
+} => {
+  if (rating === null) {
+    return { severity: "info", requiresAction: false };
+  }
+  if (rating <= 2) {
+    return { severity: "critical", requiresAction: true };
+  }
+  if (rating === 3) {
+    return { severity: "medium", requiresAction: true };
+  }
+  return { severity: "low", requiresAction: false };
+};
+
 export const mockNotifications: AppNotificationBase[] = [
   {
     id: "n1",
@@ -30,7 +49,7 @@ export const mockNotifications: AppNotificationBase[] = [
     title: "Alerte avis négatif critique",
     message: "Service très décevant, je ne reviendrai pas.",
     rating: 1,
-    severity: "critical",
+    ...deriveReviewMeta(1),
     createdAt: new Date(Date.now() - 25 * 60 * 1000).toISOString()
   },
   {
@@ -39,7 +58,7 @@ export const mockNotifications: AppNotificationBase[] = [
     title: "Nouveau 5★",
     message: "Super accueil, je recommande !",
     rating: 5,
-    severity: "low",
+    ...deriveReviewMeta(5),
     createdAt: new Date(Date.now() - 8 * 60 * 1000).toISOString()
   },
   {
@@ -56,7 +75,7 @@ export const mockNotifications: AppNotificationBase[] = [
     title: "Avis à traiter",
     message: "Temps d'attente un peu long aujourd'hui.",
     rating: 3,
-    severity: "medium",
+    ...deriveReviewMeta(3),
     createdAt: new Date(Date.now() - 52 * 60 * 1000).toISOString()
   },
   {
@@ -96,4 +115,3 @@ export const getUnreadNotificationCount = (
 export const dispatchNotificationsUpdated = (): void => {
   window.dispatchEvent(new CustomEvent(NOTIFICATIONS_UPDATED_EVENT));
 };
-
