@@ -22,6 +22,7 @@ export type AppNotification = AppNotificationBase & {
 
 export const STORAGE_KEY_READ_NOTIFICATIONS = "egia_read_notifications";
 export const STORAGE_KEY_NOTIFICATIONS = "egia_notifications";
+export const STORAGE_KEY_NOTIFICATIONS_DEDUP = "egia_notifications_dedup";
 
 export const NOTIFICATIONS_UPDATED_EVENT = "notifications-updated";
 
@@ -135,10 +136,11 @@ export const getNotifications = (): AppNotificationBase[] => {
 };
 
 export const setNotifications = (notifications: AppNotificationBase[]): void => {
+  const trimmed = notifications.slice(0, 50);
   try {
     window.localStorage.setItem(
       STORAGE_KEY_NOTIFICATIONS,
-      JSON.stringify(notifications)
+      JSON.stringify(trimmed)
     );
   } catch {
     return;
@@ -162,4 +164,57 @@ export const updateNotification = (
 
 export const resolveNotificationAction = (id: string): void => {
   updateNotification(id, { requiresAction: false });
+};
+
+export const addNotificationDedup = (
+  notification: AppNotificationBase,
+  opts?: { key?: string; cooldownMs?: number }
+): void => {
+  const dedupKey =
+    opts?.key ??
+    `${notification.kind}|${notification.severity}|${notification.title}|${notification.message}`;
+  const cooldownMs = opts?.cooldownMs ?? 30_000;
+  let dedupMap: Record<string, string> = {};
+
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY_NOTIFICATIONS_DEDUP);
+    if (stored) {
+      const parsed = JSON.parse(stored) as Record<string, string>;
+      if (parsed && typeof parsed === "object") {
+        dedupMap = parsed;
+      }
+    }
+  } catch {
+    dedupMap = {};
+  }
+
+  const lastTimestampIso = dedupMap[dedupKey];
+  const lastTimestamp = lastTimestampIso ? Date.parse(lastTimestampIso) : 0;
+  const now = Date.now();
+  if (!Number.isNaN(lastTimestamp) && now - lastTimestamp < cooldownMs) {
+    return;
+  }
+
+  setNotifications([notification, ...getNotifications()]);
+  dedupMap[dedupKey] = new Date(now).toISOString();
+  try {
+    window.localStorage.setItem(
+      STORAGE_KEY_NOTIFICATIONS_DEDUP,
+      JSON.stringify(dedupMap)
+    );
+  } catch {
+    // ignore storage errors
+  }
+  dispatchNotificationsUpdated();
+};
+
+export const clearNotifications = (): void => {
+  try {
+    window.localStorage.removeItem(STORAGE_KEY_NOTIFICATIONS);
+    window.localStorage.removeItem(STORAGE_KEY_READ_NOTIFICATIONS);
+    window.localStorage.removeItem(STORAGE_KEY_NOTIFICATIONS_DEDUP);
+  } catch {
+    // ignore storage errors
+  }
+  setNotifications(mockNotifications);
 };

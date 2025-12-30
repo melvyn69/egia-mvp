@@ -19,9 +19,10 @@ import {
   type AppNotification,
   type NotificationKind,
   type NotificationSeverity,
+  addNotificationDedup,
+  clearNotifications,
   getNotifications,
   resolveNotificationAction,
-  setNotifications,
   STORAGE_KEY_READ_NOTIFICATIONS,
   getReadNotificationIds,
   dispatchNotificationsUpdated
@@ -182,12 +183,10 @@ type NotificationDraft = Omit<AppNotificationBase, "id" | "createdAt" | "message
   message?: string | null;
 };
 
-const addNotification = (notification: AppNotificationBase): void => {
-  const notifications = getNotifications();
-  setNotifications([notification, ...notifications]);
-};
-
-const createNotification = (partial: NotificationDraft): void => {
+const createNotification = (
+  partial: NotificationDraft,
+  opts?: { key?: string; cooldownMs?: number }
+): void => {
   const rawMessage = partial.message;
   const normalizedMessage =
     typeof rawMessage === "string" ? rawMessage.trim().toLowerCase() : "";
@@ -208,7 +207,7 @@ const createNotification = (partial: NotificationDraft): void => {
     createdAt: new Date().toISOString()
   };
 
-  addNotification(notification);
+  addNotificationDedup(notification, opts);
 };
 
 const Dashboard = ({
@@ -599,11 +598,25 @@ const Dashboard = ({
         <div id="notifications-section">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-semibold text-slate-900">Notifications</h2>
-            {unreadCount > 0 && (
-              <Badge variant="success">
-                {unreadCount} nouveau{unreadCount > 1 ? "x" : ""}
-              </Badge>
-            )}
+            <div className="flex items-center gap-2">
+              {import.meta.env.DEV && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    clearNotifications();
+                    setReadNotificationIds(new Set());
+                  }}
+                >
+                  Reset (dev)
+                </Button>
+              )}
+              {unreadCount > 0 && (
+                <Badge variant="success">
+                  {unreadCount} nouveau{unreadCount > 1 ? "x" : ""}
+                </Badge>
+              )}
+            </div>
           </div>
           {urgentActionsCount > 0 && (
             <p className="mt-2 text-sm font-semibold text-red-700">
