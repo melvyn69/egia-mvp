@@ -216,6 +216,9 @@ const Dashboard = ({
   const unreadCount = notificationsWithStatus.filter(
     (n) => n.status === "unread"
   ).length;
+  const urgentActionsCount = notificationsWithStatus.filter(
+    (n) => n.requiresAction === true && n.status === "unread"
+  ).length;
 
   const sortedNotifications = notificationsWithStatus
     .slice()
@@ -488,6 +491,12 @@ const Dashboard = ({
               </Badge>
             )}
           </div>
+          {urgentActionsCount > 0 && (
+            <p className="mt-2 text-sm font-semibold text-red-700">
+              🔴 {urgentActionsCount} action
+              {urgentActionsCount > 1 ? "s urgentes" : " urgente"} à traiter
+            </p>
+          )}
 
           <Card className="mt-4">
             <CardHeader className="pb-2">
@@ -503,7 +512,11 @@ const Dashboard = ({
                   {sortedNotifications.map((notif) => (
                     <div
                       key={notif.id}
-                      className="flex items-start gap-3 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0"
+                      className={`flex items-start gap-3 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0 ${
+                        notif.requiresAction && notif.severity === "critical"
+                          ? "rounded-2xl border border-red-200 bg-red-50 p-3"
+                          : ""
+                      }`}
                     >
                       <div
                         onClick={() => markAsRead(notif.id)}
