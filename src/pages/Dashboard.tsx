@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   AlertTriangle,
@@ -15,10 +15,13 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
 import {
+  type AppNotificationBase,
   type AppNotification,
   type NotificationKind,
   type NotificationSeverity,
-  mockNotifications,
+  getNotifications,
+  resolveNotificationAction,
+  setNotifications,
   STORAGE_KEY_READ_NOTIFICATIONS,
   getReadNotificationIds,
   dispatchNotificationsUpdated
@@ -175,6 +178,38 @@ const formatRelativeTime = (isoDate: string): string => {
   }
 };
 
+type NotificationDraft = Omit<AppNotificationBase, "id" | "createdAt" | "message"> & {
+  message?: string | null;
+};
+
+const addNotification = (notification: AppNotificationBase): void => {
+  const notifications = getNotifications();
+  setNotifications([notification, ...notifications]);
+};
+
+const createNotification = (partial: NotificationDraft): void => {
+  const rawMessage = partial.message;
+  const normalizedMessage =
+    typeof rawMessage === "string" ? rawMessage.trim().toLowerCase() : "";
+  const message =
+    normalizedMessage === "" ||
+    normalizedMessage === "undefined" ||
+    normalizedMessage === "null"
+      ? "Une erreur est survenue"
+      : (rawMessage as string);
+
+  const notification: AppNotificationBase = {
+    ...partial,
+    message,
+    id:
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`,
+    createdAt: new Date().toISOString()
+  };
+
+  addNotification(notification);
+};
 
 const Dashboard = ({
   session,
@@ -190,6 +225,10 @@ const Dashboard = ({
   const greeting = getGreeting();
   const firstName = getFirstName(session);
   const greetingText = firstName ? `${greeting}, ${firstName}` : `${greeting}`;
+  const prevGoogleConnectedRef = useRef<boolean | null>(googleConnected);
+  const prevSyncingRef = useRef<boolean>(syncing);
+  const prevLocationsErrorRef = useRef<string | null>(locationsError);
+  const didMountRef = useRef(false);
 
   const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(
     getReadNotificationIds
@@ -208,7 +247,82 @@ const Dashboard = ({
     }
   }, [readNotificationIds]);
 
-  const notificationsWithStatus: AppNotification[] = mockNotifications.map((notif) => ({
+  useEffect(() => {
+    const prevGoogleConnected = prevGoogleConnectedRef.current;
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      prevGoogleConnectedRef.current = googleConnected;
+      return;
+    }
+
+    if (prevGoogleConnected !== googleConnected) {
+      if (prevGoogleConnected !== true && googleConnected === true) {
+        createNotification({
+          kind: "connection",
+          severity: "info",
+          title: "Connexion Google établie",
+          message: "Votre compte Google Business Profile est connecté."
+        });
+      } else if (prevGoogleConnected === true && googleConnected !== true) {
+        createNotification({
+          kind: "connection",
+          severity: "high",
+          title: "Connexion Google perdue",
+          message: "Reconnecte ton compte pour synchroniser."
+        });
+      }
+    }
+
+    prevGoogleConnectedRef.current = googleConnected;
+  }, [googleConnected]);
+
+  useEffect(() => {
+    const prevSyncing = prevSyncingRef.current;
+    if (prevSyncing !== syncing) {
+      if (!prevSyncing && syncing) {
+        createNotification({
+          kind: "sync",
+          severity: "info",
+          title: "Synchronisation lancée",
+          message: "Synchronisation des lieux en cours…"
+        });
+      } else if (prevSyncing && !syncing) {
+        if (locationsError) {
+          createNotification({
+            kind: "sync",
+            severity: "high",
+            title: "Erreur de synchronisation",
+            message: locationsError
+          });
+        } else {
+          const count = locations.length;
+          createNotification({
+            kind: "sync",
+            severity: "info",
+            title: "Synchronisation terminée",
+            message: `${count} ${count === 1 ? "lieu disponible" : "lieux disponibles"}.`
+          });
+        }
+      }
+    }
+    prevSyncingRef.current = syncing;
+  }, [syncing, locationsError, locations.length]);
+
+  useEffect(() => {
+    const currentError = locationsError?.trim() ?? "";
+    const prevError = prevLocationsErrorRef.current?.trim() ?? "";
+    if (!syncing && currentError && !prevError) {
+      createNotification({
+        kind: "sync",
+        severity: "high",
+        title: "Erreur",
+        message: locationsError ?? "Une erreur est survenue"
+      });
+    }
+    prevLocationsErrorRef.current = locationsError;
+  }, [locationsError, syncing]);
+
+  const notificationsWithStatus: AppNotification[] = getNotifications().map((notif) => ({
     ...notif,
     status: readNotificationIds.has(notif.id) ? ("read" as const) : ("unread" as const)
   }));
@@ -216,10 +330,18 @@ const Dashboard = ({
   const unreadCount = notificationsWithStatus.filter(
     (n) => n.status === "unread"
   ).length;
+  const urgentActionsCount = notificationsWithStatus.filter(
+    (n) => n.requiresAction === true && n.status === "unread"
+  ).length;
 
   const sortedNotifications = notificationsWithStatus
     .slice()
     .sort((a, b) => {
+      const aRequiresAction = a.requiresAction === true;
+      const bRequiresAction = b.requiresAction === true;
+      if (aRequiresAction !== bRequiresAction) {
+        return aRequiresAction ? -1 : 1;
+      }
       if (a.status !== b.status) {
         return a.status === "unread" ? -1 : 1;
       }
@@ -483,6 +605,17 @@ const Dashboard = ({
               </Badge>
             )}
           </div>
+          {urgentActionsCount > 0 && (
+            <p className="mt-2 text-sm font-semibold text-red-700">
+              🔴 {urgentActionsCount} action
+              {urgentActionsCount > 1 ? "s urgentes" : " urgente"} à traiter
+            </p>
+          )}
+          {urgentActionsCount === 0 && notificationsWithStatus.length > 0 && (
+            <p className="mt-2 text-sm font-semibold text-emerald-700">
+              ✅ Aucune action urgente pour le moment
+            </p>
+          )}
 
           <Card className="mt-4">
             <CardHeader className="pb-2">
@@ -492,13 +625,24 @@ const Dashboard = ({
             </CardHeader>
             <CardContent className="space-y-4">
               {sortedNotifications.length === 0 ? (
-                <p className="text-sm text-slate-500">Aucune notification</p>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-700">
+                    💤 Aucune notification pour le moment
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Tout est à jour. Revenez plus tard.
+                  </p>
+                </div>
               ) : (
                 <div className="space-y-4">
                   {sortedNotifications.map((notif) => (
                     <div
                       key={notif.id}
-                      className="flex items-start gap-3 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0"
+                      className={`flex items-start gap-3 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0 ${
+                        notif.requiresAction && notif.severity === "critical"
+                          ? "rounded-2xl border border-red-200 bg-red-50 p-3"
+                          : ""
+                      }`}
                     >
                       <div
                         onClick={() => markAsRead(notif.id)}
@@ -510,9 +654,16 @@ const Dashboard = ({
 
                         <div className="flex-1">
                           <div className="flex items-start justify-between gap-3">
-                            <p className="text-sm font-semibold text-slate-900">
-                              {notif.title || "Notification"}
-                            </p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-semibold text-slate-900">
+                                {notif.title || "Notification"}
+                              </p>
+                              {notif.requiresAction && (
+                                <Badge className="border-red-600 bg-red-600 text-white">
+                                  Action requise
+                                </Badge>
+                              )}
+                            </div>
                             {notif.status === "unread" && (
                               <span className="mt-0.5 inline-flex h-2 w-2 rounded-full bg-amber-500" />
                             )}
@@ -538,9 +689,22 @@ const Dashboard = ({
                       </div>
 
                       <div className="flex flex-col gap-2 pt-1">
+                        {notif.requiresAction && (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              markAsRead(notif.id);
+                              resolveNotificationAction(notif.id);
+                            }}
+                          >
+                            Marquer comme traité
+                          </Button>
+                        )}
                         {notif.kind === "review" && (
                           <Button
-                            variant="outline"
+                            variant={notif.requiresAction ? "default" : "outline"}
                             size="sm"
                             onClick={(e) => {
                               e.stopPropagation();
