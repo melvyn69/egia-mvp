@@ -497,6 +497,11 @@ const Dashboard = ({
               {urgentActionsCount > 1 ? "s urgentes" : " urgente"} à traiter
             </p>
           )}
+          {urgentActionsCount === 0 && notificationsWithStatus.length > 0 && (
+            <p className="mt-2 text-sm font-semibold text-emerald-700">
+              ✅ Aucune action urgente pour le moment
+            </p>
+          )}
 
           <Card className="mt-4">
             <CardHeader className="pb-2">
@@ -506,7 +511,14 @@ const Dashboard = ({
             </CardHeader>
             <CardContent className="space-y-4">
               {sortedNotifications.length === 0 ? (
-                <p className="text-sm text-slate-500">Aucune notification</p>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-700">
+                    💤 Aucune notification pour le moment
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Tout est à jour. Revenez plus tard.
+                  </p>
+                </div>
               ) : (
                 <div className="space-y-4">
                   {sortedNotifications.map((notif) => (
