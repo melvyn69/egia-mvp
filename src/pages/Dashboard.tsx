@@ -14,6 +14,15 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
+import {
+  type AppNotification,
+  type NotificationKind,
+  type NotificationSeverity,
+  mockNotifications,
+  STORAGE_KEY_READ_NOTIFICATIONS,
+  getReadNotificationIds,
+  dispatchNotificationsUpdated
+} from "../lib/notifications";
 import { mockGoogleConnected, mockKpis } from "../mock/mockData";
 
 type DashboardProps = {
@@ -117,73 +126,6 @@ const mockActivityEvents: ActivityEvent[] = [
   }
 ];
 
-type NotificationKind = "review" | "sync" | "connection";
-
-type NotificationSeverity = "critical" | "high" | "medium" | "low" | "info";
-
-type NotificationStatus = "read" | "unread";
-
-type AppNotificationBase = {
-  id: string;
-  kind: NotificationKind;
-  title: string;
-  message: string;
-  severity: NotificationSeverity;
-  createdAt: string; // ISO
-  rating?: number | null;
-  locationId?: string | null;
-};
-
-type AppNotification = AppNotificationBase & {
-  status: NotificationStatus;
-};
-
-const mockNotifications: AppNotificationBase[] = [
-  {
-    id: "n1",
-    kind: "review",
-    title: "Alerte avis négatif critique",
-    message: "Service très décevant, je ne reviendrai pas.",
-    rating: 1,
-    severity: "critical",
-    createdAt: new Date(Date.now() - 25 * 60 * 1000).toISOString()
-  },
-  {
-    id: "n2",
-    kind: "review",
-    title: "Nouveau 5★",
-    message: "Super accueil, je recommande !",
-    rating: 5,
-    severity: "low",
-    createdAt: new Date(Date.now() - 8 * 60 * 1000).toISOString()
-  },
-  {
-    id: "n3",
-    kind: "sync",
-    title: "Synchronisation terminée",
-    message: "5 lieux synchronisés avec succès.",
-    severity: "info",
-    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: "n4",
-    kind: "review",
-    title: "Avis à traiter",
-    message: "Temps d'attente un peu long aujourd'hui.",
-    rating: 3,
-    severity: "medium",
-    createdAt: new Date(Date.now() - 52 * 60 * 1000).toISOString()
-  },
-  {
-    id: "n5",
-    kind: "connection",
-    title: "Connexion Google établie",
-    message: "Votre compte Business Profile est maintenant connecté.",
-    severity: "info",
-    createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString()
-  }
-];
-
 const getSeverityOrder = (severity: NotificationSeverity): number => {
   const order: Record<NotificationSeverity, number> = {
     critical: 0,
@@ -233,7 +175,6 @@ const formatRelativeTime = (isoDate: string): string => {
   }
 };
 
-const STORAGE_KEY_READ_NOTIFICATIONS = "egia_read_notifications";
 
 const Dashboard = ({
   session,
@@ -251,18 +192,7 @@ const Dashboard = ({
   const greetingText = firstName ? `${greeting}, ${firstName}` : `${greeting}`;
 
   const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(
-    () => {
-      try {
-        const stored = window.localStorage.getItem(STORAGE_KEY_READ_NOTIFICATIONS);
-        if (stored) {
-          const parsed = JSON.parse(stored) as string[];
-          return new Set(parsed);
-        }
-      } catch {
-        return new Set<string>();
-      }
-      return new Set<string>();
-    }
+    getReadNotificationIds
   );
 
   useEffect(() => {
@@ -272,6 +202,7 @@ const Dashboard = ({
         STORAGE_KEY_READ_NOTIFICATIONS,
         JSON.stringify(idsArray)
       );
+      dispatchNotificationsUpdated();
     } catch {
       // Ignore storage errors
     }
@@ -309,6 +240,22 @@ const Dashboard = ({
 
   const markAllAsRead = () => {
     setReadNotificationIds(new Set(notificationsWithStatus.map((n) => n.id)));
+  };
+
+  const handleReplyToReview = () => {
+    alert("Bientôt disponible");
+  };
+
+  const handleViewLocation = (locationId?: string | null) => {
+    const locationTarget = locationId
+      ? document.getElementById(`location-${locationId}`)
+      : null;
+    const sectionTarget = document.getElementById("locations-section");
+    const target = locationTarget ?? sectionTarget;
+
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   };
 
   return (
@@ -397,7 +344,7 @@ const Dashboard = ({
         </Card>
       </section>
 
-      <section>
+      <section id="locations-section">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-semibold text-slate-900">
             Lieux connectes
@@ -499,7 +446,11 @@ const Dashboard = ({
                             {event.message ?? "Événement"}
                           </p>
                           <p className="mt-1 text-xs text-slate-500">
-                            {formatRelativeTime(event.timestamp)}
+                            {formatRelativeTime(
+                              event.timestamp instanceof Date
+                                ? event.timestamp.toISOString()
+                                : event.timestamp
+                            )}
                           </p>
                         </div>
                       </div>
@@ -510,7 +461,7 @@ const Dashboard = ({
           </Card>
         </div>
 
-        <div>
+        <div id="notifications-section">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-semibold text-slate-900">Notifications</h2>
             {unreadCount > 0 && (
@@ -534,33 +485,64 @@ const Dashboard = ({
                   {sortedNotifications.map((notif) => (
                     <div
                       key={notif.id}
-                      onClick={() => markAsRead(notif.id)}
-                      className="flex cursor-pointer items-start gap-3 border-b border-slate-100 pb-4 transition-colors hover:bg-slate-50 last:border-b-0 last:pb-0"
+                      className="flex items-start gap-3 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0"
                     >
-                      <div className="mt-0.5">
-                        {getNotificationIcon(notif.kind, notif.severity)}
+                      <div
+                        onClick={() => markAsRead(notif.id)}
+                        className="flex flex-1 cursor-pointer items-start gap-3 transition-colors hover:bg-slate-50"
+                      >
+                        <div className="mt-0.5">
+                          {getNotificationIcon(notif.kind, notif.severity)}
+                        </div>
+
+                        <div className="flex-1">
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="text-sm font-semibold text-slate-900">
+                              {notif.title || "Notification"}
+                            </p>
+                            {notif.status === "unread" && (
+                              <span className="mt-0.5 inline-flex h-2 w-2 rounded-full bg-amber-500" />
+                            )}
+                          </div>
+
+                          <p className="mt-1 text-sm text-slate-600">
+                            {notif.message || "—"}
+                          </p>
+
+                          <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
+                            <span>
+                              {notif.rating ? `${notif.rating}★` : "—"}
+                            </span>
+                            <span>{formatRelativeTime(notif.createdAt)}</span>
+                          </div>
+                        </div>
                       </div>
 
-                      <div className="flex-1">
-                        <div className="flex items-start justify-between gap-3">
-                          <p className="text-sm font-semibold text-slate-900">
-                            {notif.title || "Notification"}
-                          </p>
-                          {notif.status === "unread" && (
-                            <span className="mt-0.5 inline-flex h-2 w-2 rounded-full bg-amber-500" />
-                          )}
-                        </div>
-
-                        <p className="mt-1 text-sm text-slate-600">
-                          {notif.message || "—"}
-                        </p>
-
-                        <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
-                          <span>
-                            {notif.rating ? `${notif.rating}★` : "—"}
-                          </span>
-                          <span>{formatRelativeTime(notif.createdAt)}</span>
-                        </div>
+                      <div className="flex flex-col gap-2 pt-1">
+                        {notif.kind === "review" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleReplyToReview();
+                            }}
+                          >
+                            Répondre
+                          </Button>
+                        )}
+                        {notif.locationId && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleViewLocation(notif.locationId);
+                            }}
+                          >
+                            Voir le lieu
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ))}
