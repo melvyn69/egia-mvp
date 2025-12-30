@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   AlertTriangle,
@@ -15,11 +15,13 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
 import {
+  type AppNotificationBase,
   type AppNotification,
   type NotificationKind,
   type NotificationSeverity,
   getNotifications,
   resolveNotificationAction,
+  setNotifications,
   STORAGE_KEY_READ_NOTIFICATIONS,
   getReadNotificationIds,
   dispatchNotificationsUpdated
@@ -176,6 +178,38 @@ const formatRelativeTime = (isoDate: string): string => {
   }
 };
 
+type NotificationDraft = Omit<AppNotificationBase, "id" | "createdAt" | "message"> & {
+  message?: string | null;
+};
+
+const addNotification = (notification: AppNotificationBase): void => {
+  const notifications = getNotifications();
+  setNotifications([notification, ...notifications]);
+};
+
+const createNotification = (partial: NotificationDraft): void => {
+  const rawMessage = partial.message;
+  const normalizedMessage =
+    typeof rawMessage === "string" ? rawMessage.trim().toLowerCase() : "";
+  const message =
+    normalizedMessage === "" ||
+    normalizedMessage === "undefined" ||
+    normalizedMessage === "null"
+      ? "Une erreur est survenue"
+      : (rawMessage as string);
+
+  const notification: AppNotificationBase = {
+    ...partial,
+    message,
+    id:
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`,
+    createdAt: new Date().toISOString()
+  };
+
+  addNotification(notification);
+};
 
 const Dashboard = ({
   session,
@@ -191,6 +225,10 @@ const Dashboard = ({
   const greeting = getGreeting();
   const firstName = getFirstName(session);
   const greetingText = firstName ? `${greeting}, ${firstName}` : `${greeting}`;
+  const prevGoogleConnectedRef = useRef<boolean | null>(googleConnected);
+  const prevSyncingRef = useRef<boolean>(syncing);
+  const prevLocationsErrorRef = useRef<string | null>(locationsError);
+  const didMountRef = useRef(false);
 
   const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(
     getReadNotificationIds
@@ -208,6 +246,81 @@ const Dashboard = ({
       // Ignore storage errors
     }
   }, [readNotificationIds]);
+
+  useEffect(() => {
+    const prevGoogleConnected = prevGoogleConnectedRef.current;
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      prevGoogleConnectedRef.current = googleConnected;
+      return;
+    }
+
+    if (prevGoogleConnected !== googleConnected) {
+      if (prevGoogleConnected !== true && googleConnected === true) {
+        createNotification({
+          kind: "connection",
+          severity: "info",
+          title: "Connexion Google établie",
+          message: "Votre compte Google Business Profile est connecté."
+        });
+      } else if (prevGoogleConnected === true && googleConnected !== true) {
+        createNotification({
+          kind: "connection",
+          severity: "high",
+          title: "Connexion Google perdue",
+          message: "Reconnecte ton compte pour synchroniser."
+        });
+      }
+    }
+
+    prevGoogleConnectedRef.current = googleConnected;
+  }, [googleConnected]);
+
+  useEffect(() => {
+    const prevSyncing = prevSyncingRef.current;
+    if (prevSyncing !== syncing) {
+      if (!prevSyncing && syncing) {
+        createNotification({
+          kind: "sync",
+          severity: "info",
+          title: "Synchronisation lancée",
+          message: "Synchronisation des lieux en cours…"
+        });
+      } else if (prevSyncing && !syncing) {
+        if (locationsError) {
+          createNotification({
+            kind: "sync",
+            severity: "high",
+            title: "Erreur de synchronisation",
+            message: locationsError
+          });
+        } else {
+          const count = locations.length;
+          createNotification({
+            kind: "sync",
+            severity: "info",
+            title: "Synchronisation terminée",
+            message: `${count} ${count === 1 ? "lieu disponible" : "lieux disponibles"}.`
+          });
+        }
+      }
+    }
+    prevSyncingRef.current = syncing;
+  }, [syncing, locationsError, locations.length]);
+
+  useEffect(() => {
+    const currentError = locationsError?.trim() ?? "";
+    const prevError = prevLocationsErrorRef.current?.trim() ?? "";
+    if (!syncing && currentError && !prevError) {
+      createNotification({
+        kind: "sync",
+        severity: "high",
+        title: "Erreur",
+        message: locationsError ?? "Une erreur est survenue"
+      });
+    }
+    prevLocationsErrorRef.current = locationsError;
+  }, [locationsError, syncing]);
 
   const notificationsWithStatus: AppNotification[] = getNotifications().map((notif) => ({
     ...notif,
