@@ -127,9 +127,11 @@ export const getNotifications = (): AppNotificationBase[] => {
       }
     }
   } catch {
-    return mockNotifications;
+    // fall through to seed
   }
-  return mockNotifications;
+  const seed = mockNotifications;
+  setNotifications(seed);
+  return seed;
 };
 
 export const setNotifications = (notifications: AppNotificationBase[]): void => {
