@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { supabase } from "../lib/supabase";
 
 const statusTabs = [
   { id: "todo", label: "À traiter" },
@@ -139,7 +140,7 @@ const toneOptions: Array<{ id: TonePreset; label: string }> = [
   { id: "empathique", label: "Empathique" }
 ];
 
-const activityEvents = [
+const initialActivityEvents = [
   {
     id: "a1",
     label: "Réponse automatique enregistrée",
@@ -158,75 +159,7 @@ const formatDate = (iso: string): string => {
   }).format(date);
 };
 
-const buildReply = (
-  review: Review,
-  lengthPreset: LengthPreset,
-  tonePreset: TonePreset
-): string => {
-  const toneIntro =
-    tonePreset === "professionnel"
-      ? "Merci pour votre retour."
-      : tonePreset === "amical"
-        ? "Merci beaucoup pour votre message !"
-        : "Merci d'avoir pris le temps de partager votre expérience.";
-
-  const toneClosing =
-    tonePreset === "professionnel"
-      ? "Nous restons à votre écoute."
-      : tonePreset === "amical"
-        ? "Au plaisir de vous revoir très bientôt !"
-        : "N'hésitez pas à nous contacter si besoin.";
-
-  let core = "";
-  if (review.rating >= 4) {
-    core =
-      "Nous sommes ravis que votre visite vous ait plu et nous serions heureux de vous accueillir à nouveau.";
-  } else if (review.rating === 3) {
-    core =
-      "Nous sommes contents que certains aspects vous aient plu et prenons en compte vos remarques pour nous améliorer.";
-  } else {
-    core =
-      "Nous sommes désolés que votre expérience n'ait pas été à la hauteur et souhaitons améliorer la situation rapidement.";
-  }
-
-  const extra =
-    review.rating <= 2
-      ? "Si vous le souhaitez, contactez-nous afin que nous puissions échanger."
-      : "";
-  const improvement =
-    review.rating === 3
-      ? "Votre retour nous aide à ajuster nos priorités dès cette semaine."
-      : "";
-  const invite =
-    review.rating >= 4
-      ? "Votre soutien compte beaucoup pour l'équipe."
-      : "";
-
-  const sentences = [toneIntro, core, improvement, invite, extra, toneClosing].filter(
-    Boolean
-  );
-
-  if (lengthPreset === "court") {
-    return sentences.slice(0, 2).join(" ");
-  }
-  if (lengthPreset === "moyen") {
-    return sentences.slice(0, 3).join(" ");
-  }
-  return sentences.join(" ");
-};
-
-const generateReplyMock = (
-  review: Review,
-  lengthPreset: LengthPreset,
-  tonePreset: TonePreset
-): Promise<string> => {
-  const delay = 600 + Math.floor(Math.random() * 400);
-  return new Promise((resolve) => {
-    window.setTimeout(() => {
-      resolve(buildReply(review, lengthPreset, tonePreset));
-    }, delay);
-  });
-};
+const COOLDOWN_MS = 30000;
 
 const Inbox = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("todo");
@@ -238,6 +171,13 @@ const Inbox = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [replyTab, setReplyTab] = useState<"reply" | "activity">("reply");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [activityEvents, setActivityEvents] = useState(initialActivityEvents);
+
+  const isSupabaseAvailable = Boolean(supabase);
+  const isCooldownActive = cooldownUntil ? cooldownUntil > Date.now() : false;
 
   const locations = useMemo(() => {
     const unique = Array.from(new Set(mockReviews.map((review) => review.locationName)));
@@ -279,26 +219,85 @@ const Inbox = () => {
     setReplyText(drafts[selectedReview.id] ?? "");
   }, [drafts, selectedReview]);
 
+  useEffect(() => {
+    setSavedAt(null);
+    setGenerationError(null);
+  }, [selectedReviewId]);
+
+  useEffect(() => {
+    if (!cooldownUntil) {
+      return;
+    }
+    const remainingMs = cooldownUntil - Date.now();
+    if (remainingMs <= 0) {
+      setCooldownUntil(null);
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setCooldownUntil(null);
+    }, remainingMs);
+    return () => window.clearTimeout(timeout);
+  }, [cooldownUntil]);
+
   const handleGenerate = async () => {
     if (!selectedReview) {
       return;
     }
+    if (!supabase) {
+      setGenerationError("Configuration Supabase manquante.");
+      console.log("generate-reply: supabase client missing");
+      return;
+    }
     setIsGenerating(true);
-    const generated = await generateReplyMock(
-      selectedReview,
-      lengthPreset,
-      tonePreset
-    );
-    setReplyText(generated);
-    setDrafts((prev) => ({ ...prev, [selectedReview.id]: generated }));
-    setIsGenerating(false);
+    setGenerationError(null);
+    try {
+      console.log("generate-reply: invoking edge function", {
+        reviewId: selectedReview.id,
+        tone: tonePreset,
+        length: lengthPreset
+      });
+      const { data, error } = await supabase.functions.invoke("generate-reply", {
+        body: {
+          reviewText: selectedReview.text,
+          rating: selectedReview.rating,
+          authorName: selectedReview.authorName,
+          businessName: selectedReview.locationName,
+          source: selectedReview.source.toLowerCase(),
+          tone: tonePreset,
+          length: lengthPreset
+        }
+      });
+      console.log("generate-reply: response", { data, error });
+      if (error || !data?.reply) {
+        setGenerationError("Impossible de générer une réponse pour le moment.");
+        console.error("generate-reply error:", error ?? data?.error);
+      } else {
+        setReplyText(data.reply);
+        setDrafts((prev) => ({ ...prev, [selectedReview.id]: data.reply }));
+      }
+    } catch {
+      setGenerationError("Erreur lors de la génération.");
+      console.error("generate-reply error: request failed");
+    } finally {
+      setIsGenerating(false);
+      setCooldownUntil(Date.now() + COOLDOWN_MS);
+    }
   };
 
   const handleSave = () => {
     if (!selectedReview) {
       return;
     }
-    window.alert("Brouillon sauvegardé");
+    const now = new Date();
+    setSavedAt(now.toISOString());
+    setActivityEvents((prev) => [
+      {
+        id: `save-${now.getTime()}`,
+        label: "Brouillon sauvegardé",
+        timestamp: "À l'instant"
+      },
+      ...prev
+    ]);
   };
 
   const handleSend = () => {
@@ -527,13 +526,39 @@ const Inbox = () => {
                       }
                     }}
                   />
+                  <div className="mt-2 text-right text-xs text-slate-500">
+                    {replyText.length} caractères
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <Button onClick={handleGenerate} disabled={isGenerating || !selectedReview}>
+                  <Button
+                    type="button"
+                    onClick={handleGenerate}
+                    disabled={
+                      isGenerating ||
+                      !selectedReview ||
+                      !isSupabaseAvailable ||
+                      isCooldownActive
+                    }
+                  >
                     {isGenerating ? "Génération..." : "Générer"}
                   </Button>
                   <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleGenerate}
+                    disabled={
+                      isGenerating ||
+                      !selectedReview ||
+                      !isSupabaseAvailable ||
+                      isCooldownActive
+                    }
+                  >
+                    Regénérer
+                  </Button>
+                  <Button
+                    type="button"
                     variant="outline"
                     onClick={handleSave}
                     disabled={isGenerating || !selectedReview}
@@ -541,6 +566,7 @@ const Inbox = () => {
                     Sauvegarder
                   </Button>
                   <Button
+                    type="button"
                     variant="outline"
                     onClick={handleSend}
                     disabled={isGenerating || !selectedReview}
@@ -548,6 +574,23 @@ const Inbox = () => {
                     Envoyer
                   </Button>
                 </div>
+                {!selectedReview && (
+                  <p className="text-xs text-slate-500">Sélectionne un avis.</p>
+                )}
+                {savedAt && (
+                  <Badge variant="success">Sauvegardé</Badge>
+                )}
+                {generationError && (
+                  <p className="text-sm font-medium text-amber-700">
+                    {generationError}
+                  </p>
+                )}
+                {!isSupabaseAvailable && (
+                  <p className="text-xs text-slate-500">
+                    Configuration Supabase manquante. Vérifiez les variables
+                    d&apos;environnement.
+                  </p>
+                )}
               </div>
             )}
           </CardContent>
