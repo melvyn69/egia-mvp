@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { supabase, supabaseUrl } from "../lib/supabase";
+import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
 
 const statusTabs = [
   { id: "todo", label: "À traiter" },
@@ -14,6 +14,7 @@ type StatusFilter = (typeof statusTabs)[number]["id"];
 
 type Review = {
   id: string;
+  reviewId?: string;
   locationName: string;
   locationId: string;
   businessId: string;
@@ -50,6 +51,7 @@ type ReviewReply = {
 const mockReviews: Review[] = [
   {
     id: "r1",
+    reviewId: "r1",
     locationName: "Boulangerie Saint-Roch",
     locationId: "loc-1",
     businessId: "00000000-0000-0000-0000-000000000001",
@@ -63,6 +65,7 @@ const mockReviews: Review[] = [
   },
   {
     id: "r2",
+    reviewId: "r2",
     locationName: "Boulangerie Saint-Roch",
     locationId: "loc-1",
     businessId: "00000000-0000-0000-0000-000000000001",
@@ -76,6 +79,7 @@ const mockReviews: Review[] = [
   },
   {
     id: "r3",
+    reviewId: "r3",
     locationName: "Brasserie du Parc",
     locationId: "loc-2",
     businessId: "00000000-0000-0000-0000-000000000002",
@@ -89,6 +93,7 @@ const mockReviews: Review[] = [
   },
   {
     id: "r4",
+    reviewId: "r4",
     locationName: "Brasserie du Parc",
     locationId: "loc-2",
     businessId: "00000000-0000-0000-0000-000000000002",
@@ -102,6 +107,7 @@ const mockReviews: Review[] = [
   },
   {
     id: "r5",
+    reviewId: "r5",
     locationName: "Salon Lila",
     locationId: "loc-3",
     businessId: "00000000-0000-0000-0000-000000000003",
@@ -115,6 +121,7 @@ const mockReviews: Review[] = [
   },
   {
     id: "r6",
+    reviewId: "r6",
     locationName: "Salon Lila",
     locationId: "loc-3",
     businessId: "00000000-0000-0000-0000-000000000003",
@@ -128,6 +135,7 @@ const mockReviews: Review[] = [
   },
   {
     id: "r7",
+    reviewId: "r7",
     locationName: "Studio Forma",
     locationId: "loc-4",
     businessId: "00000000-0000-0000-0000-000000000004",
@@ -141,6 +149,7 @@ const mockReviews: Review[] = [
   },
   {
     id: "r8",
+    reviewId: "r8",
     locationName: "Studio Forma",
     locationId: "loc-4",
     businessId: "00000000-0000-0000-0000-000000000004",
@@ -233,6 +242,20 @@ const formatRelativeDate = (iso: string): string => {
     hour: "2-digit",
     minute: "2-digit"
   }).format(date);
+};
+
+const getAccessToken = async (
+  supabaseClient: typeof supabase
+): Promise<string> => {
+  if (!supabaseClient) {
+    throw new Error("No supabase client");
+  }
+  const { data } = await supabaseClient.auth.getSession();
+  const token = data.session?.access_token ?? null;
+  if (!token) {
+    throw new Error("No session / not authenticated");
+  }
+  return token;
 };
 
 const Inbox = () => {
@@ -440,6 +463,16 @@ const Inbox = () => {
       });
   }, []);
 
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+    supabase.auth.getSession().then(({ data }) => {
+      console.log("SESSION =", data.session);
+      console.log("ACCESS_TOKEN =", data.session?.access_token);
+    });
+  }, []);
+
   const handleInvalidJwt = async () => {
     setGenerationError("Session expirée, reconnecte-toi");
     const supabaseClient = supabase;
@@ -619,27 +652,57 @@ const Inbox = () => {
       setGenerationError("Aucun brouillon à envoyer.");
       return;
     }
+    if (!selectedReview.reviewId) {
+      setGenerationError("Avis sans identifiant Google.");
+      return;
+    }
+    if (!replyText.trim()) {
+      setGenerationError("La réponse est vide.");
+      return;
+    }
     setReplySending(true);
     try {
+      const userToken = await getAccessToken(supabaseClient);
+      const projectRef = getProjectRef(supabaseUrl);
       if (import.meta.env.DEV) {
+        console.log("projectRef", projectRef ?? "—");
+        console.log(
+          "access_token parts/len",
+          userToken.split(".").length,
+          userToken.length
+        );
+        const { data: userData } = await supabaseClient.auth.getUser();
+        console.log("post-reply-google userId", userData.user?.id ?? "null");
         console.log("post-reply-google: invoking", {
-          reviewId: selectedReview.id
+          reviewId: selectedReview.reviewId
         });
       }
-      const { data, error } = await supabaseClient.functions.invoke(
-        "post-reply-google",
+      const response = await fetch(
+        `${supabaseUrl}/functions/v1/post-reply-google`,
         {
-          body: {
-            reviewId: selectedReview.id,
-            replyText
-          }
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${supabaseAnonKey}`,
+            apikey: supabaseAnonKey ?? "",
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            reviewId: selectedReview.reviewId,
+            replyText,
+            userToken
+          })
         }
       );
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        code?: string;
+      };
+      const error = response.ok ? null : data;
       const isInvalidJwt =
-        error?.status === 401 ||
-        error?.message?.includes("Invalid JWT") ||
-        (data as { code?: number; message?: string } | null)?.code === 401 ||
-        (data as { message?: string } | null)?.message?.includes("Invalid JWT");
+        data?.code === "INVALID_JWT" ||
+        data?.code === "INVALID_JWT_FORMAT" ||
+        data?.error === "Unauthorized";
       if (isInvalidJwt) {
         await handleInvalidJwt();
         return;
@@ -668,6 +731,15 @@ const Inbox = () => {
         );
         setDraftReplyId(null);
         setDraftByReview((prev) => ({ ...prev, [selectedReview.id]: false }));
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === "No session / not authenticated") {
+        setGenerationError("Connecte-toi pour publier la réponse.");
+      } else {
+        setGenerationError("Impossible d'envoyer la réponse.");
+      }
+      if (import.meta.env.DEV) {
+        console.log("post-reply-google error", error);
       }
     } finally {
       setReplySending(false);
