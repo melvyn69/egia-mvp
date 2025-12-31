@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Building2, LayoutDashboard, Link2 } from "lucide-react";
+import { Building2, LayoutDashboard, Link2, Mailbox } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 const navLinkBase =
@@ -49,6 +49,20 @@ const Sidebar = () => (
         >
           <Link2 size={18} />
           Connexion Google
+        </NavLink>
+        <NavLink
+          to="/inbox"
+          className={({ isActive }) =>
+            cn(
+              navLinkBase,
+              isActive
+                ? "bg-ink text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            )
+          }
+        >
+          <Mailbox size={18} />
+          Boîte de réception
         </NavLink>
       </nav>
     </div>
