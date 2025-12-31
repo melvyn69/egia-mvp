@@ -5,6 +5,7 @@ import { supabase, supabaseAnonKey, supabaseUrl } from "./lib/supabase";
 import { Sidebar } from "./components/layout/Sidebar";
 import { Topbar } from "./components/layout/Topbar";
 import { Dashboard } from "./pages/Dashboard";
+import { Inbox } from "./pages/Inbox";
 import { Connect } from "./pages/Connect";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { Button } from "./components/ui/button";
@@ -58,6 +59,13 @@ const App = () => {
       return {
         title: "Connexion",
         subtitle: "Reliez vos lieux Google Business Profile."
+      };
+    }
+
+    if (location.pathname === "/inbox") {
+      return {
+        title: "Boîte de réception",
+        subtitle: "Réponses aux avis et suivi des interactions."
       };
     }
 
@@ -461,6 +469,7 @@ const App = () => {
                   path="/connect"
                   element={<Connect onConnect={handleConnectGoogle} />}
                 />
+                <Route path="/inbox" element={<Inbox />} />
                 <Route
                   path="/google_oauth_callback"
                   element={
