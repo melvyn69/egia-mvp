@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -16,6 +16,7 @@ type Review = {
   id: string;
   locationName: string;
   locationId: string;
+  businessId: string;
   authorName: string;
   rating: number;
   source: "Google" | "Facebook";
@@ -29,11 +30,20 @@ type LengthPreset = "court" | "moyen" | "long";
 
 type TonePreset = "professionnel" | "amical" | "empathique";
 
+const isTonePreset = (value: string | null | undefined): value is TonePreset =>
+  value === "professionnel" || value === "amical" || value === "empathique";
+
+const isLengthPreset = (
+  value: string | null | undefined
+): value is LengthPreset =>
+  value === "court" || value === "moyen" || value === "long";
+
 const mockReviews: Review[] = [
   {
     id: "r1",
     locationName: "Boulangerie Saint-Roch",
     locationId: "loc-1",
+    businessId: "00000000-0000-0000-0000-000000000001",
     authorName: "Camille Dupont",
     rating: 5,
     source: "Google",
@@ -46,6 +56,7 @@ const mockReviews: Review[] = [
     id: "r2",
     locationName: "Boulangerie Saint-Roch",
     locationId: "loc-1",
+    businessId: "00000000-0000-0000-0000-000000000001",
     authorName: "Thomas Girard",
     rating: 3,
     source: "Google",
@@ -58,6 +69,7 @@ const mockReviews: Review[] = [
     id: "r3",
     locationName: "Brasserie du Parc",
     locationId: "loc-2",
+    businessId: "00000000-0000-0000-0000-000000000002",
     authorName: "Ines Martin",
     rating: 2,
     source: "Facebook",
@@ -70,6 +82,7 @@ const mockReviews: Review[] = [
     id: "r4",
     locationName: "Brasserie du Parc",
     locationId: "loc-2",
+    businessId: "00000000-0000-0000-0000-000000000002",
     authorName: "Louis Bernard",
     rating: 4,
     source: "Google",
@@ -82,6 +95,7 @@ const mockReviews: Review[] = [
     id: "r5",
     locationName: "Salon Lila",
     locationId: "loc-3",
+    businessId: "00000000-0000-0000-0000-000000000003",
     authorName: "Nora Lemoine",
     rating: 1,
     source: "Facebook",
@@ -94,6 +108,7 @@ const mockReviews: Review[] = [
     id: "r6",
     locationName: "Salon Lila",
     locationId: "loc-3",
+    businessId: "00000000-0000-0000-0000-000000000003",
     authorName: "Julien Huguet",
     rating: 4,
     source: "Google",
@@ -106,6 +121,7 @@ const mockReviews: Review[] = [
     id: "r7",
     locationName: "Studio Forma",
     locationId: "loc-4",
+    businessId: "00000000-0000-0000-0000-000000000004",
     authorName: "Sarah Klein",
     rating: 5,
     source: "Google",
@@ -118,6 +134,7 @@ const mockReviews: Review[] = [
     id: "r8",
     locationName: "Studio Forma",
     locationId: "loc-4",
+    businessId: "00000000-0000-0000-0000-000000000004",
     authorName: "Hakim Roux",
     rating: 3,
     source: "Facebook",
@@ -175,6 +192,10 @@ const Inbox = () => {
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [activityEvents, setActivityEvents] = useState(initialActivityEvents);
+  const [businessSignature, setBusinessSignature] = useState<string | null>(null);
+  const [businessMemory, setBusinessMemory] = useState<string[]>([]);
+  const toneTouchedRef = useRef(false);
+  const lengthTouchedRef = useRef(false);
 
   const isSupabaseAvailable = Boolean(supabase);
   const isCooldownActive = cooldownUntil ? cooldownUntil > Date.now() : false;
@@ -222,6 +243,42 @@ const Inbox = () => {
   useEffect(() => {
     setSavedAt(null);
     setGenerationError(null);
+    toneTouchedRef.current = false;
+    lengthTouchedRef.current = false;
+
+    const supabaseClient = supabase;
+    if (!selectedReview || !supabaseClient) {
+      setBusinessSignature(null);
+      setBusinessMemory([]);
+      return;
+    }
+
+    const loadBusinessContext = async () => {
+      const { data: settings } = await supabaseClient
+        .from("business_settings")
+        .select("default_tone, default_length, signature")
+        .eq("business_id", selectedReview.businessId)
+        .maybeSingle();
+
+      if (!toneTouchedRef.current && isTonePreset(settings?.default_tone)) {
+        setTonePreset(settings.default_tone);
+      }
+      if (!lengthTouchedRef.current && isLengthPreset(settings?.default_length)) {
+        setLengthPreset(settings.default_length);
+      }
+      setBusinessSignature(settings?.signature ?? null);
+
+      const { data: memories } = await supabaseClient
+        .from("business_memory")
+        .select("content")
+        .eq("business_id", selectedReview.businessId)
+        .eq("is_active", true)
+        .order("created_at", { ascending: false });
+
+      setBusinessMemory(memories?.map((item) => item.content) ?? []);
+    };
+
+    void loadBusinessContext();
   }, [selectedReviewId]);
 
   useEffect(() => {
@@ -243,7 +300,8 @@ const Inbox = () => {
     if (!selectedReview) {
       return;
     }
-    if (!supabase) {
+    const supabaseClient = supabase;
+    if (!supabaseClient) {
       setGenerationError("Configuration Supabase manquante.");
       console.log("generate-reply: supabase client missing");
       return;
@@ -256,7 +314,7 @@ const Inbox = () => {
         tone: tonePreset,
         length: lengthPreset
       });
-      const { data, error } = await supabase.functions.invoke("generate-reply", {
+      const { data, error } = await supabaseClient.functions.invoke("generate-reply", {
         body: {
           reviewText: selectedReview.text,
           rating: selectedReview.rating,
@@ -264,7 +322,9 @@ const Inbox = () => {
           businessName: selectedReview.locationName,
           source: selectedReview.source.toLowerCase(),
           tone: tonePreset,
-          length: lengthPreset
+          length: lengthPreset,
+          memory: businessMemory.length > 0 ? businessMemory : undefined,
+          signature: businessSignature ?? undefined
         }
       });
       console.log("generate-reply: response", { data, error });
@@ -464,20 +524,43 @@ const Inbox = () => {
           </CardHeader>
           <CardContent>
             {replyTab === "activity" ? (
-              <div className="space-y-3">
-                {activityEvents.map((event) => (
-                  <div
-                    key={event.id}
-                    className="rounded-2xl border border-slate-200 bg-white p-3"
-                  >
-                    <p className="text-sm font-medium text-slate-900">
-                      {event.label}
+              <div className="space-y-4">
+                <div className="space-y-3">
+                  {activityEvents.map((event) => (
+                    <div
+                      key={event.id}
+                      className="rounded-2xl border border-slate-200 bg-white p-3"
+                    >
+                      <p className="text-sm font-medium text-slate-900">
+                        {event.label}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {event.timestamp}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                    Mémoire
+                  </p>
+                  {businessMemory.length === 0 ? (
+                    <p className="mt-2 text-sm text-slate-500">
+                      Aucune mémoire active.
                     </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {event.timestamp}
-                    </p>
-                  </div>
-                ))}
+                  ) : (
+                    <div className="mt-2 space-y-2">
+                      {businessMemory.map((item, index) => (
+                        <div
+                          key={`${item}-${index}`}
+                          className="rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-700"
+                        >
+                          {item}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="space-y-4">
@@ -489,7 +572,10 @@ const Inbox = () => {
                         key={option.id}
                         variant={lengthPreset === option.id ? "default" : "outline"}
                         size="sm"
-                        onClick={() => setLengthPreset(option.id)}
+                        onClick={() => {
+                          lengthTouchedRef.current = true;
+                          setLengthPreset(option.id);
+                        }}
                       >
                         {option.label}
                       </Button>
@@ -505,7 +591,10 @@ const Inbox = () => {
                         key={option.id}
                         variant={tonePreset === option.id ? "default" : "outline"}
                         size="sm"
-                        onClick={() => setTonePreset(option.id)}
+                        onClick={() => {
+                          toneTouchedRef.current = true;
+                          setTonePreset(option.id);
+                        }}
                       >
                         {option.label}
                       </Button>

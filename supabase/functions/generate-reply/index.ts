@@ -15,6 +15,8 @@ type GenerateReplyPayload = {
   source?: string;
   tone?: string;
   length?: string;
+  memory?: string[];
+  signature?: string;
 };
 
 const corsHeaders = {
@@ -75,8 +77,20 @@ Deno.serve(async (req) => {
       );
     }
 
-    const systemPrompt =
-      "Tu rédiges des réponses aux avis clients. Réponds en français, ton professionnel, poli et concis. Ne mentionne jamais l'IA ni un remboursement. Personnalise avec le prénom et le lieu si disponibles. Remercie et invite à revenir. Adapte la réponse à la note.";
+    const memoryBlock =
+      payload.memory && payload.memory.length > 0
+        ? `Rappels internes:\n- ${payload.memory.join("\n- ")}`
+        : "";
+    const signatureBlock = payload.signature
+      ? `Signature: ${payload.signature}`
+      : "";
+    const systemPrompt = [
+      "Tu rédiges des réponses aux avis clients. Réponds en français, ton professionnel, poli et concis. Ne mentionne jamais l'IA ni un remboursement. Personnalise avec le prénom et le lieu si disponibles. Remercie et invite à revenir. Adapte la réponse à la note.",
+      memoryBlock,
+      signatureBlock
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     const requestBody = (model: string) =>
       JSON.stringify({
