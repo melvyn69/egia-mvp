@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { supabase } from "../lib/supabase";
+import { supabase, supabaseUrl } from "../lib/supabase";
 
 const statusTabs = [
   { id: "todo", label: "À traiter" },
@@ -37,6 +37,15 @@ const isLengthPreset = (
   value: string | null | undefined
 ): value is LengthPreset =>
   value === "court" || value === "moyen" || value === "long";
+
+type ReviewReply = {
+  id: string;
+  review_id: string;
+  reply_text: string;
+  status: "draft" | "sent";
+  created_at: string;
+  sent_at: string | null;
+};
 
 const mockReviews: Review[] = [
   {
@@ -178,6 +187,54 @@ const formatDate = (iso: string): string => {
 
 const COOLDOWN_MS = 30000;
 
+const uuidRegex =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const getProjectRef = (url: string | null | undefined): string | null => {
+  if (!url) {
+    return null;
+  }
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname;
+    return host.split(".")[0] ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const maskToken = (token?: string | null): string => {
+  if (!token) {
+    return "—";
+  }
+  return `${token.slice(0, 12)}...`;
+};
+
+const getRatingPreset = (
+  rating: number
+): { tone: TonePreset; length: LengthPreset } => {
+  if (rating >= 5) {
+    return { tone: "amical", length: "court" };
+  }
+  if (rating >= 4) {
+    return { tone: "professionnel", length: "moyen" };
+  }
+  if (rating === 3) {
+    return { tone: "empathique", length: "moyen" };
+  }
+  return { tone: "empathique", length: "long" };
+};
+
+const formatRelativeDate = (iso: string): string => {
+  const date = new Date(iso);
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+};
+
 const Inbox = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("todo");
   const [selectedLocation, setSelectedLocation] = useState("all");
@@ -196,9 +253,23 @@ const Inbox = () => {
   const [businessMemory, setBusinessMemory] = useState<string[]>([]);
   const toneTouchedRef = useRef(false);
   const lengthTouchedRef = useRef(false);
+  const [sessionPreview, setSessionPreview] = useState("—");
+  const [sessionExp, setSessionExp] = useState<string | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [replyHistory, setReplyHistory] = useState<ReviewReply[]>([]);
+  const [replyHistoryLoading, setReplyHistoryLoading] = useState(false);
+  const [replyHistoryError, setReplyHistoryError] = useState<string | null>(null);
+  const [draftReplyId, setDraftReplyId] = useState<string | null>(null);
+  const [replySaving, setReplySaving] = useState(false);
+  const [replySending, setReplySending] = useState(false);
+  const [draftByReview, setDraftByReview] = useState<Record<string, boolean>>({});
+  const [batchGenerating, setBatchGenerating] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
+  const [batchError, setBatchError] = useState<string | null>(null);
 
   const isSupabaseAvailable = Boolean(supabase);
   const isCooldownActive = cooldownUntil ? cooldownUntil > Date.now() : false;
+  const projectRef = getProjectRef(supabaseUrl);
 
   const locations = useMemo(() => {
     const unique = Array.from(new Set(mockReviews.map((review) => review.locationName)));
@@ -245,6 +316,9 @@ const Inbox = () => {
     setGenerationError(null);
     toneTouchedRef.current = false;
     lengthTouchedRef.current = false;
+    setReplyHistory([]);
+    setReplyHistoryError(null);
+    setDraftReplyId(null);
 
     const supabaseClient = supabase;
     if (!selectedReview || !supabaseClient) {
@@ -260,11 +334,19 @@ const Inbox = () => {
         .eq("business_id", selectedReview.businessId)
         .maybeSingle();
 
-      if (!toneTouchedRef.current && isTonePreset(settings?.default_tone)) {
-        setTonePreset(settings.default_tone);
+      if (!toneTouchedRef.current) {
+        const ratingPreset = getRatingPreset(selectedReview.rating);
+        const nextTone = isTonePreset(settings?.default_tone)
+          ? ratingPreset.tone
+          : ratingPreset.tone;
+        setTonePreset(nextTone);
       }
-      if (!lengthTouchedRef.current && isLengthPreset(settings?.default_length)) {
-        setLengthPreset(settings.default_length);
+      if (!lengthTouchedRef.current) {
+        const ratingPreset = getRatingPreset(selectedReview.rating);
+        const nextLength = isLengthPreset(settings?.default_length)
+          ? ratingPreset.length
+          : ratingPreset.length;
+        setLengthPreset(nextLength);
       }
       setBusinessSignature(settings?.signature ?? null);
 
@@ -280,6 +362,105 @@ const Inbox = () => {
 
     void loadBusinessContext();
   }, [selectedReviewId]);
+
+  useEffect(() => {
+    const supabaseClient = supabase;
+    if (!selectedReview || !supabaseClient) {
+      setReplyHistory([]);
+      setDraftByReview({});
+      return;
+    }
+
+    const loadReplies = async () => {
+      setReplyHistoryLoading(true);
+      setReplyHistoryError(null);
+      const { data, error } = await supabaseClient
+        .from("review_replies")
+        .select("id, review_id, reply_text, status, created_at, sent_at")
+        .eq("review_id", selectedReview.id)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        setReplyHistoryError("Impossible de charger l'historique.");
+        setReplyHistory([]);
+      } else {
+        const rows = (data ?? []) as ReviewReply[];
+        setReplyHistory(rows);
+        const latestDraft = rows.find((item) => item.status === "draft");
+        setDraftReplyId(latestDraft?.id ?? null);
+      }
+      setReplyHistoryLoading(false);
+    };
+
+    void loadReplies();
+  }, [selectedReviewId]);
+
+  useEffect(() => {
+    const supabaseClient = supabase;
+    const reviewIds = filteredReviews.map((review) => review.id);
+    if (!supabaseClient || reviewIds.length === 0) {
+      setDraftByReview({});
+      return;
+    }
+    const loadDrafts = async () => {
+      const { data } = await supabaseClient
+        .from("review_replies")
+        .select("review_id, status")
+        .in("review_id", reviewIds)
+        .eq("status", "draft");
+      const nextMap: Record<string, boolean> = {};
+      (data ?? []).forEach((row) => {
+        if (row.review_id) {
+          nextMap[row.review_id] = true;
+        }
+      });
+      setDraftByReview(nextMap);
+    };
+    void loadDrafts();
+  }, [filteredReviews]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !supabase) {
+      return;
+    }
+    supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (error) {
+          setSessionError(error.message);
+          return;
+        }
+        setSessionPreview(maskToken(data.session?.access_token));
+        setSessionExp(
+          data.session?.expires_at ? String(data.session.expires_at) : null
+        );
+      })
+      .catch((error) => {
+        setSessionError(error instanceof Error ? error.message : "Unknown error");
+      });
+  }, []);
+
+  const handleInvalidJwt = async () => {
+    setGenerationError("Session expirée, reconnecte-toi");
+    const supabaseClient = supabase;
+    if (!supabaseClient) {
+      return;
+    }
+    const { data, error } = await supabaseClient.auth.refreshSession();
+    if (error || !data.session) {
+      await supabaseClient.auth.signOut();
+      try {
+        Object.keys(window.localStorage)
+          .filter(
+            (key) => key.startsWith("sb-") && key.endsWith("-auth-token")
+          )
+          .forEach((key) => window.localStorage.removeItem(key));
+      } catch {
+        // ignore storage errors
+      }
+      window.location.reload();
+    }
+  };
 
   useEffect(() => {
     if (!cooldownUntil) {
@@ -316,6 +497,7 @@ const Inbox = () => {
       });
       const { data, error } = await supabaseClient.functions.invoke("generate-reply", {
         body: {
+          businessId: selectedReview.businessId,
           reviewText: selectedReview.text,
           rating: selectedReview.rating,
           authorName: selectedReview.authorName,
@@ -327,6 +509,15 @@ const Inbox = () => {
           signature: businessSignature ?? undefined
         }
       });
+      const isInvalidJwt =
+        error?.status === 401 ||
+        error?.message?.includes("Invalid JWT") ||
+        (data as { code?: number; message?: string } | null)?.code === 401 ||
+        (data as { message?: string } | null)?.message?.includes("Invalid JWT");
+      if (isInvalidJwt) {
+        await handleInvalidJwt();
+        return;
+      }
       console.log("generate-reply: response", { data, error });
       if (error || !data?.reply) {
         setGenerationError("Impossible de générer une réponse pour le moment.");
@@ -334,6 +525,40 @@ const Inbox = () => {
       } else {
         setReplyText(data.reply);
         setDrafts((prev) => ({ ...prev, [selectedReview.id]: data.reply }));
+        if (supabaseClient) {
+          const { data: sessionData } = await supabaseClient.auth.getSession();
+          if (!sessionData.session?.user) {
+            setGenerationError("Connecte-toi pour sauvegarder le brouillon.");
+          } else {
+            const locationId =
+              uuidRegex.test(selectedReview.locationId)
+                ? selectedReview.locationId
+                : null;
+            const { data: inserted, error: insertError } = await supabaseClient
+              .from("review_replies")
+              .insert({
+                user_id: sessionData.session.user.id,
+                review_id: selectedReview.id,
+                source: selectedReview.source.toLowerCase(),
+                location_id: locationId,
+                business_name: selectedReview.locationName,
+                tone: tonePreset,
+                length: lengthPreset,
+                reply_text: data.reply,
+                status: "draft"
+              })
+              .select("id, review_id, reply_text, status, created_at, sent_at")
+              .single();
+            if (!insertError && inserted) {
+              const row = inserted as ReviewReply;
+              setReplyHistory((prev) => [row, ...prev]);
+              setDraftReplyId(row.id);
+              setDraftByReview((prev) => ({ ...prev, [selectedReview.id]: true }));
+            } else if (import.meta.env.DEV) {
+              console.log("review_replies insert error:", insertError);
+            }
+          }
+        }
       }
     } catch {
       setGenerationError("Erreur lors de la génération.");
@@ -344,27 +569,184 @@ const Inbox = () => {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!selectedReview) {
       return;
     }
-    const now = new Date();
-    setSavedAt(now.toISOString());
-    setActivityEvents((prev) => [
-      {
-        id: `save-${now.getTime()}`,
-        label: "Brouillon sauvegardé",
-        timestamp: "À l'instant"
-      },
-      ...prev
-    ]);
+    const supabaseClient = supabase;
+    if (!draftReplyId || !supabaseClient) {
+      setGenerationError("Aucun brouillon à sauvegarder.");
+      return;
+    }
+    setReplySaving(true);
+    try {
+      const { error } = await supabaseClient
+        .from("review_replies")
+        .update({ reply_text: replyText })
+        .eq("id", draftReplyId);
+      if (error) {
+        setGenerationError("Impossible de sauvegarder le brouillon.");
+      } else {
+        const now = new Date();
+        setSavedAt(now.toISOString());
+        setReplyHistory((prev) =>
+          prev.map((item) =>
+            item.id === draftReplyId
+              ? { ...item, reply_text: replyText }
+              : item
+          )
+        );
+        setActivityEvents((prev) => [
+          {
+            id: `save-${now.getTime()}`,
+            label: "Brouillon sauvegardé",
+            timestamp: "À l'instant"
+          },
+          ...prev
+        ]);
+      }
+    } finally {
+      setReplySaving(false);
+    }
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!selectedReview) {
       return;
     }
-    window.alert("Réponse envoyée");
+    const supabaseClient = supabase;
+    if (!draftReplyId || !supabaseClient) {
+      setGenerationError("Aucun brouillon à envoyer.");
+      return;
+    }
+    setReplySending(true);
+    try {
+      if (import.meta.env.DEV) {
+        console.log("post-reply-google: invoking", {
+          reviewId: selectedReview.id
+        });
+      }
+      const { data, error } = await supabaseClient.functions.invoke(
+        "post-reply-google",
+        {
+          body: {
+            reviewId: selectedReview.id,
+            replyText
+          }
+        }
+      );
+      const isInvalidJwt =
+        error?.status === 401 ||
+        error?.message?.includes("Invalid JWT") ||
+        (data as { code?: number; message?: string } | null)?.code === 401 ||
+        (data as { message?: string } | null)?.message?.includes("Invalid JWT");
+      if (isInvalidJwt) {
+        await handleInvalidJwt();
+        return;
+      }
+      if (import.meta.env.DEV) {
+        console.log("post-reply-google: response", { data, error });
+      }
+      if (error || !data?.ok) {
+        setGenerationError("Impossible d'envoyer la réponse.");
+        return;
+      }
+      const sentAt = new Date().toISOString();
+      const { error: updateError } = await supabaseClient
+        .from("review_replies")
+        .update({ status: "sent", sent_at: sentAt })
+        .eq("id", draftReplyId);
+      if (updateError) {
+        setGenerationError("Réponse envoyée, mais statut non mis à jour.");
+      } else {
+        setReplyHistory((prev) =>
+          prev.map((item) =>
+            item.id === draftReplyId
+              ? { ...item, status: "sent", sent_at: sentAt }
+              : item
+          )
+        );
+        setDraftReplyId(null);
+        setDraftByReview((prev) => ({ ...prev, [selectedReview.id]: false }));
+      }
+    } finally {
+      setReplySending(false);
+    }
+  };
+
+  const handleGenerateBatch = async () => {
+    const supabaseClient = supabase;
+    if (!supabaseClient) {
+      setGenerationError("Configuration Supabase manquante.");
+      return;
+    }
+    const targets = filteredReviews.filter((review) => review.status === "todo");
+    if (targets.length === 0) {
+      setBatchError("Aucun avis à traiter.");
+      return;
+    }
+    if (isCooldownActive) {
+      setBatchError("Cooldown en cours. Réessaie dans quelques secondes.");
+      return;
+    }
+    setBatchGenerating(true);
+    setBatchError(null);
+    setBatchProgress({ current: 0, total: targets.length });
+    for (let index = 0; index < targets.length; index += 1) {
+      const review = targets[index];
+      setBatchProgress({ current: index + 1, total: targets.length });
+      const preset = getRatingPreset(review.rating);
+      const { data: genData, error: genError } = await supabaseClient.functions.invoke(
+        "generate-reply",
+        {
+          body: {
+            businessId: review.businessId,
+            reviewText: review.text,
+            rating: review.rating,
+            authorName: review.authorName,
+            businessName: review.locationName,
+            source: review.source.toLowerCase(),
+            tone: preset.tone,
+            length: preset.length
+          }
+        }
+      );
+      if (genError?.status === 429 || genData?.error === "Rate limit") {
+        setBatchError("Rate limit atteint. Réessaie plus tard.");
+        break;
+      }
+      if (genError || !genData?.reply) {
+        setBatchError("Erreur pendant la génération batch.");
+        break;
+      }
+      const { data: sessionData } = await supabaseClient.auth.getSession();
+      if (!sessionData.session?.user) {
+        setBatchError("Connecte-toi pour sauvegarder les brouillons.");
+        break;
+      }
+      const locationId = uuidRegex.test(review.locationId) ? review.locationId : null;
+      const { data: inserted, error: insertError } = await supabaseClient
+        .from("review_replies")
+        .insert({
+          user_id: sessionData.session.user.id,
+          review_id: review.id,
+          source: review.source.toLowerCase(),
+          location_id: locationId,
+          business_name: review.locationName,
+          tone: preset.tone,
+          length: preset.length,
+          reply_text: genData.reply,
+          status: "draft"
+        })
+        .select("id, review_id, reply_text, status, created_at, sent_at")
+        .single();
+      if (!insertError && inserted) {
+        setDraftByReview((prev) => ({ ...prev, [review.id]: true }));
+      } else if (import.meta.env.DEV) {
+        console.log("review_replies batch insert error:", insertError);
+      }
+    }
+    setBatchGenerating(false);
   };
 
   return (
@@ -374,6 +756,15 @@ const Inbox = () => {
         <p className="text-sm text-slate-500">
           Réponses aux avis et suivi des interactions clients.
         </p>
+        {import.meta.env.DEV && (
+          <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+            <div>Supabase URL: {supabaseUrl ?? "—"}</div>
+            <div>Project ref: {projectRef ?? "—"}</div>
+            <div>Session token: {sessionPreview}</div>
+            <div>Session exp: {sessionExp ?? "—"}</div>
+            {sessionError && <div>Session error: {sessionError}</div>}
+          </div>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1.05fr_1.4fr_1.05fr]">
@@ -389,7 +780,25 @@ const Inbox = () => {
                 >
                   {tab.label}
                 </Button>
-              ))}
+                ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleGenerateBatch}
+                disabled={batchGenerating || filteredReviews.length === 0}
+              >
+                {batchGenerating
+                  ? `Génération ${batchProgress.current}/${batchProgress.total}`
+                  : "Générer pour tous"}
+              </Button>
+              {batchError && (
+                <span className="text-xs font-medium text-amber-700">
+                  {batchError}
+                </span>
+              )}
             </div>
             <div>
               <label className="text-xs font-semibold text-slate-500">Lieu</label>
@@ -437,6 +846,9 @@ const Inbox = () => {
                     <Badge variant={review.status === "todo" ? "warning" : "success"}>
                       {review.status === "todo" ? "À traiter" : "Répondu"}
                     </Badge>
+                    {draftByReview[review.id] && (
+                      <Badge variant="success">Draft saved</Badge>
+                    )}
                   </div>
                   <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
                     <span>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span>
@@ -529,14 +941,17 @@ const Inbox = () => {
                   {activityEvents.map((event) => (
                     <div
                       key={event.id}
-                      className="rounded-2xl border border-slate-200 bg-white p-3"
+                      className="flex gap-3 rounded-2xl border border-slate-200 bg-white p-3"
                     >
-                      <p className="text-sm font-medium text-slate-900">
-                        {event.label}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {event.timestamp}
-                      </p>
+                      <span className="mt-1 h-2 w-2 rounded-full bg-emerald-500" />
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">
+                          {event.label}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {event.timestamp}
+                        </p>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -556,6 +971,45 @@ const Inbox = () => {
                           className="rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-700"
                         >
                           {item}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                    Historique
+                  </p>
+                  {replyHistoryLoading ? (
+                    <p className="mt-2 text-sm text-slate-500">Chargement...</p>
+                  ) : replyHistoryError ? (
+                    <p className="mt-2 text-sm text-amber-700">
+                      {replyHistoryError}
+                    </p>
+                  ) : replyHistory.length === 0 ? (
+                    <p className="mt-2 text-sm text-slate-500">
+                      Aucun brouillon pour cet avis.
+                    </p>
+                  ) : (
+                    <div className="mt-2 space-y-2">
+                      {replyHistory.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex gap-3 rounded-2xl border border-slate-200 bg-white p-3"
+                        >
+                          <span className="mt-1 h-2 w-2 rounded-full bg-slate-300" />
+                          <div className="w-full">
+                            <div className="flex items-center justify-between text-xs text-slate-500">
+                              <span>{formatRelativeDate(item.created_at)}</span>
+                              <span>
+                                {item.status === "sent" ? "Envoyé" : "Brouillon"}
+                              </span>
+                            </div>
+                            <p className="mt-2 text-sm text-slate-700">
+                              {item.reply_text.slice(0, 120)}
+                              {item.reply_text.length > 120 ? "…" : ""}
+                            </p>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -650,17 +1104,27 @@ const Inbox = () => {
                     type="button"
                     variant="outline"
                     onClick={handleSave}
-                    disabled={isGenerating || !selectedReview}
+                    disabled={
+                      isGenerating ||
+                      replySaving ||
+                      !selectedReview ||
+                      !draftReplyId
+                    }
                   >
-                    Sauvegarder
+                    {replySaving ? "Sauvegarde..." : "Sauvegarder"}
                   </Button>
                   <Button
                     type="button"
                     variant="outline"
                     onClick={handleSend}
-                    disabled={isGenerating || !selectedReview}
+                    disabled={
+                      isGenerating ||
+                      replySending ||
+                      !selectedReview ||
+                      !draftReplyId
+                    }
                   >
-                    Envoyer
+                    {replySending ? "Envoi..." : "Envoyer"}
                   </Button>
                 </div>
                 {!selectedReview && (
