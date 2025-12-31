@@ -17,16 +17,12 @@ type GenerateReplyPayload = {
   length?: string;
 };
 
-const jsonResponse = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "authorization, apikey, content-type",
-      "Access-Control-Allow-Methods": "POST, OPTIONS"
-    }
-  });
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, apikey, content-type, x-client-info",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
 
 const buildUserPrompt = (payload: GenerateReplyPayload): string => {
   const parts = [
@@ -45,47 +41,54 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "authorization, apikey, content-type",
-        "Access-Control-Allow-Methods": "POST, OPTIONS"
-      }
+      headers: corsHeaders
     });
   }
 
-  let payload: GenerateReplyPayload;
   try {
-    payload = (await req.json()) as GenerateReplyPayload;
-  } catch {
-    return jsonResponse(400, { error: "Invalid JSON body." });
-  }
+    const payload = (await req.json()) as GenerateReplyPayload;
 
-  if (!payload.reviewText || typeof payload.rating !== "number") {
-    return jsonResponse(400, {
-      error: "Missing required fields: reviewText, rating."
-    });
-  }
+    if (!payload.reviewText || typeof payload.rating !== "number") {
+      return new Response(
+        JSON.stringify({ error: "Missing required fields: reviewText, rating." }),
+        {
+          status: 400,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+    }
 
-  const apiKey = Deno.env.get("OPENAI_API_KEY");
-  if (!apiKey) {
-    return jsonResponse(500, { error: "OPENAI_API_KEY is missing." });
-  }
+    const apiKey = Deno.env.get("OPENAI_API_KEY");
+    if (!apiKey) {
+      return new Response(
+        JSON.stringify({ error: "OPENAI_API_KEY is missing." }),
+        {
+          status: 500,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+    }
 
-  const systemPrompt =
-    "Tu rédiges des réponses aux avis clients. Réponds en français, ton professionnel, poli et concis. Ne mentionne jamais l'IA ni un remboursement. Personnalise avec le prénom et le lieu si disponibles. Remercie et invite à revenir. Adapte la réponse à la note.";
+    const systemPrompt =
+      "Tu rédiges des réponses aux avis clients. Réponds en français, ton professionnel, poli et concis. Ne mentionne jamais l'IA ni un remboursement. Personnalise avec le prénom et le lieu si disponibles. Remercie et invite à revenir. Adapte la réponse à la note.";
 
-  try {
     const requestBody = (model: string) =>
       JSON.stringify({
         model,
         input: [
           {
             role: "system",
-            content: [{ type: "text", text: systemPrompt }]
+            content: [{ type: "input_text", text: systemPrompt }]
           },
           {
             role: "user",
-            content: [{ type: "text", text: buildUserPrompt(payload) }]
+            content: [{ type: "input_text", text: buildUserPrompt(payload) }]
           }
         ]
       });
@@ -113,27 +116,60 @@ Deno.serve(async (req) => {
     if (!response.ok) {
       const errText = await response.text();
       console.error("OpenAI error:", response.status, errText);
-      return jsonResponse(500, { error: "OpenAI request failed." });
+      return new Response(
+        JSON.stringify({ error: "OpenAI request failed." }),
+        {
+          status: 500,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        }
+      );
     }
 
-    const data = (await response.json()) as {
-      output_text?: string;
-      output?: Array<{ content?: Array<{ text?: string }> }>;
-    };
-
+    const json = await response.json();
     const reply =
-      data.output_text ??
-      data.output?.[0]?.content?.[0]?.text ??
-      "";
+      json.output_text ??
+      json.output?.flatMap((o: any) => o.content ?? [])
+        ?.find((c: any) => c.type === "output_text")?.text;
 
     if (!reply) {
-      return jsonResponse(500, { error: "Empty reply from OpenAI." });
+      console.error(
+        "OpenAI response (no reply):",
+        JSON.stringify(json).slice(0, 2000)
+      );
+      return new Response(
+        JSON.stringify({ error: "OpenAI request failed." }),
+        {
+          status: 500,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        }
+      );
     }
 
-    return jsonResponse(200, { reply });
+    return new Response(JSON.stringify({ reply }), {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json",
+      },
+    });
   } catch (error) {
-    console.error("generate-reply error:", error);
-    return jsonResponse(500, { error: "Unexpected server error." });
+    console.error(error);
+    return new Response(
+      JSON.stringify({ error: "OpenAI request failed." }),
+      {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+        },
+      }
+    );
   }
 });
 

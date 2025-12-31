@@ -159,7 +159,7 @@ const formatDate = (iso: string): string => {
   }).format(date);
 };
 
-const COOLDOWN_MS = 2000;
+const COOLDOWN_MS = 30000;
 
 const Inbox = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("todo");
@@ -245,11 +245,17 @@ const Inbox = () => {
     }
     if (!supabase) {
       setGenerationError("Configuration Supabase manquante.");
+      console.log("generate-reply: supabase client missing");
       return;
     }
     setIsGenerating(true);
     setGenerationError(null);
     try {
+      console.log("generate-reply: invoking edge function", {
+        reviewId: selectedReview.id,
+        tone: tonePreset,
+        length: lengthPreset
+      });
       const { data, error } = await supabase.functions.invoke("generate-reply", {
         body: {
           reviewText: selectedReview.text,
@@ -261,6 +267,7 @@ const Inbox = () => {
           length: lengthPreset
         }
       });
+      console.log("generate-reply: response", { data, error });
       if (error || !data?.reply) {
         setGenerationError("Impossible de générer une réponse pour le moment.");
         console.error("generate-reply error:", error ?? data?.error);
@@ -526,6 +533,7 @@ const Inbox = () => {
 
                 <div className="flex flex-wrap gap-2">
                   <Button
+                    type="button"
                     onClick={handleGenerate}
                     disabled={
                       isGenerating ||
@@ -537,6 +545,7 @@ const Inbox = () => {
                     {isGenerating ? "Génération..." : "Générer"}
                   </Button>
                   <Button
+                    type="button"
                     variant="outline"
                     onClick={handleGenerate}
                     disabled={
@@ -549,6 +558,7 @@ const Inbox = () => {
                     Regénérer
                   </Button>
                   <Button
+                    type="button"
                     variant="outline"
                     onClick={handleSave}
                     disabled={isGenerating || !selectedReview}
@@ -556,6 +566,7 @@ const Inbox = () => {
                     Sauvegarder
                   </Button>
                   <Button
+                    type="button"
                     variant="outline"
                     onClick={handleSend}
                     disabled={isGenerating || !selectedReview}
