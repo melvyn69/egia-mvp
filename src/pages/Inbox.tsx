@@ -140,7 +140,7 @@ const toneOptions: Array<{ id: TonePreset; label: string }> = [
   { id: "empathique", label: "Empathique" }
 ];
 
-const activityEvents = [
+const initialActivityEvents = [
   {
     id: "a1",
     label: "Réponse automatique enregistrée",
@@ -173,6 +173,8 @@ const Inbox = () => {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [activityEvents, setActivityEvents] = useState(initialActivityEvents);
 
   const isSupabaseAvailable = Boolean(supabase);
   const isCooldownActive = cooldownUntil ? cooldownUntil > Date.now() : false;
@@ -218,6 +220,11 @@ const Inbox = () => {
   }, [drafts, selectedReview]);
 
   useEffect(() => {
+    setSavedAt(null);
+    setGenerationError(null);
+  }, [selectedReviewId]);
+
+  useEffect(() => {
     if (!cooldownUntil) {
       return;
     }
@@ -248,20 +255,22 @@ const Inbox = () => {
           reviewText: selectedReview.text,
           rating: selectedReview.rating,
           authorName: selectedReview.authorName,
-          locationName: selectedReview.locationName,
-          platform: selectedReview.source,
+          businessName: selectedReview.locationName,
+          source: selectedReview.source.toLowerCase(),
           tone: tonePreset,
           length: lengthPreset
         }
       });
       if (error || !data?.reply) {
         setGenerationError("Impossible de générer une réponse pour le moment.");
+        console.error("generate-reply error:", error ?? data?.error);
       } else {
         setReplyText(data.reply);
         setDrafts((prev) => ({ ...prev, [selectedReview.id]: data.reply }));
       }
     } catch {
       setGenerationError("Erreur lors de la génération.");
+      console.error("generate-reply error: request failed");
     } finally {
       setIsGenerating(false);
       setCooldownUntil(Date.now() + COOLDOWN_MS);
@@ -272,7 +281,16 @@ const Inbox = () => {
     if (!selectedReview) {
       return;
     }
-    window.alert("Brouillon sauvegardé");
+    const now = new Date();
+    setSavedAt(now.toISOString());
+    setActivityEvents((prev) => [
+      {
+        id: `save-${now.getTime()}`,
+        label: "Brouillon sauvegardé",
+        timestamp: "À l'instant"
+      },
+      ...prev
+    ]);
   };
 
   const handleSend = () => {
@@ -501,6 +519,9 @@ const Inbox = () => {
                       }
                     }}
                   />
+                  <div className="mt-2 text-right text-xs text-slate-500">
+                    {replyText.length} caractères
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
@@ -517,6 +538,18 @@ const Inbox = () => {
                   </Button>
                   <Button
                     variant="outline"
+                    onClick={handleGenerate}
+                    disabled={
+                      isGenerating ||
+                      !selectedReview ||
+                      !isSupabaseAvailable ||
+                      isCooldownActive
+                    }
+                  >
+                    Regénérer
+                  </Button>
+                  <Button
+                    variant="outline"
                     onClick={handleSave}
                     disabled={isGenerating || !selectedReview}
                   >
@@ -530,6 +563,12 @@ const Inbox = () => {
                     Envoyer
                   </Button>
                 </div>
+                {!selectedReview && (
+                  <p className="text-xs text-slate-500">Sélectionne un avis.</p>
+                )}
+                {savedAt && (
+                  <Badge variant="success">Sauvegardé</Badge>
+                )}
                 {generationError && (
                   <p className="text-sm font-medium text-amber-700">
                     {generationError}

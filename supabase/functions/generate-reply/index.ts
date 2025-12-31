@@ -9,8 +9,10 @@ type GenerateReplyPayload = {
   reviewText?: string;
   rating?: number;
   authorName?: string;
+  businessName?: string;
   locationName?: string;
   platform?: string;
+  source?: string;
   tone?: string;
   length?: string;
 };
@@ -21,7 +23,8 @@ const jsonResponse = (status: number, body: unknown) =>
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "authorization, apikey, content-type"
+      "Access-Control-Allow-Headers": "authorization, apikey, content-type",
+      "Access-Control-Allow-Methods": "POST, OPTIONS"
     }
   });
 
@@ -30,8 +33,8 @@ const buildUserPrompt = (payload: GenerateReplyPayload): string => {
     `Avis: ${payload.reviewText ?? ""}`,
     `Note: ${payload.rating ?? ""}`,
     `Auteur: ${payload.authorName ?? ""}`,
-    `Lieu: ${payload.locationName ?? ""}`,
-    `Plateforme: ${payload.platform ?? ""}`,
+    `Lieu: ${payload.locationName ?? payload.businessName ?? ""}`,
+    `Plateforme: ${payload.source ?? payload.platform ?? ""}`,
     `Ton souhaité: ${payload.tone ?? ""}`,
     `Longueur souhaitée: ${payload.length ?? ""}`
   ];
@@ -44,7 +47,8 @@ Deno.serve(async (req) => {
       status: 204,
       headers: {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "authorization, apikey, content-type"
+        "Access-Control-Allow-Headers": "authorization, apikey, content-type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS"
       }
     });
   }
@@ -57,7 +61,9 @@ Deno.serve(async (req) => {
   }
 
   if (!payload.reviewText || typeof payload.rating !== "number") {
-    return jsonResponse(400, { error: "Missing reviewText or rating." });
+    return jsonResponse(400, {
+      error: "Missing required fields: reviewText, rating."
+    });
   }
 
   const apiKey = Deno.env.get("OPENAI_API_KEY");
@@ -66,18 +72,11 @@ Deno.serve(async (req) => {
   }
 
   const systemPrompt =
-    "Tu es un assistant qui rédige des réponses aux avis clients. Réponds en français, ton professionnel et poli, concis. Ne mentionne jamais l'IA ni de remboursement. Personnalise avec le prénom et le lieu si disponibles. Inclure un remerciement et une invitation à revenir.";
-
-  const model = "gpt-5-mini";
+    "Tu rédiges des réponses aux avis clients. Réponds en français, ton professionnel, poli et concis. Ne mentionne jamais l'IA ni un remboursement. Personnalise avec le prénom et le lieu si disponibles. Remercie et invite à revenir. Adapte la réponse à la note.";
 
   try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
+    const requestBody = (model: string) =>
+      JSON.stringify({
         model,
         input: [
           {
@@ -89,8 +88,27 @@ Deno.serve(async (req) => {
             content: [{ type: "text", text: buildUserPrompt(payload) }]
           }
         ]
-      })
+      });
+
+    const requestInit = {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      }
+    };
+
+    let response = await fetch("https://api.openai.com/v1/responses", {
+      ...requestInit,
+      body: requestBody("gpt-5-mini")
     });
+
+    if (response.status === 404) {
+      response = await fetch("https://api.openai.com/v1/responses", {
+        ...requestInit,
+        body: requestBody("gpt-5")
+      });
+    }
 
     if (!response.ok) {
       const errText = await response.text();
