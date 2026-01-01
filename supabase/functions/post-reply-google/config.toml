@@ -1,1 +1,2 @@
+[functions.post-reply-google]
 verify_jwt = false
