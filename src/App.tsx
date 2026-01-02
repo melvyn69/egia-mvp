@@ -244,22 +244,17 @@ const App = () => {
 
     try {
       setSyncingLocations(true);
-      const res = await fetch(
-        `${supabaseUrl}/functions/v1/google_gbp_sync_locations`,
+      const { data, error } = await supabase.functions.invoke(
+        "google_gbp_sync_locations",
         {
-          method: "POST",
           headers: {
-            Authorization: `Bearer ${supabaseAnonKey}`,
-            apikey: supabaseAnonKey,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ jwt: session.access_token })
+            "X-User-JWT": session.access_token
+          }
         }
       );
 
-      const text = await res.text();
-      if (!res.ok) {
-        console.error("google_gbp_sync_locations error:", res.status, text);
+      if (error || !data?.ok) {
+        console.error("google_gbp_sync_locations error:", error);
         setLocationsError("Impossible de synchroniser les lieux.");
         return;
       }
@@ -286,23 +281,25 @@ const App = () => {
       setSyncAllMessage("Connecte-toi puis reconnecte Google.");
       return;
     }
-    if (!session.provider_token) {
+    const { data: sessionRes } = await supabase.auth.getSession();
+    const providerToken = sessionRes?.session?.provider_token;
+    if (!providerToken) {
       setSyncAllMessage("Token Google manquant. Reconnecte Google.");
       return;
     }
     setSyncAllLoading(true);
     const { data, error } = await supabase.functions.invoke("google_gbp_sync_all", {
       headers: {
-        "X-Google-Token": session.provider_token
+        "X-Google-Token": providerToken
       }
     });
     if (error) {
       setSyncAllMessage("Erreur de synchronisation.");
-    } else if (data?.ok) {
+    } else if (data) {
       setSyncAllMessage(
-        `Synchronisation terminée: ${data.locationsCount ?? 0} lieux, ${
-          data.reviewsCount ?? 0
-        } avis.`
+        `Synchronisation terminée: ${data.accounts ?? 0} comptes, ${
+          data.locations ?? 0
+        } lieux, ${data.reviews ?? 0} avis.`
       );
     } else {
       setSyncAllMessage("Erreur de synchronisation.");
