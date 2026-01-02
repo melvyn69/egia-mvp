@@ -71,3 +71,26 @@ export default defineConfig([
   },
 ])
 ```
+
+## Supabase Functions
+
+### Deploy function without JWT verification
+
+```bash
+npm run deploy:post-reply-google
+```
+
+### Pourquoi je vois 403 scope insufficient ?
+
+1) Google Cloud → OAuth consent → ajouter le scope `https://www.googleapis.com/auth/business.manage`
+2) Ajouter ton compte dans "Test users" si l'app est en mode test
+3) Révoquer l'accès à l'app dans Google Account (Sécurité → Accès tiers)
+4) Reconnecter via le bouton Google, puis vérifier le scope affiché
+
+### OAuth Redirects Supabase (prod + dev)
+
+- Auth → URL Configuration
+- Site URL: `https://egia-six.vercel.app`
+- Additional Redirect URLs:
+  - `https://egia-six.vercel.app/google_oauth_callback`
+  - `http://localhost:5173/google_oauth_callback`
