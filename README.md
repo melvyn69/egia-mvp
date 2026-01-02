@@ -94,3 +94,11 @@ npm run deploy:post-reply-google
 - Additional Redirect URLs:
   - `https://egia-six.vercel.app/google_oauth_callback`
   - `http://localhost:5173/google_oauth_callback`
+
+### Test manuel OAuth Google
+
+1) `npm run dev`
+2) Se connecter
+3) Cliquer "Lancer la connexion Google"
+4) Retour sur `/google_oauth_callback` → success puis redirection
+5) En DEV: console → `provider_token present: true`

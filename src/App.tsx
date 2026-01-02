@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, supabaseAnonKey, supabaseUrl } from "./lib/supabase";
+import { connectGoogle } from "./lib/googleAuth";
 import { Sidebar } from "./components/layout/Sidebar";
 import { Topbar } from "./components/layout/Topbar";
 import { Dashboard } from "./pages/Dashboard";
@@ -18,9 +19,6 @@ const App = () => {
   const [authError, setAuthError] = useState<string | null>(null);
   const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
   const [googleError, setGoogleError] = useState<string | null>(null);
-  const [callbackError, setCallbackError] = useState<string | null>(null);
-  const [callbackLoading, setCallbackLoading] = useState(false);
-  const [callbackHandled, setCallbackHandled] = useState(false);
   const [locations, setLocations] = useState<
     Array<{
       id: string;
@@ -113,90 +111,6 @@ const App = () => {
     }
   }, [isCallbackPath, location.search, navigate]);
 
-  useEffect(() => {
-    if (!isCallbackPath || callbackHandled) {
-      return;
-    }
-
-    const params = new URLSearchParams(location.search);
-    const code = params.get("code");
-    if (!code) {
-      setCallbackError("Code OAuth manquant.");
-      return;
-    }
-
-    if (!supabase || !supabaseUrl || !supabaseAnonKey) {
-      setCallbackError("Configuration Supabase manquante.");
-      return;
-    }
-
-    if (!session) {
-      // on attend que la session se charge après le redirect OAuth
-      supabase.auth.getSession().then(({ data }) => {
-        if (data.session) {
-          setSession(data.session);
-        } else {
-          setCallbackError(
-            "Session Supabase introuvable. Reconnecte-toi puis réessaie."
-          );
-        }
-      });
-      return;
-    }
-
-    setCallbackError(null);
-    setCallbackHandled(true);
-    setCallbackLoading(true);
-
-    const runExchange = async () => {
-      try {
-        const res = await fetch(
-          `${supabaseUrl}/functions/v1/google_oauth_exchange`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${supabaseAnonKey}`,
-              apikey: supabaseAnonKey,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ code, jwt: session.access_token })
-          }
-        );
-
-        const text = await res.text();
-        if (!res.ok) {
-          console.error("google_oauth_exchange error:", res.status, text);
-          setCallbackError("Impossible de finaliser la connexion Google.");
-          return;
-        }
-
-        const json = JSON.parse(text) as { ok?: boolean; error?: string };
-        if (!json.ok) {
-          setCallbackError(json.error ?? "Connexion Google echouee.");
-          return;
-        }
-
-        setGoogleConnected(true);
-        navigate("/?connected=1", { replace: true });
-      } catch (error) {
-        console.error(error);
-        setCallbackError("Impossible de finaliser la connexion Google.");
-      } finally {
-        setCallbackLoading(false);
-      }
-    };
-
-    void runExchange();
-  }, [
-    callbackHandled,
-    isCallbackPath,
-    location.search,
-    navigate,
-    session,
-    supabase,
-    supabaseAnonKey,
-    supabaseUrl
-  ]);
 
   useEffect(() => {
     if (!supabase || !session) {
@@ -281,12 +195,7 @@ const App = () => {
     }
 
     console.info("Supabase auth: starting Google sign-in");
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: window.location.origin
-      }
-    });
+    const { error } = await connectGoogle(supabase);
 
     if (error) {
       console.error("Supabase auth sign-in error:", error);
@@ -297,39 +206,19 @@ const App = () => {
   const handleConnectGoogle = async () => {
     setGoogleError(null);
 
-    if (!supabase || !session || !supabaseUrl || !supabaseAnonKey) {
+    if (!supabase) {
       setGoogleError("Connexion Supabase requise.");
       return;
     }
 
     try {
-      const res = await fetch(`${supabaseUrl}/functions/v1/google_oauth_start`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${supabaseAnonKey}`,
-          apikey: supabaseAnonKey,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ jwt: session.access_token })
-      });
-
-      const text = await res.text();
-
-      if (!res.ok) {
-        console.error("google_oauth_start error:", res.status, text);
+      const { error } = await connectGoogle(supabase);
+      if (error) {
+        console.error("google oauth error:", error);
         setGoogleError("Impossible de demarrer la connexion Google.");
-        return;
       }
-
-      const json = JSON.parse(text) as { url?: string };
-      if (!json.url) {
-        setGoogleError("URL Google manquante.");
-        return;
-      }
-
-      window.location.href = json.url;
     } catch (error) {
-      console.error(error);
+      console.error("google oauth error:", error);
       setGoogleError("Impossible de demarrer la connexion Google.");
     }
   };
@@ -472,13 +361,7 @@ const App = () => {
                 <Route path="/inbox" element={<Inbox />} />
                 <Route
                   path="/google_oauth_callback"
-                  element={
-                    <OAuthCallback
-                      loading={callbackLoading}
-                      error={callbackError}
-                      onBack={() => navigate("/")}
-                    />
-                  }
+                  element={<OAuthCallback />}
                 />
               </Routes>
             )}
