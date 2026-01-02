@@ -4,9 +4,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 
 type ConnectProps = {
   onConnect: () => void;
+  onSync?: () => void;
+  syncLoading?: boolean;
+  syncMessage?: string | null;
 };
 
-const Connect = ({ onConnect }: ConnectProps) => (
+const Connect = ({
+  onConnect,
+  onSync,
+  syncLoading = false,
+  syncMessage
+}: ConnectProps) => (
   <div className="space-y-6">
     <Card className="border-0 bg-gradient-to-br from-ink via-[#1d1c20] to-[#3a2f28] text-white shadow-soft">
       <CardHeader>
@@ -21,6 +29,21 @@ const Connect = ({ onConnect }: ConnectProps) => (
         <Button variant="secondary" size="lg" onClick={onConnect}>
           Lancer la connexion Google
         </Button>
+        {onSync && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onSync}
+            disabled={syncLoading}
+          >
+            {syncLoading
+              ? "Synchronisation..."
+              : "Synchroniser mes établissements & avis"}
+          </Button>
+        )}
+        {syncMessage && (
+          <p className="text-xs text-slate-200/80">{syncMessage}</p>
+        )}
         <p className="text-xs text-slate-200/80">
           Autorisation requise pour acceder aux avis, repondre et publier.
         </p>

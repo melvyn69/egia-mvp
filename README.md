@@ -102,3 +102,9 @@ npm run deploy:post-reply-google
 3) Cliquer "Lancer la connexion Google"
 4) Retour sur `/google_oauth_callback` → success puis redirection
 5) En DEV: console → `provider_token present: true`
+
+### Synchroniser établissements & avis
+
+1) Aller sur "Connexion Google"
+2) Cliquer "Synchroniser mes établissements & avis"
+3) Vérifier le message de succès (comptes/lieux/avis)

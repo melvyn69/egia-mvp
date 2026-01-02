@@ -19,6 +19,8 @@ const App = () => {
   const [authError, setAuthError] = useState<string | null>(null);
   const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
   const [googleError, setGoogleError] = useState<string | null>(null);
+  const [syncAllLoading, setSyncAllLoading] = useState(false);
+  const [syncAllMessage, setSyncAllMessage] = useState<string | null>(null);
   const [locations, setLocations] = useState<
     Array<{
       id: string;
@@ -278,6 +280,36 @@ const App = () => {
     }
   };
 
+  const handleSyncAll = async () => {
+    setSyncAllMessage(null);
+    if (!supabase || !session) {
+      setSyncAllMessage("Connecte-toi puis reconnecte Google.");
+      return;
+    }
+    if (!session.provider_token) {
+      setSyncAllMessage("Token Google manquant. Reconnecte Google.");
+      return;
+    }
+    setSyncAllLoading(true);
+    const { data, error } = await supabase.functions.invoke("google_gbp_sync_all", {
+      headers: {
+        "X-Google-Token": session.provider_token
+      }
+    });
+    if (error) {
+      setSyncAllMessage("Erreur de synchronisation.");
+    } else if (data?.ok) {
+      setSyncAllMessage(
+        `Synchronisation terminée: ${data.locationsCount ?? 0} lieux, ${
+          data.reviewsCount ?? 0
+        } avis.`
+      );
+    } else {
+      setSyncAllMessage("Erreur de synchronisation.");
+    }
+    setSyncAllLoading(false);
+  };
+
   const handleSignOut = async () => {
     if (!supabase) {
       return;
@@ -356,7 +388,14 @@ const App = () => {
                 />
                 <Route
                   path="/connect"
-                  element={<Connect onConnect={handleConnectGoogle} />}
+                  element={
+                    <Connect
+                      onConnect={handleConnectGoogle}
+                      onSync={handleSyncAll}
+                      syncLoading={syncAllLoading}
+                      syncMessage={syncAllMessage}
+                    />
+                  }
                 />
                 <Route path="/inbox" element={<Inbox />} />
                 <Route
