@@ -19,6 +19,8 @@ const App = () => {
   const [authError, setAuthError] = useState<string | null>(null);
   const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
   const [googleError, setGoogleError] = useState<string | null>(null);
+  const [syncAllLoading, setSyncAllLoading] = useState(false);
+  const [syncAllMessage, setSyncAllMessage] = useState<string | null>(null);
   const [locations, setLocations] = useState<
     Array<{
       id: string;
@@ -242,22 +244,17 @@ const App = () => {
 
     try {
       setSyncingLocations(true);
-      const res = await fetch(
-        `${supabaseUrl}/functions/v1/google_gbp_sync_locations`,
+      const { data, error } = await supabase.functions.invoke(
+        "google_gbp_sync_locations",
         {
-          method: "POST",
           headers: {
-            Authorization: `Bearer ${supabaseAnonKey}`,
-            apikey: supabaseAnonKey,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ jwt: session.access_token })
+            "X-User-JWT": session.access_token
+          }
         }
       );
 
-      const text = await res.text();
-      if (!res.ok) {
-        console.error("google_gbp_sync_locations error:", res.status, text);
+      if (error || !data?.ok) {
+        console.error("google_gbp_sync_locations error:", error);
         setLocationsError("Impossible de synchroniser les lieux.");
         return;
       }
@@ -276,6 +273,38 @@ const App = () => {
     } finally {
       setSyncingLocations(false);
     }
+  };
+
+  const handleSyncAll = async () => {
+    setSyncAllMessage(null);
+    if (!supabase || !session) {
+      setSyncAllMessage("Connecte-toi puis reconnecte Google.");
+      return;
+    }
+    const { data: sessionRes } = await supabase.auth.getSession();
+    const providerToken = sessionRes?.session?.provider_token;
+    if (!providerToken) {
+      setSyncAllMessage("Token Google manquant. Reconnecte Google.");
+      return;
+    }
+    setSyncAllLoading(true);
+    const { data, error } = await supabase.functions.invoke("google_gbp_sync_all", {
+      headers: {
+        "X-Google-Token": providerToken
+      }
+    });
+    if (error) {
+      setSyncAllMessage("Erreur de synchronisation.");
+    } else if (data) {
+      setSyncAllMessage(
+        `Synchronisation terminée: ${data.accounts ?? 0} comptes, ${
+          data.locations ?? 0
+        } lieux, ${data.reviews ?? 0} avis.`
+      );
+    } else {
+      setSyncAllMessage("Erreur de synchronisation.");
+    }
+    setSyncAllLoading(false);
   };
 
   const handleSignOut = async () => {
@@ -356,7 +385,14 @@ const App = () => {
                 />
                 <Route
                   path="/connect"
-                  element={<Connect onConnect={handleConnectGoogle} />}
+                  element={
+                    <Connect
+                      onConnect={handleConnectGoogle}
+                      onSync={handleSyncAll}
+                      syncLoading={syncAllLoading}
+                      syncMessage={syncAllMessage}
+                    />
+                  }
                 />
                 <Route path="/inbox" element={<Inbox />} />
                 <Route

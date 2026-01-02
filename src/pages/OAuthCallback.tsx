@@ -17,6 +17,9 @@ const OAuthCallback = () => {
   const navigate = useNavigate();
   const [status, setStatus] = useState<CallbackStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [providerToken, setProviderToken] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncLoading, setSyncLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,6 +58,7 @@ const OAuthCallback = () => {
         setErrorMessage("Token Google manquant, reconnecte Google.");
         return;
       }
+      setProviderToken(session.provider_token);
       setStatus("success");
       setErrorMessage(null);
       window.setTimeout(() => {
@@ -83,6 +87,30 @@ const OAuthCallback = () => {
       setStatus("error");
       setErrorMessage("Impossible de relancer la connexion Google.");
     }
+  };
+
+  const handleSync = async () => {
+    if (!supabase || !providerToken) {
+      setSyncMessage("Token Google manquant.");
+      return;
+    }
+    setSyncLoading(true);
+    setSyncMessage(null);
+    const { data, error } = await supabase.functions.invoke("google_gbp_sync_all", {
+      headers: {
+        "X-Google-Token": providerToken
+      }
+    });
+    if (error || !data?.ok) {
+      setSyncMessage("Erreur de synchronisation.");
+    } else {
+      setSyncMessage(
+        `Synchronisation lancée: ${data.locationsCount ?? 0} lieux, ${
+          data.reviewsCount ?? 0
+        } avis.`
+      );
+    }
+    setSyncLoading(false);
   };
 
   return (
@@ -129,6 +157,22 @@ const OAuthCallback = () => {
             <Button variant="outline" onClick={handleReconnect}>
               Relancer la connexion Google
             </Button>
+          )}
+          {status === "success" && (
+            <div className="space-y-2">
+              <Button
+                variant="outline"
+                onClick={handleSync}
+                disabled={syncLoading}
+              >
+                {syncLoading
+                  ? "Synchronisation..."
+                  : "Lancer la synchronisation"}
+              </Button>
+              {syncMessage && (
+                <p className="text-xs text-slate-500">{syncMessage}</p>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
