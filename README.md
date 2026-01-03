@@ -1,21 +1,23 @@
 # React + TypeScript + Vite
 
-## MVP setup
-1) `.env.local`: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_TEST_EMAIL`, `SUPABASE_TEST_PASSWORD`, `APP_BASE_URL`.
-2) Supabase secrets: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_BASE_URL`.
-3) Supabase Auth redirect: `http://localhost:5173/auth/callback`.
-4) Google OAuth redirect: `http://localhost:5173/google_oauth_callback`.
-5) Scopes Google: `https://www.googleapis.com/auth/business.manage`.
-6) `npm install`
-7) `npm run dev`
-8) Login Google (Supabase), puis "Connecter Google Business Profile".
-9) "Sync All" -> comptes/lieux/avis.
-10) Smoke test: `npm run smoke:auth` (ou `SUPABASE_ACCESS_TOKEN` depuis Debug en dev).
-11) Curl: `curl -i -X POST "$SUPABASE_URL/functions/v1/google_gbp_sync_all" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "apikey: $SUPABASE_ANON_KEY"` -> JSON avec `accounts`.
+## MVP setup (local)
+1) `.env.local`: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_BASE_URL`.
+2) Supabase Auth redirect: `http://localhost:5173/auth/callback`.
+3) Google OAuth redirect: `http://localhost:3000/api/google/oauth/callback` (Vercel dev) ou l'URL Vercel en prod.
+4) Scopes Google: `https://www.googleapis.com/auth/business.manage`.
+5) `npm install`
+6) `npm run dev` (frontend Vite) + `vercel dev` (API routes).
+7) Login Google (Supabase), puis "Connecter Google Business Profile".
+8) Synchroniser les lieux Google Business Profile.
+
+## MVP setup (prod)
+1) Vercel env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_BASE_URL`.
+2) Google OAuth redirect: `${APP_BASE_URL}/api/google/oauth/callback`.
+3) Déployer sur Vercel, puis tester la connexion Google depuis `/connect`.
 
 ## Google OAuth setup
 1) Google Cloud Console -> OAuth consent -> ajouter le scope `https://www.googleapis.com/auth/business.manage`.
-2) Credentials -> OAuth Client -> Authorized redirect URI: `http://localhost:5173/google_oauth_callback`.
+2) Credentials -> OAuth Client -> Authorized redirect URI: `${APP_BASE_URL}/api/google/oauth/callback`.
 3) Ajouter l'utilisateur test si l'app est en mode test.
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
