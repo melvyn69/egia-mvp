@@ -3,25 +3,47 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const googleClientId = Deno.env.get("GOOGLE_CLIENT_ID") ?? "";
 const googleClientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET") ?? "";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-user-jwt",
-  "Access-Control-Allow-Methods": "POST, OPTIONS"
+const baseAllowedOrigins = [
+  "http://localhost:5173",
+  "https://egia-six.vercel.app"
+];
+
+const buildAllowedOrigins = () => {
+  const fromEnv = Deno.env.get("ALLOWED_ORIGINS") ?? "";
+  const extra = fromEnv
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return new Set([...baseAllowedOrigins, ...extra]);
+};
+
+const getCorsHeaders = (origin: string | null) => {
+  const allowedOrigins = buildAllowedOrigins();
+  const allowedOrigin =
+    origin && allowedOrigins.has(origin) ? origin : "http://localhost:5173";
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type, x-google-token, x-requested-with, accept, origin, referer, user-agent, cache-control, pragma",
+    "Access-Control-Allow-Methods": "POST, OPTIONS"
+  };
 };
 
 const jsonResponse = (
   status: number,
   payload: Record<string, string | number | boolean>,
+  origin: string | null
 ) =>
   new Response(JSON.stringify(payload), {
     status,
     headers: {
       "Content-Type": "application/json",
-      ...corsHeaders
+      ...getCorsHeaders(origin)
     }
   });
 
@@ -74,53 +96,67 @@ const fetchAllPages = async <T>(
 
 serve(async (req) => {
   try {
+    const origin = req.headers.get("origin");
+    const authHeader = req.headers.get("authorization") ?? "";
+    const apiKeyHeader = req.headers.get("apikey");
+    const hasAuth = Boolean(authHeader);
+    const hasApiKey = Boolean(apiKeyHeader);
     if (req.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders });
+      console.log("gbp_sync_locations options:", {
+        origin,
+        hasAuth,
+        hasApiKey
+      });
+      return new Response(null, { status: 204, headers: getCorsHeaders(origin) });
     }
 
+    console.log("gbp_sync_locations post:", {
+      origin,
+      hasAuth,
+      hasApiKey
+    });
+
     if (req.method !== "POST") {
-      return jsonResponse(405, { error: "Method not allowed" });
+      return jsonResponse(405, { error: "Method not allowed" }, origin);
     }
 
     if (
       !supabaseUrl ||
       !serviceRoleKey ||
+      !supabaseAnonKey ||
       !googleClientId ||
       !googleClientSecret
     ) {
-      return jsonResponse(500, { error: "Server misconfigured" });
+      return jsonResponse(500, { error: "Server misconfigured" }, origin);
     }
 
-    let payload: { jwt?: string } | null = null;
-    try {
-      payload = await req.json();
-    } catch {
-      return jsonResponse(400, { error: "Invalid JSON body" });
-    }
-
-    const authHeader = req.headers.get("authorization") ??
-      req.headers.get("Authorization");
-    const bearerToken = authHeader?.startsWith("Bearer ")
-      ? authHeader.slice("Bearer ".length).trim()
-      : null;
-    const jwt = payload?.jwt ??
-      bearerToken ??
-      req.headers.get("x-user-jwt") ??
-      req.headers.get("X-User-JWT");
+    const jwt = authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7)
+      : authHeader;
     if (!jwt) {
-      return jsonResponse(401, { error: "Missing Supabase JWT" });
+      return jsonResponse(401, { code: 401, message: "Missing JWT" }, origin);
+    }
+
+    const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: false }
+    });
+
+    const { data: authData, error: authError } = await supabaseAuth.auth.getUser(
+      jwt
+    );
+    const user = authData?.user;
+
+    if (authError || !user) {
+      return jsonResponse(
+        401,
+        { code: 401, message: "Invalid JWT", details: authError?.message },
+        origin
+      );
     }
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false }
     });
-
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(
-      jwt
-    );
-    if (userError || !user) {
-      return jsonResponse(401, { error: "Invalid Supabase JWT" });
-    }
 
     const { data: connection, error: connectionError } = await supabaseAdmin
       .from("google_connections")
@@ -130,11 +166,11 @@ serve(async (req) => {
       .maybeSingle();
 
     if (connectionError) {
-      return jsonResponse(500, { error: "Failed to read google connection" });
+      return jsonResponse(500, { error: "Failed to read google connection" }, origin);
     }
 
     if (!connection?.access_token) {
-      return jsonResponse(401, { error: "Missing Google connection" });
+      return jsonResponse(401, { error: "Missing Google connection" }, origin);
     }
 
     let accessToken = connection.access_token;
@@ -145,7 +181,7 @@ serve(async (req) => {
 
     if (expiresAt && expiresAt <= now + 60_000) {
       if (!connection.refresh_token) {
-        return jsonResponse(401, { error: "Missing refresh token" });
+        return jsonResponse(401, { error: "Missing refresh token" }, origin);
       }
 
       const refreshResponse = await fetch(
@@ -167,7 +203,7 @@ serve(async (req) => {
       if (!refreshResponse.ok) {
         const body = await refreshResponse.text();
         console.error("Google refresh failed:", refreshResponse.status, body);
-        return jsonResponse(401, { error: "Failed to refresh access token" });
+        return jsonResponse(401, { error: "Failed to refresh access token" }, origin);
       }
 
       const refreshData = await refreshResponse.json();
@@ -264,9 +300,9 @@ serve(async (req) => {
       ok: true,
       accountsCount,
       locationsCount
-    });
+    }, origin);
   } catch (error) {
     console.error("google_gbp_sync_locations fatal:", error);
-    return jsonResponse(500, { error: "Sync failed (see logs)" });
+    return jsonResponse(500, { error: "Sync failed (see logs)" }, null);
   }
 });

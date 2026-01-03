@@ -3,22 +3,36 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const googleClientId = Deno.env.get("GOOGLE_CLIENT_ID") ?? "";
 const googleClientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET") ?? "";
 
-const allowedOrigins = new Set([
+const baseAllowedOrigins = [
   "http://localhost:5173",
-  "https://ton-domaine.com",
-]);
+  "https://egia-six.vercel.app",
+];
 
-const getCorsHeaders = (origin: string | null) => ({
-  "Access-Control-Allow-Origin":
-    origin && allowedOrigins.has(origin) ? origin : "http://localhost:5173",
-  "Access-Control-Allow-Credentials": "true",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-requested-with, accept, origin, referer, user-agent, cache-control, pragma",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-});
+const buildAllowedOrigins = () => {
+  const fromEnv = Deno.env.get("ALLOWED_ORIGINS") ?? "";
+  const extra = fromEnv
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return new Set([...baseAllowedOrigins, ...extra]);
+};
+
+const getCorsHeaders = (origin: string | null) => {
+  const allowedOrigins = buildAllowedOrigins();
+  const allowedOrigin =
+    origin && allowedOrigins.has(origin) ? origin : "http://localhost:5173";
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type, x-google-token, x-requested-with, accept, origin, referer, user-agent, cache-control, pragma",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+  };
+};
 
 const jsonResponse = (
   status: number,
@@ -113,51 +127,68 @@ const starRatingToInt = (starRating: string | undefined) => {
 
 serve(async (req) => {
   const origin = req.headers.get("origin");
+  const authHeader = req.headers.get("authorization") ?? "";
+  const apiKeyHeader = req.headers.get("apikey");
+  const hasAuth = Boolean(authHeader);
+  const hasApiKey = Boolean(apiKeyHeader);
 
   if (req.method === "OPTIONS") {
+    console.log("gbp_sync_all options:", {
+      origin,
+      hasAuth,
+      hasApiKey
+    });
     return new Response(null, { status: 204, headers: getCorsHeaders(origin) });
   }
+
+  console.log("gbp_sync_all post:", {
+    origin,
+    hasAuth,
+    hasApiKey
+  });
 
   if (req.method !== "POST") {
     return jsonResponse(405, { error: "Method not allowed" }, origin);
   }
 
-  if (!supabaseUrl || !serviceRoleKey || !googleClientId || !googleClientSecret) {
+  if (
+    !supabaseUrl ||
+    !serviceRoleKey ||
+    !supabaseAnonKey ||
+    !googleClientId ||
+    !googleClientSecret
+  ) {
     return jsonResponse(500, { error: "Server misconfigured" }, origin);
   }
 
-  const authHeader = req.headers.get("authorization") ??
-    req.headers.get("Authorization");
-  const jwt = authHeader?.startsWith("Bearer ")
-    ? authHeader.slice("Bearer ".length).trim()
-    : null;
-
-  const apiKeyHeader = req.headers.get("apikey");
-  console.log("headers_present", {
-    authorization: Boolean(authHeader),
-    apikey: Boolean(apiKeyHeader)
-  });
+  const jwt = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7)
+    : authHeader;
 
   if (!jwt) {
-    return jsonResponse(401, { error: "Missing Supabase JWT" }, origin);
+    return jsonResponse(401, { code: 401, message: "Missing JWT" }, origin);
   }
   console.log("has_jwt", !!jwt, "jwt_prefix", jwt?.slice(0, 20));
 
-  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+  const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
     auth: { persistSession: false },
   });
 
-  const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
+  const { data: userData, error: userError } = await supabaseAuth.auth.getUser(jwt);
   const user = userData?.user;
 
   if (userError || !user) {
     console.error("JWT invalid:", userError);
     return jsonResponse(
       401,
-      { error: "Invalid Supabase JWT", detail: userError?.message ?? null },
+      { code: 401, message: "Invalid JWT", details: userError?.message ?? null },
       origin
     );
   }
+
+  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
 
   const { data: connection, error: connectionError } = await supabaseAdmin
     .from("google_connections")
