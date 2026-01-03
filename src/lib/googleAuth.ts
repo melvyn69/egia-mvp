@@ -19,23 +19,13 @@ const signInWithGoogle = async (supabase: SupabaseClient) =>
 
 const startGoogleConnection = async (supabase: SupabaseClient) => {
   const { data: sessionData } = await supabase.auth.getSession();
-  const jwt = sessionData.session?.access_token ?? null;
-  if (!jwt) {
+  const session = sessionData.session;
+  if (!session) {
     throw new Error("Missing Supabase session.");
   }
-  const headers: Record<string, string> = {};
-  headers.Authorization = `Bearer ${jwt}`;
-  const { data, error } = await supabase.functions.invoke("google_oauth_start", {
-    headers
-  });
-  if (error) {
-    throw error;
-  }
-  const url = (data as { url?: string } | null)?.url;
-  if (!url) {
-    throw new Error("OAuth URL missing.");
-  }
-  window.location.assign(url);
+  const url = new URL("/api/google/oauth/start", window.location.origin);
+  url.searchParams.set("user_id", session.user.id);
+  window.location.assign(url.toString());
 };
 
 export { signInWithGoogle, startGoogleConnection };

@@ -253,19 +253,14 @@ const App = () => {
       setSyncingLocations(true);
       const { data: sessionData } = await supabase.auth.getSession();
       const jwt = sessionData.session?.access_token;
-      const headers: Record<string, string> = {};
-      if (jwt) {
-        headers.Authorization = `Bearer ${jwt}`;
-      }
-      const { data, error } = await supabase.functions.invoke(
-        "google_gbp_sync_locations",
-        {
-          headers
-        }
-      );
+      const response = await fetch("/api/google/gbp/sync", {
+        method: "POST",
+        headers: jwt ? { Authorization: `Bearer ${jwt}` } : {}
+      });
+      const data = await response.json().catch(() => null);
 
-      if (error || !data?.ok) {
-        console.error("google_gbp_sync_locations error:", error);
+      if (!response.ok || !data?.ok) {
+        console.error("google gbp sync error:", data);
         setLocationsError("Impossible de synchroniser les lieux.");
         return;
       }
@@ -309,22 +304,18 @@ const App = () => {
       if (!jwt) {
         throw new Error("Missing Supabase session token.");
       }
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${jwt}`
-      };
-      const { data, error } = await supabase.functions.invoke(
-        "google_gbp_sync_all",
-        {
-          headers
+      const response = await fetch("/api/google/gbp/sync", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${jwt}`
         }
-      );
-      if (error) {
-        throw error;
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.ok) {
+        throw new Error("Sync failed.");
       }
       setSyncAllMessage(
-        `Synchronisation terminée: ${data?.accounts ?? 0} comptes, ${
-          data?.locations ?? 0
-        } lieux, ${data?.reviews ?? 0} avis.`
+        `Synchronisation terminée: ${data?.locationsCount ?? 0} lieux.`
       );
       setLastLogStatus("success");
       setLastLogMessage("Synchronisation terminée avec succès.");

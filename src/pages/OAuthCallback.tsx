@@ -57,27 +57,16 @@ const OAuthCallback = () => {
         setErrorMessage("Code OAuth manquant.");
         return;
       }
-      const jwt = session.access_token;
-      const { data: exchangeData, error: exchangeError } =
-        await supabase.functions.invoke("google_oauth_exchange", {
-          body: { code, state },
-          headers: {
-            Authorization: `Bearer ${jwt}`
-          }
-        });
-      if (exchangeError || !exchangeData?.ok) {
-        setStatus("error");
-        setErrorMessage("Echec de la connexion Google.");
-        return;
+      const callbackUrl = new URL(
+        "/api/google/oauth/callback",
+        window.location.origin
+      );
+      callbackUrl.searchParams.set("code", code);
+      if (state) {
+        callbackUrl.searchParams.set("state", state);
       }
-      url.searchParams.delete("code");
-      url.searchParams.delete("state");
-      window.history.replaceState({}, "", url.toString());
-      setStatus("success");
-      setErrorMessage(null);
-      window.setTimeout(() => {
-        navigate("/connect", { replace: true });
-      }, 800);
+      callbackUrl.searchParams.set("user_id", session.user.id);
+      window.location.assign(callbackUrl.toString());
     };
 
     void run();
@@ -122,22 +111,18 @@ const OAuthCallback = () => {
       setSyncLoading(false);
       return;
     }
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${jwt}`
-    };
-    const { data, error } = await supabase.functions.invoke(
-      "google_gbp_sync_all",
-      {
-        headers
+    const response = await fetch("/api/google/gbp/sync", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${jwt}`
       }
-    );
-    if (error) {
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.ok) {
       setSyncMessage("Erreur de synchronisation.");
     } else {
       setSyncMessage(
-        `Synchronisation terminée: ${data?.accounts ?? 0} comptes, ${
-          data?.locations ?? 0
-        } lieux, ${data?.reviews ?? 0} avis.`
+        `Synchronisation terminée: ${data?.locationsCount ?? 0} lieux.`
       );
     }
     setSyncLoading(false);
