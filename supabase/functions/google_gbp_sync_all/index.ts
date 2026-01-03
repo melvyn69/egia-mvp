@@ -6,19 +6,32 @@ const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const googleClientId = Deno.env.get("GOOGLE_CLIENT_ID") ?? "";
 const googleClientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET") ?? "";
 
-const allowedOrigins = new Set([
+const baseAllowedOrigins = [
   "http://localhost:5173",
-  "https://ton-domaine.com",
-]);
+  "https://egia-six.vercel.app",
+];
 
-const getCorsHeaders = (origin: string | null) => ({
-  "Access-Control-Allow-Origin":
-    origin && allowedOrigins.has(origin) ? origin : "http://localhost:5173",
-  "Access-Control-Allow-Credentials": "true",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-requested-with, accept, origin, referer, user-agent, cache-control, pragma",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-});
+const buildAllowedOrigins = () => {
+  const fromEnv = Deno.env.get("ALLOWED_ORIGINS") ?? "";
+  const extra = fromEnv
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return new Set([...baseAllowedOrigins, ...extra]);
+};
+
+const getCorsHeaders = (origin: string | null) => {
+  const allowedOrigins = buildAllowedOrigins();
+  const allowedOrigin =
+    origin && allowedOrigins.has(origin) ? origin : "http://localhost:5173";
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type, x-google-token, x-requested-with, accept, origin, referer, user-agent, cache-control, pragma",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+  };
+};
 
 const jsonResponse = (
   status: number,
