@@ -17,6 +17,27 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
   }
 
   try {
+    const requiredEnv = [
+      "APP_BASE_URL",
+      "GOOGLE_CLIENT_ID",
+      "GOOGLE_CLIENT_SECRET",
+      "GOOGLE_REDIRECT_URI"
+    ];
+    const missingEnv = requiredEnv.filter((key) => !process.env[key]);
+    if (missingEnv.length > 0) {
+      console.error("google oauth start missing env vars:", missingEnv);
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          ok: false,
+          error: "Missing environment variables.",
+          missing: missingEnv
+        })
+      );
+      return;
+    }
+
     const supabaseAdmin = createSupabaseAdmin();
     const { userId, error: userError } = await getUserFromRequest(
       { headers: req.headers as Record<string, string | undefined> },
