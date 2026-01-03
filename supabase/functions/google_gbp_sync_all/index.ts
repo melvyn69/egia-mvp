@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const googleClientId = Deno.env.get("GOOGLE_CLIENT_ID") ?? "";
 const googleClientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET") ?? "";
 
@@ -126,51 +127,68 @@ const starRatingToInt = (starRating: string | undefined) => {
 
 serve(async (req) => {
   const origin = req.headers.get("origin");
+  const authHeader = req.headers.get("authorization") ?? "";
+  const apiKeyHeader = req.headers.get("apikey");
+  const hasAuth = Boolean(authHeader);
+  const hasApiKey = Boolean(apiKeyHeader);
 
   if (req.method === "OPTIONS") {
+    console.log("gbp_sync_all options:", {
+      origin,
+      hasAuth,
+      hasApiKey
+    });
     return new Response(null, { status: 204, headers: getCorsHeaders(origin) });
   }
+
+  console.log("gbp_sync_all post:", {
+    origin,
+    hasAuth,
+    hasApiKey
+  });
 
   if (req.method !== "POST") {
     return jsonResponse(405, { error: "Method not allowed" }, origin);
   }
 
-  if (!supabaseUrl || !serviceRoleKey || !googleClientId || !googleClientSecret) {
+  if (
+    !supabaseUrl ||
+    !serviceRoleKey ||
+    !supabaseAnonKey ||
+    !googleClientId ||
+    !googleClientSecret
+  ) {
     return jsonResponse(500, { error: "Server misconfigured" }, origin);
   }
 
-  const authHeader = req.headers.get("authorization") ??
-    req.headers.get("Authorization");
-  const jwt = authHeader?.startsWith("Bearer ")
-    ? authHeader.slice("Bearer ".length).trim()
-    : null;
-
-  const apiKeyHeader = req.headers.get("apikey");
-  console.log("headers_present", {
-    authorization: Boolean(authHeader),
-    apikey: Boolean(apiKeyHeader)
-  });
+  const jwt = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7)
+    : authHeader;
 
   if (!jwt) {
-    return jsonResponse(401, { error: "Missing Supabase JWT" }, origin);
+    return jsonResponse(401, { code: 401, message: "Missing JWT" }, origin);
   }
   console.log("has_jwt", !!jwt, "jwt_prefix", jwt?.slice(0, 20));
 
-  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+  const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
     auth: { persistSession: false },
   });
 
-  const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
+  const { data: userData, error: userError } = await supabaseAuth.auth.getUser(jwt);
   const user = userData?.user;
 
   if (userError || !user) {
     console.error("JWT invalid:", userError);
     return jsonResponse(
       401,
-      { error: "Invalid Supabase JWT", detail: userError?.message ?? null },
+      { code: 401, message: "Invalid JWT", details: userError?.message ?? null },
       origin
     );
   }
+
+  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
 
   const { data: connection, error: connectionError } = await supabaseAdmin
     .from("google_connections")

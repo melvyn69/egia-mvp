@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const googleClientId = Deno.env.get("GOOGLE_CLIENT_ID") ?? "";
 const googleClientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET") ?? "";
 
@@ -96,9 +97,24 @@ const fetchAllPages = async <T>(
 serve(async (req) => {
   try {
     const origin = req.headers.get("origin");
+    const authHeader = req.headers.get("authorization") ?? "";
+    const apiKeyHeader = req.headers.get("apikey");
+    const hasAuth = Boolean(authHeader);
+    const hasApiKey = Boolean(apiKeyHeader);
     if (req.method === "OPTIONS") {
+      console.log("gbp_sync_locations options:", {
+        origin,
+        hasAuth,
+        hasApiKey
+      });
       return new Response(null, { status: 204, headers: getCorsHeaders(origin) });
     }
+
+    console.log("gbp_sync_locations post:", {
+      origin,
+      hasAuth,
+      hasApiKey
+    });
 
     if (req.method !== "POST") {
       return jsonResponse(405, { error: "Method not allowed" }, origin);
@@ -107,42 +123,40 @@ serve(async (req) => {
     if (
       !supabaseUrl ||
       !serviceRoleKey ||
+      !supabaseAnonKey ||
       !googleClientId ||
       !googleClientSecret
     ) {
       return jsonResponse(500, { error: "Server misconfigured" }, origin);
     }
 
-    let payload: { jwt?: string } | null = null;
-    try {
-      payload = await req.json();
-    } catch {
-      return jsonResponse(400, { error: "Invalid JSON body" }, origin);
+    const jwt = authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7)
+      : authHeader;
+    if (!jwt) {
+      return jsonResponse(401, { code: 401, message: "Missing JWT" }, origin);
     }
 
-    const authHeader = req.headers.get("authorization") ??
-      req.headers.get("Authorization");
-    const bearerToken = authHeader?.startsWith("Bearer ")
-      ? authHeader.slice("Bearer ".length).trim()
-      : null;
-    const jwt = payload?.jwt ??
-      bearerToken ??
-      req.headers.get("x-user-jwt") ??
-      req.headers.get("X-User-JWT");
-    if (!jwt) {
-      return jsonResponse(401, { error: "Missing Supabase JWT" }, origin);
+    const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: false }
+    });
+
+    const { data: authData, error: authError } = await supabaseAuth.auth.getUser(
+      jwt
+    );
+    const user = authData?.user;
+
+    if (authError || !user) {
+      return jsonResponse(
+        401,
+        { code: 401, message: "Invalid JWT", details: authError?.message },
+        origin
+      );
     }
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false }
     });
-
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(
-      jwt
-    );
-    if (userError || !user) {
-      return jsonResponse(401, { error: "Invalid Supabase JWT" }, origin);
-    }
 
     const { data: connection, error: connectionError } = await supabaseAdmin
       .from("google_connections")

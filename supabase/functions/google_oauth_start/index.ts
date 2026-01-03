@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const googleClientId = Deno.env.get("GOOGLE_CLIENT_ID") ?? "";
 const appBaseUrl = Deno.env.get("APP_BASE_URL") ?? "";
 
@@ -56,51 +57,71 @@ const getRedirectUrl = () => {
 
 serve(async (req) => {
   const origin = req.headers.get("origin");
-  const hasAuth = Boolean(
-    req.headers.get("authorization") ?? req.headers.get("Authorization")
-  );
-  const hasApiKey = Boolean(req.headers.get("apikey"));
-  console.log("oauth_start request:", {
+  const authHeader = req.headers.get("authorization") ?? "";
+  const apiKeyHeader = req.headers.get("apikey");
+  const hasAuth = Boolean(authHeader);
+  const hasApiKey = Boolean(apiKeyHeader);
+
+  if (req.method === "OPTIONS") {
+    console.log("oauth_start options:", {
+      origin,
+      hasAuth,
+      hasApiKey
+    });
+    return new Response(null, { status: 204, headers: getCorsHeaders(origin) });
+  }
+
+  console.log("oauth_start post:", {
     origin,
     hasAuth,
     hasApiKey
   });
 
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: getCorsHeaders(origin) });
-  }
-
   if (req.method !== "POST") {
     return jsonResponse(405, { error: "Method not allowed" }, origin);
   }
 
-  if (!supabaseUrl || !serviceRoleKey || !googleClientId || !appBaseUrl) {
+  if (
+    !supabaseUrl ||
+    !serviceRoleKey ||
+    !supabaseAnonKey ||
+    !googleClientId ||
+    !appBaseUrl
+  ) {
     return jsonResponse(500, { error: "Server misconfigured" }, origin);
   }
 
-  const authHeader = req.headers.get("authorization") ??
-    req.headers.get("Authorization");
-  const userJwt = authHeader?.startsWith("Bearer ")
-    ? authHeader.slice("Bearer ".length).trim()
-    : null;
+  const jwt = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7)
+    : authHeader;
 
-  if (!userJwt) {
-    return jsonResponse(401, { error: "Missing user JWT" }, origin);
+  if (!jwt) {
+    return jsonResponse(401, { code: 401, message: "Missing JWT" }, origin);
   }
 
-  const jwtPreview = `${userJwt.slice(0, 12)}...${userJwt.slice(-6)}`;
+  const jwtPreview = `${jwt.slice(0, 12)}...${jwt.slice(-6)}`;
   console.log("oauth_start jwt preview:", jwtPreview);
+
+  const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false }
+  });
+
+  const { data: authData, error: authError } = await supabaseAuth.auth.getUser(jwt);
+  const user = authData?.user;
+
+  if (authError || !user) {
+    const preview = `${jwt.slice(0, 12)}...${jwt.slice(-6)}`;
+    console.error("Invalid user JWT:", preview, authError?.message);
+    return jsonResponse(
+      401,
+      { code: 401, message: "Invalid JWT", details: authError?.message },
+      origin
+    );
+  }
 
   const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false }
   });
-
-  const { data: { user }, error } = await supabaseAdmin.auth.getUser(userJwt);
-  if (error || !user) {
-    const preview = `${userJwt.slice(0, 12)}...${userJwt.slice(-6)}`;
-    console.error("Invalid user JWT:", preview, error?.message);
-    return jsonResponse(401, { error: "Invalid user JWT" }, origin);
-  }
 
   const redirectUri = getRedirectUrl();
   if (!redirectUri) {
