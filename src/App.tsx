@@ -24,6 +24,8 @@ const App = () => {
   const location = useLocation();
   const [session, setSession] = useState<Session | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [authEmail, setAuthEmail] = useState("");
   const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
   const [googleError, setGoogleError] = useState<string | null>(null);
   const [syncAllLoading, setSyncAllLoading] = useState(false);
@@ -138,7 +140,6 @@ const App = () => {
       .from("google_connections")
       .select("id")
       .eq("user_id", session.user.id)
-      .eq("provider", "google")
       .maybeSingle()
       .then(({ data, error }) => {
         if (!isMounted) {
@@ -174,7 +175,6 @@ const App = () => {
         "id, location_title, location_resource_name, address_json, phone, website_uri"
       )
       .eq("user_id", userId)
-      .eq("provider", "google")
       .order("updated_at", { ascending: false });
 
     if (error) {
@@ -199,6 +199,7 @@ const App = () => {
 
   const handleSignIn = async () => {
     setAuthError(null);
+    setAuthMessage(null);
 
     if (!supabase) {
       const message = "Configuration Supabase manquante.";
@@ -207,8 +208,25 @@ const App = () => {
       return;
     }
 
-    console.warn("Supabase Google provider disabled.");
-    setAuthError("Connexion Google indisponible.");
+    if (!authEmail.trim()) {
+      setAuthError("Email requis.");
+      return;
+    }
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: authEmail.trim(),
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`
+      }
+    });
+
+    if (error) {
+      console.error("magic link error:", error);
+      setAuthError("Impossible d'envoyer le lien de connexion.");
+      return;
+    }
+
+    setAuthMessage("Lien de connexion envoye. Verifie ta boite mail.");
   };
 
   const handleConnectGoogle = async () => {
@@ -383,8 +401,25 @@ const App = () => {
               {authError}
             </div>
           )}
+          {authMessage && (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+              {authMessage}
+            </div>
+          )}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-slate-700">
+              Email
+            </label>
+            <input
+              type="email"
+              value={authEmail}
+              onChange={(event) => setAuthEmail(event.target.value)}
+              placeholder="vous@entreprise.com"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 outline-none focus:border-ink/60 focus:ring-2 focus:ring-ink/10"
+            />
+          </div>
           <Button onClick={handleSignIn} disabled={envMissing}>
-            Se connecter avec Google
+            Recevoir le lien de connexion
           </Button>
         </CardContent>
       </Card>

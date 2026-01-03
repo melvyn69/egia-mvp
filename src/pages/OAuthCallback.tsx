@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { supabase } from "../lib/supabase";
@@ -8,71 +7,30 @@ import { startGoogleConnection } from "../lib/googleAuth";
 
 type CallbackStatus =
   | "loading"
-  | "no_session"
   | "success"
   | "error";
 
+const getStatusFromUrl = (): CallbackStatus => {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get("status");
+  if (status === "success") {
+    return "success";
+  }
+  if (status === "error") {
+    return "error";
+  }
+  return "loading";
+};
+
 const OAuthCallback = () => {
-  const navigate = useNavigate();
-  const [status, setStatus] = useState<CallbackStatus>("loading");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [status, setStatus] = useState<CallbackStatus>(getStatusFromUrl);
+  const [errorMessage, setErrorMessage] = useState<string | null>(() =>
+    getStatusFromUrl() === "error"
+      ? "Connexion Google impossible."
+      : null
+  );
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [syncLoading, setSyncLoading] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      if (!supabase) {
-        if (!cancelled) {
-          setStatus("error");
-          setErrorMessage("Configuration Supabase manquante.");
-        }
-        return;
-      }
-      setStatus("loading");
-      const url = new URL(window.location.href);
-      const code = url.searchParams.get("code");
-      const state = url.searchParams.get("state");
-      const { data, error } = await supabase.auth.getSession();
-      if (cancelled) {
-        return;
-      }
-      if (error) {
-        setStatus("error");
-        setErrorMessage("Impossible de charger la session.");
-        return;
-      }
-      const session = data.session;
-      const hasSession = Boolean(session);
-      if (import.meta.env.DEV) {
-        console.log("oauth callback session exists:", hasSession);
-      }
-      if (!session) {
-        setStatus("no_session");
-        setErrorMessage("Session Supabase manquante. Reconnecte-toi.");
-        return;
-      }
-      if (!code) {
-        setStatus("error");
-        setErrorMessage("Code OAuth manquant.");
-        return;
-      }
-      const callbackUrl = new URL(
-        "/api/google/oauth/callback",
-        window.location.origin
-      );
-      callbackUrl.searchParams.set("code", code);
-      if (state) {
-        callbackUrl.searchParams.set("state", state);
-      }
-      window.location.assign(callbackUrl.toString());
-    };
-
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [navigate]);
 
   const handleReconnect = async () => {
     if (!supabase) {
@@ -83,11 +41,6 @@ const OAuthCallback = () => {
     setStatus("loading");
     setErrorMessage(null);
     try {
-      const { data } = await supabase.auth.getSession();
-      if (!data.session) {
-        navigate("/", { replace: true });
-        return;
-      }
       await startGoogleConnection(supabase);
     } catch (error) {
       console.error(error);
@@ -146,16 +99,7 @@ const OAuthCallback = () => {
           {status === "success" && (
             <div className="flex items-center gap-3 text-sm text-emerald-700">
               <CheckCircle2 size={18} />
-              Connexion Google réussie ✅ Redirection...
-            </div>
-          )}
-          {status === "no_session" && (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
-              <div className="flex items-center gap-2 font-semibold">
-                <AlertTriangle size={16} />
-                Connexion incomplète
-              </div>
-              <p className="mt-2">{errorMessage}</p>
+              Connexion Google réussie ✅
             </div>
           )}
           {status === "error" && (
@@ -167,7 +111,7 @@ const OAuthCallback = () => {
               <p className="mt-2">{errorMessage}</p>
             </div>
           )}
-          {status === "no_session" && (
+          {status === "error" && (
             <Button variant="outline" onClick={handleReconnect}>
               Relancer la connexion Google
             </Button>
