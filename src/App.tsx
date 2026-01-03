@@ -1,26 +1,37 @@
 import { useEffect, useMemo, useState } from "react";
-import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { Routes, Route, useLocation } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, supabaseAnonKey, supabaseUrl } from "./lib/supabase";
-import { connectGoogle } from "./lib/googleAuth";
+import { signInWithGoogle, startGoogleConnection } from "./lib/googleAuth";
 import { Sidebar } from "./components/layout/Sidebar";
 import { Topbar } from "./components/layout/Topbar";
 import { Dashboard } from "./pages/Dashboard";
 import { Inbox } from "./pages/Inbox";
 import { Connect } from "./pages/Connect";
 import { OAuthCallback } from "./pages/OAuthCallback";
+import { AuthCallback } from "./pages/AuthCallback";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 
+type SessionDebugInfo = {
+  userId: string | null;
+  expiresAt: number | null;
+  accessToken: string | null;
+  googleConnected: boolean;
+};
+
 const App = () => {
   const location = useLocation();
-  const navigate = useNavigate();
   const [session, setSession] = useState<Session | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
   const [googleError, setGoogleError] = useState<string | null>(null);
   const [syncAllLoading, setSyncAllLoading] = useState(false);
   const [syncAllMessage, setSyncAllMessage] = useState<string | null>(null);
+  const [lastLogStatus, setLastLogStatus] = useState<string | null>(null);
+  const [lastLogMessage, setLastLogMessage] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<SessionDebugInfo | null>(null);
+  const [debugError, setDebugError] = useState<string | null>(null);
   const [locations, setLocations] = useState<
     Array<{
       id: string;
@@ -45,10 +56,23 @@ const App = () => {
     }
   );
   const envMissing = !supabaseUrl || !supabaseAnonKey;
-  const isCallbackPath = location.pathname === "/google_oauth_callback";
+  const isCallbackPath =
+    location.pathname === "/google_oauth_callback" ||
+    location.pathname === "/auth/callback";
+  const debugExpiresAtLabel =
+    debugInfo?.expiresAt && Number.isFinite(debugInfo.expiresAt)
+      ? new Date(debugInfo.expiresAt * 1000).toISOString()
+      : "—";
 
   const pageMeta = useMemo(() => {
-    if (isCallbackPath) {
+    if (location.pathname === "/auth/callback") {
+      return {
+        title: "Connexion",
+        subtitle: "Finalisation de la session."
+      };
+    }
+
+    if (location.pathname === "/google_oauth_callback") {
       return {
         title: "Connexion Google",
         subtitle: "Finalisation du compte Business Profile."
@@ -100,19 +124,6 @@ const App = () => {
       authListener.subscription.unsubscribe();
     };
   }, []);
-
-  useEffect(() => {
-    if (isCallbackPath) {
-      return;
-    }
-
-    const params = new URLSearchParams(location.search);
-    if (params.get("connected") === "1") {
-      setGoogleConnected(true);
-      navigate("/", { replace: true });
-    }
-  }, [isCallbackPath, location.search, navigate]);
-
 
   useEffect(() => {
     if (!supabase || !session) {
@@ -197,7 +208,7 @@ const App = () => {
     }
 
     console.info("Supabase auth: starting Google sign-in");
-    const { error } = await connectGoogle(supabase);
+    const { error } = await signInWithGoogle(supabase);
 
     if (error) {
       console.error("Supabase auth sign-in error:", error);
@@ -214,11 +225,7 @@ const App = () => {
     }
 
     try {
-      const { error } = await connectGoogle(supabase);
-      if (error) {
-        console.error("google oauth error:", error);
-        setGoogleError("Impossible de demarrer la connexion Google.");
-      }
+      await startGoogleConnection(supabase);
     } catch (error) {
       console.error("google oauth error:", error);
       setGoogleError("Impossible de demarrer la connexion Google.");
@@ -244,12 +251,16 @@ const App = () => {
 
     try {
       setSyncingLocations(true);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const jwt = sessionData.session?.access_token;
+      const headers: Record<string, string> = {};
+      if (jwt) {
+        headers.Authorization = `Bearer ${jwt}`;
+      }
       const { data, error } = await supabase.functions.invoke(
         "google_gbp_sync_locations",
         {
-          headers: {
-            "X-User-JWT": session.access_token
-          }
+          headers
         }
       );
 
@@ -279,30 +290,49 @@ const App = () => {
     setSyncAllMessage(null);
     if (!supabase || !session) {
       setSyncAllMessage("Connecte-toi puis reconnecte Google.");
+      setLastLogStatus("error");
+      setLastLogMessage("Session Supabase manquante.");
       return;
     }
-    const { data: sessionRes } = await supabase.auth.getSession();
-    const providerToken = sessionRes?.session?.provider_token;
-    if (!providerToken) {
-      setSyncAllMessage("Token Google manquant. Reconnecte Google.");
+    if (!googleConnected) {
+      setSyncAllMessage("Connexion Google requise avant la synchronisation.");
+      setLastLogStatus("error");
+      setLastLogMessage("Connexion Google manquante.");
       return;
     }
     setSyncAllLoading(true);
-    const { data, error } = await supabase.functions.invoke("google_gbp_sync_all", {
-      headers: {
-        "X-Google-Token": providerToken
+    setLastLogStatus("running");
+    setLastLogMessage("Synchronisation en cours...");
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const jwt = sessionData.session?.access_token ?? null;
+      if (!jwt) {
+        throw new Error("Missing Supabase session token.");
       }
-    });
-    if (error) {
-      setSyncAllMessage("Erreur de synchronisation.");
-    } else if (data) {
-      setSyncAllMessage(
-        `Synchronisation terminée: ${data.accounts ?? 0} comptes, ${
-          data.locations ?? 0
-        } lieux, ${data.reviews ?? 0} avis.`
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${jwt}`
+      };
+      const { data, error } = await supabase.functions.invoke(
+        "google_gbp_sync_all",
+        {
+          headers
+        }
       );
-    } else {
+      if (error) {
+        throw error;
+      }
+      setSyncAllMessage(
+        `Synchronisation terminée: ${data?.accounts ?? 0} comptes, ${
+          data?.locations ?? 0
+        } lieux, ${data?.reviews ?? 0} avis.`
+      );
+      setLastLogStatus("success");
+      setLastLogMessage("Synchronisation terminée avec succès.");
+    } catch (error) {
+      console.error(error);
       setSyncAllMessage("Erreur de synchronisation.");
+      setLastLogStatus("error");
+      setLastLogMessage("Echec de la synchronisation.");
     }
     setSyncAllLoading(false);
   };
@@ -314,6 +344,42 @@ const App = () => {
 
     await supabase.auth.signOut();
     console.info("Supabase auth: signed out");
+  };
+
+  const handleDebugSession = async () => {
+    if (!supabase) {
+      setDebugError("Configuration Supabase manquante.");
+      return;
+    }
+    setDebugError(null);
+    const { data, error } = await supabase.auth.getSession();
+    if (error || !data.session) {
+      setDebugInfo(null);
+      setDebugError("Session introuvable.");
+      return;
+    }
+    const accessToken = data.session.access_token ?? null;
+    setDebugInfo({
+      userId: data.session.user?.id ?? null,
+      expiresAt: data.session.expires_at ?? null,
+      accessToken,
+      googleConnected: Boolean(googleConnected)
+    });
+  };
+
+  const handleCopyAccessToken = async () => {
+    if (!debugInfo?.accessToken) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(debugInfo.accessToken);
+      setLastLogStatus("info");
+      setLastLogMessage("Access token copié dans le presse-papiers.");
+    } catch (error) {
+      console.error(error);
+      setLastLogStatus("error");
+      setLastLogMessage("Impossible de copier le token.");
+    }
   };
 
   const authPanel = (
@@ -349,6 +415,7 @@ const App = () => {
             subtitle={pageMeta.subtitle}
             userEmail={session?.user.email}
             onSignOut={session ? handleSignOut : undefined}
+            onDebugSession={session ? handleDebugSession : undefined}
           />
 
           <main className="flex-1 space-y-6 bg-gradient-to-br from-sand via-white to-clay px-6 py-8">
@@ -362,6 +429,47 @@ const App = () => {
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
                 {googleError}
               </div>
+            )}
+            {(debugInfo || debugError) && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Debug session</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm text-slate-600">
+                  {debugError && <p>{debugError}</p>}
+                  {debugInfo && (
+                    <>
+                      <p>
+                        <span className="font-semibold text-slate-700">
+                          expires_at:
+                        </span>{" "}
+                        {debugExpiresAtLabel}
+                      </p>
+                      <p>
+                        <span className="font-semibold text-slate-700">
+                          user.id:
+                        </span>{" "}
+                        {debugInfo.userId ?? "—"}
+                      </p>
+                      <p>
+                        <span className="font-semibold text-slate-700">
+                          google_connection:
+                        </span>{" "}
+                        {debugInfo.googleConnected ? "connected" : "missing"}
+                      </p>
+                      {import.meta.env.DEV && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleCopyAccessToken}
+                        >
+                          Copier access_token (dev)
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
             )}
 
             {!session && !isCallbackPath ? (
@@ -391,6 +499,8 @@ const App = () => {
                       onSync={handleSyncAll}
                       syncLoading={syncAllLoading}
                       syncMessage={syncAllMessage}
+                      lastLogStatus={lastLogStatus}
+                      lastLogMessage={lastLogMessage}
                     />
                   }
                 />
@@ -399,6 +509,7 @@ const App = () => {
                   path="/google_oauth_callback"
                   element={<OAuthCallback />}
                 />
+                <Route path="/auth/callback" element={<AuthCallback />} />
               </Routes>
             )}
           </main>

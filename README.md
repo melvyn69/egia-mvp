@@ -1,5 +1,23 @@
 # React + TypeScript + Vite
 
+## MVP setup
+1) `.env.local`: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_TEST_EMAIL`, `SUPABASE_TEST_PASSWORD`, `APP_BASE_URL`.
+2) Supabase secrets: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_BASE_URL`.
+3) Supabase Auth redirect: `http://localhost:5173/auth/callback`.
+4) Google OAuth redirect: `http://localhost:5173/google_oauth_callback`.
+5) Scopes Google: `https://www.googleapis.com/auth/business.manage`.
+6) `npm install`
+7) `npm run dev`
+8) Login Google (Supabase), puis "Connecter Google Business Profile".
+9) "Sync All" -> comptes/lieux/avis.
+10) Smoke test: `npm run smoke:auth` (ou `SUPABASE_ACCESS_TOKEN` depuis Debug en dev).
+11) Curl: `curl -i -X POST "$SUPABASE_URL/functions/v1/google_gbp_sync_all" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "apikey: $SUPABASE_ANON_KEY"` -> JSON avec `accounts`.
+
+## Google OAuth setup
+1) Google Cloud Console -> OAuth consent -> ajouter le scope `https://www.googleapis.com/auth/business.manage`.
+2) Credentials -> OAuth Client -> Authorized redirect URI: `http://localhost:5173/google_oauth_callback`.
+3) Ajouter l'utilisateur test si l'app est en mode test.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:
@@ -74,37 +92,8 @@ export default defineConfig([
 
 ## Supabase Functions
 
-### Deploy function without JWT verification
-
-```bash
-npm run deploy:post-reply-google
-```
-
-### Pourquoi je vois 403 scope insufficient ?
-
+### 403 scope insufficient ?
 1) Google Cloud → OAuth consent → ajouter le scope `https://www.googleapis.com/auth/business.manage`
 2) Ajouter ton compte dans "Test users" si l'app est en mode test
-3) Révoquer l'accès à l'app dans Google Account (Sécurité → Accès tiers)
-4) Reconnecter via le bouton Google, puis vérifier le scope affiché
-
-### OAuth Redirects Supabase (prod + dev)
-
-- Auth → URL Configuration
-- Site URL: `https://egia-six.vercel.app`
-- Additional Redirect URLs:
-  - `https://egia-six.vercel.app/google_oauth_callback`
-  - `http://localhost:5173/google_oauth_callback`
-
-### Test manuel OAuth Google
-
-1) `npm run dev`
-2) Se connecter
-3) Cliquer "Lancer la connexion Google"
-4) Retour sur `/google_oauth_callback` → success puis redirection
-5) En DEV: console → `provider_token present: true`
-
-### Synchroniser établissements & avis
-
-1) Aller sur "Connexion Google"
-2) Cliquer "Synchroniser mes établissements & avis"
-3) Vérifier le message de succès (comptes/lieux/avis)
+3) Revoquer l'acces a l'app dans Google Account (Securite → Acces tiers)
+4) Relancer "Connecter Google Business Profile"

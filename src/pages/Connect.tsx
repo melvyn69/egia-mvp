@@ -7,13 +7,17 @@ type ConnectProps = {
   onSync?: () => void;
   syncLoading?: boolean;
   syncMessage?: string | null;
+  lastLogStatus?: string | null;
+  lastLogMessage?: string | null;
 };
 
 const Connect = ({
   onConnect,
   onSync,
   syncLoading = false,
-  syncMessage
+  syncMessage,
+  lastLogStatus,
+  lastLogMessage
 }: ConnectProps) => (
   <div className="space-y-6">
     <Card className="border-0 bg-gradient-to-br from-ink via-[#1d1c20] to-[#3a2f28] text-white shadow-soft">
@@ -83,6 +87,22 @@ const Connect = ({
         </Card>
       ))}
     </div>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>Logs</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm text-slate-600">
+        <p>
+          <span className="font-semibold text-slate-700">Status:</span>{" "}
+          {lastLogStatus ?? "—"}
+        </p>
+        <p>
+          <span className="font-semibold text-slate-700">Dernier message:</span>{" "}
+          {lastLogMessage ?? "—"}
+        </p>
+      </CardContent>
+    </Card>
   </div>
 );
 

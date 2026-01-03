@@ -4,12 +4,11 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { supabase } from "../lib/supabase";
-import { connectGoogle } from "../lib/googleAuth";
+import { startGoogleConnection } from "../lib/googleAuth";
 
 type CallbackStatus =
   | "loading"
   | "no_session"
-  | "no_provider_token"
   | "success"
   | "error";
 
@@ -17,7 +16,6 @@ const OAuthCallback = () => {
   const navigate = useNavigate();
   const [status, setStatus] = useState<CallbackStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [providerToken, setProviderToken] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [syncLoading, setSyncLoading] = useState(false);
 
@@ -32,6 +30,9 @@ const OAuthCallback = () => {
         return;
       }
       setStatus("loading");
+      const url = new URL(window.location.href);
+      const code = url.searchParams.get("code");
+      const state = url.searchParams.get("state");
       const { data, error } = await supabase.auth.getSession();
       if (cancelled) {
         return;
@@ -43,26 +44,39 @@ const OAuthCallback = () => {
       }
       const session = data.session;
       const hasSession = Boolean(session);
-      const hasProviderToken = Boolean(session?.provider_token);
       if (import.meta.env.DEV) {
         console.log("oauth callback session exists:", hasSession);
-        console.log("oauth callback provider_token present:", hasProviderToken);
       }
       if (!session) {
         setStatus("no_session");
         setErrorMessage("Session Supabase manquante. Reconnecte-toi.");
         return;
       }
-      if (!session.provider_token) {
-        setStatus("no_provider_token");
-        setErrorMessage("Token Google manquant, reconnecte Google.");
+      if (!code) {
+        setStatus("error");
+        setErrorMessage("Code OAuth manquant.");
         return;
       }
-      setProviderToken(session.provider_token);
+      const jwt = session.access_token;
+      const { data: exchangeData, error: exchangeError } =
+        await supabase.functions.invoke("google_oauth_exchange", {
+          body: { code, state },
+          headers: {
+            Authorization: `Bearer ${jwt}`
+          }
+        });
+      if (exchangeError || !exchangeData?.ok) {
+        setStatus("error");
+        setErrorMessage("Echec de la connexion Google.");
+        return;
+      }
+      url.searchParams.delete("code");
+      url.searchParams.delete("state");
+      window.history.replaceState({}, "", url.toString());
       setStatus("success");
       setErrorMessage(null);
       window.setTimeout(() => {
-        navigate("/inbox", { replace: true });
+        navigate("/connect", { replace: true });
       }, 800);
     };
 
@@ -80,34 +94,50 @@ const OAuthCallback = () => {
     }
     setStatus("loading");
     setErrorMessage(null);
-    await supabase.auth.signOut();
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    const { error } = await connectGoogle(supabase);
-    if (error) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) {
+        navigate("/", { replace: true });
+        return;
+      }
+      await startGoogleConnection(supabase);
+    } catch (error) {
+      console.error(error);
       setStatus("error");
       setErrorMessage("Impossible de relancer la connexion Google.");
     }
   };
 
   const handleSync = async () => {
-    if (!supabase || !providerToken) {
-      setSyncMessage("Token Google manquant.");
+    if (!supabase) {
+      setSyncMessage("Connexion Supabase requise.");
       return;
     }
     setSyncLoading(true);
     setSyncMessage(null);
-    const { data, error } = await supabase.functions.invoke("google_gbp_sync_all", {
-      headers: {
-        "X-Google-Token": providerToken
+    const { data: sessionData } = await supabase.auth.getSession();
+    const jwt = sessionData.session?.access_token ?? null;
+    if (!jwt) {
+      setSyncMessage("Session Supabase manquante.");
+      setSyncLoading(false);
+      return;
+    }
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${jwt}`
+    };
+    const { data, error } = await supabase.functions.invoke(
+      "google_gbp_sync_all",
+      {
+        headers
       }
-    });
-    if (error || !data?.ok) {
+    );
+    if (error) {
       setSyncMessage("Erreur de synchronisation.");
     } else {
       setSyncMessage(
-        `Synchronisation lancée: ${data.locationsCount ?? 0} lieux, ${
-          data.reviewsCount ?? 0
-        } avis.`
+        `Synchronisation terminée: ${data?.accounts ?? 0} comptes, ${
+          data?.locations ?? 0
+        } lieux, ${data?.reviews ?? 0} avis.`
       );
     }
     setSyncLoading(false);
@@ -135,7 +165,7 @@ const OAuthCallback = () => {
               Connexion Google réussie ✅ Redirection...
             </div>
           )}
-          {(status === "no_session" || status === "no_provider_token") && (
+          {status === "no_session" && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
               <div className="flex items-center gap-2 font-semibold">
                 <AlertTriangle size={16} />
@@ -153,7 +183,7 @@ const OAuthCallback = () => {
               <p className="mt-2">{errorMessage}</p>
             </div>
           )}
-          {(status === "no_session" || status === "no_provider_token") && (
+          {status === "no_session" && (
             <Button variant="outline" onClick={handleReconnect}>
               Relancer la connexion Google
             </Button>

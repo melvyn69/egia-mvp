@@ -3,12 +3,20 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+const googleClientId = Deno.env.get("GOOGLE_CLIENT_ID") ?? "";
+const googleClientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET") ?? "";
+
+const allowedOrigins = new Set([
+  "http://localhost:5173",
+  "https://ton-domaine.com",
+]);
 
 const getCorsHeaders = (origin: string | null) => ({
-  "Access-Control-Allow-Origin": origin ?? "*",
+  "Access-Control-Allow-Origin":
+    origin && allowedOrigins.has(origin) ? origin : "http://localhost:5173",
+  "Access-Control-Allow-Credentials": "true",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-google-token",
+    "authorization, x-client-info, apikey, content-type, x-requested-with, accept, origin, referer, user-agent, cache-control, pragma",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 });
 
@@ -26,6 +34,17 @@ const jsonResponse = (
   });
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+class GoogleApiError extends Error {
+  status: number;
+  body: string;
+
+  constructor(status: number, body: string) {
+    super(`Google API error ${status}`);
+    this.status = status;
+    this.body = body;
+  }
+}
 
 const fetchAllPages = async <T>(
   baseUrl: string,
@@ -60,6 +79,9 @@ const fetchAllPages = async <T>(
     }
 
     if (!res || !res.ok) {
+      if (res?.status === 401 || res?.status === 403) {
+        throw new GoogleApiError(res.status, lastBody);
+      }
       throw new Error(`Google API error ${res?.status}: ${lastBody}`);
     }
 
@@ -100,7 +122,7 @@ serve(async (req) => {
     return jsonResponse(405, { error: "Method not allowed" }, origin);
   }
 
-  if (!supabaseUrl || !serviceRoleKey || !supabaseAnonKey) {
+  if (!supabaseUrl || !serviceRoleKey || !googleClientId || !googleClientSecret) {
     return jsonResponse(500, { error: "Server misconfigured" }, origin);
   }
 
@@ -110,35 +132,105 @@ serve(async (req) => {
     ? authHeader.slice("Bearer ".length).trim()
     : null;
 
+  const apiKeyHeader = req.headers.get("apikey");
+  console.log("headers_present", {
+    authorization: Boolean(authHeader),
+    apikey: Boolean(apiKeyHeader)
+  });
+
   if (!jwt) {
     return jsonResponse(401, { error: "Missing Supabase JWT" }, origin);
   }
-
-  const googleToken = req.headers.get("x-google-token") ??
-    req.headers.get("X-Google-Token");
-  if (!googleToken) {
-    return jsonResponse(400, { error: "Missing Google token" }, origin);
-  }
-
-  const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: { persistSession: false },
-  });
-  const { data: userData, error: userError } = await supabaseAuth.auth.getUser(
-    jwt
-  );
-  const user = userData?.user;
-  if (userError || !user) {
-    return jsonResponse(401, { error: "Invalid Supabase JWT" }, origin);
-  }
+  console.log("has_jwt", !!jwt, "jwt_prefix", jwt?.slice(0, 20));
 
   const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false },
   });
 
+  const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
+  const user = userData?.user;
+
+  if (userError || !user) {
+    console.error("JWT invalid:", userError);
+    return jsonResponse(
+      401,
+      { error: "Invalid Supabase JWT", detail: userError?.message ?? null },
+      origin
+    );
+  }
+
+  const { data: connection, error: connectionError } = await supabaseAdmin
+    .from("google_connections")
+    .select("access_token, refresh_token, expires_at, scope, token_type")
+    .eq("user_id", user.id)
+    .eq("provider", "google")
+    .maybeSingle();
+
+  if (connectionError) {
+    console.error("google_connections read failed:", connectionError);
+    return jsonResponse(500, { error: "Failed to read google connection" }, origin);
+  }
+
+  if (!connection?.refresh_token) {
+    return jsonResponse(401, { error: "Missing Google refresh token" }, origin);
+  }
+
+  let accessToken = connection.access_token ?? null;
+  const expiresAt = connection.expires_at
+    ? new Date(connection.expires_at).getTime()
+    : 0;
+  const now = Date.now();
+  const needsRefresh = !accessToken || !expiresAt || expiresAt <= now + 60_000;
+
+  if (needsRefresh) {
+    const refreshResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        client_id: googleClientId,
+        client_secret: googleClientSecret,
+        refresh_token: connection.refresh_token,
+        grant_type: "refresh_token",
+      }),
+    });
+
+    const refreshBody = await refreshResponse.text();
+    if (!refreshResponse.ok) {
+      console.error("Google refresh failed:", refreshResponse.status, refreshBody);
+      return jsonResponse(
+        401,
+        { error: "Failed to refresh Google access token", status: refreshResponse.status },
+        origin
+      );
+    }
+
+    const refreshData = JSON.parse(refreshBody) as Record<string, unknown>;
+    accessToken = (refreshData.access_token as string | undefined) ?? accessToken;
+    const refreshExpiresIn = Number(refreshData.expires_in ?? 0);
+    const newExpiresAt = new Date(now + refreshExpiresIn * 1000).toISOString();
+
+    await supabaseAdmin
+      .from("google_connections")
+      .update({
+        access_token: accessToken,
+        token_type: (refreshData.token_type as string | undefined) ??
+          connection.token_type,
+        scope: (refreshData.scope as string | undefined) ?? connection.scope,
+        expires_at: newExpiresAt,
+      })
+      .eq("user_id", user.id)
+      .eq("provider", "google");
+  }
+
   try {
+    if (!accessToken) {
+      return jsonResponse(401, { error: "Missing Google access token" }, origin);
+    }
     const accounts = await fetchAllPages<Record<string, unknown>>(
       "https://mybusinessaccountmanagement.googleapis.com/v1/accounts",
-      googleToken,
+      accessToken,
       "accounts"
     );
 
@@ -175,7 +267,7 @@ serve(async (req) => {
 
       const locations = await fetchAllPages<Record<string, unknown>>(
         `https://mybusinessbusinessinformation.googleapis.com/v1/${accountResourceName}/locations?readMask=name,title,storeCode,storefrontAddress,websiteUri,phoneNumbers&pageSize=100`,
-        googleToken,
+        accessToken,
         "locations"
       );
 
@@ -215,7 +307,7 @@ serve(async (req) => {
 
         const reviews = await fetchAllPages<Record<string, unknown>>(
           `https://mybusiness.googleapis.com/v4/${locationResourceName}/reviews?pageSize=200`,
-          googleToken,
+          accessToken,
           "reviews"
         );
 
@@ -262,6 +354,18 @@ serve(async (req) => {
       origin
     );
   } catch (error) {
+    if (error instanceof GoogleApiError) {
+      console.error("google_gbp_sync_all google error:", error.status, error.body);
+      return jsonResponse(
+        error.status,
+        {
+          error: "Google permission error",
+          status: error.status,
+          body: error.body,
+        },
+        origin
+      );
+    }
     console.error("google_gbp_sync_all failed:", error);
     return jsonResponse(500, { error: "Sync failed (see logs)" }, origin);
   }
