@@ -1,5 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import { createSupabaseAdmin, getRequiredEnv, getUserFromRequest } from "../_utils";
+import {
+  createSupabaseAdmin,
+  getGoogleRedirectUri,
+  getRequiredEnv
+} from "../_utils";
 
 type TokenResponse = {
   access_token?: string;
@@ -32,14 +36,9 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
 
   try {
     const supabaseAdmin = createSupabaseAdmin();
-    const { userId: userIdFromReq } = await getUserFromRequest(
-      { headers: req.headers as Record<string, string | undefined>, url: req.url },
-      supabaseAdmin
-    );
-
     const { data: stateRow, error: stateError } = await supabaseAdmin
       .from("google_oauth_states")
-      .select("user_id")
+      .select("user_id, expires_at")
       .eq("state", state)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -50,30 +49,34 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     const userIdFromState = stateRow?.user_id ?? null;
-    const userId = userIdFromState ?? userIdFromReq;
+    const expiresAt = stateRow?.expires_at ?? null;
+    const isExpired =
+      !expiresAt || Number.isNaN(Date.parse(expiresAt))
+        ? true
+        : Date.parse(expiresAt) <= Date.now();
 
-    if (!userId) {
+    if (!userIdFromState) {
+      console.warn("google oauth callback invalid state.");
       res.statusCode = 401;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: false, error: "User not found." }));
+      res.end(JSON.stringify({ ok: false, error: "Invalid OAuth state." }));
       return;
     }
 
-    if (userIdFromState && userIdFromReq && userIdFromState !== userIdFromReq) {
+    if (isExpired) {
+      console.warn("google oauth callback expired state.");
       res.statusCode = 401;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: false, error: "State mismatch." }));
+      res.end(JSON.stringify({ ok: false, error: "OAuth state expired." }));
       return;
     }
 
-    if (userIdFromState) {
-      const { error: deleteError } = await supabaseAdmin
-        .from("google_oauth_states")
-        .delete()
-        .eq("state", state);
-      if (deleteError) {
-        console.error("google oauth state delete failed:", deleteError);
-      }
+    const { error: deleteError } = await supabaseAdmin
+      .from("google_oauth_states")
+      .delete()
+      .eq("state", state);
+    if (deleteError) {
+      console.error("google oauth state delete failed:", deleteError);
     }
 
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
@@ -85,7 +88,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
         code,
         client_id: getRequiredEnv("GOOGLE_CLIENT_ID"),
         client_secret: getRequiredEnv("GOOGLE_CLIENT_SECRET"),
-        redirect_uri: getRequiredEnv("GOOGLE_REDIRECT_URI"),
+        redirect_uri: getGoogleRedirectUri(),
         grant_type: "authorization_code"
       })
     });
@@ -109,7 +112,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       const { data: existing } = await supabaseAdmin
         .from("google_connections")
         .select("refresh_token")
-        .eq("user_id", userId)
+        .eq("user_id", userIdFromState)
         .eq("provider", "google")
         .maybeSingle();
       refreshToken = existing?.refresh_token ?? null;
@@ -125,7 +128,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       .from("google_connections")
       .upsert(
         {
-          user_id: userId,
+          user_id: userIdFromState,
           provider: "google",
           access_token: tokenData.access_token ?? null,
           refresh_token: refreshToken,

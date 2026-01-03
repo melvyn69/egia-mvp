@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Routes, Route, useLocation } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, supabaseAnonKey, supabaseUrl } from "./lib/supabase";
-import { signInWithGoogle, startGoogleConnection } from "./lib/googleAuth";
+import { startGoogleConnection } from "./lib/googleAuth";
 import { Sidebar } from "./components/layout/Sidebar";
 import { Topbar } from "./components/layout/Topbar";
 import { Dashboard } from "./pages/Dashboard";
@@ -207,13 +207,8 @@ const App = () => {
       return;
     }
 
-    console.info("Supabase auth: starting Google sign-in");
-    const { error } = await signInWithGoogle(supabase);
-
-    if (error) {
-      console.error("Supabase auth sign-in error:", error);
-      setAuthError("Impossible de se connecter avec Google.");
-    }
+    console.warn("Supabase Google provider disabled.");
+    setAuthError("Connexion Google indisponible.");
   };
 
   const handleConnectGoogle = async () => {

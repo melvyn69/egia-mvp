@@ -65,7 +65,6 @@ const OAuthCallback = () => {
       if (state) {
         callbackUrl.searchParams.set("state", state);
       }
-      callbackUrl.searchParams.set("user_id", session.user.id);
       window.location.assign(callbackUrl.toString());
     };
 

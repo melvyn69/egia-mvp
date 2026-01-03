@@ -1,7 +1,7 @@
 # React + TypeScript + Vite
 
 ## MVP setup (local)
-1) `.env.local`: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `APP_BASE_URL`.
+1) `.env.local`: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_BASE_URL`.
 2) Supabase Auth redirect: `http://localhost:5173/auth/callback`.
 3) Google OAuth redirect: `http://localhost:3000/api/google/oauth/callback` (Vercel dev) ou l'URL Vercel en prod.
 4) Scopes Google: `https://www.googleapis.com/auth/business.manage`.
@@ -11,7 +11,7 @@
 8) Synchroniser les lieux Google Business Profile.
 
 ## MVP setup (prod)
-1) Vercel env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `APP_BASE_URL`.
+1) Vercel env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_BASE_URL`.
 2) Google OAuth redirect: `${APP_BASE_URL}/api/google/oauth/callback`.
 3) Déployer sur Vercel, puis tester la connexion Google depuis `/connect`.
 

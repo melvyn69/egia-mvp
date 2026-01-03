@@ -2,6 +2,8 @@ import crypto from "crypto";
 import type { IncomingMessage, ServerResponse } from "http";
 import {
   createSupabaseAdmin,
+  getGoogleRedirectUri,
+  getOauthStateExpiry,
   getRequiredEnv,
   getUserFromRequest
 } from "../_utils";
@@ -16,12 +18,15 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
 
   try {
     const supabaseAdmin = createSupabaseAdmin();
-    const { userId } = await getUserFromRequest(
-      { headers: req.headers as Record<string, string | undefined>, url: req.url },
+    const { userId, error: userError } = await getUserFromRequest(
+      { headers: req.headers as Record<string, string | undefined> },
       supabaseAdmin
     );
 
     if (!userId) {
+      if (userError) {
+        console.warn("google oauth start auth error:", userError.message);
+      }
       res.statusCode = 401;
       res.setHeader("Content-Type", "application/json");
       res.end(
@@ -34,12 +39,14 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     const state = crypto.randomBytes(32).toString("hex");
+    const expiresAt = getOauthStateExpiry();
     const { error: stateError } = await supabaseAdmin
       .from("google_oauth_states")
       .insert({
         user_id: userId,
         state,
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        expires_at: expiresAt
       });
 
     if (stateError) {
@@ -55,13 +62,19 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     oauthUrl.searchParams.set("access_type", "offline");
     oauthUrl.searchParams.set("prompt", "consent");
     oauthUrl.searchParams.set("scope", "https://www.googleapis.com/auth/business.manage");
-    oauthUrl.searchParams.set("redirect_uri", getRequiredEnv("GOOGLE_REDIRECT_URI"));
+    oauthUrl.searchParams.set("redirect_uri", getGoogleRedirectUri());
     oauthUrl.searchParams.set("client_id", getRequiredEnv("GOOGLE_CLIENT_ID"));
     oauthUrl.searchParams.set("state", state);
 
-    res.statusCode = 302;
-    res.setHeader("Location", oauthUrl.toString());
-    res.end();
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/json");
+    res.end(
+      JSON.stringify({
+        ok: true,
+        url: oauthUrl.toString(),
+        expiresAt
+      })
+    );
   } catch (error) {
     console.error("google oauth start error:", error);
     res.statusCode = 500;

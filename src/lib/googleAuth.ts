@@ -1,31 +1,21 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-const getAuthRedirectTo = () => {
-  const origin = window.location.origin;
-  const redirectTo = `${origin}/auth/callback`;
-  if (import.meta.env.DEV) {
-    console.log("auth redirectTo", redirectTo);
-  }
-  return redirectTo;
-};
-
-const signInWithGoogle = async (supabase: SupabaseClient) =>
-  supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: getAuthRedirectTo()
-    }
-  });
-
 const startGoogleConnection = async (supabase: SupabaseClient) => {
   const { data: sessionData } = await supabase.auth.getSession();
   const session = sessionData.session;
   if (!session) {
     throw new Error("Missing Supabase session.");
   }
-  const url = new URL("/api/google/oauth/start", window.location.origin);
-  url.searchParams.set("user_id", session.user.id);
-  window.location.assign(url.toString());
+  const response = await fetch("/api/google/oauth/start", {
+    headers: {
+      Authorization: `Bearer ${session.access_token}`
+    }
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.url) {
+    throw new Error("OAuth URL missing.");
+  }
+  window.location.assign(data.url);
 };
 
-export { signInWithGoogle, startGoogleConnection };
+export { startGoogleConnection };
