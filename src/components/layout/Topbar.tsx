@@ -11,9 +11,16 @@ type TopbarProps = {
   subtitle?: string;
   userEmail?: string | null;
   onSignOut?: () => void;
+  onDebugSession?: () => void;
 };
 
-const Topbar = ({ title, subtitle, userEmail, onSignOut }: TopbarProps) => {
+const Topbar = ({
+  title,
+  subtitle,
+  userEmail,
+  onSignOut,
+  onDebugSession
+}: TopbarProps) => {
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
@@ -81,6 +88,11 @@ const Topbar = ({ title, subtitle, userEmail, onSignOut }: TopbarProps) => {
               <p className="font-medium text-slate-900">{userEmail}</p>
               <p className="text-xs text-slate-500">Compte actif</p>
             </div>
+            {onDebugSession && (
+              <Button variant="ghost" size="sm" onClick={onDebugSession}>
+                Debug session
+              </Button>
+            )}
             {onSignOut && (
               <Button variant="outline" size="sm" onClick={onSignOut}>
                 Se deconnecter

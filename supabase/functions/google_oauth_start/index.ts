@@ -9,7 +9,7 @@ const appBaseUrl = Deno.env.get("APP_BASE_URL") ?? "";
 const getCorsHeaders = (origin: string | null) => ({
   "Access-Control-Allow-Origin": origin ?? "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-user-jwt",
+    "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS"
 });
 
@@ -40,14 +40,10 @@ serve(async (req) => {
     req.headers.get("authorization") ?? req.headers.get("Authorization")
   );
   const hasApiKey = Boolean(req.headers.get("apikey"));
-  const hasUserJwtHeader = Boolean(
-    req.headers.get("x-user-jwt") ?? req.headers.get("X-User-JWT")
-  );
   console.log("oauth_start request:", {
     origin,
     hasAuth,
-    hasApiKey,
-    hasUserJwtHeader
+    hasApiKey
   });
 
   if (req.method === "OPTIONS") {
@@ -62,18 +58,11 @@ serve(async (req) => {
     return jsonResponse(500, { error: "Server misconfigured" }, origin);
   }
 
-  let userJwt =
-    req.headers.get("x-user-jwt") ?? req.headers.get("X-User-JWT");
-  if (!userJwt) {
-    try {
-      const payload = await req.json();
-      if (payload && typeof payload.jwt === "string") {
-        userJwt = payload.jwt;
-      }
-    } catch {
-      userJwt = null;
-    }
-  }
+  const authHeader = req.headers.get("authorization") ??
+    req.headers.get("Authorization");
+  const userJwt = authHeader?.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length).trim()
+    : null;
 
   if (!userJwt) {
     return jsonResponse(401, { error: "Missing user JWT" }, origin);
@@ -98,6 +87,27 @@ serve(async (req) => {
     return jsonResponse(500, { error: "Cannot build redirect URL" }, origin);
   }
 
+  const oauthState = crypto.randomUUID();
+  const stateExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+  const { error: stateError } = await supabaseAdmin
+    .from("google_connections")
+    .upsert(
+      {
+        user_id: user.id,
+        provider: "google",
+        oauth_state: oauthState,
+        oauth_state_expires_at: stateExpiresAt,
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: "user_id,provider" }
+    );
+
+  if (stateError) {
+    console.error("Failed to store oauth state:", stateError);
+    return jsonResponse(500, { error: "Failed to store oauth state" }, origin);
+  }
+
   const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   authUrl.searchParams.set("client_id", googleClientId);
   authUrl.searchParams.set("redirect_uri", redirectUri);
@@ -108,7 +118,7 @@ serve(async (req) => {
   );
   authUrl.searchParams.set("access_type", "offline");
   authUrl.searchParams.set("prompt", "consent");
-  authUrl.searchParams.set("state", userJwt);
+  authUrl.searchParams.set("state", oauthState);
 
   return jsonResponse(200, { url: authUrl.toString() }, origin);
 });

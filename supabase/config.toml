@@ -383,3 +383,12 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 
 [functions.generate-reply]
 verify_jwt = false
+
+[functions.google_oauth_start]
+verify_jwt = true
+
+[functions.google_oauth_exchange]
+verify_jwt = true
+
+[functions.google_gbp_sync_all]
+verify_jwt = true

@@ -10,7 +10,7 @@ const appBaseUrl = Deno.env.get("APP_BASE_URL") ?? "";
 const getCorsHeaders = (origin: string | null) => ({
   "Access-Control-Allow-Origin": origin ?? "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-user-jwt",
+    "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 });
 
@@ -53,7 +53,7 @@ serve(async (req) => {
     return jsonResponse(500, { error: "Server misconfigured" }, origin);
   }
 
-  let payload: { code?: string; jwt?: string } | null = null;
+  let payload: { code?: string; state?: string } | null = null;
   try {
     payload = await req.json();
   } catch {
@@ -61,7 +61,12 @@ serve(async (req) => {
   }
 
   const code = payload?.code;
-  const jwt = payload?.jwt;
+  const state = payload?.state ?? null;
+  const authHeader = req.headers.get("authorization") ??
+    req.headers.get("Authorization");
+  const jwt = authHeader?.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length).trim()
+    : null;
 
   if (!code || !jwt) {
     return jsonResponse(400, { error: "Missing code or jwt" }, origin);
@@ -76,6 +81,37 @@ serve(async (req) => {
 
   if (userError || !user) {
     return jsonResponse(401, { error: "Invalid Supabase JWT" }, origin);
+  }
+
+  if (!state) {
+    return jsonResponse(400, { error: "Missing OAuth state" }, origin);
+  }
+
+  const { data: existingConnection, error: stateLookupError } =
+    await supabaseAdmin
+      .from("google_connections")
+      .select("refresh_token, oauth_state, oauth_state_expires_at")
+      .eq("user_id", user.id)
+      .eq("provider", "google")
+      .maybeSingle();
+
+  if (stateLookupError) {
+    console.error("Failed to load oauth state:", stateLookupError);
+    return jsonResponse(500, { error: "Failed to load oauth state" }, origin);
+  }
+
+  if (
+    !existingConnection?.oauth_state ||
+    existingConnection.oauth_state !== state
+  ) {
+    return jsonResponse(401, { error: "Invalid OAuth state" }, origin);
+  }
+
+  if (existingConnection.oauth_state_expires_at) {
+    const expiresAt = new Date(existingConnection.oauth_state_expires_at).getTime();
+    if (Number.isFinite(expiresAt) && expiresAt < Date.now()) {
+      return jsonResponse(401, { error: "OAuth state expired" }, origin);
+    }
   }
 
   const redirectUri = getRedirectUrl();
@@ -108,6 +144,8 @@ serve(async (req) => {
   const tokenData = await tokenResponse.json();
   const expiresIn = Number(tokenData.expires_in ?? 0);
   const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+  const refreshToken =
+    tokenData.refresh_token ?? existingConnection?.refresh_token ?? null;
 
   const { error: upsertError } = await supabaseAdmin
     .from("google_connections")
@@ -116,10 +154,13 @@ serve(async (req) => {
         user_id: user.id,
         provider: "google",
         access_token: tokenData.access_token ?? null,
-        refresh_token: tokenData.refresh_token ?? null,
+        refresh_token: refreshToken,
         token_type: tokenData.token_type ?? null,
         scope: tokenData.scope ?? null,
         expires_at: expiresAt,
+        oauth_state: null,
+        oauth_state_expires_at: null,
+        updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id,provider" }
     );

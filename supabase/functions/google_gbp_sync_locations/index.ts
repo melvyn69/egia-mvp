@@ -98,8 +98,13 @@ serve(async (req) => {
       return jsonResponse(400, { error: "Invalid JSON body" });
     }
 
-    const jwt =
-      payload?.jwt ??
+    const authHeader = req.headers.get("authorization") ??
+      req.headers.get("Authorization");
+    const bearerToken = authHeader?.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length).trim()
+      : null;
+    const jwt = payload?.jwt ??
+      bearerToken ??
       req.headers.get("x-user-jwt") ??
       req.headers.get("X-User-JWT");
     if (!jwt) {
