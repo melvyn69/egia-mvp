@@ -232,7 +232,9 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
 
     let locationQuery = supabaseAdmin
       .from("google_locations")
-      .select("account_resource_name, location_resource_name")
+      .select(
+        "account_resource_name, location_resource_name, location_title, location_name"
+      )
       .eq("user_id", userId);
 
     if (locationId) {
@@ -256,6 +258,11 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     let reviewsUpsertedCount = 0;
     let locationsFailed = 0;
     for (const location of locationList) {
+      const displayName =
+        (location as { location_title?: string }).location_title ??
+        (location as { title?: string }).title ??
+        (location as { name?: string }).name ??
+        location.location_resource_name;
       const parent = location.location_resource_name.startsWith("accounts/")
         ? location.location_resource_name
         : `${location.account_resource_name}/${location.location_resource_name}`;
@@ -277,6 +284,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       const rows = reviews.map((review) => ({
         user_id: userId,
         location_id: location.location_resource_name,
+        location_name: displayName,
         review_id: review.reviewId ?? review.name ?? "",
         author_name: review.reviewer?.displayName ?? null,
         rating: mapRating(review.starRating),
