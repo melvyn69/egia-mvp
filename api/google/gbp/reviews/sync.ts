@@ -232,9 +232,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
 
     let locationQuery = supabaseAdmin
       .from("google_locations")
-      .select(
-        "account_resource_name, location_resource_name, location_title, location_name"
-      )
+      .select("account_resource_name, location_resource_name, location_title")
       .eq("user_id", userId);
 
     if (locationId) {
