@@ -71,18 +71,25 @@ const refreshAccessToken = async (refreshToken: string) => {
 
 const listReviewsForLocation = async (
   accessToken: string,
-  locationName: string
+  parent: string,
+  accountResourceName: string,
+  locationResourceName: string
 ) => {
   const reviews: GoogleReview[] = [];
   let pageToken: string | undefined;
 
   do {
     const baseUrl =
-      `https://mybusiness.googleapis.com/v4/${locationName}/reviews` +
+      `https://mybusiness.googleapis.com/v4/${parent}/reviews` +
       `?pageSize=50&orderBy=updateTime desc`;
     const url = pageToken
       ? `${baseUrl}&pageToken=${encodeURIComponent(pageToken)}`
       : baseUrl;
+    console.log("google reviews request:", {
+      account_resource_name: accountResourceName,
+      location_resource_name: locationResourceName,
+      url
+    });
     const response = await fetch(url, {
       headers: {
         Authorization: `Bearer ${accessToken}`
@@ -91,7 +98,9 @@ const listReviewsForLocation = async (
     const data = await response.json().catch(() => null);
     if (response.status === 404) {
       console.warn("google reviews 404:", {
-        location_resource_name: locationName,
+        account_resource_name: accountResourceName,
+        location_resource_name: locationResourceName,
+        url,
         response: data
       });
       return { reviews: [], notFound: true };
@@ -223,7 +232,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
 
     let locationQuery = supabaseAdmin
       .from("google_locations")
-      .select("location_resource_name")
+      .select("account_resource_name, location_resource_name")
       .eq("user_id", userId);
 
     if (locationId) {
@@ -240,16 +249,19 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       return;
     }
 
-    const locationList = (locations ?? []).map(
-      (location) => location.location_resource_name
+    const locationList = (locations ?? []).filter(
+      (location) => location.location_resource_name && location.account_resource_name
     );
 
     let reviewsUpsertedCount = 0;
     let locationsFailed = 0;
-    for (const locationName of locationList) {
+    for (const location of locationList) {
+      const parent = `${location.account_resource_name}/${location.location_resource_name}`;
       const { reviews, notFound } = await listReviewsForLocation(
         accessToken,
-        locationName
+        parent,
+        location.account_resource_name,
+        location.location_resource_name
       );
       if (notFound) {
         locationsFailed += 1;
@@ -262,7 +274,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       const nowIso = new Date().toISOString();
       const rows = reviews.map((review) => ({
         user_id: userId,
-        location_id: locationName,
+        location_id: location.location_resource_name,
         review_id: review.reviewId ?? review.name ?? "",
         author_name: review.reviewer?.displayName ?? null,
         rating: mapRating(review.starRating),
