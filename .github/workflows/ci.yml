@@ -1,18 +1,17 @@
 name: CI
 
 on:
-  push:
-    branches: [main, "release/*"]
   pull_request:
-    branches: [main, "release/*"]
+  push:
+    branches:
+      - main
+      - release/*
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Setup Node
@@ -21,11 +20,11 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install
+      - name: Install dependencies
         run: npm ci
 
       - name: Lint
         run: npm run lint
 
-      - name: Typecheck + Build
+      - name: Build
         run: npm run build
