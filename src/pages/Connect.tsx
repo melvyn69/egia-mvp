@@ -6,6 +6,7 @@ type ConnectProps = {
   onConnect: () => void;
   onSync?: () => void;
   syncLoading?: boolean;
+  syncDisabled?: boolean;
   syncMessage?: string | null;
   lastLogStatus?: string | null;
   lastLogMessage?: string | null;
@@ -15,6 +16,7 @@ const Connect = ({
   onConnect,
   onSync,
   syncLoading = false,
+  syncDisabled = false,
   syncMessage,
   lastLogStatus,
   lastLogMessage
@@ -38,7 +40,7 @@ const Connect = ({
             variant="outline"
             size="sm"
             onClick={onSync}
-            disabled={syncLoading}
+            disabled={syncLoading || syncDisabled}
           >
             {syncLoading
               ? "Synchronisation..."

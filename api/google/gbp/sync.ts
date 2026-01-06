@@ -30,7 +30,11 @@ const refreshAccessToken = async (refreshToken: string) => {
 
   const tokenData = await tokenResponse.json();
   if (!tokenResponse.ok || tokenData.error) {
-    throw new Error(tokenData.error_description ?? "Token refresh failed.");
+    const refreshError = new Error(
+      tokenData.error_description ?? "Token refresh failed."
+    ) as Error & { code?: string };
+    refreshError.code = tokenData.error;
+    throw refreshError;
   }
 
   return tokenData as {
@@ -144,7 +148,32 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
         res.end(JSON.stringify({ ok: false, error: "Refresh token missing." }));
         return;
       }
-      const refreshed = await refreshAccessToken(connection.refresh_token);
+      let refreshed: Awaited<ReturnType<typeof refreshAccessToken>>;
+      try {
+        refreshed = await refreshAccessToken(connection.refresh_token);
+      } catch (error) {
+        const refreshError = error as Error & { code?: string };
+        const reauthRequired =
+          refreshError.code === "invalid_grant" ||
+          /expired or revoked/i.test(refreshError.message);
+        if (reauthRequired) {
+          await supabaseAdmin
+            .from("google_connections")
+            .delete()
+            .eq("user_id", userId)
+            .eq("provider", "google");
+          res.statusCode = 401;
+          res.setHeader("Content-Type", "application/json");
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: "reauth_required"
+            })
+          );
+          return;
+        }
+        throw error;
+      }
       accessToken = refreshed.access_token;
       const newExpiresAt =
         refreshed.expires_in && refreshed.expires_in > 0

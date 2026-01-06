@@ -34,6 +34,7 @@ type DashboardProps = {
   googleConnected: boolean | null;
   onConnect: () => void;
   onSyncLocations: () => void;
+  syncDisabled?: boolean;
   locations: Array<{
     id: string;
     location_title: string | null;
@@ -215,6 +216,7 @@ const Dashboard = ({
   googleConnected,
   onConnect,
   onSyncLocations,
+  syncDisabled = false,
   locations,
   locationsLoading,
   locationsError,
@@ -484,7 +486,11 @@ const Dashboard = ({
             Lieux connectes
           </h2>
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={onSyncLocations} disabled={syncing}>
+            <Button
+              variant="outline"
+              onClick={onSyncLocations}
+              disabled={syncing || syncDisabled}
+            >
               {syncing ? "Synchronisation..." : "Synchroniser les lieux"}
             </Button>
           </div>

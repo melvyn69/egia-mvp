@@ -28,6 +28,7 @@ const App = () => {
   const [authEmail, setAuthEmail] = useState("");
   const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
   const [googleError, setGoogleError] = useState<string | null>(null);
+  const [googleReauthRequired, setGoogleReauthRequired] = useState(false);
   const [syncAllLoading, setSyncAllLoading] = useState(false);
   const [syncAllMessage, setSyncAllMessage] = useState<string | null>(null);
   const [lastLogStatus, setLastLogStatus] = useState<string | null>(null);
@@ -231,6 +232,7 @@ const App = () => {
 
   const handleConnectGoogle = async () => {
     setGoogleError(null);
+    setGoogleReauthRequired(false);
 
     if (!supabase) {
       setGoogleError("Connexion Supabase requise.");
@@ -241,7 +243,11 @@ const App = () => {
       await startGoogleConnection(supabase);
     } catch (error) {
       console.error("google oauth error:", error);
-      setGoogleError("Impossible de demarrer la connexion Google.");
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Impossible de demarrer la connexion Google.";
+      setGoogleError(message);
     }
   };
 
@@ -273,6 +279,11 @@ const App = () => {
       const data = await response.json().catch(() => null);
 
       if (!response.ok || !data?.ok) {
+        if (response.status === 401 && data?.error === "reauth_required") {
+          setGoogleReauthRequired(true);
+          setLocationsError("Reconnecte Google.");
+          return;
+        }
         console.error("google gbp sync error:", data);
         setLocationsError("Impossible de synchroniser les lieux.");
         return;
@@ -285,6 +296,7 @@ const App = () => {
       );
       setSyncCooldownUntil(cooldown);
 
+      setGoogleReauthRequired(false);
       await fetchLocations(session.user.id);
     } catch (error) {
       console.error(error);
@@ -325,6 +337,13 @@ const App = () => {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.ok) {
+        if (response.status === 401 && data?.error === "reauth_required") {
+          setSyncAllMessage("Reconnecte Google.");
+          setLastLogStatus("error");
+          setLastLogMessage("Reconnexion Google requise.");
+          setGoogleReauthRequired(true);
+          return;
+        }
         throw new Error("Sync failed.");
       }
       setSyncAllMessage(
@@ -332,6 +351,7 @@ const App = () => {
       );
       setLastLogStatus("success");
       setLastLogMessage("Synchronisation terminée avec succès.");
+      setGoogleReauthRequired(false);
     } catch (error) {
       console.error(error);
       setSyncAllMessage("Erreur de synchronisation.");
@@ -505,6 +525,7 @@ const App = () => {
                       googleConnected={googleConnected}
                       onConnect={handleConnectGoogle}
                       onSyncLocations={handleSyncLocations}
+                      syncDisabled={googleReauthRequired}
                       locations={locations}
                       locationsLoading={locationsLoading}
                       locationsError={locationsError}
@@ -518,6 +539,7 @@ const App = () => {
                     <Connect
                       onConnect={handleConnectGoogle}
                       onSync={handleSyncAll}
+                      syncDisabled={googleReauthRequired}
                       syncLoading={syncAllLoading}
                       syncMessage={syncAllMessage}
                       lastLogStatus={lastLogStatus}

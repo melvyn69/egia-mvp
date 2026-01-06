@@ -31,6 +31,7 @@ const OAuthCallback = () => {
   );
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [syncLoading, setSyncLoading] = useState(false);
+  const [syncDisabled, setSyncDisabled] = useState(false);
 
   const handleReconnect = async () => {
     if (!supabase) {
@@ -71,11 +72,17 @@ const OAuthCallback = () => {
     });
     const data = await response.json().catch(() => null);
     if (!response.ok || !data?.ok) {
-      setSyncMessage("Erreur de synchronisation.");
+      if (response.status === 401 && data?.error === "reauth_required") {
+        setSyncMessage("Reconnecte Google.");
+        setSyncDisabled(true);
+      } else {
+        setSyncMessage("Erreur de synchronisation.");
+      }
     } else {
       setSyncMessage(
         `Synchronisation terminée: ${data?.locationsCount ?? 0} lieux.`
       );
+      setSyncDisabled(false);
     }
     setSyncLoading(false);
   };
@@ -121,7 +128,7 @@ const OAuthCallback = () => {
               <Button
                 variant="outline"
                 onClick={handleSync}
-                disabled={syncLoading}
+                disabled={syncLoading || syncDisabled}
               >
                 {syncLoading
                   ? "Synchronisation..."
