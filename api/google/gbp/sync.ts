@@ -67,21 +67,23 @@ const listLocationsForAccount = async (
 ) => {
   const locations: GoogleLocation[] = [];
   let pageToken: string | undefined;
+  const normalizedAccountName = accountName.startsWith("accounts/")
+    ? accountName
+    : `accounts/${accountName}`;
 
   do {
-    const url = new URL(
-      `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations`
-    );
-    url.searchParams.set(
-      "readMask",
-      "name,title,storeCode,storefrontAddress,primaryPhone,websiteUri"
-    );
-    url.searchParams.set("pageSize", "100");
-    if (pageToken) {
-      url.searchParams.set("pageToken", pageToken);
-    }
+    const baseUrl =
+      `https://mybusinessbusinessinformation.googleapis.com/v1/${normalizedAccountName}/locations` +
+      `?readMask=name,title,storefrontAddress,metadata,phoneNumbers,websiteUri` +
+      `&pageSize=100`;
+    const url = pageToken
+      ? `${baseUrl}&pageToken=${encodeURIComponent(pageToken)}`
+      : baseUrl;
 
-    const response = await fetch(url.toString(), {
+    console.log("[GBP] account.name =", accountName);
+    console.log("[GBP] list locations url =", url);
+
+    const response = await fetch(url, {
       headers: {
         Authorization: `Bearer ${accessToken}`
       }
