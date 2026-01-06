@@ -256,7 +256,9 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     let reviewsUpsertedCount = 0;
     let locationsFailed = 0;
     for (const location of locationList) {
-      const parent = `${location.account_resource_name}/${location.location_resource_name}`;
+      const parent = location.location_resource_name.startsWith("accounts/")
+        ? location.location_resource_name
+        : `${location.account_resource_name}/${location.location_resource_name}`;
       const { reviews, notFound } = await listReviewsForLocation(
         accessToken,
         parent,
@@ -285,8 +287,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
         owner_reply_time: review.reviewReply?.updateTime ?? null,
         reply_text: review.reviewReply?.comment ?? null,
         replied_at: review.reviewReply?.updateTime ?? null,
-        last_synced_at: nowIso,
-        raw: review
+        last_synced_at: nowIso
       }));
 
       const { error: upsertError } = await supabaseAdmin
