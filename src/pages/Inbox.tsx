@@ -213,7 +213,6 @@ const Inbox = () => {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
   const [reviewsError, setReviewsError] = useState<string | null>(null);
-  const [locationsMap, setLocationsMap] = useState<Record<string, string>>({});
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncDisabled, setSyncDisabled] = useState(false);
@@ -225,7 +224,6 @@ const Inbox = () => {
   const loadInboxData = async () => {
     if (!supabase) {
       setReviews([]);
-      setLocationsMap({});
       return;
     }
     setReviewsLoading(true);
@@ -245,8 +243,6 @@ const Inbox = () => {
             location.location_title ?? location.location_resource_name;
         }
       });
-      setLocationsMap(nextLocationsMap);
-
       const { data: reviewsData, error: reviewsError } = await supabase
         .from("google_reviews")
         .select(
