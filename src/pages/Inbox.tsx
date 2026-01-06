@@ -229,6 +229,14 @@ const Inbox = () => {
     setReviewsLoading(true);
     setReviewsError(null);
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData.session?.user?.id ?? null;
+      if (!userId) {
+        setReviews([]);
+        setReviewsError("Session introuvable.");
+        return;
+      }
+
       const { data: locationsData, error: locationsError } = await supabase
         .from("google_locations")
         .select("location_resource_name, location_title")
@@ -268,7 +276,7 @@ const Inbox = () => {
           locationName:
             nextLocationsMap[row.location_id] ?? row.location_id ?? "—",
           locationId: row.location_id,
-          businessId: row.location_id,
+          businessId: userId,
           authorName: row.author_name ?? "Anonyme",
           rating: row.rating ?? 0,
           source: "Google",
@@ -323,12 +331,12 @@ const Inbox = () => {
   }, [reviews, selectedReviewId]);
 
   useEffect(() => {
-    if (!selectedReview) {
+    if (!selectedReviewId) {
       setReplyText("");
       return;
     }
-    setReplyText(drafts[selectedReview.id] ?? "");
-  }, [drafts, selectedReview]);
+    setReplyText(drafts[selectedReviewId] ?? "");
+  }, [drafts, selectedReviewId]);
 
   useEffect(() => {
     setSavedAt(null);
@@ -380,7 +388,7 @@ const Inbox = () => {
     };
 
     void loadBusinessContext();
-  }, [selectedReviewId]);
+  }, [selectedReview, selectedReviewId]);
 
   useEffect(() => {
     const supabaseClient = supabase;
@@ -412,7 +420,7 @@ const Inbox = () => {
     };
 
     void loadReplies();
-  }, [selectedReviewId]);
+  }, [selectedReview, selectedReviewId]);
 
   useEffect(() => {
     const supabaseClient = supabase;

@@ -1,101 +1,100 @@
-# React + TypeScript + Vite
+# EGIA MVP — Inbox Avis (Google) + Génération + Réponses
 
-## MVP setup (local)
-1) `.env.local`: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_BASE_URL`.
-2) Supabase Auth redirect: `http://localhost:5173/auth/callback`.
-3) Google OAuth redirect: `http://localhost:3000/api/google/oauth/callback` (Vercel dev) ou l'URL Vercel en prod.
-4) Scopes Google: `https://www.googleapis.com/auth/business.manage`.
-5) `npm install`
-6) `npm run dev` (frontend Vite) + `vercel dev` (API routes).
-7) Login Google (Supabase), puis "Connecter Google Business Profile".
-8) Synchroniser les lieux Google Business Profile.
+Ce repo contient le MVP EGIA : synchronisation des avis Google Business Profile, inbox de traitement, génération de réponses (IA) et envoi des réponses sur Google.
 
-## MVP setup (prod)
-1) Vercel env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_BASE_URL`.
-2) Google OAuth redirect: `${APP_BASE_URL}/api/google/oauth/callback`.
-3) Déployer sur Vercel, puis tester la connexion Google depuis `/connect`.
+## ✅ Ce qui fonctionne (v0.1 stable)
+- Sync des avis Google (pagination) → Supabase `google_reviews`
+- Affichage Inbox (filtres statut + lieu)
+- Génération de réponse via Edge Function `generate-reply`
+- Sauvegarde de brouillon dans `review_replies`
+- Envoi de la réponse sur Google via Edge Function `post-reply-google`
+- Historique des réponses / brouillons
+- Mapping des lieux via `google_locations.location_title`
 
-## Google OAuth setup
-1) Google Cloud Console -> OAuth consent -> ajouter le scope `https://www.googleapis.com/auth/business.manage`.
-2) Credentials -> OAuth Client -> Authorized redirect URI: `${APP_BASE_URL}/api/google/oauth/callback`.
-3) Ajouter l'utilisateur test si l'app est en mode test.
+Tag stable : `v0.1-inbox-sync-stable`
+Branche stable : `release/v0.1-stable`
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+---
 
-Currently, two official plugins are available:
+## Architecture (haut niveau)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+### Frontend (Vercel)
+- App React + TypeScript
+- Page principale : `src/pages/Inbox.tsx`
+- Interaction Supabase :
+  - `supabase.auth.getSession()` pour récupérer le JWT user
+  - lecture tables (PostgREST)
+  - appels Edge Functions (`supabase.functions.invoke`)
 
-## React Compiler
+### Backend (Supabase)
+- Postgres (tables + RLS)
+- Auth (Google login via Supabase)
+- Edge Functions :
+  - `generate-reply`
+  - `post-reply-google`
+- DB migrations : `supabase/migrations/*`
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### API Sync (Vercel route)
+- Endpoint : `POST /api/google/gbp/reviews/sync`
+- Vérifie le JWT Supabase
+- Charge `google_locations` de l’utilisateur
+- Pour chaque location :
+  - appelle l’API Google Reviews (pagination)
+  - mappe les champs
+  - upsert dans `google_reviews`
 
-## Expanding the ESLint configuration
+---
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Modèle de données (tables principales)
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### `google_locations`
+Stocke les lieux Google d’un utilisateur.
+Champs typiques :
+- `user_id`
+- `account_resource_name` (ex: `accounts/1085...`)
+- `location_resource_name` (ex: `locations/1116...`)
+- `location_title` (nom lisible)
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### `google_reviews`
+Stocke les avis Google synchronisés.
+Champs typiques :
+- `user_id`
+- `review_id` (id Google si dispo)
+- `review_name` (NOT NULL)
+- `location_id` (ex: `locations/...`)
+- `location_name` (NOT NULL, default `''`)
+- `author_name`, `rating`, `comment`
+- `create_time`, `update_time`
+- `status` : `new | reading | replied | archived`
+- (optionnel) `raw` jsonb (recommandé)
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### `review_replies`
+Stocke brouillons et réponses envoyées.
+- `review_id` (référence `google_reviews.id`)
+- `reply_text`
+- `status`: `draft | sent`
+- `created_at`, `sent_at`
+
+### `business_settings` / `business_memory`
+Contexte IA :
+- `business_id` (UUID)
+- signature, tone/length par défaut
+- mémoire active (notes)
+
+⚠️ Important : `business_id` est un UUID. Le frontend doit envoyer un UUID (pas `locations/...`).
+
+---
+
+## Installation locale
+
+### Prérequis
+- Node.js
+- Supabase CLI
+- Un projet Supabase configuré
+- Variables d’environnement (Vercel/local)
+
+### Install
+```bash
+npm install
+npm run dev
 ```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-## Supabase Functions
-
-### 403 scope insufficient ?
-1) Google Cloud → OAuth consent → ajouter le scope `https://www.googleapis.com/auth/business.manage`
-2) Ajouter ton compte dans "Test users" si l'app est en mode test
-3) Revoquer l'acces a l'app dans Google Account (Securite → Acces tiers)
-4) Relancer "Connecter Google Business Profile"
