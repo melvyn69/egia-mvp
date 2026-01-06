@@ -279,22 +279,36 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       }
 
       const nowIso = new Date().toISOString();
-      const rows = reviews.map((review) => ({
-        user_id: userId,
-        location_id: location.location_resource_name,
-        location_name: displayName,
-        review_id: review.reviewId ?? review.name ?? "",
-        author_name: review.reviewer?.displayName ?? null,
-        rating: mapRating(review.starRating),
-        comment: review.comment ?? null,
-        create_time: review.createTime ?? null,
-        update_time: review.updateTime ?? null,
-        owner_reply: review.reviewReply?.comment ?? null,
-        owner_reply_time: review.reviewReply?.updateTime ?? null,
-        reply_text: review.reviewReply?.comment ?? null,
-        replied_at: review.reviewReply?.updateTime ?? null,
-        last_synced_at: nowIso
-      }));
+      const rows = reviews
+        .map((review) => {
+          const reviewName = review.name ?? null;
+          const reviewIdFromName = review.name
+            ? review.name.split("/").pop() ?? null
+            : null;
+          const reviewId = review.reviewId ?? reviewIdFromName ?? null;
+          if (!reviewId) {
+            return null;
+          }
+          return {
+            user_id: userId,
+            location_id: location.location_resource_name,
+            location_name: displayName,
+            review_name: reviewName,
+            review_id: reviewId,
+            author_name: review.reviewer?.displayName ?? null,
+            rating: mapRating(review.starRating),
+            comment: review.comment ?? null,
+            create_time: review.createTime ?? null,
+            update_time: review.updateTime ?? null,
+            owner_reply: review.reviewReply?.comment ?? null,
+            owner_reply_time: review.reviewReply?.updateTime ?? null,
+            reply_text: review.reviewReply?.comment ?? null,
+            replied_at: review.reviewReply?.updateTime ?? null,
+            last_synced_at: nowIso,
+            raw: review
+          };
+        })
+        .filter(Boolean);
 
       const { error: upsertError } = await supabaseAdmin
         .from("google_reviews")
