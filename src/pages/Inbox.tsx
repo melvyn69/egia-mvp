@@ -5,12 +5,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
 
 const statusTabs = [
-  { id: "todo", label: "À traiter" },
+  { id: "new", label: "Nouveau" },
+  { id: "reading", label: "À traiter" },
   { id: "replied", label: "Répondu" },
+  { id: "archived", label: "Ignoré" },
   { id: "all", label: "Tout" }
 ] as const;
 
 type StatusFilter = (typeof statusTabs)[number]["id"];
+type ReviewStatus = "new" | "reading" | "replied" | "archived";
+
+const isReviewStatus = (value: string | null | undefined): value is ReviewStatus =>
+  value === "new" ||
+  value === "reading" ||
+  value === "replied" ||
+  value === "archived";
 
 type Review = {
   id: string;
@@ -21,8 +30,9 @@ type Review = {
   authorName: string;
   rating: number;
   source: "Google" | "Facebook";
-  status: "todo" | "replied";
+  status: ReviewStatus;
   createdAt: string;
+  updatedAt: string;
   text: string;
   tags: string[];
 };
@@ -48,120 +58,31 @@ type ReviewReply = {
   sent_at: string | null;
 };
 
-const mockReviews: Review[] = [
-  {
-    id: "r1",
-    reviewId: "r1",
-    locationName: "Boulangerie Saint-Roch",
-    locationId: "loc-1",
-    businessId: "00000000-0000-0000-0000-000000000001",
-    authorName: "Camille Dupont",
-    rating: 5,
-    source: "Google",
-    status: "todo",
-    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    text: "Accueil chaleureux, viennoiseries délicieuses. Je recommande !",
-    tags: ["Accueil", "Qualité"]
-  },
-  {
-    id: "r2",
-    reviewId: "r2",
-    locationName: "Boulangerie Saint-Roch",
-    locationId: "loc-1",
-    businessId: "00000000-0000-0000-0000-000000000001",
-    authorName: "Thomas Girard",
-    rating: 3,
-    source: "Google",
-    status: "todo",
-    createdAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
-    text: "Bon produit mais attente un peu longue ce matin.",
-    tags: ["Attente", "Service"]
-  },
-  {
-    id: "r3",
-    reviewId: "r3",
-    locationName: "Brasserie du Parc",
-    locationId: "loc-2",
-    businessId: "00000000-0000-0000-0000-000000000002",
-    authorName: "Ines Martin",
-    rating: 2,
-    source: "Facebook",
-    status: "todo",
-    createdAt: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
-    text: "Service lent et plat tiède. Décevant.",
-    tags: ["Service", "Cuisine"]
-  },
-  {
-    id: "r4",
-    reviewId: "r4",
-    locationName: "Brasserie du Parc",
-    locationId: "loc-2",
-    businessId: "00000000-0000-0000-0000-000000000002",
-    authorName: "Louis Bernard",
-    rating: 4,
-    source: "Google",
-    status: "replied",
-    createdAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-    text: "Cadre agréable et équipe souriante.",
-    tags: ["Ambiance", "Equipe"]
-  },
-  {
-    id: "r5",
-    reviewId: "r5",
-    locationName: "Salon Lila",
-    locationId: "loc-3",
-    businessId: "00000000-0000-0000-0000-000000000003",
-    authorName: "Nora Lemoine",
-    rating: 1,
-    source: "Facebook",
-    status: "todo",
-    createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    text: "Rendez-vous annulé sans prévenir, très déçue.",
-    tags: ["Organisation", "Fiabilité"]
-  },
-  {
-    id: "r6",
-    reviewId: "r6",
-    locationName: "Salon Lila",
-    locationId: "loc-3",
-    businessId: "00000000-0000-0000-0000-000000000003",
-    authorName: "Julien Huguet",
-    rating: 4,
-    source: "Google",
-    status: "replied",
-    createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    text: "Très bon service, je reviendrai !",
-    tags: ["Service", "Fidelité"]
-  },
-  {
-    id: "r7",
-    reviewId: "r7",
-    locationName: "Studio Forma",
-    locationId: "loc-4",
-    businessId: "00000000-0000-0000-0000-000000000004",
-    authorName: "Sarah Klein",
-    rating: 5,
-    source: "Google",
-    status: "todo",
-    createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-    text: "Coaching motivant et suivi au top.",
-    tags: ["Coaching", "Suivi"]
-  },
-  {
-    id: "r8",
-    reviewId: "r8",
-    locationName: "Studio Forma",
-    locationId: "loc-4",
-    businessId: "00000000-0000-0000-0000-000000000004",
-    authorName: "Hakim Roux",
-    rating: 3,
-    source: "Facebook",
-    status: "replied",
-    createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-    text: "Salle correcte, un peu trop chargée aux heures de pointe.",
-    tags: ["Affluence", "Infrastructure"]
-  }
-];
+type ReviewRow = {
+  id: string;
+  review_id: string | null;
+  location_id: string;
+  author_name: string | null;
+  rating: number | null;
+  comment: string | null;
+  create_time: string | null;
+  update_time: string | null;
+  status: ReviewStatus | null;
+};
+
+const statusLabelMap: Record<ReviewStatus, string> = {
+  new: "Nouveau",
+  reading: "À traiter",
+  replied: "Répondu",
+  archived: "Ignoré"
+};
+
+const statusVariantMap: Record<ReviewStatus, "warning" | "success" | "neutral"> = {
+  new: "warning",
+  reading: "warning",
+  replied: "success",
+  archived: "neutral"
+};
 
 const lengthOptions: Array<{ id: LengthPreset; label: string }> = [
   { id: "court", label: "Court" },
@@ -259,9 +180,9 @@ const getAccessToken = async (
 };
 
 const Inbox = () => {
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("todo");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("new");
   const [selectedLocation, setSelectedLocation] = useState("all");
-  const [selectedReviewId, setSelectedReviewId] = useState<string>(mockReviews[0]?.id);
+  const [selectedReviewId, setSelectedReviewId] = useState<string>("");
   const [lengthPreset, setLengthPreset] = useState<LengthPreset>("moyen");
   const [tonePreset, setTonePreset] = useState<TonePreset>("professionnel");
   const [replyText, setReplyText] = useState("");
@@ -289,18 +210,93 @@ const Inbox = () => {
   const [batchGenerating, setBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [batchError, setBatchError] = useState<string | null>(null);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsError, setReviewsError] = useState<string | null>(null);
+  const [locationsMap, setLocationsMap] = useState<Record<string, string>>({});
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncDisabled, setSyncDisabled] = useState(false);
 
   const isSupabaseAvailable = Boolean(supabase);
   const isCooldownActive = cooldownUntil ? cooldownUntil > Date.now() : false;
   const projectRef = getProjectRef(supabaseUrl);
 
+  const loadInboxData = async () => {
+    if (!supabase) {
+      setReviews([]);
+      setLocationsMap({});
+      return;
+    }
+    setReviewsLoading(true);
+    setReviewsError(null);
+    try {
+      const { data: locationsData, error: locationsError } = await supabase
+        .from("google_locations")
+        .select("location_resource_name, location_title")
+        .order("updated_at", { ascending: false });
+      if (locationsError) {
+        console.error("google_locations fetch error:", locationsError);
+      }
+      const nextLocationsMap: Record<string, string> = {};
+      (locationsData ?? []).forEach((location) => {
+        if (location.location_resource_name) {
+          nextLocationsMap[location.location_resource_name] =
+            location.location_title ?? location.location_resource_name;
+        }
+      });
+      setLocationsMap(nextLocationsMap);
+
+      const { data: reviewsData, error: reviewsError } = await supabase
+        .from("google_reviews")
+        .select(
+          "id, review_id, location_id, author_name, rating, comment, create_time, update_time, status"
+        )
+        .order("update_time", { ascending: false })
+        .limit(50);
+
+      if (reviewsError) {
+        setReviewsError("Impossible de charger les avis.");
+        setReviews([]);
+        return;
+      }
+
+      const rows = (reviewsData ?? []) as ReviewRow[];
+      const mapped = rows.map((row) => {
+        const createdAt = row.create_time ?? row.update_time ?? new Date().toISOString();
+        const updatedAt = row.update_time ?? createdAt;
+        const status = isReviewStatus(row.status) ? row.status : "new";
+        return {
+          id: row.id,
+          reviewId: row.review_id ?? row.id,
+          locationName:
+            nextLocationsMap[row.location_id] ?? row.location_id ?? "—",
+          locationId: row.location_id,
+          businessId: row.location_id,
+          authorName: row.author_name ?? "Anonyme",
+          rating: row.rating ?? 0,
+          source: "Google",
+          status,
+          createdAt,
+          updatedAt,
+          text: row.comment ?? "",
+          tags: []
+        } satisfies Review;
+      });
+
+      setReviews(mapped);
+    } finally {
+      setReviewsLoading(false);
+    }
+  };
+
   const locations = useMemo(() => {
-    const unique = Array.from(new Set(mockReviews.map((review) => review.locationName)));
+    const unique = Array.from(new Set(reviews.map((review) => review.locationName)));
     return ["Tous", ...unique];
-  }, []);
+  }, [reviews]);
 
   const filteredReviews = useMemo(() => {
-    return mockReviews.filter((review) => {
+    return reviews.filter((review) => {
       const matchesStatus =
         statusFilter === "all" ? true : review.status === statusFilter;
       const matchesLocation =
@@ -309,7 +305,7 @@ const Inbox = () => {
           : review.locationName === selectedLocation;
       return matchesStatus && matchesLocation;
     });
-  }, [statusFilter, selectedLocation]);
+  }, [reviews, statusFilter, selectedLocation]);
 
   useEffect(() => {
     if (filteredReviews.length === 0) {
@@ -322,9 +318,13 @@ const Inbox = () => {
     }
   }, [filteredReviews, selectedReviewId]);
 
+  useEffect(() => {
+    void loadInboxData();
+  }, [isSupabaseAvailable]);
+
   const selectedReview = useMemo(() => {
-    return mockReviews.find((review) => review.id === selectedReviewId) ?? null;
-  }, [selectedReviewId]);
+    return reviews.find((review) => review.id === selectedReviewId) ?? null;
+  }, [reviews, selectedReviewId]);
 
   useEffect(() => {
     if (!selectedReview) {
@@ -510,6 +510,42 @@ const Inbox = () => {
     return () => window.clearTimeout(timeout);
   }, [cooldownUntil]);
 
+  const handleSyncReviews = async () => {
+    setSyncError(null);
+    setSyncDisabled(false);
+    if (!supabase) {
+      setSyncError("Connexion Supabase requise.");
+      return;
+    }
+    setSyncLoading(true);
+    try {
+      const jwt = await getAccessToken(supabase);
+      const response = await fetch("/api/google/gbp/reviews/sync", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${jwt}`
+        }
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.ok) {
+        if (data?.error === "reauth_required") {
+          setSyncError("Reconnecte Google.");
+          setSyncDisabled(true);
+        } else {
+          setSyncError("Erreur de synchronisation.");
+        }
+        return;
+      }
+      setSyncDisabled(false);
+      await loadInboxData();
+    } catch (error) {
+      console.error(error);
+      setSyncError("Erreur de synchronisation.");
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
   const handleGenerate = async () => {
     if (!selectedReview) {
       return;
@@ -523,6 +559,7 @@ const Inbox = () => {
     setIsGenerating(true);
     setGenerationError(null);
     try {
+      // TODO: generate_ai_reply(review)
       console.log("generate-reply: invoking edge function", {
         reviewId: selectedReview.id,
         tone: tonePreset,
@@ -663,6 +700,7 @@ const Inbox = () => {
     setReplySending(true);
     try {
       const userToken = await getAccessToken(supabaseClient);
+      // TODO: publish_reply_to_google(review)
       const projectRef = getProjectRef(supabaseUrl);
       if (import.meta.env.DEV) {
         console.log("projectRef", projectRef ?? "—");
@@ -752,7 +790,7 @@ const Inbox = () => {
       setGenerationError("Configuration Supabase manquante.");
       return;
     }
-    const targets = filteredReviews.filter((review) => review.status === "todo");
+    const targets = filteredReviews.filter((review) => review.status === "new");
     if (targets.length === 0) {
       setBatchError("Aucun avis à traiter.");
       return;
@@ -828,6 +866,27 @@ const Inbox = () => {
         <p className="text-sm text-slate-500">
           Réponses aux avis et suivi des interactions clients.
         </p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleSyncReviews}
+            disabled={syncLoading || syncDisabled}
+          >
+            {syncLoading ? "Synchronisation..." : "Synchroniser les avis"}
+          </Button>
+          {syncError && (
+            <span className="text-xs font-medium text-amber-700">
+              {syncError}
+            </span>
+          )}
+          {reviewsError && (
+            <span className="text-xs font-medium text-amber-700">
+              {reviewsError}
+            </span>
+          )}
+        </div>
         {import.meta.env.DEV && (
           <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
             <div>Supabase URL: {supabaseUrl ?? "—"}</div>
@@ -892,7 +951,9 @@ const Inbox = () => {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {filteredReviews.length === 0 ? (
+            {reviewsLoading ? (
+              <p className="text-sm text-slate-500">Chargement des avis...</p>
+            ) : filteredReviews.length === 0 ? (
               <p className="text-sm text-slate-500">Aucun avis à afficher.</p>
             ) : (
               filteredReviews.map((review) => (
@@ -915,15 +976,18 @@ const Inbox = () => {
                         {review.locationName}
                       </p>
                     </div>
-                    <Badge variant={review.status === "todo" ? "warning" : "success"}>
-                      {review.status === "todo" ? "À traiter" : "Répondu"}
+                    <Badge variant={statusVariantMap[review.status]}>
+                      {statusLabelMap[review.status]}
                     </Badge>
                     {draftByReview[review.id] && (
                       <Badge variant="success">Draft saved</Badge>
                     )}
                   </div>
                   <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-                    <span>{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span>
+                    <span>
+                      {"★".repeat(Math.max(0, Math.min(5, review.rating)))}
+                      {"☆".repeat(5 - Math.max(0, Math.min(5, review.rating)))}
+                    </span>
                     <span>{review.source}</span>
                     <span>•</span>
                     <span>{formatDate(review.createdAt)}</span>
@@ -963,10 +1027,8 @@ const Inbox = () => {
 
                 <div className="flex items-center gap-2">
                   <Badge variant="neutral">{selectedReview.rating}★</Badge>
-                  <Badge variant={
-                    selectedReview.status === "todo" ? "warning" : "success"
-                  }>
-                    {selectedReview.status === "todo" ? "À traiter" : "Répondu"}
+                  <Badge variant={statusVariantMap[selectedReview.status]}>
+                    {statusLabelMap[selectedReview.status]}
                   </Badge>
                 </div>
 
