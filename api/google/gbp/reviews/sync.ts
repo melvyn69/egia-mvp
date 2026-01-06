@@ -89,6 +89,13 @@ const listReviewsForLocation = async (
       }
     });
     const data = await response.json().catch(() => null);
+    if (response.status === 404) {
+      console.warn("google reviews 404:", {
+        location_resource_name: locationName,
+        response: data
+      });
+      return { reviews: [], notFound: true };
+    }
     if (!response.ok) {
       console.error(
         "google reviews fetch error:",
@@ -101,7 +108,7 @@ const listReviewsForLocation = async (
     pageToken = data?.nextPageToken;
   } while (pageToken);
 
-  return reviews;
+  return { reviews, notFound: false };
 };
 
 const handler = async (req: IncomingMessage, res: ServerResponse) => {
@@ -238,8 +245,16 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     );
 
     let reviewsUpsertedCount = 0;
+    let locationsFailed = 0;
     for (const locationName of locationList) {
-      const reviews = await listReviewsForLocation(accessToken, locationName);
+      const { reviews, notFound } = await listReviewsForLocation(
+        accessToken,
+        locationName
+      );
+      if (notFound) {
+        locationsFailed += 1;
+        continue;
+      }
       if (reviews.length === 0) {
         continue;
       }
@@ -288,7 +303,8 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       JSON.stringify({
         ok: true,
         locationsCount: locationList.length,
-        reviewsCount: reviewsUpsertedCount
+        reviewsCount: reviewsUpsertedCount,
+        locationsFailed
       })
     );
   } catch (error) {
