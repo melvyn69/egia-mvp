@@ -149,6 +149,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(403).json({ error: "Unauthorized" });
   }
 
+  // GET = healthcheck (évite que cron-job.org ou un navigateur te fasse un sync complet)
+  if (method === "GET") {
+    return res.status(200).json({
+      ok: true,
+      requestId,
+      mode: "healthcheck",
+      message: "Use POST to run the sync."
+    });
+  }
+
   const errors: Array<{ locationId: string; message: string }> = [];
   let processedUsers = 0;
   let processedLocations = 0;
