@@ -75,17 +75,168 @@ const getAuthSecret = (req: VercelRequest) => {
   return secretParam ?? "";
 };
 
-const analyzeReview = async (_review: {
-  id: string;
-  comment: string;
-}) => {
-  return {
-    sentiment: "neutral",
-    sentiment_score: 0,
-    summary: "",
-    topics: [],
-    model: "stub"
-  } as AiResult;
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, value));
+
+const normalizeTopics = (topics: AiTag[]) => {
+  const maxTopics = Number(process.env.AI_TAG_MAX_TOPICS ?? 8);
+  const seen = new Set<string>();
+  const allowedCategories = new Set([
+    "service",
+    "produit",
+    "prix",
+    "attente",
+    "livraison",
+    "propreté",
+    "ambiance",
+    "communication",
+    "qualité",
+    "autre"
+  ]);
+
+  const normalized: AiTag[] = [];
+  for (const topic of topics ?? []) {
+    if (!topic?.name) {
+      continue;
+    }
+    const name = String(topic.name).trim();
+    if (!name) {
+      continue;
+    }
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    const category = allowedCategories.has(topic.category ?? "")
+      ? topic.category
+      : "autre";
+    normalized.push({
+      name,
+      weight: typeof topic.weight === "number" ? topic.weight : undefined,
+      polarity:
+        typeof topic.polarity === "number"
+          ? clamp(topic.polarity, -1, 1)
+          : undefined,
+      confidence:
+        typeof topic.confidence === "number"
+          ? clamp(topic.confidence, 0, 1)
+          : undefined,
+      evidence: topic.evidence ? String(topic.evidence).slice(0, 90) : undefined,
+      category
+    });
+    if (normalized.length >= maxTopics) {
+      break;
+    }
+  }
+  return normalized;
+};
+
+const analyzeReview = async (review: { id: string; comment: string }) => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing OPENAI_API_KEY");
+  }
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "review_ai_analysis",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                sentiment: {
+                  type: "string",
+                  enum: ["positive", "neutral", "negative", "mixed"]
+                },
+                sentiment_score: { type: "number" },
+                summary: { type: "string" },
+                topics: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      name: { type: "string" },
+                      weight: { type: "number" },
+                      polarity: { type: "number" },
+                      confidence: { type: "number" },
+                      evidence: { type: "string" },
+                      category: { type: "string" }
+                    },
+                    required: ["name"]
+                  }
+                }
+              },
+              required: ["sentiment", "sentiment_score", "summary", "topics"]
+            }
+          }
+        },
+        input: [
+          {
+            role: "system",
+            content:
+              "Tu es un analyste d'avis Google. Réponds en français uniquement. " +
+              "Retourne strictement du JSON valide selon le schéma fourni. " +
+              "Les tags doivent être courts (2-4 mots), sans emoji."
+          },
+          {
+            role: "user",
+            content:
+              "Analyse cet avis client et produis les champs demandés (sentiment, score, résumé, topics). " +
+              "Base-toi uniquement sur le commentaire suivant:\n\n" +
+              review.comment
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OpenAI error: ${errorText.slice(0, 200)}`);
+    }
+
+    const payload = await response.json();
+    const outputText =
+      payload?.output_text ??
+      payload?.output?.[0]?.content?.[0]?.text ??
+      null;
+    if (!outputText) {
+      throw new Error("OpenAI response missing output_text");
+    }
+
+    const parsed = JSON.parse(outputText) as AiResult;
+    const sentimentScore = clamp(parsed.sentiment_score, -1, 1);
+    return {
+      sentiment: parsed.sentiment,
+      sentiment_score: sentimentScore,
+      summary: String(parsed.summary ?? "").slice(0, 180),
+      topics: normalizeTopics(parsed.topics ?? []),
+      model
+    } satisfies AiResult;
+  } catch (error) {
+    if ((error as Error).name === "AbortError") {
+      throw new Error("OpenAI request timeout");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
