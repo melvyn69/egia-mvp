@@ -136,7 +136,16 @@ const normalizeTopics = (topics: AiTag[]) => {
   return normalized;
 };
 
-const analyzeReview = async (review: { id: string; comment: string }) => {
+const analyzeReview = async (
+  review: { id: string; comment: string },
+  requestId: string,
+  debugInfo?: {
+    openaiStatus?: number;
+    openaiId?: string;
+    outputTextPreview?: string;
+    parsedKeys?: string[];
+  }
+) => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("Missing OPENAI_API_KEY");
@@ -196,6 +205,7 @@ const analyzeReview = async (review: { id: string; comment: string }) => {
             role: "system",
             content:
               "Tu es un analyste d'avis Google. Réponds en français uniquement. " +
+              "Return ONLY valid JSON matching the schema. No prose. No markdown. " +
               "Retourne strictement du JSON valide selon le schéma fourni. " +
               "Les tags doivent être courts (2-4 mots), sans emoji."
           },
@@ -216,10 +226,29 @@ const analyzeReview = async (review: { id: string; comment: string }) => {
     }
 
     const payload = await response.json();
+    if (debugInfo) {
+      debugInfo.openaiStatus = response.status;
+      debugInfo.openaiId = payload?.id ?? null;
+    }
     const outputText =
-      payload?.output_text ??
-      payload?.output?.[0]?.content?.[0]?.text ??
-      null;
+      (typeof payload?.output_text === "string" && payload.output_text.trim()
+        ? payload.output_text
+        : null) ??
+      (() => {
+        const chunks: string[] = [];
+        const outputItems = Array.isArray(payload?.output) ? payload.output : [];
+        for (const item of outputItems) {
+          const contentItems = Array.isArray(item?.content) ? item.content : [];
+          for (const content of contentItems) {
+            const text =
+              typeof content?.text === "string" ? content.text : undefined;
+            if (text) {
+              chunks.push(text);
+            }
+          }
+        }
+        return chunks.length ? chunks.join("\n") : null;
+      })();
     if (!outputText) {
       throw new Error("OpenAI response missing output_text");
     }
@@ -228,8 +257,20 @@ const analyzeReview = async (review: { id: string; comment: string }) => {
     try {
       parsed = JSON.parse(outputText) as AiResult;
     } catch (error) {
-      console.error("[ai-tag] OpenAI JSON parse failed");
+      if (debugInfo) {
+        debugInfo.outputTextPreview = outputText.slice(0, 200);
+      }
+      console.error(
+        "[ai-tag]",
+        requestId,
+        "OpenAI JSON parse failed",
+        outputText.slice(0, 300)
+      );
       throw error;
+    }
+    if (debugInfo) {
+      debugInfo.outputTextPreview = outputText.slice(0, 200);
+      debugInfo.parsedKeys = Object.keys(parsed ?? {});
     }
     const sentimentScore = clamp(parsed.sentiment_score, -1, 1);
     return {
@@ -387,6 +428,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             since_time: string;
             since_id: string;
           };
+          openaiStatus?: number;
+          openaiId?: string | null;
+          outputTextPreview?: string;
+          parsedKeys?: string[];
           reason?: string;
         }
       | undefined;
@@ -470,10 +515,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       reviewsScanned += 1;
       try {
         reviewsProcessed += 1;
-        const analysis = await analyzeReview({
-          id: review.id,
-          comment: review.comment
-        });
+        const analysis = await analyzeReview(
+          {
+            id: review.id,
+            comment: review.comment
+          },
+          requestId,
+          debug
+        );
 
         const nowIso = new Date().toISOString();
         const { error: insightError } = await supabaseAdmin
