@@ -47,8 +47,8 @@ const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
 });
 
 type Cursor = {
-  last_time: string | null;
-  last_id: string | null;
+  last_source_time: string | null;
+  last_review_pk: string | null;
 };
 
 const loadCursor = async (): Promise<Cursor> => {
@@ -58,8 +58,8 @@ const loadCursor = async (): Promise<Cursor> => {
     .eq("key", CURSOR_KEY)
     .maybeSingle();
   return (data?.value as Cursor) ?? {
-    last_time: "1970-01-01T00:00:00.000Z",
-    last_id: "00000000-0000-0000-0000-000000000000"
+    last_source_time: "1970-01-01T00:00:00.000Z",
+    last_review_pk: "00000000-0000-0000-0000-000000000000"
   };
 };
 
@@ -286,31 +286,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let reviewsProcessed = 0;
   let tagsUpserted = 0;
   let candidatesFound = 0;
-  let missingInsightsCount = 0;
+  let totalWithText = 0;
+  let totalMissingInsights = 0;
   let skipReason: string | null = null;
 
   try {
     const cursor = await loadCursor();
+    console.log("[ai-tag]", requestId, "cursor", cursor);
+
+    const totalWithTextQuery = await supabaseAdmin
+      .from("google_reviews")
+      .select("id", { count: "exact", head: true })
+      .not("comment", "is", null)
+      .neq("comment", "");
+    totalWithText = totalWithTextQuery.count ?? 0;
+
+    const totalMissingInsightsQuery = await supabaseAdmin
+      .from("google_reviews")
+      .select("id, review_ai_insights(review_pk)", { count: "exact", head: true })
+      .not("comment", "is", null)
+      .neq("comment", "")
+      .is("review_ai_insights.review_pk", null);
+    totalMissingInsights = totalMissingInsightsQuery.count ?? 0;
+    console.log(
+      "[ai-tag]",
+      requestId,
+      "totalMissingInsights",
+      totalMissingInsights
+    );
+
+    const lastSourceTime =
+      cursor.last_source_time ?? "1970-01-01T00:00:00.000Z";
+    const lastReviewPk =
+      cursor.last_review_pk ?? "00000000-0000-0000-0000-000000000000";
     let query = supabaseAdmin
       .from("google_reviews")
       .select(
-        "id, user_id, location_id, location_name, comment, update_time, create_time, review_ai_insights(source_update_time)"
+        "id, user_id, location_id, location_name, comment, update_time, create_time, created_at, review_ai_insights(source_update_time)"
       )
       .not("comment", "is", null)
       .neq("comment", "")
-      .order("update_time", { ascending: true })
+      .order("update_time", { ascending: true, nullsFirst: true })
+      .order("create_time", { ascending: true, nullsFirst: true })
+      .order("created_at", { ascending: true, nullsFirst: true })
       .order("id", { ascending: true })
       .limit(MAX_REVIEWS);
 
-    const lastTime =
-      cursor.last_time ?? "1970-01-01T00:00:00.000Z";
-    const lastId =
-      cursor.last_id ?? "00000000-0000-0000-0000-000000000000";
     query = query.or(
-      `and(update_time.gt.${lastTime}),` +
-        `and(update_time.eq.${lastTime},id.gt.${lastId}),` +
-        `and(update_time.is.null,create_time.gt.${lastTime}),` +
-        `and(update_time.is.null,create_time.eq.${lastTime},id.gt.${lastId})`
+      `and(update_time.gt.${lastSourceTime}),` +
+        `and(update_time.eq.${lastSourceTime},id.gt.${lastReviewPk}),` +
+        `and(update_time.is.null,create_time.gt.${lastSourceTime}),` +
+        `and(update_time.is.null,create_time.eq.${lastSourceTime},id.gt.${lastReviewPk}),` +
+        `and(update_time.is.null,create_time.is.null,created_at.gt.${lastSourceTime}),` +
+        `and(update_time.is.null,create_time.is.null,created_at.eq.${lastSourceTime},id.gt.${lastReviewPk})`
     );
 
     const { data: reviews, error: reviewsError } = await query;
@@ -340,6 +368,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const candidates = reviews.filter((review) => {
+      if (!review.comment || review.comment.trim().length === 0) {
+        return false;
+      }
       const insightValue = review.review_ai_insights as
         | { source_update_time?: string }
         | Array<{ source_update_time?: string }>
@@ -347,8 +378,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const existingSourceUpdate = Array.isArray(insightValue)
         ? insightValue[0]?.source_update_time ?? null
         : insightValue?.source_update_time ?? null;
-      const effectiveUpdateTime = review.update_time ?? review.create_time ?? null;
+      const effectiveUpdateTime =
+        review.update_time ?? review.create_time ?? review.created_at ?? null;
       if (!effectiveUpdateTime) {
+        console.error("[ai-tag]", requestId, "missing source_time", review.id);
+        return false;
+      }
+      if (
+        new Date(effectiveUpdateTime).getTime() <
+        new Date(lastSourceTime).getTime()
+      ) {
+        return false;
+      }
+      if (
+        new Date(effectiveUpdateTime).getTime() ===
+          new Date(lastSourceTime).getTime() &&
+        review.id <= lastReviewPk
+      ) {
         return false;
       }
       if (!existingSourceUpdate) {
@@ -361,7 +407,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     candidatesFound = candidates.length;
-    missingInsightsCount = candidates.length;
+    console.log(
+      "[ai-tag]",
+      requestId,
+      "candidatesFound",
+      candidatesFound
+    );
+    if (candidates.length > 0) {
+      console.log(
+        "[ai-tag]",
+        requestId,
+        "candidateRange",
+        candidates[0]?.id,
+        candidates[candidates.length - 1]?.id
+      );
+    }
 
     if (candidatesFound === 0) {
       skipReason = "no_candidates";
@@ -372,11 +432,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aborted,
         skipReason,
         stats: {
+          totalWithText,
+          totalMissingInsights,
           reviewsScanned,
           reviewsProcessed,
           tagsUpserted,
           candidatesFound,
-          missingInsightsCount,
           errors
         }
       });
@@ -386,19 +447,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (timeUp() || reviewsScanned >= MAX_REVIEWS) {
         break;
       }
-      const effectiveUpdateTime = review.update_time ?? review.create_time ?? null;
+      const effectiveUpdateTime =
+        review.update_time ?? review.create_time ?? review.created_at ?? null;
       if (!effectiveUpdateTime) {
-        errors.push({ reviewId: review.id, message: "Missing update_time" });
-        console.error("[ai]", requestId, "missing update_time", review.id);
-        await saveCursor({
-          last_time: lastTime,
-          last_id: review.id
-        });
+        errors.push({ reviewId: review.id, message: "Missing source_time" });
+        console.error("[ai-tag]", requestId, "missing source_time", review.id);
         continue;
       }
 
       reviewsScanned += 1;
       try {
+        reviewsProcessed += 1;
         const analysis = await analyzeReview({
           id: review.id,
           comment: review.comment
@@ -433,8 +492,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
           errors.push({ reviewId: review.id, message: insightError.message });
           await saveCursor({
-            last_time: effectiveUpdateTime,
-            last_id: review.id
+            last_source_time: effectiveUpdateTime,
+            last_review_pk: review.id
           });
           continue;
         }
@@ -469,18 +528,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           tagsUpserted += 1;
         }
 
-        reviewsProcessed += 1;
         await saveCursor({
-          last_time: effectiveUpdateTime,
-          last_id: review.id
+          last_source_time: effectiveUpdateTime,
+          last_review_pk: review.id
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
         errors.push({ reviewId: review.id, message });
         console.error("[ai]", requestId, "review failed", message);
         await saveCursor({
-          last_time: effectiveUpdateTime,
-          last_id: review.id
+          last_source_time: effectiveUpdateTime ?? lastSourceTime,
+          last_review_pk: review.id
         });
       }
     }
@@ -495,11 +553,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       aborted,
       skipReason,
       stats: {
+        totalWithText,
+        totalMissingInsights,
         reviewsScanned,
         reviewsProcessed,
         tagsUpserted,
         candidatesFound,
-        missingInsightsCount,
         errors
       }
     });
