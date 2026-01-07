@@ -179,6 +179,26 @@ const getAccessToken = async (
   return token;
 };
 
+const CRON_CURSOR_KEY = "google_sync_replies_cursor_v1";
+
+const formatSinceMinutes = (iso: string | null): string => {
+  if (!iso) {
+    return "—";
+  }
+  const diffMs = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) {
+    return "—";
+  }
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) {
+    return "moins d'une minute";
+  }
+  if (minutes === 1) {
+    return "1 minute";
+  }
+  return `${minutes} minutes`;
+};
+
 const Inbox = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("new");
   const [selectedLocation, setSelectedLocation] = useState("all");
@@ -213,9 +233,8 @@ const Inbox = () => {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
   const [reviewsError, setReviewsError] = useState<string | null>(null);
-  const [syncLoading, setSyncLoading] = useState(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [syncDisabled, setSyncDisabled] = useState(false);
+  const [lastCronSyncAt, setLastCronSyncAt] = useState<string | null>(null);
+  const [cronErrors, setCronErrors] = useState(false);
 
   const isSupabaseAvailable = Boolean(supabase);
   const isCooldownActive = cooldownUntil ? cooldownUntil > Date.now() : false;
@@ -224,6 +243,8 @@ const Inbox = () => {
   const loadInboxData = async () => {
     if (!supabase) {
       setReviews([]);
+      setLastCronSyncAt(null);
+      setCronErrors(false);
       return;
     }
     setReviewsLoading(true);
@@ -513,42 +534,6 @@ const Inbox = () => {
     }, remainingMs);
     return () => window.clearTimeout(timeout);
   }, [cooldownUntil]);
-
-  const handleSyncReviews = async () => {
-    setSyncError(null);
-    setSyncDisabled(false);
-    if (!supabase) {
-      setSyncError("Connexion Supabase requise.");
-      return;
-    }
-    setSyncLoading(true);
-    try {
-      const jwt = await getAccessToken(supabase);
-      const response = await fetch("/api/google/gbp/reviews/sync", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${jwt}`
-        }
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data?.ok) {
-        if (data?.error === "reauth_required") {
-          setSyncError("Reconnecte Google.");
-          setSyncDisabled(true);
-        } else {
-          setSyncError("Erreur de synchronisation.");
-        }
-        return;
-      }
-      setSyncDisabled(false);
-      await loadInboxData();
-    } catch (error) {
-      console.error(error);
-      setSyncError("Erreur de synchronisation.");
-    } finally {
-      setSyncLoading(false);
-    }
-  };
 
   const handleGenerate = async () => {
     if (!selectedReview) {
@@ -918,25 +903,23 @@ const Inbox = () => {
         <p className="text-sm text-slate-500">
           Réponses aux avis et suivi des interactions clients.
         </p>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleSyncReviews}
-            disabled={syncLoading || syncDisabled}
-          >
-            {syncLoading ? "Synchronisation..." : "Synchroniser les avis"}
-          </Button>
-          {syncError && (
-            <span className="text-xs font-medium text-amber-700">
-              {syncError}
-            </span>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+          <span>Synchronisation automatique toutes les 5 minutes</span>
+          <span>•</span>
+          <span>Dernière synchronisation : {formatSinceMinutes(lastCronSyncAt)}</span>
+          {cronErrors && (
+            <>
+              <span>•</span>
+              <span className="text-amber-700">
+                ⚠️ Certaines fiches Google n&apos;ont pas pu être synchronisées
+              </span>
+            </>
           )}
           {reviewsError && (
-            <span className="text-xs font-medium text-amber-700">
-              {reviewsError}
-            </span>
+            <>
+              <span>•</span>
+              <span className="text-amber-700">{reviewsError}</span>
+            </>
           )}
         </div>
         {import.meta.env.DEV && (
@@ -1341,3 +1324,12 @@ const Inbox = () => {
 };
 
 export { Inbox };
+      const { data: cronState } = await supabase
+        .from("cron_state")
+        .select("updated_at, value")
+        .eq("key", CRON_CURSOR_KEY)
+        .maybeSingle();
+      setLastCronSyncAt(cronState?.updated_at ?? null);
+      const errorsCount = (cronState?.value as { errors_count?: number } | null)
+        ?.errors_count;
+      setCronErrors(Boolean(errorsCount && errorsCount > 0));

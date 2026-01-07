@@ -57,6 +57,7 @@ const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
 type Cursor = {
   location_pk: string | null;
   page_token: string | null;
+  errors_count?: number;
 };
 
 const loadCursor = async (): Promise<Cursor> => {
@@ -471,6 +472,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break;
       }
     }
+
+    cursor.errors_count = errors.length;
+    await saveCursor(cursor);
 
     const aborted = timeUp();
     return res.status(200).json({
