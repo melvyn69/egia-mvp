@@ -234,7 +234,7 @@ const Inbox = () => {
   const [reviewsLoading, setReviewsLoading] = useState(false);
   const [reviewsError, setReviewsError] = useState<string | null>(null);
   const [lastCronSyncAt, setLastCronSyncAt] = useState<string | null>(null);
-  const [cronErrors, setCronErrors] = useState(false);
+  const [cronErrors, setCronErrors] = useState<number>(0);
 
   const isSupabaseAvailable = Boolean(supabase);
   const isCooldownActive = cooldownUntil ? cooldownUntil > Date.now() : false;
@@ -244,7 +244,7 @@ const Inbox = () => {
     if (!supabase) {
       setReviews([]);
       setLastCronSyncAt(null);
-      setCronErrors(false);
+      setCronErrors(0);
       return;
     }
     setReviewsLoading(true);
@@ -907,7 +907,7 @@ const Inbox = () => {
           <span>Synchronisation automatique toutes les 5 minutes</span>
           <span>•</span>
           <span>Dernière synchronisation : {formatSinceMinutes(lastCronSyncAt)}</span>
-          {cronErrors && (
+          {cronErrors > 0 && (
             <>
               <span>•</span>
               <span className="text-amber-700">
@@ -1332,4 +1332,4 @@ export { Inbox };
       setLastCronSyncAt(cronState?.updated_at ?? null);
       const errorsCount = (cronState?.value as { errors_count?: number } | null)
         ?.errors_count;
-      setCronErrors(Boolean(errorsCount && errorsCount > 0));
+      setCronErrors(Number(errorsCount ?? 0));
