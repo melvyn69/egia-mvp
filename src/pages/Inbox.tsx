@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
+import { supabase, supabaseUrl } from "../lib/supabase";
 
 const statusTabs = [
   { id: "new", label: "Nouveau" },
@@ -719,21 +719,19 @@ const Inbox = () => {
           reviewId: selectedReview.reviewId
         });
       }
-      const response = await fetch(
-        `${supabaseUrl}/functions/v1/post-reply-google`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${userJwt}`,
-            apikey: supabaseAnonKey ?? "",
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            reviewId: selectedReview.reviewId,
-            replyText
-          })
-        }
-      );
+      const response = await fetch("/api/google/reply", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${userJwt}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          reviewId: selectedReview.reviewId,
+          replyText,
+          draftReplyId,
+          googleReviewId: selectedReview.id
+        })
+      });
       const data = (await response.json()) as {
         ok?: boolean;
         error?: string;
