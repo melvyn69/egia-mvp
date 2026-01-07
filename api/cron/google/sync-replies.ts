@@ -17,6 +17,11 @@ type GoogleReview = {
   };
 };
 
+const MAX_MS = Number(process.env.CRON_MAX_MS ?? 25000);
+const MAX_LOCATIONS = Number(process.env.CRON_MAX_LOCATIONS ?? 2);
+const MAX_REVIEWS = Number(process.env.CRON_MAX_REVIEWS ?? 400);
+const CURSOR_KEY = "google_sync_replies_location_cursor_v1";
+
 const getEnv = (keys: string[]) => {
   for (const key of keys) {
     const value = process.env[key];
@@ -50,6 +55,28 @@ const getMissingEnv = () => {
 const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false }
 });
+
+const getCursor = async () => {
+  const { data } = await supabaseAdmin
+    .from("cron_state")
+    .select("value")
+    .eq("key", CURSOR_KEY)
+    .maybeSingle();
+  return (data?.value as { last_location_pk?: string } | null)?.last_location_pk ?? null;
+};
+
+const setCursor = async (lastLocationPk: string) => {
+  await supabaseAdmin
+    .from("cron_state")
+    .upsert(
+      {
+        key: CURSOR_KEY,
+        value: { last_location_pk: lastLocationPk },
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: "key" }
+    );
+};
 
 const mapRating = (starRating?: string): number | null => {
   switch (starRating) {
@@ -89,12 +116,24 @@ const refreshGoogleAccessToken = async (refreshToken: string) => {
   return json.access_token as string;
 };
 
-const listReviewsForLocation = async (accessToken: string, parent: string) => {
+const listReviewsForLocation = async (
+  accessToken: string,
+  parent: string,
+  maxReviews: number,
+  timeUp: () => boolean
+) => {
   const reviews: GoogleReview[] = [];
   let pageToken: string | undefined;
 
   do {
-    const baseUrl = `https://mybusiness.googleapis.com/v4/${parent}/reviews?pageSize=200`;
+    if (timeUp()) {
+      break;
+    }
+    if (reviews.length >= maxReviews) {
+      break;
+    }
+    const pageSize = Math.min(200, maxReviews - reviews.length);
+    const baseUrl = `https://mybusiness.googleapis.com/v4/${parent}/reviews?pageSize=${pageSize}`;
     const url = pageToken
       ? `${baseUrl}&pageToken=${encodeURIComponent(pageToken)}`
       : baseUrl;
@@ -127,6 +166,8 @@ const getAuthSecret = (req: VercelRequest) => {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId =
     req.headers["x-request-id"]?.toString() ?? `req_${crypto.randomUUID()}`;
+  const startedAt = Date.now();
+  const timeUp = () => Date.now() - startedAt > MAX_MS;
 
   const method = req.method ?? "GET";
   res.setHeader("Cache-Control", "no-store");
@@ -164,6 +205,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let processedLocations = 0;
   let processedReviews = 0;
   let repliesUpserted = 0;
+  let lastLocationId: string | null = null;
 
   try {
     const { data: connections, error: connectionsError } = await supabaseAdmin
@@ -182,21 +224,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     });
 
-    const { data: locations, error: locationsError } = await supabaseAdmin
+    const cursor = await getCursor();
+    let { data: locations, error: locationsError } = await supabaseAdmin
       .from("google_locations")
       .select(
         "id, user_id, account_resource_name, location_resource_name, location_title"
-      );
+      )
+      .order("id", { ascending: true })
+      .gt("id", cursor ?? "00000000-0000-0000-0000-000000000000")
+      .limit(MAX_LOCATIONS);
 
     if (locationsError) {
       console.error("[sync]", requestId, "locations fetch failed", locationsError);
       return res.status(500).json({ error: "Failed to load locations" });
     }
 
+    if (!locations || locations.length === 0) {
+      const { data: firstBatch } = await supabaseAdmin
+        .from("google_locations")
+        .select(
+          "id, user_id, account_resource_name, location_resource_name, location_title"
+        )
+        .order("id", { ascending: true })
+        .limit(MAX_LOCATIONS);
+      locations = firstBatch ?? [];
+    }
+    if (locations.length > 0) {
+      lastLocationId = locations[locations.length - 1].id;
+    }
+
     const accessTokenByUser = new Map<string, string>();
     processedUsers = refreshTokenByUser.size;
 
     for (const location of locations ?? []) {
+      if (timeUp()) {
+        break;
+      }
       if (!location.location_resource_name || !location.user_id) {
         continue;
       }
@@ -227,10 +290,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       try {
-        const reviews = await listReviewsForLocation(accessToken, parent);
+        const reviews = await listReviewsForLocation(
+          accessToken,
+          parent,
+          MAX_REVIEWS,
+          timeUp
+        );
         processedReviews += reviews.length;
 
         for (const review of reviews) {
+          if (timeUp()) {
+            break;
+          }
           const reviewName = review.name ?? null;
           const reviewIdFromName = reviewName
             ? reviewName.split("/").pop() ?? null
@@ -318,9 +389,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    if (lastLocationId) {
+      await setCursor(lastLocationId);
+    }
+
+    const aborted = timeUp();
     return res.status(200).json({
       ok: true,
       requestId,
+      aborted,
       stats: {
         users: processedUsers,
         locations: processedLocations,
