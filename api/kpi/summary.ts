@@ -56,6 +56,12 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       to,
       timeZone
     );
+    console.log("[kpi-summary] range", {
+      preset,
+      from: range.from,
+      to: range.to,
+      tz: timeZone
+    });
 
     const args = {
       p_location_id: locationId,
@@ -78,19 +84,13 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
     if (summaryError) {
       console.error("kpi_summary rpc error", {
-        message: summaryError.message,
-        details: (summaryError as { details?: string }).details,
-        hint: (summaryError as { hint?: string }).hint,
-        code: (summaryError as { code?: string }).code,
-        args: {
-          p_location_id: args.p_location_id,
-          p_from: args.p_from,
-          p_to: args.p_to,
-          p_rating_min: args.p_rating_min,
-          p_rating_max: args.p_rating_max,
-          p_sentiment: args.p_sentiment,
-          p_status: args.p_status,
-          p_tags: args.p_tags ? `[${args.p_tags.length}]` : null
+        route: "/api/kpi/summary",
+        args,
+        error: {
+          message: summaryError.message,
+          details: (summaryError as { details?: string }).details,
+          hint: (summaryError as { hint?: string }).hint,
+          code: (summaryError as { code?: string }).code
         }
       });
       return res.status(500).json({
