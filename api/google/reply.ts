@@ -216,7 +216,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error("[reply]", requestId, "google_reviews update failed", reviewUpdateError);
     }
 
-    return res.status(200).json({ ok: true });
+    return res.status(200).json({ ok: true, requestId, sentAt });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     const status = msg === "Unauthorized" ? 401 : 500;
