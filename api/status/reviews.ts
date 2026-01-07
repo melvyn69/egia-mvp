@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { createSupabaseAdmin, getUserFromRequest } from "../google/_utils.js";
+import { requireUser } from "../_auth.js";
 
 type CronStatus = {
   status: "idle" | "running" | "done" | "error";
@@ -19,14 +19,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const supabaseAdmin = createSupabaseAdmin();
-    const { userId } = await getUserFromRequest(
-      { headers: req.headers as Record<string, string | undefined> },
-      supabaseAdmin
-    );
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
+    const auth = await requireUser(req, res);
+    if (!auth) {
+      return;
     }
+    const { userId, supabaseAdmin } = auth;
 
     let locationId = req.query.location_id;
     if (Array.isArray(locationId)) {

@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { resolveDateRange } from "../_date.js";
 import { parseFilters } from "../_filters.js";
-import { createSupabaseAdmin, getUserFromRequest } from "../google/_utils.js";
+import { requireUser } from "../_auth.js";
 
 const handler = async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== "GET") {
@@ -9,14 +9,11 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
   }
 
   try {
-    const supabaseAdmin = createSupabaseAdmin();
-    const { userId } = await getUserFromRequest(
-      { headers: req.headers as Record<string, string | undefined> },
-      supabaseAdmin
-    );
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
+    const auth = await requireUser(req, res);
+    if (!auth) {
+      return;
     }
+    const { userId, supabaseAdmin } = auth;
 
     const locationParam = req.query.location_id;
     const locationId = Array.isArray(locationParam)
