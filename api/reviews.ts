@@ -1,8 +1,30 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { resolveDateRange } from "./_date.js";
+import { parseFilters } from "./_filters.js";
 import { createSupabaseAdmin, getUserFromRequest } from "./google/_utils.js";
 
 type Cursor = { source_time: string; id: string };
+
+type GoogleLocationRow = { location_resource_name: string };
+
+type GoogleReviewRow = {
+  id: string;
+  review_id: string | null;
+  location_id: string | null;
+  author_name: string | null;
+  rating: number | null;
+  comment: string | null;
+  create_time: string | null;
+  update_time: string | null;
+  created_at: string | null;
+  status: string | null;
+};
+
+type ReviewInsightRow = { review_pk: string; sentiment: string | null };
+
+type ReviewTagLinkRow = { review_pk: string; tag_id: string };
+
+type AiTagRow = { id: string; tag: string };
 
 const parseCursor = (cursorParam: string | undefined): Cursor | null => {
   if (!cursorParam) {
@@ -38,27 +60,28 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const locationParam = req.query.location_id;
-    const locationId = Array.isArray(locationParam)
-      ? locationParam[0]
-      : locationParam;
+    const filters = parseFilters(req.query);
+    if (filters.reject) {
+      return res.status(200).json({ rows: [], nextCursor: null });
+    }
+    const locationId = filters.location_id;
     let locationIds: string[] = [];
     if (locationId) {
-      const { data: locationRow } = await supabaseAdmin
+      const { data: locationRow } = (await supabaseAdmin
         .from("google_locations")
         .select("location_resource_name")
         .eq("user_id", userId)
         .eq("location_resource_name", locationId)
-        .maybeSingle();
+        .maybeSingle()) as { data: GoogleLocationRow | null; error: unknown };
       if (!locationRow) {
         return res.status(404).json({ error: "Location not found" });
       }
       locationIds = [locationId];
     } else {
-      const { data: locations } = await supabaseAdmin
+      const { data: locations } = (await supabaseAdmin
         .from("google_locations")
         .select("location_resource_name")
-        .eq("user_id", userId);
+        .eq("user_id", userId)) as { data: GoogleLocationRow[] | null; error: unknown };
       locationIds = (locations ?? [])
         .map((location) => location.location_resource_name)
         .filter(Boolean);
@@ -67,15 +90,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       }
     }
 
-    const presetParam = req.query.preset;
-    const preset = (Array.isArray(presetParam) ? presetParam[0] : presetParam) ??
-      "this_month";
-    const fromParam = req.query.from;
-    const toParam = req.query.to;
-    const from = Array.isArray(fromParam) ? fromParam[0] : fromParam;
-    const to = Array.isArray(toParam) ? toParam[0] : toParam;
-    const tzParam = req.query.tz;
-    const timeZone = Array.isArray(tzParam) ? tzParam[0] : tzParam ?? "UTC";
+    const preset = filters.preset;
+    const from = filters.from;
+    const to = filters.to;
+    const timeZone = filters.tz;
     const range = resolveDateRange(
       preset as Parameters<typeof resolveDateRange>[0],
       from,
@@ -83,26 +101,11 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       timeZone
     );
 
-    const ratingMinParam = req.query.rating_min;
-    const ratingMaxParam = req.query.rating_max;
-    const ratingMin = ratingMinParam ? Number(ratingMinParam) : null;
-    const ratingMax = ratingMaxParam ? Number(ratingMaxParam) : null;
-    const sentimentParam = req.query.sentiment;
-    const sentiment = Array.isArray(sentimentParam)
-      ? sentimentParam[0]
-      : sentimentParam;
-    const statusParam = req.query.status;
-    const status = Array.isArray(statusParam) ? statusParam[0] : statusParam;
-    const tagsParam = req.query.tags;
-    const tags = (Array.isArray(tagsParam) ? tagsParam[0] : tagsParam)
-      ?.split(",")
-      .map((tag) => tag.trim().toLowerCase())
-      .filter(Boolean);
-    const sourceParam = req.query.source;
-    const source = Array.isArray(sourceParam) ? sourceParam[0] : sourceParam;
-    if (source && source !== "google") {
-      return res.status(200).json({ rows: [], nextCursor: null });
-    }
+    const ratingMin = filters.rating_min ?? null;
+    const ratingMax = filters.rating_max ?? null;
+    const sentiment = filters.sentiment;
+    const status = filters.status;
+    const tags = filters.tags;
 
     const limitParam = req.query.limit;
     const limit = Math.min(
@@ -142,11 +145,14 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     if (ratingMax !== null && Number.isFinite(ratingMax)) {
       query = query.lte("rating", ratingMax);
     }
-    if (status && status !== "all") {
+    if (status) {
       query = query.eq("status", status);
     }
 
-    const { data: baseRows, error: baseError } = await query;
+    const { data: baseRows, error: baseError } = (await query) as {
+      data: GoogleReviewRow[] | null;
+      error: unknown;
+    };
     if (baseError) {
       return res.status(500).json({ error: "Failed to load reviews" });
     }
@@ -167,25 +173,25 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     });
 
     const reviewIds = rows.map((row) => row.id);
-    const { data: insights } = await supabaseAdmin
+    const { data: insights } = (await supabaseAdmin
       .from("review_ai_insights")
       .select("review_pk, sentiment")
-      .in("review_pk", reviewIds);
+      .in("review_pk", reviewIds)) as { data: ReviewInsightRow[] | null; error: unknown };
     const sentimentMap = new Map(
       (insights ?? []).map((item) => [item.review_pk, item.sentiment])
     );
 
-    const { data: tagLinks } = await supabaseAdmin
+    const { data: tagLinks } = (await supabaseAdmin
       .from("review_ai_tags")
       .select("review_pk, tag_id")
-      .in("review_pk", reviewIds);
+      .in("review_pk", reviewIds)) as { data: ReviewTagLinkRow[] | null; error: unknown };
     const tagIds = Array.from(
       new Set((tagLinks ?? []).map((item) => item.tag_id))
     );
-    const { data: tagsData } = await supabaseAdmin
+    const { data: tagsData } = (await supabaseAdmin
       .from("ai_tags")
       .select("id, tag")
-      .in("id", tagIds);
+      .in("id", tagIds)) as { data: AiTagRow[] | null; error: unknown };
     const tagLookup = new Map((tagsData ?? []).map((item) => [item.id, item.tag]));
     const tagsByReview = new Map<string, string[]>();
     for (const link of tagLinks ?? []) {
@@ -200,7 +206,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
     const filtered = rows.filter((row) => {
       const rowSentiment = sentimentMap.get(row.id) ?? null;
-      if (sentiment && sentiment !== "all" && rowSentiment !== sentiment) {
+      if (sentiment && rowSentiment !== sentiment) {
         return false;
       }
       if (tags && tags.length > 0) {

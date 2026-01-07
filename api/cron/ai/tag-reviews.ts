@@ -92,6 +92,37 @@ const upsertAiStatus = async (
   });
 };
 
+const LOCK_TTL_MS = 90_000;
+
+const acquireLock = async (
+  userId: string,
+  locationId: string
+): Promise<boolean> => {
+  const key = `lock_ai_tag_v1:${userId}:${locationId}`;
+  const { data } = await supabaseAdmin
+    .from("cron_state")
+    .select("value")
+    .eq("key", key)
+    .maybeSingle();
+  const lockedAt = (data?.value as { locked_at?: string } | null)?.locked_at;
+  if (lockedAt) {
+    const age = Date.now() - new Date(lockedAt).getTime();
+    if (Number.isFinite(age) && age < LOCK_TTL_MS) {
+      return false;
+    }
+  }
+  await supabaseAdmin.from("cron_state").upsert({
+    key,
+    value: { locked_at: new Date().toISOString() },
+    updated_at: new Date().toISOString()
+  });
+  return true;
+};
+
+const releaseLock = async (userId: string, locationId: string) => {
+  const key = `lock_ai_tag_v1:${userId}:${locationId}`;
+  await supabaseAdmin.from("cron_state").delete().eq("key", key);
+};
 const getAuthSecret = (req: VercelRequest) => {
   const secretParam = req.query?.secret;
   if (Array.isArray(secretParam)) {
@@ -102,6 +133,8 @@ const getAuthSecret = (req: VercelRequest) => {
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const normalizeTopics = (topics: AiTag[]) => {
   const maxTopics = Number(process.env.AI_TAG_MAX_TOPICS ?? 8);
@@ -172,74 +205,93 @@ const analyzeReview = async (
     throw new Error("Missing OPENAI_API_KEY");
   }
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
+  const shouldRetry = (status: number) => [429, 503, 504].includes(status);
 
   try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        text: {
-          format: {
-            type: "json_schema",
-            name: "review_ai_tags",
-            strict: true,
-            schema: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                sentiment: {
-                  type: "string",
-                  enum: ["positive", "neutral", "negative", "mixed"]
-                },
-                sentiment_score: { type: "number" },
-                summary: { type: "string" },
-                topics: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                      name: { type: "string" },
-                      sentiment: {
-                        type: "string",
-                        enum: ["positive", "neutral", "negative"]
-                      },
-                      confidence: { type: "number" }
-                    },
-                    required: ["name", "sentiment", "confidence"]
-                  }
-                }
+    const body = JSON.stringify({
+      model,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "review_ai_tags",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              sentiment: {
+                type: "string",
+                enum: ["positive", "neutral", "negative", "mixed"]
               },
-              required: ["sentiment", "sentiment_score", "summary", "topics"]
-            }
+              sentiment_score: { type: "number" },
+              summary: { type: "string" },
+              topics: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    name: { type: "string" },
+                    sentiment: {
+                      type: "string",
+                      enum: ["positive", "neutral", "negative"]
+                    },
+                    confidence: { type: "number" }
+                  },
+                  required: ["name", "sentiment", "confidence"]
+                }
+              }
+            },
+            required: ["sentiment", "sentiment_score", "summary", "topics"]
           }
+        }
+      },
+      input: [
+        {
+          role: "system",
+          content:
+            "Tu es un analyste d'avis Google. Réponds en français uniquement. " +
+            "Return ONLY valid JSON matching the schema. No prose. No markdown. " +
+            "Retourne strictement du JSON valide selon le schéma fourni. " +
+            "Les tags doivent être courts (2-4 mots), sans emoji."
         },
-        input: [
-          {
-            role: "system",
-            content:
-              "Tu es un analyste d'avis Google. Réponds en français uniquement. " +
-              "Return ONLY valid JSON matching the schema. No prose. No markdown. " +
-              "Retourne strictement du JSON valide selon le schéma fourni. " +
-              "Les tags doivent être courts (2-4 mots), sans emoji."
-          },
-          {
-            role: "user",
-            content:
-              "Analyse cet avis client et produis les champs demandés (sentiment, score, résumé, topics). " +
-              "Base-toi uniquement sur le commentaire suivant:\n\n" +
-              review.comment
-          }
-        ]
-      })
+        {
+          role: "user",
+          content:
+            "Analyse cet avis client et produis les champs demandés (sentiment, score, résumé, topics). " +
+            "Base-toi uniquement sur le commentaire suivant:\n\n" +
+            review.comment
+        }
+      ]
     });
+
+    let response: Response | null = null;
+    let attempt = 0;
+    while (attempt < 2) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      try {
+        response = await fetch("https://api.openai.com/v1/responses", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          signal: controller.signal,
+          body
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (response.ok || !shouldRetry(response.status) || attempt === 1) {
+        break;
+      }
+      await sleep(400);
+      attempt += 1;
+    }
+    if (!response) {
+      throw new Error("OpenAI response missing");
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -306,8 +358,6 @@ const analyzeReview = async (
       throw new Error("OpenAI request timeout");
     }
     throw error;
-  } finally {
-    clearTimeout(timeout);
   }
 };
 
@@ -521,6 +571,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .filter((value): value is string => Boolean(value))
       )
     );
+    const lockedLocations = new Set<string>();
     const locationStats = new Map<
       string,
       { withText: number; missingInsights: number }
@@ -544,6 +595,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       locationStats.set(locationId, { withText, missingInsights });
       const userIdForLocation = locationUserMap.get(locationId);
       if (userIdForLocation) {
+        const locked = await acquireLock(userIdForLocation, locationId);
+        if (!locked) {
+          continue;
+        }
+        lockedLocations.add(locationId);
         await upsertAiStatus(userIdForLocation, locationId, {
           status: "running",
           last_run_at: nowIso,
@@ -555,6 +611,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           missing_insights_count: missingInsights
         });
       }
+    }
+
+    if (lockedLocations.size === 0 && locationIds.length > 0) {
+      return res.status(200).json({
+        ok: true,
+        requestId,
+        aborted: false,
+        skipReason: "locked",
+        debug,
+        stats: {
+          totalWithText,
+          totalMissingInsights,
+          reviewsProcessed,
+          tagsUpserted,
+          candidatesFound,
+          errors
+        }
+      });
+    }
+
+    const candidateRowsByLock = candidateRows.filter((review) =>
+      review.location_id ? lockedLocations.has(review.location_id) : false
+    );
+
+    if (candidateRowsByLock.length === 0 && candidatesFound > 0) {
+      return res.status(200).json({
+        ok: true,
+        requestId,
+        aborted: false,
+        skipReason: "locked",
+        debug,
+        stats: {
+          totalWithText,
+          totalMissingInsights,
+          reviewsProcessed,
+          tagsUpserted,
+          candidatesFound,
+          errors
+        }
+      });
     }
 
     if (candidatesFound === 0) {
@@ -577,7 +673,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    for (const review of candidateRows) {
+    for (const review of candidateRowsByLock) {
       if (timeUp() || reviewsScanned >= MAX_REVIEWS) {
         break;
       }
@@ -720,7 +816,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const aborted = timeUp() || reviewsScanned >= MAX_REVIEWS;
 
-    for (const locationId of locationIds) {
+    for (const locationId of lockedLocations) {
       const { data: missingData } = await supabaseAdmin.rpc(
         "ai_tag_candidates_count",
         {
@@ -751,6 +847,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           last_error: lastErrorByLocation.get(locationId) ?? null,
           missing_insights_count: missingInsights
         });
+        await releaseLock(userIdForLocation, locationId);
       }
     }
 
@@ -788,6 +885,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           last_error: message,
           missing_insights_count: null
         });
+        await releaseLock(userId, locationId);
       }
     }
     return res.status(500).json({ error: message });

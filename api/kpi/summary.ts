@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { resolveDateRange } from "../_date.js";
+import { parseFilters } from "../_filters.js";
 import { createSupabaseAdmin, getUserFromRequest } from "../google/_utils.js";
 
 const handler = async (req: VercelRequest, res: VercelResponse) => {
@@ -35,9 +36,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       return res.status(404).json({ error: "Location not found" });
     }
 
-    const sourceParam = req.query.source;
-    const source = Array.isArray(sourceParam) ? sourceParam[0] : sourceParam;
-    if (source && source !== "google") {
+    const filters = parseFilters(req.query);
+    if (filters.reject) {
       return res.status(200).json({
         reviews_total: 0,
         reviews_with_text: 0,
@@ -48,15 +48,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       });
     }
 
-    const presetParam = req.query.preset;
-    const preset = (Array.isArray(presetParam) ? presetParam[0] : presetParam) ??
-      "this_month";
-    const fromParam = req.query.from;
-    const toParam = req.query.to;
-    const from = Array.isArray(fromParam) ? fromParam[0] : fromParam;
-    const to = Array.isArray(toParam) ? toParam[0] : toParam;
-    const tzParam = req.query.tz;
-    const timeZone = Array.isArray(tzParam) ? tzParam[0] : tzParam ?? "UTC";
+    const preset = filters.preset;
+    const from = filters.from;
+    const to = filters.to;
+    const timeZone = filters.tz;
 
     const range = resolveDateRange(
       preset as Parameters<typeof resolveDateRange>[0],
@@ -69,7 +64,12 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       .rpc("kpi_summary", {
         p_location_id: locationId,
         p_from: range.from,
-        p_to: range.to
+        p_to: range.to,
+        p_rating_min: filters.rating_min ?? null,
+        p_rating_max: filters.rating_max ?? null,
+        p_sentiment: filters.sentiment ?? null,
+        p_status: filters.status ?? null,
+        p_tags: filters.tags ?? null
       })
       .maybeSingle();
 

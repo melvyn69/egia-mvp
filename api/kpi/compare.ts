@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { resolveDateRange } from "../_date.js";
+import { parseFilters } from "../_filters.js";
 import { createSupabaseAdmin, getUserFromRequest } from "../google/_utils.js";
 
 type Range = { from: string; to: string };
@@ -37,8 +38,11 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       return res.status(404).json({ error: "Location not found" });
     }
 
-    const tzParam = req.query.tz;
-    const timeZone = Array.isArray(tzParam) ? tzParam[0] : tzParam ?? "UTC";
+    const filters = parseFilters(req.query);
+    if (filters.reject) {
+      return res.status(200).json({ a: null, b: null, delta: null });
+    }
+    const timeZone = filters.tz;
 
     const splitParam = req.query.split_date;
     const splitDate = Array.isArray(splitParam) ? splitParam[0] : splitParam;
@@ -61,15 +65,13 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         to: Array.isArray(bToParam) ? bToParam[0] : bToParam
       };
     } else if (splitDate) {
-      const presetParam = req.query.preset;
-      const preset = (Array.isArray(presetParam) ? presetParam[0] : presetParam) ??
-        "this_month";
-      const fromParam = req.query.from;
-      const toParam = req.query.to;
+      const preset = filters.preset;
+      const fromParam = filters.from;
+      const toParam = filters.to;
       const baseRange = resolveDateRange(
         preset as Parameters<typeof resolveDateRange>[0],
-        Array.isArray(fromParam) ? fromParam[0] : fromParam,
-        Array.isArray(toParam) ? toParam[0] : toParam,
+        fromParam,
+        toParam,
         timeZone
       );
       rangeA = { from: baseRange.from, to: splitDate };
@@ -83,14 +85,24 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         .rpc("kpi_summary", {
           p_location_id: locationId,
           p_from: rangeA.from,
-          p_to: rangeA.to
+          p_to: rangeA.to,
+          p_rating_min: filters.rating_min ?? null,
+          p_rating_max: filters.rating_max ?? null,
+          p_sentiment: filters.sentiment ?? null,
+          p_status: filters.status ?? null,
+          p_tags: filters.tags ?? null
         })
         .maybeSingle(),
       supabaseAdmin
         .rpc("kpi_summary", {
           p_location_id: locationId,
           p_from: rangeB.from,
-          p_to: rangeB.to
+          p_to: rangeB.to,
+          p_rating_min: filters.rating_min ?? null,
+          p_rating_max: filters.rating_max ?? null,
+          p_sentiment: filters.sentiment ?? null,
+          p_status: filters.status ?? null,
+          p_tags: filters.tags ?? null
         })
         .maybeSingle()
     ]);
