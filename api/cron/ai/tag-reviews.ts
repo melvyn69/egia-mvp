@@ -186,13 +186,13 @@ const analyzeReview = async (
                     additionalProperties: false,
                     properties: {
                       name: { type: "string" },
-                      weight: { type: "number" },
-                      polarity: { type: "number" },
-                      confidence: { type: "number" },
-                      evidence: { type: "string" },
-                      category: { type: "string" }
+                      sentiment: {
+                        type: "string",
+                        enum: ["positive", "neutral", "negative"]
+                      },
+                      confidence: { type: "number" }
                     },
-                    required: ["name"]
+                    required: ["name", "sentiment", "confidence"]
                   }
                 }
               },
