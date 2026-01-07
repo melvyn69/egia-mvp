@@ -310,6 +310,16 @@ const Inbox = () => {
       });
 
       setReviews(mapped);
+
+      const { data: cronState } = await supabase
+        .from("cron_state")
+        .select("updated_at, value")
+        .eq("key", CRON_CURSOR_KEY)
+        .maybeSingle();
+      setLastCronSyncAt(cronState?.updated_at ?? null);
+      const errorsCount = (cronState?.value as { errors_count?: number } | null)
+        ?.errors_count;
+      setCronErrors(Number(errorsCount ?? 0));
     } finally {
       setReviewsLoading(false);
     }
@@ -1324,12 +1334,3 @@ const Inbox = () => {
 };
 
 export { Inbox };
-      const { data: cronState } = await supabase
-        .from("cron_state")
-        .select("updated_at, value")
-        .eq("key", CRON_CURSOR_KEY)
-        .maybeSingle();
-      setLastCronSyncAt(cronState?.updated_at ?? null);
-      const errorsCount = (cronState?.value as { errors_count?: number } | null)
-        ?.errors_count;
-      setCronErrors(Number(errorsCount ?? 0));
