@@ -100,7 +100,7 @@ const App = () => {
       title: "Dashboard",
       subtitle: "Suivi des avis, KPIs et activite en temps reel."
     };
-  }, [isCallbackPath, location.pathname]);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!supabase) {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { supabase, supabaseAnonKey, supabaseUrl } from "../lib/supabase";
+import { supabase, supabaseUrl } from "../lib/supabase";
 
 const statusTabs = [
   { id: "new", label: "Nouveau" },
@@ -229,6 +229,14 @@ const Inbox = () => {
     setReviewsLoading(true);
     setReviewsError(null);
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData.session?.user?.id ?? null;
+      if (!userId) {
+        setReviews([]);
+        setReviewsError("Session introuvable.");
+        return;
+      }
+
       const { data: locationsData, error: locationsError } = await supabase
         .from("google_locations")
         .select("location_resource_name, location_title")
@@ -268,7 +276,7 @@ const Inbox = () => {
           locationName:
             nextLocationsMap[row.location_id] ?? row.location_id ?? "—",
           locationId: row.location_id,
-          businessId: row.location_id,
+          businessId: userId,
           authorName: row.author_name ?? "Anonyme",
           rating: row.rating ?? 0,
           source: "Google",
@@ -323,12 +331,12 @@ const Inbox = () => {
   }, [reviews, selectedReviewId]);
 
   useEffect(() => {
-    if (!selectedReview) {
+    if (!selectedReviewId) {
       setReplyText("");
       return;
     }
-    setReplyText(drafts[selectedReview.id] ?? "");
-  }, [drafts, selectedReview]);
+    setReplyText(drafts[selectedReviewId] ?? "");
+  }, [drafts, selectedReviewId]);
 
   useEffect(() => {
     setSavedAt(null);
@@ -380,7 +388,7 @@ const Inbox = () => {
     };
 
     void loadBusinessContext();
-  }, [selectedReviewId]);
+  }, [selectedReview, selectedReviewId]);
 
   useEffect(() => {
     const supabaseClient = supabase;
@@ -412,7 +420,7 @@ const Inbox = () => {
     };
 
     void loadReplies();
-  }, [selectedReviewId]);
+  }, [selectedReview, selectedReviewId]);
 
   useEffect(() => {
     const supabaseClient = supabase;
@@ -695,15 +703,15 @@ const Inbox = () => {
     }
     setReplySending(true);
     try {
-      const userToken = await getAccessToken(supabaseClient);
+      const userJwt = await getAccessToken(supabaseClient);
       // TODO: publish_reply_to_google(review)
       const projectRef = getProjectRef(supabaseUrl);
       if (import.meta.env.DEV) {
         console.log("projectRef", projectRef ?? "—");
         console.log(
           "access_token parts/len",
-          userToken.split(".").length,
-          userToken.length
+          userJwt.split(".").length,
+          userJwt.length
         );
         const { data: userData } = await supabaseClient.auth.getUser();
         console.log("post-reply-google userId", userData.user?.id ?? "null");
@@ -711,22 +719,19 @@ const Inbox = () => {
           reviewId: selectedReview.reviewId
         });
       }
-      const response = await fetch(
-        `${supabaseUrl}/functions/v1/post-reply-google`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${supabaseAnonKey}`,
-            apikey: supabaseAnonKey ?? "",
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            reviewId: selectedReview.reviewId,
-            replyText,
-            userToken
-          })
-        }
-      );
+      const response = await fetch("/api/google/reply", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${userJwt}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          reviewId: selectedReview.reviewId,
+          replyText,
+          draftReplyId,
+          googleReviewId: selectedReview.id
+        })
+      });
       const data = (await response.json()) as {
         ok?: boolean;
         error?: string;
@@ -756,6 +761,7 @@ const Inbox = () => {
       if (updateError) {
         setGenerationError("Réponse envoyée, mais statut non mis à jour.");
       } else {
+        // 1) Marquer le brouillon comme envoyé dans l'historique
         setReplyHistory((prev) =>
           prev.map((item) =>
             item.id === draftReplyId
@@ -765,6 +771,34 @@ const Inbox = () => {
         );
         setDraftReplyId(null);
         setDraftByReview((prev) => ({ ...prev, [selectedReview.id]: false }));
+
+        // 2) Mettre à jour le statut de l'avis dans la DB (google_reviews)
+        // selectedReview.id = id (uuid) de la table google_reviews (pas review_id)
+        const { error: reviewStatusError } = await supabaseClient
+          .from("google_reviews")
+          .update({ status: "replied" })
+          .eq("id", selectedReview.id);
+
+        if (reviewStatusError) {
+          // On n'empêche pas l'utilisateur d'avancer : la réponse est déjà envoyée à Google
+          console.warn("google_reviews status update failed:", reviewStatusError);
+        }
+
+        // 3) Mettre à jour l'UI localement (instant)
+        setReviews((prev) =>
+          prev.map((r) =>
+            r.id === selectedReview.id ? { ...r, status: "replied" } : r
+          )
+        );
+
+        // 4) Auto-sélection du prochain avis "new" dans la liste filtrée
+        // (On utilise la version la plus fraîche possible)
+        const nextNew = filteredReviews.find(
+          (r) => r.id !== selectedReview.id && r.status === "new"
+        );
+        if (nextNew) {
+          setSelectedReviewId(nextNew.id);
+        }
       }
     } catch (error) {
       if (error instanceof Error && error.message === "No session / not authenticated") {
