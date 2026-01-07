@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -68,6 +68,17 @@ type ReviewRow = {
   create_time: string | null;
   update_time: string | null;
   status: ReviewStatus | null;
+};
+
+type ReviewCronStatus = {
+  status: "ok" | "running" | "error" | "unknown";
+  total_reviews?: number;
+  last_synced_at?: string | null;
+  finished_at?: string | null;
+  errors_count?: number;
+  with_text?: number;
+  missing_insights?: number;
+  last_run_at?: string | null;
 };
 
 const statusLabelMap: Record<ReviewStatus, string> = {
@@ -199,9 +210,45 @@ const formatSinceMinutes = (iso: string | null): string => {
   return `${minutes} minutes`;
 };
 
+const formatStatusIcon = (status: ReviewCronStatus["status"]) => {
+  switch (status) {
+    case "ok":
+      return "✅";
+    case "running":
+      return "⏳";
+    case "error":
+      return "❌";
+    default:
+      return "—";
+  }
+};
+
+const formatAiProgress = (
+  withText?: number,
+  missingInsights?: number
+): string => {
+  if (!withText || withText <= 0) {
+    return "—";
+  }
+  const missing = Math.max(0, missingInsights ?? 0);
+  const progress = Math.max(0, Math.min(1, 1 - missing / withText));
+  return `${Math.round(progress * 100)}%`;
+};
+
 const Inbox = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("new");
   const [selectedLocation, setSelectedLocation] = useState("all");
+  const [datePreset, setDatePreset] = useState<
+    "this_week" | "this_month" | "this_quarter" | "this_year" | "last_year" | "custom"
+  >("this_month");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [sentimentFilter, setSentimentFilter] = useState<
+    "all" | "positive" | "neutral" | "negative"
+  >("all");
+  const [ratingMin, setRatingMin] = useState("");
+  const [ratingMax, setRatingMax] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
   const [selectedReviewId, setSelectedReviewId] = useState<string>("");
   const [lengthPreset, setLengthPreset] = useState<LengthPreset>("moyen");
   const [tonePreset, setTonePreset] = useState<TonePreset>("professionnel");
@@ -235,10 +282,20 @@ const Inbox = () => {
   const [reviewsError, setReviewsError] = useState<string | null>(null);
   const [lastCronSyncAt, setLastCronSyncAt] = useState<string | null>(null);
   const [cronErrors, setCronErrors] = useState<number>(0);
+  const [locationOptions, setLocationOptions] = useState<
+    Array<{ id: string; label: string }>
+  >([]);
+  const [importStatus, setImportStatus] = useState<ReviewCronStatus>({
+    status: "unknown"
+  });
+  const [aiStatus, setAiStatus] = useState<ReviewCronStatus>({
+    status: "unknown"
+  });
 
   const isSupabaseAvailable = Boolean(supabase);
   const isCooldownActive = cooldownUntil ? cooldownUntil > Date.now() : false;
   const projectRef = getProjectRef(supabaseUrl);
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
 
   const loadInboxData = async () => {
     if (!supabase) {
@@ -266,27 +323,61 @@ const Inbox = () => {
         console.error("google_locations fetch error:", locationsError);
       }
       const nextLocationsMap: Record<string, string> = {};
+      const nextLocationOptions: Array<{ id: string; label: string }> = [];
       (locationsData ?? []).forEach((location) => {
         if (location.location_resource_name) {
           nextLocationsMap[location.location_resource_name] =
             location.location_title ?? location.location_resource_name;
+          nextLocationOptions.push({
+            id: location.location_resource_name,
+            label: location.location_title ?? location.location_resource_name
+          });
         }
       });
-      const { data: reviewsData, error: reviewsError } = await supabase
-        .from("google_reviews")
-        .select(
-          "id, review_id, location_id, author_name, rating, comment, create_time, update_time, status"
-        )
-        .order("update_time", { ascending: false })
-        .limit(50);
+      setLocationOptions(nextLocationOptions);
 
-      if (reviewsError) {
+      const token = await getAccessToken(supabase);
+      const params = new URLSearchParams();
+      if (selectedLocation !== "all") {
+        params.set("location_id", selectedLocation);
+      }
+      params.set("preset", datePreset);
+      params.set("tz", timeZone);
+      if (datePreset === "custom") {
+        if (dateFrom) {
+          params.set("from", dateFrom);
+        }
+        if (dateTo) {
+          params.set("to", dateTo);
+        }
+      }
+      if (sentimentFilter !== "all") {
+        params.set("sentiment", sentimentFilter);
+      }
+      if (ratingMin) {
+        params.set("rating_min", ratingMin);
+      }
+      if (ratingMax) {
+        params.set("rating_max", ratingMax);
+      }
+      if (tagFilter.trim()) {
+        params.set("tags", tagFilter.trim());
+      }
+      params.set("limit", "50");
+
+      const response = await fetch(`/api/reviews?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.rows) {
         setReviewsError("Impossible de charger les avis.");
         setReviews([]);
         return;
       }
 
-      const rows = (reviewsData ?? []) as ReviewRow[];
+      const rows = (payload.rows ?? []) as ReviewRow[];
       const mapped = rows.map((row) => {
         const createdAt = row.create_time ?? row.update_time ?? new Date().toISOString();
         const updatedAt = row.update_time ?? createdAt;
@@ -326,9 +417,14 @@ const Inbox = () => {
   };
 
   const locations = useMemo(() => {
-    const unique = Array.from(new Set(reviews.map((review) => review.locationName)));
-    return ["Tous", ...unique];
-  }, [reviews]);
+    return [
+      { id: "all", label: "Tous" },
+      ...locationOptions.map((option) => ({
+        id: option.id,
+        label: option.label
+      }))
+    ];
+  }, [locationOptions]);
 
   const filteredReviews = useMemo(() => {
     return reviews.filter((review) => {
@@ -337,7 +433,7 @@ const Inbox = () => {
       const matchesLocation =
         selectedLocation === "all"
           ? true
-          : review.locationName === selectedLocation;
+          : review.locationId === selectedLocation;
       return matchesStatus && matchesLocation;
     });
   }, [reviews, statusFilter, selectedLocation]);
@@ -355,11 +451,28 @@ const Inbox = () => {
 
   useEffect(() => {
     void loadInboxData();
-  }, [isSupabaseAvailable]);
+  }, [
+    isSupabaseAvailable,
+    selectedLocation,
+    datePreset,
+    dateFrom,
+    dateTo,
+    sentimentFilter,
+    ratingMin,
+    ratingMax,
+    tagFilter
+  ]);
 
   const selectedReview = useMemo(() => {
     return reviews.find((review) => review.id === selectedReviewId) ?? null;
   }, [reviews, selectedReviewId]);
+
+  const activeLocationId = useMemo(() => {
+    if (selectedLocation !== "all") {
+      return selectedLocation;
+    }
+    return selectedReview?.locationId ?? reviews[0]?.locationId ?? "";
+  }, [selectedLocation, selectedReview, reviews]);
 
   useEffect(() => {
     if (!selectedReviewId) {
@@ -368,6 +481,57 @@ const Inbox = () => {
     }
     setReplyText(drafts[selectedReviewId] ?? "");
   }, [drafts, selectedReviewId]);
+
+  const loadReviewStatuses = useCallback(async () => {
+    if (!supabase || !activeLocationId) {
+      setImportStatus({ status: "unknown" });
+      setAiStatus({ status: "unknown" });
+      return;
+    }
+    try {
+      const token = await getAccessToken(supabase);
+      const response = await fetch(
+        `/api/status/reviews?location_id=${encodeURIComponent(activeLocationId)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload) {
+        setImportStatus({ status: "unknown" });
+        setAiStatus({ status: "unknown" });
+        return;
+      }
+      setImportStatus(payload.import ?? { status: "unknown" });
+      setAiStatus(payload.ai ?? { status: "unknown" });
+    } catch {
+      setImportStatus({ status: "unknown" });
+      setAiStatus({ status: "unknown" });
+    }
+  }, [activeLocationId, supabase]);
+
+  useEffect(() => {
+    void loadReviewStatuses();
+  }, [loadReviewStatuses]);
+
+  useEffect(() => {
+    if (!supabase || !activeLocationId) {
+      return;
+    }
+    const shouldPoll =
+      importStatus.status === "running" || aiStatus.status === "running";
+    if (!shouldPoll) {
+      return;
+    }
+    const timeoutId = setTimeout(() => {
+      void loadReviewStatuses();
+    }, 15000);
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [activeLocationId, aiStatus.status, importStatus.status, loadReviewStatuses, supabase]);
 
   useEffect(() => {
     setSavedAt(null);
@@ -932,6 +1096,34 @@ const Inbox = () => {
             </>
           )}
         </div>
+        <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-700">
+          <div className="flex items-center justify-between">
+            <span>Import avis Google</span>
+            <span>
+              {formatStatusIcon(importStatus.status)}{" "}
+              {importStatus.total_reviews ?? "—"} avis
+            </span>
+          </div>
+          <div className="mt-1 text-[11px] text-slate-500">
+            Dernière sync :{" "}
+            {formatSinceMinutes(
+              importStatus.last_synced_at ??
+                importStatus.finished_at ??
+                null
+            )}
+          </div>
+          <div className="mt-3 flex items-center justify-between">
+            <span>Analyse IA</span>
+            <span>
+              {formatStatusIcon(aiStatus.status)}{" "}
+              {formatAiProgress(aiStatus.with_text, aiStatus.missing_insights)}
+            </span>
+          </div>
+          <div className="mt-1 text-[11px] text-slate-500">
+            Dernière analyse :{" "}
+            {formatSinceMinutes(aiStatus.last_run_at ?? aiStatus.finished_at ?? null)}
+          </div>
+        </div>
         {import.meta.env.DEV && (
           <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
             <div>Supabase URL: {supabaseUrl ?? "—"}</div>
@@ -981,18 +1173,117 @@ const Inbox = () => {
               <select
                 className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
                 value={selectedLocation}
-                onChange={(event) =>
-                  setSelectedLocation(
-                    event.target.value === "Tous" ? "all" : event.target.value
-                  )
-                }
+                onChange={(event) => setSelectedLocation(event.target.value)}
               >
                 {locations.map((location) => (
-                  <option key={location} value={location}>
-                    {location === "Tous" ? "Tous" : location}
+                  <option key={location.id} value={location.id}>
+                    {location.label}
                   </option>
                 ))}
               </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Période
+              </label>
+              <select
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                value={datePreset}
+                onChange={(event) =>
+                  setDatePreset(
+                    event.target.value as typeof datePreset
+                  )
+                }
+              >
+                <option value="this_week">Cette semaine</option>
+                <option value="this_month">Ce mois</option>
+                <option value="this_quarter">Ce trimestre</option>
+                <option value="this_year">Cette année</option>
+                <option value="last_year">Année dernière</option>
+                <option value="custom">Personnalisé</option>
+              </select>
+              {datePreset === "custom" && (
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <input
+                    type="date"
+                    className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                    value={dateFrom}
+                    onChange={(event) => setDateFrom(event.target.value)}
+                  />
+                  <input
+                    type="date"
+                    className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                    value={dateTo}
+                    onChange={(event) => setDateTo(event.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Sentiment
+              </label>
+              <select
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                value={sentimentFilter}
+                onChange={(event) =>
+                  setSentimentFilter(
+                    event.target.value as typeof sentimentFilter
+                  )
+                }
+              >
+                <option value="all">Tous</option>
+                <option value="positive">Positif</option>
+                <option value="neutral">Neutre</option>
+                <option value="negative">Négatif</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-semibold text-slate-500">
+                  Note min
+                </label>
+                <select
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                  value={ratingMin}
+                  onChange={(event) => setRatingMin(event.target.value)}
+                >
+                  <option value="">—</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500">
+                  Note max
+                </label>
+                <select
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                  value={ratingMax}
+                  onChange={(event) => setRatingMax(event.target.value)}
+                >
+                  <option value="">—</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Tags (séparés par des virgules)
+              </label>
+              <input
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                value={tagFilter}
+                onChange={(event) => setTagFilter(event.target.value)}
+                placeholder="accueil, attente..."
+              />
             </div>
           </CardHeader>
           <CardContent className="space-y-3">

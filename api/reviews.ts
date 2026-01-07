@@ -1,0 +1,237 @@
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { resolveDateRange } from "./_date.js";
+import { createSupabaseAdmin, getUserFromRequest } from "./google/_utils.js";
+
+type Cursor = { source_time: string; id: string };
+
+const parseCursor = (cursorParam: string | undefined): Cursor | null => {
+  if (!cursorParam) {
+    return null;
+  }
+  try {
+    const decoded = Buffer.from(cursorParam, "base64").toString("utf-8");
+    const parsed = JSON.parse(decoded) as Cursor;
+    if (parsed?.source_time && parsed?.id) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const buildCursor = (cursor: Cursor) =>
+  Buffer.from(JSON.stringify(cursor), "utf-8").toString("base64");
+
+const handler = async (req: VercelRequest, res: VercelResponse) => {
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  try {
+    const supabaseAdmin = createSupabaseAdmin();
+    const { userId } = await getUserFromRequest(
+      { headers: req.headers as Record<string, string | undefined> },
+      supabaseAdmin
+    );
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const locationParam = req.query.location_id;
+    const locationId = Array.isArray(locationParam)
+      ? locationParam[0]
+      : locationParam;
+    let locationIds: string[] = [];
+    if (locationId) {
+      const { data: locationRow } = await supabaseAdmin
+        .from("google_locations")
+        .select("location_resource_name")
+        .eq("user_id", userId)
+        .eq("location_resource_name", locationId)
+        .maybeSingle();
+      if (!locationRow) {
+        return res.status(404).json({ error: "Location not found" });
+      }
+      locationIds = [locationId];
+    } else {
+      const { data: locations } = await supabaseAdmin
+        .from("google_locations")
+        .select("location_resource_name")
+        .eq("user_id", userId);
+      locationIds = (locations ?? [])
+        .map((location) => location.location_resource_name)
+        .filter(Boolean);
+      if (locationIds.length === 0) {
+        return res.status(200).json({ rows: [], nextCursor: null });
+      }
+    }
+
+    const presetParam = req.query.preset;
+    const preset = (Array.isArray(presetParam) ? presetParam[0] : presetParam) ??
+      "this_month";
+    const fromParam = req.query.from;
+    const toParam = req.query.to;
+    const from = Array.isArray(fromParam) ? fromParam[0] : fromParam;
+    const to = Array.isArray(toParam) ? toParam[0] : toParam;
+    const tzParam = req.query.tz;
+    const timeZone = Array.isArray(tzParam) ? tzParam[0] : tzParam ?? "UTC";
+    const range = resolveDateRange(
+      preset as Parameters<typeof resolveDateRange>[0],
+      from,
+      to,
+      timeZone
+    );
+
+    const ratingMinParam = req.query.rating_min;
+    const ratingMaxParam = req.query.rating_max;
+    const ratingMin = ratingMinParam ? Number(ratingMinParam) : null;
+    const ratingMax = ratingMaxParam ? Number(ratingMaxParam) : null;
+    const sentimentParam = req.query.sentiment;
+    const sentiment = Array.isArray(sentimentParam)
+      ? sentimentParam[0]
+      : sentimentParam;
+    const tagsParam = req.query.tags;
+    const tags = (Array.isArray(tagsParam) ? tagsParam[0] : tagsParam)
+      ?.split(",")
+      .map((tag) => tag.trim().toLowerCase())
+      .filter(Boolean);
+    const sourceParam = req.query.source;
+    const source = Array.isArray(sourceParam) ? sourceParam[0] : sourceParam;
+    if (source && source !== "google") {
+      return res.status(200).json({ rows: [], nextCursor: null });
+    }
+
+    const limitParam = req.query.limit;
+    const limit = Math.min(
+      Math.max(Number(limitParam) || 50, 1),
+      200
+    );
+    const cursorParam = req.query.cursor;
+    const cursor = parseCursor(
+      Array.isArray(cursorParam) ? cursorParam[0] : cursorParam
+    );
+
+    let query = supabaseAdmin
+      .from("google_reviews")
+      .select(
+        "id, review_id, location_id, author_name, rating, comment, create_time, update_time, created_at, status"
+      )
+      .order("update_time", { ascending: false, nullsFirst: false })
+      .order("create_time", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false, nullsFirst: false })
+      .order("id", { ascending: false })
+      .limit(limit * 3);
+    if (locationIds.length === 1) {
+      query = query.eq("location_id", locationIds[0]);
+    } else {
+      query = query.in("location_id", locationIds);
+    }
+
+    query = query.or(
+      `and(update_time.gte.${range.from},update_time.lte.${range.to}),` +
+        `and(update_time.is.null,create_time.gte.${range.from},create_time.lte.${range.to}),` +
+        `and(update_time.is.null,create_time.is.null,created_at.gte.${range.from},created_at.lte.${range.to})`
+    );
+
+    if (ratingMin !== null && Number.isFinite(ratingMin)) {
+      query = query.gte("rating", ratingMin);
+    }
+    if (ratingMax !== null && Number.isFinite(ratingMax)) {
+      query = query.lte("rating", ratingMax);
+    }
+
+    const { data: baseRows, error: baseError } = await query;
+    if (baseError) {
+      return res.status(500).json({ error: "Failed to load reviews" });
+    }
+
+    const rows = (baseRows ?? []).filter((row) => {
+      const sourceTime =
+        row.update_time ?? row.create_time ?? row.created_at ?? null;
+      if (!sourceTime || !cursor) {
+        return true;
+      }
+      if (sourceTime < cursor.source_time) {
+        return true;
+      }
+      if (sourceTime === cursor.source_time && row.id < cursor.id) {
+        return true;
+      }
+      return false;
+    });
+
+    const reviewIds = rows.map((row) => row.id);
+    const { data: insights } = await supabaseAdmin
+      .from("review_ai_insights")
+      .select("review_pk, sentiment")
+      .in("review_pk", reviewIds);
+    const sentimentMap = new Map(
+      (insights ?? []).map((item) => [item.review_pk, item.sentiment])
+    );
+
+    const { data: tagLinks } = await supabaseAdmin
+      .from("review_ai_tags")
+      .select("review_pk, tag_id")
+      .in("review_pk", reviewIds);
+    const tagIds = Array.from(
+      new Set((tagLinks ?? []).map((item) => item.tag_id))
+    );
+    const { data: tagsData } = await supabaseAdmin
+      .from("ai_tags")
+      .select("id, tag")
+      .in("id", tagIds);
+    const tagLookup = new Map((tagsData ?? []).map((item) => [item.id, item.tag]));
+    const tagsByReview = new Map<string, string[]>();
+    for (const link of tagLinks ?? []) {
+      const tag = tagLookup.get(link.tag_id);
+      if (!tag) {
+        continue;
+      }
+      const list = tagsByReview.get(link.review_pk) ?? [];
+      list.push(tag);
+      tagsByReview.set(link.review_pk, list);
+    }
+
+    const filtered = rows.filter((row) => {
+      const rowSentiment = sentimentMap.get(row.id) ?? null;
+      if (sentiment && rowSentiment !== sentiment) {
+        return false;
+      }
+      if (tags && tags.length > 0) {
+        const rowTags = (tagsByReview.get(row.id) ?? []).map((tag) =>
+          tag.toLowerCase()
+        );
+        const matches = tags.some((tag) => rowTags.includes(tag));
+        if (!matches) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    const limited = filtered.slice(0, limit);
+    const last = limited[limited.length - 1];
+    const nextCursor =
+      last && limited.length === limit
+        ? buildCursor({
+            source_time:
+              last.update_time ?? last.create_time ?? last.created_at ?? "",
+            id: last.id
+          })
+        : null;
+
+    return res.status(200).json({
+      rows: limited.map((row) => ({
+        ...row,
+        sentiment: sentimentMap.get(row.id) ?? null,
+        tags: tagsByReview.get(row.id) ?? []
+      })),
+      nextCursor
+    });
+  } catch {
+    return res.status(500).json({ error: "Failed to load reviews" });
+  }
+};
+
+export default handler;

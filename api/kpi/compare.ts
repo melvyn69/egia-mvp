@@ -1,0 +1,123 @@
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { resolveDateRange } from "../_date.js";
+import { createSupabaseAdmin, getUserFromRequest } from "../google/_utils.js";
+
+type Range = { from: string; to: string };
+
+const handler = async (req: VercelRequest, res: VercelResponse) => {
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  try {
+    const supabaseAdmin = createSupabaseAdmin();
+    const { userId } = await getUserFromRequest(
+      { headers: req.headers as Record<string, string | undefined> },
+      supabaseAdmin
+    );
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const locationParam = req.query.location_id;
+    const locationId = Array.isArray(locationParam)
+      ? locationParam[0]
+      : locationParam;
+    if (!locationId) {
+      return res.status(400).json({ error: "Missing location_id" });
+    }
+
+    const { data: locationRow } = await supabaseAdmin
+      .from("google_locations")
+      .select("location_resource_name")
+      .eq("user_id", userId)
+      .eq("location_resource_name", locationId)
+      .maybeSingle();
+    if (!locationRow) {
+      return res.status(404).json({ error: "Location not found" });
+    }
+
+    const tzParam = req.query.tz;
+    const timeZone = Array.isArray(tzParam) ? tzParam[0] : tzParam ?? "UTC";
+
+    const splitParam = req.query.split_date;
+    const splitDate = Array.isArray(splitParam) ? splitParam[0] : splitParam;
+
+    const aFromParam = req.query.a_from;
+    const aToParam = req.query.a_to;
+    const bFromParam = req.query.b_from;
+    const bToParam = req.query.b_to;
+
+    let rangeA: Range;
+    let rangeB: Range;
+
+    if (aFromParam && aToParam && bFromParam && bToParam) {
+      rangeA = {
+        from: Array.isArray(aFromParam) ? aFromParam[0] : aFromParam,
+        to: Array.isArray(aToParam) ? aToParam[0] : aToParam
+      };
+      rangeB = {
+        from: Array.isArray(bFromParam) ? bFromParam[0] : bFromParam,
+        to: Array.isArray(bToParam) ? bToParam[0] : bToParam
+      };
+    } else if (splitDate) {
+      const presetParam = req.query.preset;
+      const preset = (Array.isArray(presetParam) ? presetParam[0] : presetParam) ??
+        "this_month";
+      const fromParam = req.query.from;
+      const toParam = req.query.to;
+      const baseRange = resolveDateRange(
+        preset as Parameters<typeof resolveDateRange>[0],
+        Array.isArray(fromParam) ? fromParam[0] : fromParam,
+        Array.isArray(toParam) ? toParam[0] : toParam,
+        timeZone
+      );
+      rangeA = { from: baseRange.from, to: splitDate };
+      rangeB = { from: splitDate, to: baseRange.to };
+    } else {
+      return res.status(400).json({ error: "Missing compare range" });
+    }
+
+    const [summaryA, summaryB] = await Promise.all([
+      supabaseAdmin
+        .rpc("kpi_summary", {
+          p_location_id: locationId,
+          p_from: rangeA.from,
+          p_to: rangeA.to
+        })
+        .maybeSingle(),
+      supabaseAdmin
+        .rpc("kpi_summary", {
+          p_location_id: locationId,
+          p_from: rangeB.from,
+          p_to: rangeB.to
+        })
+        .maybeSingle()
+    ]);
+
+    if (summaryA.error || summaryB.error) {
+      return res.status(500).json({ error: "Failed to load KPI compare" });
+    }
+
+    return res.status(200).json({
+      a: summaryA.data ?? null,
+      b: summaryB.data ?? null,
+      delta: {
+        reviews_total:
+          (summaryB.data?.reviews_total ?? 0) -
+          (summaryA.data?.reviews_total ?? 0),
+        reviews_with_text:
+          (summaryB.data?.reviews_with_text ?? 0) -
+          (summaryA.data?.reviews_with_text ?? 0),
+        avg_rating:
+          (summaryB.data?.avg_rating ?? 0) -
+          (summaryA.data?.avg_rating ?? 0)
+      },
+      ranges: { a: rangeA, b: rangeB }
+    });
+  } catch {
+    return res.status(500).json({ error: "Failed to load KPI compare" });
+  }
+};
+
+export default handler;

@@ -27,7 +27,7 @@ import {
   getReadNotificationIds,
   dispatchNotificationsUpdated
 } from "../lib/notifications";
-import { mockGoogleConnected, mockKpis } from "../mock/mockData";
+import { mockGoogleConnected } from "../mock/mockData";
 
 type DashboardProps = {
   session: Session | null;
@@ -46,6 +46,18 @@ type DashboardProps = {
   locationsLoading: boolean;
   locationsError: string | null;
   syncing: boolean;
+};
+
+type KpiSummary = {
+  reviews_total: number;
+  reviews_with_text: number;
+  avg_rating: number | null;
+  sentiment_breakdown: {
+    positive: number;
+    neutral: number;
+    negative: number;
+  };
+  top_tags: Array<{ tag: string; count: number }>;
 };
 
 const getGreeting = (): string => {
@@ -226,6 +238,7 @@ const Dashboard = ({
   const greeting = getGreeting();
   const firstName = getFirstName(session);
   const greetingText = firstName ? `${greeting}, ${firstName}` : `${greeting}`;
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
   const prevGoogleConnectedRef = useRef<boolean | null>(googleConnected);
   const prevSyncingRef = useRef<boolean>(syncing);
   const prevLocationsErrorRef = useRef<string | null>(locationsError);
@@ -234,6 +247,15 @@ const Dashboard = ({
   const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(
     getReadNotificationIds
   );
+  const [kpiPreset, setKpiPreset] = useState<
+    "this_week" | "this_month" | "this_quarter" | "this_year" | "last_year" | "custom"
+  >("this_month");
+  const [kpiFrom, setKpiFrom] = useState("");
+  const [kpiTo, setKpiTo] = useState("");
+  const [kpiLocationId, setKpiLocationId] = useState("");
+  const [kpiData, setKpiData] = useState<KpiSummary | null>(null);
+  const [kpiLoading, setKpiLoading] = useState(false);
+  const [kpiError, setKpiError] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -247,6 +269,67 @@ const Dashboard = ({
       // Ignore storage errors
     }
   }, [readNotificationIds]);
+
+  useEffect(() => {
+    if (!kpiLocationId && locations.length > 0) {
+      setKpiLocationId(locations[0].location_resource_name);
+    }
+  }, [kpiLocationId, locations]);
+
+  useEffect(() => {
+    const token = session?.access_token;
+    if (!token || !kpiLocationId) {
+      setKpiData(null);
+      return;
+    }
+    let cancelled = false;
+    const loadKpis = async () => {
+      setKpiLoading(true);
+      setKpiError(null);
+      const params = new URLSearchParams();
+      params.set("location_id", kpiLocationId);
+      params.set("preset", kpiPreset);
+      params.set("tz", timeZone);
+      if (kpiPreset === "custom") {
+        if (kpiFrom) {
+          params.set("from", kpiFrom);
+        }
+        if (kpiTo) {
+          params.set("to", kpiTo);
+        }
+      }
+      try {
+        const response = await fetch(`/api/kpi/summary?${params.toString()}`, {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        });
+        const payload = await response.json().catch(() => null);
+        if (cancelled) {
+          return;
+        }
+        if (!response.ok || !payload) {
+          setKpiError("Impossible de charger les KPIs.");
+          setKpiData(null);
+          return;
+        }
+        setKpiData(payload as KpiSummary);
+      } catch {
+        if (!cancelled) {
+          setKpiError("Impossible de charger les KPIs.");
+          setKpiData(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setKpiLoading(false);
+        }
+      }
+    };
+    void loadKpis();
+    return () => {
+      cancelled = true;
+    };
+  }, [kpiLocationId, kpiPreset, kpiFrom, kpiTo, session, timeZone]);
 
   useEffect(() => {
     const prevGoogleConnected = prevGoogleConnectedRef.current;
@@ -394,33 +477,131 @@ const Dashboard = ({
     return location.location_title ?? location.location_resource_name ?? "—";
   };
 
+  const sentimentTotal =
+    (kpiData?.sentiment_breakdown.positive ?? 0) +
+    (kpiData?.sentiment_breakdown.neutral ?? 0) +
+    (kpiData?.sentiment_breakdown.negative ?? 0);
+  const positiveRate = sentimentTotal
+    ? Math.round(
+        ((kpiData?.sentiment_breakdown.positive ?? 0) / sentimentTotal) * 100
+      )
+    : null;
+  const kpiCards = [
+    {
+      label: "Volume d'avis",
+      value: kpiData?.reviews_total ?? "—",
+      caption: `Avec texte: ${kpiData?.reviews_with_text ?? "—"}`
+    },
+    {
+      label: "Note moyenne",
+      value: kpiData?.avg_rating ? kpiData.avg_rating.toFixed(2) : "—",
+      caption: "Sur 5"
+    },
+    {
+      label: "Sentiment positif",
+      value: positiveRate !== null ? `${positiveRate}%` : "—",
+      caption: "Sur avis taggés"
+    }
+  ];
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-semibold text-slate-900">{greetingText}</h2>
       </div>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        {mockKpis.map((kpi) => (
-          <Card key={kpi.label}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-slate-500">
-                {kpi.label}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex items-end justify-between">
-              <div>
-                <p className="text-3xl font-semibold text-slate-900">
-                  {formatKpiValue(kpi.value)}
-                </p>
-                <p className="text-xs text-slate-500">{formatKpiValue(kpi.caption)}</p>
-              </div>
-              <Badge variant={kpi.trend === "up" ? "success" : "warning"}>
-                {formatKpiValue(kpi.delta)}
-              </Badge>
-            </CardContent>
-          </Card>
-        ))}
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="text-xs font-semibold text-slate-500">
+              Lieu
+            </label>
+            <select
+              className="mt-1 w-56 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+              value={kpiLocationId}
+              onChange={(event) => setKpiLocationId(event.target.value)}
+            >
+              {locations.map((location) => (
+                <option
+                  key={location.location_resource_name}
+                  value={location.location_resource_name}
+                >
+                  {location.location_title ?? location.location_resource_name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-500">
+              Période
+            </label>
+            <select
+              className="mt-1 w-44 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+              value={kpiPreset}
+              onChange={(event) =>
+                setKpiPreset(event.target.value as typeof kpiPreset)
+              }
+            >
+              <option value="this_week">Cette semaine</option>
+              <option value="this_month">Ce mois</option>
+              <option value="this_quarter">Ce trimestre</option>
+              <option value="this_year">Cette année</option>
+              <option value="last_year">Année dernière</option>
+              <option value="custom">Personnalisé</option>
+            </select>
+          </div>
+          {kpiPreset === "custom" && (
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                value={kpiFrom}
+                onChange={(event) => setKpiFrom(event.target.value)}
+              />
+              <input
+                type="date"
+                className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                value={kpiTo}
+                onChange={(event) => setKpiTo(event.target.value)}
+              />
+            </div>
+          )}
+          {kpiError && (
+            <span className="text-xs text-amber-700">{kpiError}</span>
+          )}
+        </div>
+        <div className="grid gap-4 md:grid-cols-3">
+          {kpiCards.map((kpi) => (
+            <Card key={kpi.label}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold text-slate-500">
+                  {kpi.label}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex items-end justify-between">
+                <div>
+                  <p className="text-3xl font-semibold text-slate-900">
+                    {formatKpiValue(kpi.value)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {formatKpiValue(kpi.caption)}
+                  </p>
+                </div>
+                <Badge variant="neutral">
+                  {kpiLoading ? "..." : " "}
+                </Badge>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+        <div className="text-xs text-slate-500">
+          Tags dominants:{" "}
+          {kpiData?.top_tags?.length
+            ? kpiData.top_tags
+                .map((tag) => `${tag.tag} (${tag.count})`)
+                .join(", ")
+            : "—"}
+        </div>
       </section>
 
       <section className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">

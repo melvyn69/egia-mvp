@@ -71,6 +71,25 @@ const saveCursor = async (cursor: Cursor) => {
   });
 };
 
+const upsertAiStatus = async (
+  locationId: string,
+  value: {
+    status: "running" | "ok" | "error";
+    with_text?: number;
+    missing_insights?: number;
+    last_run_at?: string;
+    finished_at?: string | null;
+    errors_count?: number;
+    message?: string | null;
+  }
+) => {
+  await supabaseAdmin.from("cron_state").upsert({
+    key: `ai_tags_status:${locationId}`,
+    value,
+    updated_at: new Date().toISOString()
+  });
+};
+
 const getAuthSecret = (req: VercelRequest) => {
   const secretParam = req.query?.secret;
   if (Array.isArray(secretParam)) {
@@ -336,6 +355,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let totalWithText = 0;
   let totalMissingInsights = 0;
   let skipReason: string | null = null;
+  const errorsByLocation = new Map<string, number>();
 
   try {
     const cursor = await loadCursor();
@@ -480,6 +500,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : "RPC returned 0 rows; cursor may be too advanced (try &force=1 or reset ai_tag_cursor_v2).";
     }
 
+    const nowIso = new Date().toISOString();
+    const locationIds = Array.from(
+      new Set(
+        candidateRows
+          .map((review) => review.location_id)
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+    const locationStats = new Map<
+      string,
+      { withText: number; missingInsights: number }
+    >();
+    for (const locationId of locationIds) {
+      const { count } = await supabaseAdmin
+        .from("google_reviews")
+        .select("id", { count: "exact", head: true })
+        .eq("location_id", locationId)
+        .not("comment", "is", null)
+        .neq("comment", "");
+      const { data: missingData } = await supabaseAdmin.rpc(
+        "ai_tag_candidates_count",
+        {
+          p_user_id: null,
+          p_location_id: locationId
+        }
+      );
+      const withText = count ?? 0;
+      const missingInsights = Number(missingData ?? 0);
+      locationStats.set(locationId, { withText, missingInsights });
+      await upsertAiStatus(locationId, {
+        status: "running",
+        with_text: withText,
+        missing_insights: missingInsights,
+        last_run_at: nowIso
+      });
+    }
+
     if (candidatesFound === 0) {
       skipReason = "no_candidates";
       const aborted = timeUp();
@@ -543,6 +600,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (insightError) {
           console.error("[ai]", requestId, "insight upsert failed", insightError);
+          if (review.location_id) {
+            errorsByLocation.set(
+              review.location_id,
+              (errorsByLocation.get(review.location_id) ?? 0) + 1
+            );
+          }
           await supabaseAdmin.from("review_ai_insights").upsert({
             review_pk: review.id,
             user_id: review.user_id,
@@ -597,11 +660,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const message = error instanceof Error ? error.message : "Unknown error";
         errors.push({ reviewId: review.id, message });
         console.error("[ai]", requestId, "review failed", message);
+        if (review.location_id) {
+          errorsByLocation.set(
+            review.location_id,
+            (errorsByLocation.get(review.location_id) ?? 0) + 1
+          );
+        }
         await saveCursor({
           last_source_time: effectiveUpdateTime ?? lastSourceTime,
           last_review_pk: review.id
         });
       }
+    }
+
+    for (const locationId of locationIds) {
+      const { data: missingData } = await supabaseAdmin.rpc(
+        "ai_tag_candidates_count",
+        {
+          p_user_id: null,
+          p_location_id: locationId
+        }
+      );
+      const missingInsights = Number(missingData ?? 0);
+      const withText = locationStats.get(locationId)?.withText ?? 0;
+      const errorsCount = errorsByLocation.get(locationId) ?? 0;
+      let status: "ok" | "running" | "error" =
+        missingInsights === 0 ? "ok" : "running";
+      if (errorsCount > 0) {
+        status = "error";
+      }
+      await upsertAiStatus(locationId, {
+        status,
+        with_text: withText,
+        missing_insights: missingInsights,
+        last_run_at: nowIso,
+        finished_at: status === "ok" ? nowIso : null,
+        errors_count: errorsCount
+      });
     }
 
     const aborted = timeUp() || reviewsScanned >= MAX_REVIEWS;
