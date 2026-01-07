@@ -57,16 +57,19 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       timeZone
     );
 
-    console.log("[kpi-summary] range", range);
     const args = {
       p_location_id: locationId,
       p_from: range.from,
       p_to: range.to,
       p_rating_min: filters.rating_min ?? null,
       p_rating_max: filters.rating_max ?? null,
-      p_sentiment: filters.sentiment ?? null,
-      p_status: filters.status ?? null,
-      p_tags: filters.tags && filters.tags.length ? filters.tags : null
+      p_sentiment:
+        filters.sentiment && filters.sentiment !== "all"
+          ? filters.sentiment
+          : null,
+      p_status:
+        filters.status && filters.status !== "all" ? filters.status : null,
+      p_tags: Array.isArray(filters.tags) && filters.tags.length ? filters.tags : null
     };
 
     const { data: summary, error: summaryError } = await supabaseAdmin
@@ -74,18 +77,26 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       .maybeSingle();
 
     if (summaryError) {
-      console.error("[kpi-summary] rpc error", {
+      console.error("kpi_summary rpc error", {
         message: summaryError.message,
         details: (summaryError as { details?: string }).details,
         hint: (summaryError as { hint?: string }).hint,
         code: (summaryError as { code?: string }).code,
-        args
+        args: {
+          p_location_id: args.p_location_id,
+          p_from: args.p_from,
+          p_to: args.p_to,
+          p_rating_min: args.p_rating_min,
+          p_rating_max: args.p_rating_max,
+          p_sentiment: args.p_sentiment,
+          p_status: args.p_status,
+          p_tags: args.p_tags ? `[${args.p_tags.length}]` : null
+        }
       });
       return res.status(500).json({
-        error: summaryError.message,
-        details: (summaryError as { details?: string }).details,
-        hint: (summaryError as { hint?: string }).hint,
-        code: (summaryError as { code?: string }).code
+        error: "Failed to load KPI summary",
+        code: (summaryError as { code?: string }).code,
+        message: summaryError.message
       });
     }
 
@@ -105,5 +116,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     return res.status(500).json({ error: "Failed to load KPI summary" });
   }
 };
+
+// Smoke test:
+// curl -i "$BASE/api/kpi/summary?location_id=...&preset=this_week&tz=Europe/Paris&source=google" -H "Authorization: Bearer $JWT"
 
 export default handler;
