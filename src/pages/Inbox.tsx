@@ -71,14 +71,14 @@ type ReviewRow = {
 };
 
 type ReviewCronStatus = {
-  status: "ok" | "running" | "error" | "unknown";
-  total_reviews?: number;
-  last_synced_at?: string | null;
-  finished_at?: string | null;
-  errors_count?: number;
-  with_text?: number;
-  missing_insights?: number;
+  status: "idle" | "running" | "done" | "error";
   last_run_at?: string | null;
+  aborted?: boolean;
+  cursor?: unknown;
+  stats?: { scanned?: number; upserted?: number; processed?: number; tagsUpserted?: number };
+  errors_count?: number;
+  last_error?: string | null;
+  missing_insights_count?: number | null;
 };
 
 const statusLabelMap: Record<ReviewStatus, string> = {
@@ -212,27 +212,24 @@ const formatSinceMinutes = (iso: string | null): string => {
 
 const formatStatusIcon = (status: ReviewCronStatus["status"]) => {
   switch (status) {
-    case "ok":
+    case "done":
       return "✅";
     case "running":
       return "⏳";
     case "error":
       return "❌";
+    case "idle":
+      return "—";
     default:
       return "—";
   }
 };
 
-const formatAiProgress = (
-  withText?: number,
-  missingInsights?: number
-): string => {
-  if (!withText || withText <= 0) {
+const formatMissingInsights = (missing?: number | null): string => {
+  if (missing === null || missing === undefined) {
     return "—";
   }
-  const missing = Math.max(0, missingInsights ?? 0);
-  const progress = Math.max(0, Math.min(1, 1 - missing / withText));
-  return `${Math.round(progress * 100)}%`;
+  return `${missing}`;
 };
 
 const Inbox = () => {
@@ -286,10 +283,10 @@ const Inbox = () => {
     Array<{ id: string; label: string }>
   >([]);
   const [importStatus, setImportStatus] = useState<ReviewCronStatus>({
-    status: "unknown"
+    status: "idle"
   });
   const [aiStatus, setAiStatus] = useState<ReviewCronStatus>({
-    status: "unknown"
+    status: "idle"
   });
 
   const isSupabaseAvailable = Boolean(supabase);
@@ -487,8 +484,8 @@ const Inbox = () => {
 
   const loadReviewStatuses = useCallback(async () => {
     if (!supabase || !activeLocationId) {
-      setImportStatus({ status: "unknown" });
-      setAiStatus({ status: "unknown" });
+      setImportStatus({ status: "idle" });
+      setAiStatus({ status: "idle" });
       return;
     }
     try {
@@ -503,15 +500,15 @@ const Inbox = () => {
       );
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload) {
-        setImportStatus({ status: "unknown" });
-        setAiStatus({ status: "unknown" });
+        setImportStatus({ status: "idle" });
+        setAiStatus({ status: "idle" });
         return;
       }
-      setImportStatus(payload.import ?? { status: "unknown" });
-      setAiStatus(payload.ai ?? { status: "unknown" });
+      setImportStatus(payload.import ?? { status: "idle" });
+      setAiStatus(payload.ai ?? { status: "idle" });
     } catch {
-      setImportStatus({ status: "unknown" });
-      setAiStatus({ status: "unknown" });
+      setImportStatus({ status: "idle" });
+      setAiStatus({ status: "idle" });
     }
   }, [activeLocationId, supabase]);
 
@@ -1104,27 +1101,23 @@ const Inbox = () => {
             <span>Import avis Google</span>
             <span>
               {formatStatusIcon(importStatus.status)}{" "}
-              {importStatus.total_reviews ?? "—"} avis
+              {importStatus.stats?.upserted ?? "—"} avis
             </span>
           </div>
           <div className="mt-1 text-[11px] text-slate-500">
-            Dernière sync :{" "}
-            {formatSinceMinutes(
-              importStatus.last_synced_at ??
-                importStatus.finished_at ??
-                null
-            )}
+            Dernier run :{" "}
+            {formatSinceMinutes(importStatus.last_run_at ?? null)}
           </div>
           <div className="mt-3 flex items-center justify-between">
             <span>Analyse IA</span>
             <span>
               {formatStatusIcon(aiStatus.status)}{" "}
-              {formatAiProgress(aiStatus.with_text, aiStatus.missing_insights)}
+              {formatMissingInsights(aiStatus.missing_insights_count)} en attente
             </span>
           </div>
           <div className="mt-1 text-[11px] text-slate-500">
             Dernière analyse :{" "}
-            {formatSinceMinutes(aiStatus.last_run_at ?? aiStatus.finished_at ?? null)}
+            {formatSinceMinutes(aiStatus.last_run_at ?? null)}
           </div>
         </div>
         {import.meta.env.DEV && (

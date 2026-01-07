@@ -122,18 +122,21 @@ const listReviewsForLocation = async (
 
 const upsertImportStatus = async (
   supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
+  userId: string,
   locationId: string,
   value: {
-    status: "running" | "ok" | "error";
-    total_reviews?: number;
-    last_synced_at?: string | null;
-    finished_at?: string | null;
+    status: "idle" | "running" | "done" | "error";
+    last_run_at?: string;
+    aborted?: boolean;
+    cursor?: string | null;
+    pages_exhausted?: boolean;
+    stats?: { scanned?: number; upserted?: number };
     errors_count?: number;
-    message?: string | null;
+    last_error?: string | null;
   }
 ) => {
   await supabaseAdmin.from("cron_state").upsert({
-    key: `gmb_import_status:${locationId}`,
+    key: `import_status_v1:${userId}:${locationId}`,
     value,
     updated_at: new Date().toISOString()
   });
@@ -276,13 +279,20 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     let locationsFailed = 0;
     for (const location of locationList) {
       const runStartedAt = new Date().toISOString();
-      await upsertImportStatus(supabaseAdmin, location.location_resource_name, {
-        status: "running",
-        total_reviews: 0,
-        last_synced_at: null,
-        finished_at: null,
-        errors_count: 0
-      });
+      await upsertImportStatus(
+        supabaseAdmin,
+        userId,
+        location.location_resource_name,
+        {
+          status: "running",
+          last_run_at: runStartedAt,
+          aborted: false,
+          cursor: null,
+          pages_exhausted: false,
+          stats: { scanned: 0, upserted: 0 },
+          errors_count: 0
+        }
+      );
       const displayName =
         (location as { location_title?: string }).location_title ??
         (location as { title?: string }).title ??
@@ -305,14 +315,17 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       } catch (error) {
         await upsertImportStatus(
           supabaseAdmin,
+          userId,
           location.location_resource_name,
           {
             status: "error",
-            total_reviews: 0,
-            last_synced_at: null,
-            finished_at: runStartedAt,
+            last_run_at: runStartedAt,
+            aborted: false,
+            cursor: null,
+            pages_exhausted: false,
+            stats: { scanned: 0, upserted: 0 },
             errors_count: 1,
-            message: (error as Error)?.message ?? "Failed to sync reviews."
+            last_error: (error as Error)?.message ?? "Failed to sync reviews."
           }
         );
         throw error;
@@ -320,14 +333,17 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       if (notFound) {
         await upsertImportStatus(
           supabaseAdmin,
+          userId,
           location.location_resource_name,
           {
             status: "error",
-            total_reviews: 0,
-            last_synced_at: null,
-            finished_at: runStartedAt,
+            last_run_at: runStartedAt,
+            aborted: false,
+            cursor: null,
+            pages_exhausted: false,
+            stats: { scanned: 0, upserted: 0 },
             errors_count: 1,
-            message: "Location not found on Google."
+            last_error: "Location not found on Google."
           }
         );
         locationsFailed += 1;
@@ -336,12 +352,15 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       if (reviews.length === 0) {
         await upsertImportStatus(
           supabaseAdmin,
+          userId,
           location.location_resource_name,
           {
-            status: "ok",
-            total_reviews: 0,
-            last_synced_at: runStartedAt,
-            finished_at: runStartedAt,
+            status: "done",
+            last_run_at: runStartedAt,
+            aborted: false,
+            cursor: null,
+            pages_exhausted: true,
+            stats: { scanned: 0, upserted: 0 },
             errors_count: 0
           }
         );
@@ -390,27 +409,37 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
         console.error("google reviews upsert failed:", upsertError);
         await upsertImportStatus(
           supabaseAdmin,
+          userId,
           location.location_resource_name,
           {
             status: "error",
-            total_reviews: 0,
-            last_synced_at: null,
-            finished_at: nowIso,
+            last_run_at: nowIso,
+            aborted: false,
+            cursor: null,
+            pages_exhausted: false,
+            stats: { scanned: reviews.length, upserted: 0 },
             errors_count: 1,
-            message: upsertError.message ?? "Upsert failed."
+            last_error: upsertError.message ?? "Upsert failed."
           }
         );
         continue;
       }
 
       reviewsUpsertedCount += rows.length;
-      await upsertImportStatus(supabaseAdmin, location.location_resource_name, {
-        status: "ok",
-        total_reviews: rows.length,
-        last_synced_at: nowIso,
-        finished_at: nowIso,
-        errors_count: 0
-      });
+      await upsertImportStatus(
+        supabaseAdmin,
+        userId,
+        location.location_resource_name,
+        {
+          status: "done",
+          last_run_at: nowIso,
+          aborted: false,
+          cursor: null,
+          pages_exhausted: true,
+          stats: { scanned: reviews.length, upserted: rows.length },
+          errors_count: 0
+        }
+      );
     }
 
     console.log("gbp reviews sync:", {

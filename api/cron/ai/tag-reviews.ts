@@ -72,19 +72,21 @@ const saveCursor = async (cursor: Cursor) => {
 };
 
 const upsertAiStatus = async (
+  userId: string,
   locationId: string,
   value: {
-    status: "running" | "ok" | "error";
-    with_text?: number;
-    missing_insights?: number;
+    status: "idle" | "running" | "done" | "error";
     last_run_at?: string;
-    finished_at?: string | null;
+    aborted?: boolean;
+    cursor?: Cursor | null;
+    stats?: { processed?: number; tagsUpserted?: number };
     errors_count?: number;
-    message?: string | null;
+    last_error?: string | null;
+    missing_insights_count?: number;
   }
 ) => {
   await supabaseAdmin.from("cron_state").upsert({
-    key: `ai_tags_status:${locationId}`,
+    key: `ai_status_v1:${userId}:${locationId}`,
     value,
     updated_at: new Date().toISOString()
   });
@@ -356,6 +358,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let totalMissingInsights = 0;
   let skipReason: string | null = null;
   const errorsByLocation = new Map<string, number>();
+  const processedByLocation = new Map<string, number>();
+  const tagsByLocation = new Map<string, number>();
+  const lastErrorByLocation = new Map<string, string>();
+  const locationUserMap = new Map<string, string>();
 
   try {
     const cursor = await loadCursor();
@@ -501,6 +507,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const nowIso = new Date().toISOString();
+    candidateRows.forEach((review) => {
+      if (review.location_id && review.user_id) {
+        if (!locationUserMap.has(review.location_id)) {
+          locationUserMap.set(review.location_id, review.user_id);
+        }
+      }
+    });
     const locationIds = Array.from(
       new Set(
         candidateRows
@@ -529,12 +542,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const withText = count ?? 0;
       const missingInsights = Number(missingData ?? 0);
       locationStats.set(locationId, { withText, missingInsights });
-      await upsertAiStatus(locationId, {
-        status: "running",
-        with_text: withText,
-        missing_insights: missingInsights,
-        last_run_at: nowIso
-      });
+      const userIdForLocation = locationUserMap.get(locationId);
+      if (userIdForLocation) {
+        await upsertAiStatus(userIdForLocation, locationId, {
+          status: "running",
+          last_run_at: nowIso,
+          aborted: false,
+          cursor,
+          stats: { processed: 0, tagsUpserted: 0 },
+          errors_count: 0,
+          last_error: null,
+          missing_insights_count: missingInsights
+        });
+      }
     }
 
     if (candidatesFound === 0) {
@@ -563,9 +583,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const effectiveUpdateTime =
         review.update_time ?? review.create_time ?? review.created_at ?? null;
+      const locationId = review.location_id ?? null;
       if (!effectiveUpdateTime) {
         errors.push({ reviewId: review.id, message: "Missing source_time" });
         console.error("[ai-tag]", requestId, "missing source_time", review.id);
+        if (locationId) {
+          errorsByLocation.set(
+            locationId,
+            (errorsByLocation.get(locationId) ?? 0) + 1
+          );
+          lastErrorByLocation.set(locationId, "Missing source_time");
+        }
         continue;
       }
 
@@ -604,6 +632,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             errorsByLocation.set(
               review.location_id,
               (errorsByLocation.get(review.location_id) ?? 0) + 1
+            );
+            lastErrorByLocation.set(
+              review.location_id,
+              insightError.message ?? "insight upsert failed"
             );
           }
           await supabaseAdmin.from("review_ai_insights").upsert({
@@ -650,8 +682,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               evidence: tag.evidence ?? null
             });
           tagsUpserted += 1;
+          if (locationId) {
+            tagsByLocation.set(
+              locationId,
+              (tagsByLocation.get(locationId) ?? 0) + 1
+            );
+          }
         }
 
+        if (locationId) {
+          processedByLocation.set(
+            locationId,
+            (processedByLocation.get(locationId) ?? 0) + 1
+          );
+        }
         await saveCursor({
           last_source_time: effectiveUpdateTime,
           last_review_pk: review.id
@@ -665,6 +709,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             review.location_id,
             (errorsByLocation.get(review.location_id) ?? 0) + 1
           );
+          lastErrorByLocation.set(review.location_id, message);
         }
         await saveCursor({
           last_source_time: effectiveUpdateTime ?? lastSourceTime,
@@ -672,6 +717,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
     }
+
+    const aborted = timeUp() || reviewsScanned >= MAX_REVIEWS;
 
     for (const locationId of locationIds) {
       const { data: missingData } = await supabaseAdmin.rpc(
@@ -684,22 +731,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const missingInsights = Number(missingData ?? 0);
       const withText = locationStats.get(locationId)?.withText ?? 0;
       const errorsCount = errorsByLocation.get(locationId) ?? 0;
-      let status: "ok" | "running" | "error" =
-        missingInsights === 0 ? "ok" : "running";
-      if (errorsCount > 0) {
+      const processedCount = processedByLocation.get(locationId) ?? 0;
+      const tagsCount = tagsByLocation.get(locationId) ?? 0;
+      let status: "idle" | "running" | "done" | "error" = "running";
+      if (!aborted && errorsCount === 0 && missingInsights === 0) {
+        status = "done";
+      } else if (errorsCount > 0) {
         status = "error";
       }
-      await upsertAiStatus(locationId, {
-        status,
-        with_text: withText,
-        missing_insights: missingInsights,
-        last_run_at: nowIso,
-        finished_at: status === "ok" ? nowIso : null,
-        errors_count: errorsCount
-      });
+      const userIdForLocation = locationUserMap.get(locationId);
+      if (userIdForLocation) {
+        await upsertAiStatus(userIdForLocation, locationId, {
+          status,
+          last_run_at: nowIso,
+          aborted,
+          cursor,
+          stats: { processed: processedCount, tagsUpserted: tagsCount },
+          errors_count: errorsCount,
+          last_error: lastErrorByLocation.get(locationId) ?? null,
+          missing_insights_count: missingInsights
+        });
+      }
     }
 
-    const aborted = timeUp() || reviewsScanned >= MAX_REVIEWS;
     if (reviewsProcessed === 0 && !skipReason) {
       skipReason = "short_circuit_removed";
     }
@@ -721,6 +775,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error("[ai]", requestId, "fatal error", message);
+    if (locationUserMap.size > 0) {
+      const nowIso = new Date().toISOString();
+      for (const [locationId, userId] of locationUserMap.entries()) {
+        await upsertAiStatus(userId, locationId, {
+          status: "error",
+          last_run_at: nowIso,
+          aborted: false,
+          cursor: null,
+          stats: { processed: 0, tagsUpserted: 0 },
+          errors_count: 1,
+          last_error: message,
+          missing_insights_count: null
+        });
+      }
+    }
     return res.status(500).json({ error: message });
   }
 }

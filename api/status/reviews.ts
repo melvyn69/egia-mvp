@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createSupabaseAdmin, getUserFromRequest } from "../google/_utils.js";
 
 type CronStatus = {
-  status: "ok" | "running" | "error" | "unknown";
+  status: "idle" | "running" | "done" | "error";
   [key: string]: unknown;
 };
 
@@ -10,7 +10,7 @@ const toStatus = (value: unknown): CronStatus => {
   if (value && typeof value === "object" && "status" in value) {
     return value as CronStatus;
   }
-  return { status: "unknown" };
+  return { status: "idle" };
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -33,22 +33,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       locationId = locationId[0];
     }
     if (!locationId) {
-      const { data: locationRow } = await supabaseAdmin
-        .from("google_locations")
-        .select("location_resource_name")
-        .eq("user_id", userId)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      locationId = locationRow?.location_resource_name ?? null;
+      return res.status(400).json({ error: "Missing location_id" });
     }
 
-    if (!locationId) {
+    const { data: locationRow } = await supabaseAdmin
+      .from("google_locations")
+      .select("location_resource_name")
+      .eq("user_id", userId)
+      .eq("location_resource_name", locationId)
+      .maybeSingle();
+    if (!locationRow) {
       return res.status(404).json({ error: "Location not found" });
     }
 
-    const importKey = `gmb_import_status:${locationId}`;
-    const aiKey = `ai_tags_status:${locationId}`;
+    const importKey = `import_status_v1:${userId}:${locationId}`;
+    const aiKey = `ai_status_v1:${userId}:${locationId}`;
 
     const { data: importState } = await supabaseAdmin
       .from("cron_state")
@@ -65,6 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const aiStatus = toStatus(aiState?.value);
 
     return res.status(200).json({
+      location_id: locationId,
       import: importStatus,
       ai: aiStatus
     });
