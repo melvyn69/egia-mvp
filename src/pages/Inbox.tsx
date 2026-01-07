@@ -764,6 +764,7 @@ const Inbox = () => {
       if (updateError) {
         setGenerationError("Réponse envoyée, mais statut non mis à jour.");
       } else {
+        // 1) Marquer le brouillon comme envoyé dans l'historique
         setReplyHistory((prev) =>
           prev.map((item) =>
             item.id === draftReplyId
@@ -773,6 +774,34 @@ const Inbox = () => {
         );
         setDraftReplyId(null);
         setDraftByReview((prev) => ({ ...prev, [selectedReview.id]: false }));
+
+        // 2) Mettre à jour le statut de l'avis dans la DB (google_reviews)
+        // selectedReview.id = id (uuid) de la table google_reviews (pas review_id)
+        const { error: reviewStatusError } = await supabaseClient
+          .from("google_reviews")
+          .update({ status: "replied" })
+          .eq("id", selectedReview.id);
+
+        if (reviewStatusError) {
+          // On n'empêche pas l'utilisateur d'avancer : la réponse est déjà envoyée à Google
+          console.warn("google_reviews status update failed:", reviewStatusError);
+        }
+
+        // 3) Mettre à jour l'UI localement (instant)
+        setReviews((prev) =>
+          prev.map((r) =>
+            r.id === selectedReview.id ? { ...r, status: "replied" } : r
+          )
+        );
+
+        // 4) Auto-sélection du prochain avis "new" dans la liste filtrée
+        // (On utilise la version la plus fraîche possible)
+        const nextNew = filteredReviews.find(
+          (r) => r.id !== selectedReview.id && r.status === "new"
+        );
+        if (nextNew) {
+          setSelectedReviewId(nextNew.id);
+        }
       }
     } catch (error) {
       if (error instanceof Error && error.message === "No session / not authenticated") {
