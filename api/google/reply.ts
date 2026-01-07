@@ -62,27 +62,29 @@ const refreshGoogleAccessToken = async (refreshToken: string) => {
   return json.access_token as string;
 };
 
-const resolveReviewName = async (
+const resolveReviewRecord = async (
   userId: string,
   reviewId: string,
   googleReviewId?: string | null
 ) => {
-  if (reviewId.includes("accounts/")) {
-    return reviewId;
-  }
   let query = supabaseAdmin
     .from("google_reviews")
-    .select("review_name")
-    .eq("user_id", userId)
-    .eq("review_id", reviewId);
+    .select("review_name, status")
+    .eq("user_id", userId);
   if (googleReviewId) {
     query = query.eq("id", googleReviewId);
+  } else if (reviewId.includes("accounts/")) {
+    query = query.eq("review_name", reviewId);
+  } else {
+    query = query.eq("review_id", reviewId);
   }
   const { data, error } = await query.maybeSingle();
-  if (error || !data?.review_name) {
-    throw new Error("Review name not found");
+  if (error) {
+    throw new Error("Review lookup failed");
   }
-  return data.review_name as string;
+  const reviewName =
+    data?.review_name ?? (reviewId.includes("accounts/") ? reviewId : null);
+  return { reviewName, status: data?.status ?? null };
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -133,6 +135,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: "Missing reviewId or replyText" });
     }
 
+    const reviewRecord = await resolveReviewRecord(
+      userId,
+      reviewId,
+      googleReviewId ?? null
+    );
+    if (reviewRecord.status === "replied") {
+      console.error("[reply]", requestId, "already replied", {
+        reviewId,
+        googleReviewId
+      });
+      return res.status(409).json({ error: "already_replied" });
+    }
+    if (!reviewRecord.reviewName) {
+      console.error("[reply]", requestId, "review name missing", {
+        reviewId,
+        googleReviewId
+      });
+      return res.status(400).json({ error: "Review name not found" });
+    }
+
     const { data: conn, error: connErr } = await supabaseAdmin
       .from("google_connections")
       .select("refresh_token")
@@ -153,11 +175,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error("[reply]", requestId, "token refresh failed", error);
       return res.status(502).json({ error: "Google token refresh failed" });
     }
-    const googleReviewName = await resolveReviewName(
-      userId,
-      reviewId,
-      googleReviewId ?? null
-    );
+    const googleReviewName = reviewRecord.reviewName;
 
     const googleRes = await fetch(
       `https://mybusiness.googleapis.com/v4/${googleReviewName}/reply`,
