@@ -18,7 +18,7 @@ type AiResult = {
   model: string;
 };
 
-const CURSOR_KEY = "ai_tag_cursor_v1";
+const CURSOR_KEY = "ai_tag_cursor_v2";
 
 const getEnv = (keys: string[]) => {
   for (const key of keys) {
@@ -47,6 +47,7 @@ const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
 });
 
 type Cursor = {
+  last_update_time: string | null;
   last_review_pk: string | null;
 };
 
@@ -56,7 +57,10 @@ const loadCursor = async (): Promise<Cursor> => {
     .select("value")
     .eq("key", CURSOR_KEY)
     .maybeSingle();
-  return (data?.value as Cursor) ?? { last_review_pk: null };
+  return (data?.value as Cursor) ?? {
+    last_update_time: "1970-01-01T00:00:00.000Z",
+    last_review_pk: "00000000-0000-0000-0000-000000000000"
+  };
 };
 
 const saveCursor = async (cursor: Cursor) => {
@@ -287,7 +291,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let query = supabaseAdmin
       .from("google_reviews")
       .select(
-        "id, user_id, location_id, location_name, comment, update_time, review_ai_insights(source_update_time)"
+        "id, user_id, location_id, location_name, comment, update_time, create_time, review_ai_insights(source_update_time)"
       )
       .not("comment", "is", null)
       .neq("comment", "")
@@ -295,9 +299,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .order("id", { ascending: true })
       .limit(MAX_REVIEWS);
 
-    if (cursor.last_review_pk) {
-      query = query.gt("id", cursor.last_review_pk);
-    }
+    const lastUpdateTime =
+      cursor.last_update_time ?? "1970-01-01T00:00:00.000Z";
+    const lastReviewPk =
+      cursor.last_review_pk ?? "00000000-0000-0000-0000-000000000000";
+    query = query.or(
+      `and(update_time.gt.${lastUpdateTime}),` +
+        `and(update_time.eq.${lastUpdateTime},id.gt.${lastReviewPk}),` +
+        `and(update_time.is.null,create_time.gt.${lastUpdateTime}),` +
+        `and(update_time.is.null,create_time.eq.${lastUpdateTime},id.gt.${lastReviewPk})`
+    );
 
     const { data: reviews, error: reviewsError } = await query;
 
@@ -307,7 +318,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     for (const review of reviews ?? []) {
-      if (timeUp()) {
+      if (timeUp() || reviewsScanned >= MAX_REVIEWS) {
         break;
       }
       const insightValue = review.review_ai_insights as
@@ -317,11 +328,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const existingSourceUpdate = Array.isArray(insightValue)
         ? insightValue[0]?.source_update_time ?? null
         : insightValue?.source_update_time ?? null;
-      if (existingSourceUpdate && review.update_time) {
-        if (new Date(review.update_time).getTime() <= new Date(existingSourceUpdate).getTime()) {
-          await saveCursor({ last_review_pk: review.id });
-          continue;
-        }
+      const effectiveUpdateTime = review.update_time ?? review.create_time ?? null;
+      if (!effectiveUpdateTime) {
+        errors.push({ reviewId: review.id, message: "Missing update_time" });
+        console.error("[ai]", requestId, "missing update_time", review.id);
+        await saveCursor({
+          last_update_time: lastUpdateTime,
+          last_review_pk: review.id
+        });
+        continue;
+      }
+      if (
+        existingSourceUpdate &&
+        new Date(effectiveUpdateTime).getTime() <=
+          new Date(existingSourceUpdate).getTime()
+      ) {
+        await saveCursor({
+          last_update_time: effectiveUpdateTime,
+          last_review_pk: review.id
+        });
+        continue;
       }
       reviewsScanned += 1;
       try {
@@ -343,7 +369,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             topics: analysis.topics,
             model: analysis.model,
             processed_at: nowIso,
-            source_update_time: review.update_time ?? nowIso,
+            source_update_time: effectiveUpdateTime,
             error: null
           });
 
@@ -354,11 +380,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             user_id: review.user_id,
             location_resource_name: review.location_id ?? review.location_name,
             processed_at: nowIso,
-            source_update_time: review.update_time ?? nowIso,
+            source_update_time: effectiveUpdateTime,
             error: insightError.message ?? "insight upsert failed"
           });
           errors.push({ reviewId: review.id, message: insightError.message });
-          await saveCursor({ last_review_pk: review.id });
+          await saveCursor({
+            last_update_time: effectiveUpdateTime,
+            last_review_pk: review.id
+          });
           continue;
         }
 
@@ -393,16 +422,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         reviewsProcessed += 1;
-        await saveCursor({ last_review_pk: review.id });
+        await saveCursor({
+          last_update_time: effectiveUpdateTime,
+          last_review_pk: review.id
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
         errors.push({ reviewId: review.id, message });
         console.error("[ai]", requestId, "review failed", message);
-        await saveCursor({ last_review_pk: review.id });
+        await saveCursor({
+          last_update_time: effectiveUpdateTime,
+          last_review_pk: review.id
+        });
       }
     }
 
-    const aborted = timeUp();
+    const aborted = timeUp() || reviewsScanned >= MAX_REVIEWS;
     return res.status(200).json({
       ok: true,
       requestId,
