@@ -703,15 +703,15 @@ const Inbox = () => {
     }
     setReplySending(true);
     try {
-      const userToken = await getAccessToken(supabaseClient);
+      const userJwt = await getAccessToken(supabaseClient);
       // TODO: publish_reply_to_google(review)
       const projectRef = getProjectRef(supabaseUrl);
       if (import.meta.env.DEV) {
         console.log("projectRef", projectRef ?? "—");
         console.log(
           "access_token parts/len",
-          userToken.split(".").length,
-          userToken.length
+          userJwt.split(".").length,
+          userJwt.length
         );
         const { data: userData } = await supabaseClient.auth.getUser();
         console.log("post-reply-google userId", userData.user?.id ?? "null");
@@ -724,14 +724,13 @@ const Inbox = () => {
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${supabaseAnonKey}`,
+            Authorization: `Bearer ${userJwt}`,
             apikey: supabaseAnonKey ?? "",
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
             reviewId: selectedReview.reviewId,
-            replyText,
-            userToken
+            replyText
           })
         }
       );
