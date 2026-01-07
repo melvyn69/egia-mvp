@@ -57,21 +57,36 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       timeZone
     );
 
+    console.log("[kpi-summary] range", range);
+    const args = {
+      p_location_id: locationId,
+      p_from: range.from,
+      p_to: range.to,
+      p_rating_min: filters.rating_min ?? null,
+      p_rating_max: filters.rating_max ?? null,
+      p_sentiment: filters.sentiment ?? null,
+      p_status: filters.status ?? null,
+      p_tags: filters.tags && filters.tags.length ? filters.tags : null
+    };
+
     const { data: summary, error: summaryError } = await supabaseAdmin
-      .rpc("kpi_summary", {
-        p_location_id: locationId,
-        p_from: range.from,
-        p_to: range.to,
-        p_rating_min: filters.rating_min ?? null,
-        p_rating_max: filters.rating_max ?? null,
-        p_sentiment: filters.sentiment ?? null,
-        p_status: filters.status ?? null,
-        p_tags: filters.tags ?? null
-      })
+      .rpc("kpi_summary", args)
       .maybeSingle();
 
     if (summaryError) {
-      return res.status(500).json({ error: "Failed to load KPI summary" });
+      console.error("[kpi-summary] rpc error", {
+        message: summaryError.message,
+        details: (summaryError as { details?: string }).details,
+        hint: (summaryError as { hint?: string }).hint,
+        code: (summaryError as { code?: string }).code,
+        args
+      });
+      return res.status(500).json({
+        error: summaryError.message,
+        details: (summaryError as { details?: string }).details,
+        hint: (summaryError as { hint?: string }).hint,
+        code: (summaryError as { code?: string }).code
+      });
     }
 
     return res.status(200).json({
