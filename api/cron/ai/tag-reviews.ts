@@ -155,10 +155,10 @@ const analyzeReview = async (review: { id: string; comment: string }) => {
       signal: controller.signal,
       body: JSON.stringify({
         model,
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "review_ai_analysis",
+        text: {
+          format: {
+            type: "json_schema",
+            name: "review_ai_tags",
             strict: true,
             schema: {
               type: "object",
@@ -224,7 +224,13 @@ const analyzeReview = async (review: { id: string; comment: string }) => {
       throw new Error("OpenAI response missing output_text");
     }
 
-    const parsed = JSON.parse(outputText) as AiResult;
+    let parsed: AiResult;
+    try {
+      parsed = JSON.parse(outputText) as AiResult;
+    } catch (error) {
+      console.error("[ai-tag] OpenAI JSON parse failed");
+      throw error;
+    }
     const sentimentScore = clamp(parsed.sentiment_score, -1, 1);
     return {
       sentiment: parsed.sentiment,
@@ -304,13 +310,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .neq("comment", "");
     totalWithText = totalWithTextQuery.count ?? 0;
 
-    const totalMissingInsightsQuery = await supabaseAdmin
-      .from("google_reviews")
-      .select("id, review_ai_insights(review_pk)", { count: "exact", head: true })
-      .not("comment", "is", null)
-      .neq("comment", "")
-      .is("review_ai_insights.review_pk", null);
-    totalMissingInsights = totalMissingInsightsQuery.count ?? 0;
+    const { data: missingCountData, error: missingCountError } =
+      await supabaseAdmin.rpc("ai_tag_candidates_count", {
+        p_user_id: null,
+        p_location_id: null
+      });
+    if (missingCountError) {
+      console.error("[ai-tag]", requestId, "missing count failed", missingCountError);
+    }
+    totalMissingInsights = Number(missingCountData ?? 0);
     console.log(
       "[ai-tag]",
       requestId,
@@ -324,70 +332,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const lastReviewPk = force
       ? "00000000-0000-0000-0000-000000000000"
       : cursor.last_review_pk ?? "00000000-0000-0000-0000-000000000000";
-    let query = supabaseAdmin
-      .from("google_reviews")
-      .select(
-        "id, user_id, location_id, location_name, comment, update_time, create_time, created_at, review_ai_insights(review_pk)"
-      )
-      .not("comment", "is", null)
-      .neq("comment", "")
-      .is("review_ai_insights.review_pk", null)
-      .order("update_time", { ascending: true, nullsFirst: false })
-      .order("create_time", { ascending: true, nullsFirst: false })
-      .order("created_at", { ascending: true, nullsFirst: false })
-      .order("id", { ascending: true })
-      .limit(MAX_REVIEWS);
+    const { data: candidates, error: candidatesError } =
+      await supabaseAdmin.rpc("ai_tag_candidates", {
+        p_user_id: null,
+        p_location_id: null,
+        p_since_time: lastSourceTime,
+        p_since_id: lastReviewPk,
+        p_limit: MAX_REVIEWS,
+        p_force: force
+      });
 
-    if (!force) {
-      query = query.or(
-        `and(update_time.gt.${lastSourceTime}),` +
-          `and(update_time.eq.${lastSourceTime},id.gt.${lastReviewPk}),` +
-          `and(update_time.is.null,create_time.gt.${lastSourceTime}),` +
-          `and(update_time.is.null,create_time.eq.${lastSourceTime},id.gt.${lastReviewPk}),` +
-          `and(update_time.is.null,create_time.is.null,created_at.gt.${lastSourceTime}),` +
-          `and(update_time.is.null,create_time.is.null,created_at.eq.${lastSourceTime},id.gt.${lastReviewPk})`
-      );
+    if (candidatesError) {
+      console.error("[ai-tag]", requestId, "candidates rpc failed", candidatesError);
+      return res.status(500).json({ error: "Failed to load candidates" });
     }
 
-    const { data: reviews, error: reviewsError } = await query;
-
-    if (reviewsError) {
-      console.error("[ai]", requestId, "reviews fetch failed", reviewsError);
-      return res.status(500).json({ error: "Failed to load reviews" });
-    }
-
-    const reviewsList = reviews ?? [];
-
-    const candidates = reviewsList.filter((review) => {
-      if (!review.comment || review.comment.trim().length === 0) {
-        return false;
-      }
-      return true;
-    });
-
-    candidates.sort((a, b) => {
-      const timeA = a.update_time ?? a.create_time ?? a.created_at ?? "";
-      const timeB = b.update_time ?? b.create_time ?? b.created_at ?? "";
-      if (timeA === timeB) {
-        return a.id.localeCompare(b.id);
-      }
-      return new Date(timeA).getTime() - new Date(timeB).getTime();
-    });
-
-    candidatesFound = candidates.length;
+    const candidateRows = candidates ?? [];
+    candidatesFound = candidateRows.length;
     console.log(
       "[ai-tag]",
       requestId,
       "candidatesFound",
       candidatesFound
     );
-    if (candidates.length > 0) {
+    if (candidateRows.length > 0) {
       console.log(
         "[ai-tag]",
         requestId,
         "candidateRange",
-        candidates[0]?.id,
-        candidates[candidates.length - 1]?.id
+        candidateRows[0]?.id,
+        candidateRows[candidateRows.length - 1]?.id
       );
     }
 
@@ -410,6 +384,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             order: string;
             limit: number;
             force: boolean;
+            since_time: string;
+            since_id: string;
           };
           reason?: string;
         }
@@ -418,7 +394,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (debugEnabled) {
       debug = {
         cursorIn: cursor,
-        candidatesSample: candidates.slice(0, 5).map((review) => ({
+        candidatesSample: candidateRows.slice(0, 5).map((review) => ({
           id: review.id,
           update_time: review.update_time ?? null,
           create_time: review.create_time ?? null,
@@ -428,18 +404,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })),
         candidateQueryMeta: {
           filter:
-            "comment not null and length(trim(comment))>0 and review_ai_insights.review_pk is null",
+            "comment not null and length(trim(comment))>0 and no existing insights",
           order: "coalesce(update_time, create_time, created_at) asc, id asc",
           limit: MAX_REVIEWS,
-          force
+          force,
+          since_time: lastSourceTime,
+          since_id: lastReviewPk
         }
       };
     }
 
-    if (totalMissingInsights > 0 && candidatesFound === 0 && debug) {
+    if (totalMissingInsights > 0 && candidatesFound === 0) {
+      if (!debug) {
+        debug = {
+          cursorIn: cursor,
+          candidatesSample: [],
+          candidateQueryMeta: {
+            filter:
+              "comment not null and length(trim(comment))>0 and no existing insights",
+            order: "coalesce(update_time, create_time, created_at) asc, id asc",
+            limit: MAX_REVIEWS,
+            force,
+            since_time: lastSourceTime,
+            since_id: lastReviewPk
+          }
+        };
+      }
       debug.reason = force
-        ? "No candidates returned; data may not match filters (comment empty/blank or missing timestamps)."
-        : "Cursor may be too advanced; try &force=1 or reset ai_tag_cursor_v2.";
+        ? "RPC returned 0 rows; data may not match filters (comment empty/blank or missing timestamps)."
+        : "RPC returned 0 rows; cursor may be too advanced (try &force=1 or reset ai_tag_cursor_v2).";
     }
 
     if (candidatesFound === 0) {
@@ -462,7 +455,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    for (const review of candidates) {
+    for (const review of candidateRows) {
       if (timeUp() || reviewsScanned >= MAX_REVIEWS) {
         break;
       }
