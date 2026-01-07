@@ -287,13 +287,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let tagsUpserted = 0;
   let candidatesFound = 0;
   let missingInsightsCount = 0;
+  let skipReason: string | null = null;
 
   try {
     const cursor = await loadCursor();
     let query = supabaseAdmin
       .from("google_reviews")
       .select(
-        "id, user_id, location_id, location_name, comment, update_time, create_time"
+        "id, user_id, location_id, location_name, comment, update_time, create_time, review_ai_insights(source_update_time)"
       )
       .not("comment", "is", null)
       .neq("comment", "")
@@ -320,11 +321,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (!reviews || reviews.length === 0) {
+      skipReason = "no_candidates";
       const aborted = timeUp();
       return res.status(200).json({
         ok: true,
         requestId,
         aborted,
+        skipReason,
         stats: {
           reviewsScanned,
           reviewsProcessed,
@@ -336,9 +339,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    candidatesFound = reviews.length;
+    const candidates = reviews.filter((review) => {
+      const insightValue = review.review_ai_insights as
+        | { source_update_time?: string }
+        | Array<{ source_update_time?: string }>
+        | null;
+      const existingSourceUpdate = Array.isArray(insightValue)
+        ? insightValue[0]?.source_update_time ?? null
+        : insightValue?.source_update_time ?? null;
+      const effectiveUpdateTime = review.update_time ?? review.create_time ?? null;
+      if (!effectiveUpdateTime) {
+        return false;
+      }
+      if (!existingSourceUpdate) {
+        return true;
+      }
+      return (
+        new Date(effectiveUpdateTime).getTime() >
+        new Date(existingSourceUpdate).getTime()
+      );
+    });
 
-    for (const review of reviews) {
+    candidatesFound = candidates.length;
+    missingInsightsCount = candidates.length;
+
+    if (candidatesFound === 0) {
+      skipReason = "no_candidates";
+      const aborted = timeUp();
+      return res.status(200).json({
+        ok: true,
+        requestId,
+        aborted,
+        skipReason,
+        stats: {
+          reviewsScanned,
+          reviewsProcessed,
+          tagsUpserted,
+          candidatesFound,
+          missingInsightsCount,
+          errors
+        }
+      });
+    }
+
+    for (const review of candidates) {
       if (timeUp() || reviewsScanned >= MAX_REVIEWS) {
         break;
       }
@@ -351,28 +395,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           last_id: review.id
         });
         continue;
-      }
-
-      const { data: existingInsight } = await supabaseAdmin
-        .from("review_ai_insights")
-        .select("source_update_time")
-        .eq("review_pk", review.id)
-        .maybeSingle();
-
-      if (
-        existingInsight?.source_update_time &&
-        new Date(effectiveUpdateTime).getTime() <=
-          new Date(existingInsight.source_update_time).getTime()
-      ) {
-        await saveCursor({
-          last_time: effectiveUpdateTime,
-          last_id: review.id
-        });
-        continue;
-      }
-
-      if (!existingInsight) {
-        missingInsightsCount += 1;
       }
 
       reviewsScanned += 1;
@@ -464,10 +486,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const aborted = timeUp() || reviewsScanned >= MAX_REVIEWS;
+    if (reviewsProcessed === 0 && !skipReason) {
+      skipReason = "short_circuit_removed";
+    }
     return res.status(200).json({
       ok: true,
       requestId,
       aborted,
+      skipReason,
       stats: {
         reviewsScanned,
         reviewsProcessed,
