@@ -18,6 +18,7 @@ type GoogleReview = {
 };
 
 const CURSOR_KEY = "google_sync_replies_cursor_v1";
+const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000;
 
 const getEnv = (keys: string[]) => {
   for (const key of keys) {
@@ -229,15 +230,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const accessTokenByUser = new Map<string, string>();
     processedUsers = refreshTokenByUser.size;
 
-    for (const location of locations ?? []) {
-      if (cursor.location_pk && location.id < cursor.location_pk) {
-        continue;
+    const locationsList = locations ?? [];
+    const locationByResource = new Map(
+      locationsList.map((location) => [
+        location.location_resource_name,
+        location
+      ])
+    );
+
+    const recentSince = new Date(Date.now() - RECENT_WINDOW_MS).toISOString();
+    const { data: recentReviews } = await supabaseAdmin
+      .from("google_reviews")
+      .select("location_id, update_time, status")
+      .or("status.is.null,status.neq.replied")
+      .gte("update_time", recentSince)
+      .order("update_time", { ascending: false })
+      .limit(50);
+
+    const priorityLocations: typeof locationsList = [];
+    const seenPriority = new Set<string>();
+    (recentReviews ?? []).forEach((review) => {
+      const location = locationByResource.get(review.location_id);
+      if (location && !seenPriority.has(location.id)) {
+        seenPriority.add(location.id);
+        priorityLocations.push(location);
       }
-      if (timeUp()) break;
+    });
+
+    const processedLocationIds = new Set<string>();
+
+    const processLocation = async (
+      location: (typeof locationsList)[number],
+      allowCursorUpdate: boolean
+    ) => {
       if (!location.location_resource_name || !location.user_id) {
-        continue;
+        return;
       }
       processedLocations += 1;
+      processedLocationIds.add(location.id);
       const displayName =
         location.location_title ?? location.location_resource_name;
       const parent = location.location_resource_name.startsWith("accounts/")
@@ -249,7 +279,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.warn("[sync]", requestId, "missing refresh token", {
           userId: location.user_id
         });
-        continue;
+        return;
       }
 
       let accessToken = accessTokenByUser.get(location.user_id);
@@ -259,12 +289,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           accessTokenByUser.set(location.user_id, accessToken);
         } catch (error) {
           console.error("[sync]", requestId, "token refresh failed", error);
-          continue;
+          return;
         }
       }
 
       try {
-        let pageToken = cursor.page_token ?? null;
+        let pageToken = allowCursorUpdate ? cursor.page_token ?? null : null;
         while (!timeUp()) {
           const page = await listReviewsPage(
             accessToken,
@@ -288,6 +318,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const replyComment = review.reviewReply?.comment ?? null;
             const replyUpdateTime = review.reviewReply?.updateTime ?? null;
             const nowIso = new Date().toISOString();
+            const reviewUpdateTime = review.updateTime ?? null;
+
+            const { data: existingReview } = await supabaseAdmin
+              .from("google_reviews")
+              .select("last_synced_at, status")
+              .eq("user_id", location.user_id)
+              .eq("location_id", location.location_resource_name)
+              .eq("review_id", reviewId)
+              .maybeSingle();
+
+            if (
+              existingReview?.last_synced_at &&
+              reviewUpdateTime &&
+              new Date(reviewUpdateTime).getTime() <=
+                new Date(existingReview.last_synced_at).getTime() &&
+              (!replyComment || existingReview.status === "replied")
+            ) {
+              if (processedReviews >= MAX_REVIEWS) {
+                break;
+              }
+              continue;
+            }
 
             const row: Record<string, unknown> = {
               user_id: location.user_id,
@@ -364,15 +416,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
 
           if (!page.nextPageToken || processedReviews >= MAX_REVIEWS) {
-            cursor.location_pk = location.id;
-            cursor.page_token = null;
-            await saveCursor(cursor);
+            if (allowCursorUpdate) {
+              cursor.location_pk = location.id;
+              cursor.page_token = null;
+              await saveCursor(cursor);
+            }
             break;
           }
 
-          cursor.location_pk = location.id;
-          cursor.page_token = page.nextPageToken;
-          await saveCursor(cursor);
+          if (allowCursorUpdate) {
+            cursor.location_pk = location.id;
+            cursor.page_token = page.nextPageToken;
+            await saveCursor(cursor);
+          }
           pageToken = page.nextPageToken;
         }
       } catch (error) {
@@ -385,11 +441,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           location: location.location_resource_name,
           message
         });
-        cursor.location_pk = location.id;
-        cursor.page_token = null;
-        await saveCursor(cursor);
+        if (allowCursorUpdate) {
+          cursor.location_pk = location.id;
+          cursor.page_token = null;
+          await saveCursor(cursor);
+        }
       }
+    };
 
+    for (const location of priorityLocations) {
+      if (timeUp() || processedReviews >= MAX_REVIEWS) {
+        break;
+      }
+      await processLocation(location, false);
+    }
+
+    for (const location of locationsList) {
+      if (cursor.location_pk && location.id < cursor.location_pk) {
+        continue;
+      }
+      if (processedLocationIds.has(location.id)) {
+        continue;
+      }
+      if (timeUp() || processedReviews >= MAX_REVIEWS) {
+        break;
+      }
+      await processLocation(location, true);
       if (timeUp()) {
         break;
       }
