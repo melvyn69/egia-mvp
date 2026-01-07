@@ -91,6 +91,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     const sentiment = Array.isArray(sentimentParam)
       ? sentimentParam[0]
       : sentimentParam;
+    const statusParam = req.query.status;
+    const status = Array.isArray(statusParam) ? statusParam[0] : statusParam;
     const tagsParam = req.query.tags;
     const tags = (Array.isArray(tagsParam) ? tagsParam[0] : tagsParam)
       ?.split(",")
@@ -139,6 +141,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     }
     if (ratingMax !== null && Number.isFinite(ratingMax)) {
       query = query.lte("rating", ratingMax);
+    }
+    if (status && status !== "all") {
+      query = query.eq("status", status);
     }
 
     const { data: baseRows, error: baseError } = await query;
@@ -195,7 +200,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
     const filtered = rows.filter((row) => {
       const rowSentiment = sentimentMap.get(row.id) ?? null;
-      if (sentiment && rowSentiment !== sentiment) {
+      if (sentiment && sentiment !== "all" && rowSentiment !== sentiment) {
         return false;
       }
       if (tags && tags.length > 0) {

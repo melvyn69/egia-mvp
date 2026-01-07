@@ -354,6 +354,9 @@ const Inbox = () => {
       if (sentimentFilter !== "all") {
         params.set("sentiment", sentimentFilter);
       }
+      if (statusFilter !== "all") {
+        params.set("status", statusFilter);
+      }
       if (ratingMin) {
         params.set("rating_min", ratingMin);
       }
