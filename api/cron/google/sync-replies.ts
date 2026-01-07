@@ -17,10 +17,7 @@ type GoogleReview = {
   };
 };
 
-const MAX_MS = Number(process.env.CRON_MAX_MS ?? 25000);
-const MAX_LOCATIONS = Number(process.env.CRON_MAX_LOCATIONS ?? 2);
-const MAX_REVIEWS = Number(process.env.CRON_MAX_REVIEWS ?? 400);
-const CURSOR_KEY = "google_sync_replies_location_cursor_v1";
+const CURSOR_KEY = "google_sync_replies_cursor_v1";
 
 const getEnv = (keys: string[]) => {
   for (const key of keys) {
@@ -56,26 +53,28 @@ const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false }
 });
 
-const getCursor = async () => {
+type Cursor = {
+  location_pk: string | null;
+  page_token: string | null;
+};
+
+const loadCursor = async (): Promise<Cursor> => {
   const { data } = await supabaseAdmin
     .from("cron_state")
     .select("value")
     .eq("key", CURSOR_KEY)
     .maybeSingle();
-  return (data?.value as { last_location_pk?: string } | null)?.last_location_pk ?? null;
+  return (data?.value as Cursor) ?? { location_pk: null, page_token: null };
 };
 
-const setCursor = async (lastLocationPk: string) => {
+const saveCursor = async (cursor: Cursor) => {
   await supabaseAdmin
     .from("cron_state")
-    .upsert(
-      {
-        key: CURSOR_KEY,
-        value: { last_location_pk: lastLocationPk },
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "key" }
-    );
+    .upsert({
+      key: CURSOR_KEY,
+      value: cursor,
+      updated_at: new Date().toISOString()
+    });
 };
 
 const mapRating = (starRating?: string): number | null => {
@@ -116,43 +115,31 @@ const refreshGoogleAccessToken = async (refreshToken: string) => {
   return json.access_token as string;
 };
 
-const listReviewsForLocation = async (
+const listReviewsPage = async (
   accessToken: string,
   parent: string,
-  maxReviews: number,
-  timeUp: () => boolean
+  pageToken?: string
 ) => {
-  const reviews: GoogleReview[] = [];
-  let pageToken: string | undefined;
+  const url = new URL(
+    `https://mybusiness.googleapis.com/v4/${parent}/reviews`
+  );
+  url.searchParams.set("pageSize", "50");
+  if (pageToken) {
+    url.searchParams.set("pageToken", pageToken);
+  }
 
-  do {
-    if (timeUp()) {
-      break;
-    }
-    if (reviews.length >= maxReviews) {
-      break;
-    }
-    const pageSize = Math.min(200, maxReviews - reviews.length);
-    const baseUrl = `https://mybusiness.googleapis.com/v4/${parent}/reviews?pageSize=${pageSize}`;
-    const url = pageToken
-      ? `${baseUrl}&pageToken=${encodeURIComponent(pageToken)}`
-      : baseUrl;
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`
-      }
-    });
-    const data = await response.json().catch(() => null);
-    if (!response.ok) {
-      throw new Error(
-        data?.error?.message ?? `Failed to list reviews (${response.status}).`
-      );
-    }
-    reviews.push(...((data?.reviews ?? []) as GoogleReview[]));
-    pageToken = data?.nextPageToken;
-  } while (pageToken);
+  const response = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(data?.error?.message ?? "Google API error");
+  }
 
-  return reviews;
+  return {
+    reviews: (data?.reviews ?? []) as GoogleReview[],
+    nextPageToken: data?.nextPageToken ?? null
+  };
 };
 
 const getAuthSecret = (req: VercelRequest) => {
@@ -166,8 +153,10 @@ const getAuthSecret = (req: VercelRequest) => {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId =
     req.headers["x-request-id"]?.toString() ?? `req_${crypto.randomUUID()}`;
-  const startedAt = Date.now();
-  const timeUp = () => Date.now() - startedAt > MAX_MS;
+  const start = Date.now();
+  const MAX_MS = Number(process.env.CRON_MAX_MS ?? 24000);
+  const MAX_REVIEWS = Number(process.env.CRON_MAX_REVIEWS ?? 80);
+  const timeUp = () => Date.now() - start > MAX_MS;
 
   const method = req.method ?? "GET";
   res.setHeader("Cache-Control", "no-store");
@@ -205,7 +194,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let processedLocations = 0;
   let processedReviews = 0;
   let repliesUpserted = 0;
-  let lastLocationId: string | null = null;
 
   try {
     const { data: connections, error: connectionsError } = await supabaseAdmin
@@ -224,42 +212,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     });
 
-    const cursor = await getCursor();
-    let { data: locations, error: locationsError } = await supabaseAdmin
+    const cursor = await loadCursor();
+    const { data: locations, error: locationsError } = await supabaseAdmin
       .from("google_locations")
       .select(
         "id, user_id, account_resource_name, location_resource_name, location_title"
       )
       .order("id", { ascending: true })
-      .gt("id", cursor ?? "00000000-0000-0000-0000-000000000000")
-      .limit(MAX_LOCATIONS);
+      .limit(1000);
 
     if (locationsError) {
       console.error("[sync]", requestId, "locations fetch failed", locationsError);
       return res.status(500).json({ error: "Failed to load locations" });
     }
 
-    if (!locations || locations.length === 0) {
-      const { data: firstBatch } = await supabaseAdmin
-        .from("google_locations")
-        .select(
-          "id, user_id, account_resource_name, location_resource_name, location_title"
-        )
-        .order("id", { ascending: true })
-        .limit(MAX_LOCATIONS);
-      locations = firstBatch ?? [];
-    }
-    if (locations.length > 0) {
-      lastLocationId = locations[locations.length - 1].id;
-    }
-
     const accessTokenByUser = new Map<string, string>();
     processedUsers = refreshTokenByUser.size;
 
     for (const location of locations ?? []) {
-      if (timeUp()) {
-        break;
+      if (cursor.location_pk && location.id < cursor.location_pk) {
+        continue;
       }
+      if (timeUp()) break;
       if (!location.location_resource_name || !location.user_id) {
         continue;
       }
@@ -270,16 +244,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? location.location_resource_name
         : `${location.account_resource_name}/${location.location_resource_name}`;
 
+      const refreshToken = refreshTokenByUser.get(location.user_id);
+      if (!refreshToken) {
+        console.warn("[sync]", requestId, "missing refresh token", {
+          userId: location.user_id
+        });
+        continue;
+      }
+
       let accessToken = accessTokenByUser.get(location.user_id);
       if (!accessToken) {
-        const refreshToken = refreshTokenByUser.get(location.user_id);
-        if (!refreshToken) {
-          console.warn("[sync]", requestId, "missing refresh token", {
-            userId: location.user_id
-          });
-          continue;
-        }
-
         try {
           accessToken = await refreshGoogleAccessToken(refreshToken);
           accessTokenByUser.set(location.user_id, accessToken);
@@ -290,91 +264,116 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       try {
-        const reviews = await listReviewsForLocation(
-          accessToken,
-          parent,
-          MAX_REVIEWS,
-          timeUp
-        );
-        processedReviews += reviews.length;
+        let pageToken = cursor.page_token ?? null;
+        while (!timeUp()) {
+          const page = await listReviewsPage(
+            accessToken,
+            parent,
+            pageToken ?? undefined
+          );
+          for (const review of page.reviews) {
+            if (timeUp()) {
+              break;
+            }
+            processedReviews += 1;
+            const reviewName = review.name ?? null;
+            const reviewIdFromName = reviewName
+              ? reviewName.split("/").pop() ?? null
+              : null;
+            const reviewId = review.reviewId ?? reviewIdFromName ?? null;
+            if (!reviewId) {
+              continue;
+            }
 
-        for (const review of reviews) {
-          if (timeUp()) {
-            break;
-          }
-          const reviewName = review.name ?? null;
-          const reviewIdFromName = reviewName
-            ? reviewName.split("/").pop() ?? null
-            : null;
-          const reviewId = review.reviewId ?? reviewIdFromName ?? null;
-          if (!reviewId) {
-            continue;
-          }
+            const replyComment = review.reviewReply?.comment ?? null;
+            const replyUpdateTime = review.reviewReply?.updateTime ?? null;
+            const nowIso = new Date().toISOString();
 
-          const replyComment = review.reviewReply?.comment ?? null;
-          const replyUpdateTime = review.reviewReply?.updateTime ?? null;
-          const nowIso = new Date().toISOString();
+            const row: Record<string, unknown> = {
+              user_id: location.user_id,
+              location_id: location.location_resource_name,
+              location_name: displayName,
+              review_id: reviewId,
+              review_name: reviewName,
+              author_name: review.reviewer?.displayName ?? null,
+              rating: mapRating(review.starRating),
+              comment: review.comment ?? null,
+              create_time: review.createTime ?? null,
+              update_time: review.updateTime ?? null,
+              last_synced_at: nowIso
+            };
 
-          const row: Record<string, unknown> = {
-            user_id: location.user_id,
-            location_id: location.location_resource_name,
-            location_name: displayName,
-            review_id: reviewId,
-            review_name: reviewName,
-            author_name: review.reviewer?.displayName ?? null,
-            rating: mapRating(review.starRating),
-            comment: review.comment ?? null,
-            create_time: review.createTime ?? null,
-            update_time: review.updateTime ?? null,
-            last_synced_at: nowIso
-          };
+            if (replyComment) {
+              row.status = "replied";
+              row.reply_text = replyComment;
+              row.replied_at = replyUpdateTime ?? nowIso;
+            }
 
-          if (replyComment) {
-            row.status = "replied";
-            row.reply_text = replyComment;
-            row.replied_at = replyUpdateTime ?? nowIso;
-          }
-
-          const { data: upserted, error: upsertError } = await supabaseAdmin
-            .from("google_reviews")
-            .upsert(row, { onConflict: "user_id,location_id,review_id" })
-            .select("id, status")
-            .maybeSingle();
-
-          if (upsertError || !upserted?.id) {
-            console.error("[sync]", requestId, "google_reviews upsert failed", upsertError);
-            continue;
-          }
-          if (replyComment) {
-            const reviewKey = String(upserted.id);
-            const { data: existingSent } = await supabaseAdmin
-              .from("review_replies")
-              .select("id")
-              .eq("user_id", location.user_id)
-              .eq("source", "google")
-              .eq("review_id", reviewKey)
-              .eq("status", "sent")
+            const { data: upserted, error: upsertError } = await supabaseAdmin
+              .from("google_reviews")
+              .upsert(row, { onConflict: "user_id,location_id,review_id" })
+              .select("id, status")
               .maybeSingle();
 
-            if (existingSent?.id) {
-              await supabaseAdmin
-                .from("review_replies")
-                .update({ reply_text: replyComment, sent_at: replyUpdateTime ?? nowIso })
-                .eq("id", existingSent.id);
-            } else {
-              await supabaseAdmin.from("review_replies").insert({
-                user_id: location.user_id,
-                source: "google",
-                review_id: reviewKey,
-                location_id: location.id,
-                business_name: displayName,
-                reply_text: replyComment,
-                status: "sent",
-                sent_at: replyUpdateTime ?? nowIso
-              });
+            if (upsertError || !upserted?.id) {
+              console.error(
+                "[sync]",
+                requestId,
+                "google_reviews upsert failed",
+                upsertError
+              );
+              continue;
             }
-            repliesUpserted += 1;
+            if (replyComment) {
+              const reviewKey = String(upserted.id);
+              const { data: existingSent } = await supabaseAdmin
+                .from("review_replies")
+                .select("id")
+                .eq("user_id", location.user_id)
+                .eq("source", "google")
+                .eq("review_id", reviewKey)
+                .eq("status", "sent")
+                .maybeSingle();
+
+              if (existingSent?.id) {
+                await supabaseAdmin
+                  .from("review_replies")
+                  .update({
+                    reply_text: replyComment,
+                    sent_at: replyUpdateTime ?? nowIso
+                  })
+                  .eq("id", existingSent.id);
+              } else {
+                await supabaseAdmin.from("review_replies").insert({
+                  user_id: location.user_id,
+                  source: "google",
+                  review_id: reviewKey,
+                  location_id: location.id,
+                  business_name: displayName,
+                  reply_text: replyComment,
+                  status: "sent",
+                  sent_at: replyUpdateTime ?? nowIso
+                });
+              }
+              repliesUpserted += 1;
+            }
+
+            if (processedReviews >= MAX_REVIEWS) {
+              break;
+            }
           }
+
+          if (!page.nextPageToken || processedReviews >= MAX_REVIEWS) {
+            cursor.location_pk = location.id;
+            cursor.page_token = null;
+            await saveCursor(cursor);
+            break;
+          }
+
+          cursor.location_pk = location.id;
+          cursor.page_token = page.nextPageToken;
+          await saveCursor(cursor);
+          pageToken = page.nextPageToken;
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
@@ -386,11 +385,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           location: location.location_resource_name,
           message
         });
+        cursor.location_pk = location.id;
+        cursor.page_token = null;
+        await saveCursor(cursor);
       }
-    }
 
-    if (lastLocationId) {
-      await setCursor(lastLocationId);
+      if (timeUp()) {
+        break;
+      }
     }
 
     const aborted = timeUp();
