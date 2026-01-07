@@ -701,6 +701,10 @@ const Inbox = () => {
       setGenerationError("La réponse est vide.");
       return;
     }
+    if (selectedReview.status === "replied") {
+      setGenerationError("Avis déjà répondu.");
+      return;
+    }
     setReplySending(true);
     try {
       const userJwt = await getAccessToken(supabaseClient);
@@ -736,6 +740,8 @@ const Inbox = () => {
         ok?: boolean;
         error?: string;
         code?: string;
+        requestId?: string;
+        sentAt?: string;
       };
       const error = response.ok ? null : data;
       const isInvalidJwt =
@@ -746,6 +752,22 @@ const Inbox = () => {
         await handleInvalidJwt();
         return;
       }
+      if (response.status === 401) {
+        setGenerationError("Session expirée, reconnecte-toi.");
+        return;
+      }
+      if (response.status === 409) {
+        setGenerationError("Avis déjà répondu.");
+        return;
+      }
+      if (response.status === 400) {
+        setGenerationError(data?.error ?? "Requête invalide.");
+        return;
+      }
+      if (response.status === 502) {
+        setGenerationError("Google a refusé la réponse.");
+        return;
+      }
       if (import.meta.env.DEV) {
         console.log("post-reply-google: response", { data, error });
       }
@@ -753,7 +775,7 @@ const Inbox = () => {
         setGenerationError("Impossible d'envoyer la réponse.");
         return;
       }
-      const sentAt = new Date().toISOString();
+      const sentAt = data?.sentAt ?? new Date().toISOString();
       const { error: updateError } = await supabaseClient
         .from("review_replies")
         .update({ status: "sent", sent_at: sentAt })
@@ -1285,7 +1307,8 @@ const Inbox = () => {
                       isGenerating ||
                       replySending ||
                       !selectedReview ||
-                      !draftReplyId
+                      !draftReplyId ||
+                      selectedReview?.status === "replied"
                     }
                   >
                     {replySending ? "Envoi..." : "Envoyer"}
