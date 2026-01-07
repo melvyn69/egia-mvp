@@ -43,6 +43,12 @@ Branche stable : `release/v0.1-stable`
   - mappe les champs
   - upsert dans `google_reviews`
 
+### Cron Sync (source of truth)
+- Endpoint : `POST /api/cron/google/sync-replies`
+- Protégé par secret (header `Authorization: Bearer <CRON_SECRET>` ou `?secret=...`)
+- Synchronise les replies Google → `google_reviews` + `review_replies`
+- Recommandé: cron-job.org toutes les 10 minutes
+
 ---
 
 ## Modèle de données (tables principales)
@@ -97,4 +103,20 @@ Contexte IA :
 ```bash
 npm install
 npm run dev
+```
+
+## Cron-job.org
+
+Créer un job POST:
+- URL: `https://<votre-domaine>/api/cron/google/sync-replies?secret=<CRON_SECRET>`
+- Fréquence: toutes les 10 minutes
+
+Générer un secret:
+```bash
+openssl rand -hex 24
+```
+
+Test local:
+```bash
+curl -i -X POST "http://localhost:3000/api/cron/google/sync-replies?secret=<CRON_SECRET>"
 ```
