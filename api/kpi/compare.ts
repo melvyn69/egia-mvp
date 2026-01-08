@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { resolveDateRange } from '../_shared/';
-import { parseFilters } from '../_shared/';
-import { requireUser } from '../_shared/';
+import { resolveDateRange } from '../_shared/_date.js';
+import { parseFilters } from '../_shared/_filters.js';
+import { requireUser } from '../_shared/_auth.js';
 
 type Range = { from: string; to: string };
 

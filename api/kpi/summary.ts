@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { randomUUID } from "crypto";
-import { resolveDateRange } from '../_shared/';
-import { parseFilters } from '../_shared/';
-import { requireUser } from '../_shared/';
+import { resolveDateRange } from '../_shared/_date.js';
+import { parseFilters } from '../_shared/_filters.js';
+import { requireUser } from '../_shared/_auth.js';
 
 const getRequestId = (req: VercelRequest) => {
   const header = req.headers["x-vercel-id"] ?? req.headers["x-request-id"];

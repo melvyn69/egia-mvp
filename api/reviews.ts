@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { randomUUID } from "crypto";
-import { resolveDateRange } from "./_shared/_date";
-import { parseFilters } from "./_shared/_filters";
-import { requireUser } from "./_shared/_auth";
+import { resolveDateRange } from "./_shared/_date.js";
+import { parseFilters } from "./_shared/_filters.js";
+import { requireUser } from "./_shared/_auth.js";
 
 type Cursor = { source_time: string; id: string };
 

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from '../_shared/database.types';
+import type { Database } from '../_shared/database.types.js';
 
 const getEnv = (keys: string[]) => {
   for (const key of keys) {
