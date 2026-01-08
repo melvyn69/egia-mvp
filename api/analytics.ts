@@ -36,22 +36,13 @@ type AnalyticsOverview = {
 };
 
 type AnalyticsTimeseries = {
-  scope: {
-    preset: string;
-    from: string | null;
-    to: string | null;
-    location_id: string | null;
-    location_ids_count: number;
-    granularity: "day" | "week";
-  };
-  data_status: "ok" | "empty" | "partial";
-  reasons: string[];
+  granularity: "day" | "week";
   points: Array<{
-    bucket_start: string;
-    reviews_total: number;
+    date: string;
+    review_count: number;
     avg_rating: number | null;
-    negative_share_pct: number | null;
-    reviews_with_text: number;
+    neg_share: number | null;
+    reply_rate: number | null;
   }>;
 };
 
@@ -77,6 +68,13 @@ const buildEmptyOverview = (
 });
 
 const toDateKey = (date: Date) => date.toISOString().slice(0, 10);
+const startOfDayUtc = (date: Date) =>
+  new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+const addDaysUtc = (date: Date, days: number) => {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+};
 
 const getWeekStartUtc = (date: Date) => {
   const day = date.getUTCDay();
@@ -85,6 +83,48 @@ const getWeekStartUtc = (date: Date) => {
   start.setUTCDate(start.getUTCDate() + diff);
   return start;
 };
+
+const getQueryParam = (
+  query: Record<string, string | string[] | undefined>,
+  key: string
+) => {
+  const value = query[key];
+  return Array.isArray(value) ? value[0] : value;
+};
+
+const normalizeAnalyticsQuery = (
+  query: Record<string, string | string[] | undefined>
+) => {
+  const normalized = { ...query };
+  const preset = getQueryParam(query, "preset") ?? getQueryParam(query, "period");
+  const location =
+    getQueryParam(query, "location_id") ?? getQueryParam(query, "location");
+  if (preset) {
+    normalized.preset = preset;
+  }
+  if (location) {
+    normalized.location_id = location;
+  }
+  return normalized;
+};
+
+const isReplyable = (row: { comment?: string | null }) =>
+  typeof row.comment === "string" && row.comment.trim().length > 0;
+
+const isReplied = (row: {
+  reply_text?: string | null;
+  replied_at?: string | null;
+  owner_reply?: string | null;
+  owner_reply_time?: string | null;
+  status?: string | null;
+}) =>
+  Boolean(
+    row.reply_text ||
+      row.replied_at ||
+      row.owner_reply ||
+      row.owner_reply_time ||
+      row.status === "replied"
+  );
 
 const resolveLocationIds = async (
   supabaseAdmin: ReturnType<typeof requireUser> extends Promise<infer R>
@@ -141,7 +181,7 @@ const handleOverview = async (
       : never
     : never
 ) => {
-  const filters = parseFilters(req.query);
+  const filters = parseFilters(normalizeAnalyticsQuery(req.query));
   if (filters.reject) {
     return res.status(200).json(
       buildEmptyOverview(
@@ -166,10 +206,7 @@ const handleOverview = async (
     timeZone
   );
 
-  const locationParam = req.query.location_id;
-  const locationId = Array.isArray(locationParam)
-    ? locationParam[0]
-    : locationParam ?? null;
+  const locationId = filters.location_id ?? null;
 
   const scopeBase = {
     preset,
@@ -236,17 +273,6 @@ const handleOverview = async (
     });
     return res.status(200).json(empty);
   }
-
-  const isReplyable = (row: (typeof reviews)[number]) =>
-    typeof row.comment === "string" && row.comment.trim().length > 0;
-  const isReplied = (row: (typeof reviews)[number]) =>
-    Boolean(
-      row.reply_text ||
-        row.replied_at ||
-        row.owner_reply ||
-        row.owner_reply_time ||
-        row.status === "replied"
-    );
 
   const replyableRows = reviews.filter(isReplyable);
   const replyableCount = replyableRows.length;
@@ -450,22 +476,9 @@ const handleTimeseries = async (
       : never
     : never
 ) => {
-  const filters = parseFilters(req.query);
+  const filters = parseFilters(normalizeAnalyticsQuery(req.query));
   if (filters.reject) {
-    const empty: AnalyticsTimeseries = {
-      scope: {
-        preset: filters.preset,
-        from: null,
-        to: null,
-        location_id: null,
-        location_ids_count: 0,
-        granularity: "day"
-      },
-      data_status: "empty",
-      reasons: ["invalid_source"],
-      points: []
-    };
-    return res.status(200).json(empty);
+    return res.status(200).json({ granularity: "day", points: [] });
   }
 
   const preset = filters.preset;
@@ -477,10 +490,7 @@ const handleTimeseries = async (
     timeZone
   );
 
-  const locationParam = req.query.location_id;
-  const locationId = Array.isArray(locationParam)
-    ? locationParam[0]
-    : locationParam ?? null;
+  const locationId = filters.location_id ?? null;
 
   const { locationIds, missing } = await resolveLocationIds(
     supabaseAdmin,
@@ -491,29 +501,22 @@ const handleTimeseries = async (
     return res.status(404).json({ error: "Location not found" });
   }
 
-  const rawGranularity = req.query.granularity;
-  const granularityParam = Array.isArray(rawGranularity)
-    ? rawGranularity[0]
-    : rawGranularity;
-  const granularity: "day" | "week" =
-    granularityParam === "week" ? "week" : "day";
-
-  const scope = {
-    preset,
-    from: preset === "all_time" ? null : range.from,
-    to: range.to,
-    location_id: locationId,
-    location_ids_count: locationIds.length,
-    granularity
-  };
+  const rawGranularity = getQueryParam(req.query, "granularity") ?? "auto";
+  const rangeStart = new Date(range.from);
+  const rangeEnd = new Date(range.to);
+  const rangeDays = Math.max(
+    1,
+    Math.ceil((rangeEnd.getTime() - rangeStart.getTime()) / (1000 * 60 * 60 * 24)) + 1
+  );
+  const resolvedGranularity: "day" | "week" =
+    rawGranularity === "day" || rawGranularity === "week"
+      ? rawGranularity
+      : rangeDays <= 90
+        ? "day"
+        : "week";
 
   if (locationIds.length === 0) {
-    const empty: AnalyticsTimeseries = {
-      scope,
-      data_status: "empty",
-      reasons: ["no_locations"],
-      points: []
-    };
+    const empty: AnalyticsTimeseries = { granularity: resolvedGranularity, points: [] };
     console.log("[analytics/timeseries]", {
       userId,
       preset,
@@ -523,53 +526,73 @@ const handleTimeseries = async (
     return res.status(200).json(empty);
   }
 
-  let reviewsQuery = supabaseAdmin
-    .from("google_reviews")
-    .select("rating, comment, create_time, update_time, created_at")
-    .eq("user_id", userId);
+  const buildReviewsQuery = () => {
+    let query = supabaseAdmin
+      .from("google_reviews")
+      .select(
+        "rating, comment, reply_text, replied_at, owner_reply, owner_reply_time, status, create_time, update_time, created_at, location_id"
+      )
+      .eq("user_id", userId);
 
-  reviewsQuery =
-    locationIds.length === 1
-      ? reviewsQuery.eq("location_id", locationIds[0])
-      : reviewsQuery.in("location_id", locationIds);
+    query =
+      locationIds.length === 1
+        ? query.eq("location_id", locationIds[0])
+        : query.in("location_id", locationIds);
 
-  reviewsQuery = reviewsQuery.or(
-    `and(create_time.gte.${range.from},create_time.lte.${range.to}),` +
-      `and(create_time.is.null,update_time.gte.${range.from},update_time.lte.${range.to}),` +
-      `and(create_time.is.null,update_time.is.null,created_at.gte.${range.from},created_at.lte.${range.to})`
-  );
+    return query.or(
+      `and(create_time.gte.${range.from},create_time.lte.${range.to}),` +
+        `and(create_time.is.null,update_time.gte.${range.from},update_time.lte.${range.to}),` +
+        `and(create_time.is.null,update_time.is.null,created_at.gte.${range.from},created_at.lte.${range.to})`
+    );
+  };
 
-  const { data: reviewsData, error: reviewsError } = await reviewsQuery;
-  if (reviewsError) {
-    console.error("[analytics/timeseries] reviews error", reviewsError);
-    return res.status(500).json({ error: "Failed to load reviews" });
+  const rows: Array<{
+    rating: number | null;
+    comment: string | null;
+    reply_text: string | null;
+    replied_at: string | null;
+    owner_reply: string | null;
+    owner_reply_time: string | null;
+    status: string | null;
+    create_time: string | null;
+    update_time: string | null;
+    created_at: string | null;
+    location_id: string | null;
+  }> = [];
+  const pageSize = 1000;
+  const maxRows = 20000;
+  for (let offset = 0; offset < maxRows; offset += pageSize) {
+    const { data: pageData, error: pageError } = await buildReviewsQuery().range(
+      offset,
+      offset + pageSize - 1
+    );
+    if (pageError) {
+      console.error("[analytics/timeseries] reviews error", pageError);
+      return res.status(500).json({ error: "Failed to load reviews" });
+    }
+    const pageRows = pageData ?? [];
+    rows.push(...pageRows);
+    if (pageRows.length < pageSize) {
+      break;
+    }
   }
-
-  const rows = reviewsData ?? [];
-  if (rows.length === 0) {
-    const empty: AnalyticsTimeseries = {
-      scope,
-      data_status: "empty",
-      reasons: ["no_reviews_in_range"],
-      points: []
-    };
-    console.log("[analytics/timeseries]", {
+  if (rows.length >= maxRows) {
+    console.warn("[analytics/timeseries] max rows reached", {
       userId,
       preset,
-      locationsCount: locationIds.length,
-      status: "empty"
+      maxRows
     });
-    return res.status(200).json(empty);
   }
 
   const buckets = new Map<
     string,
     {
-      reviews_total: number;
-      reviews_with_text: number;
+      review_count: number;
       rating_sum: number;
       rating_count: number;
       negative_count: number;
+      replyable_count: number;
+      replied_count: number;
     }
   >();
 
@@ -581,18 +604,22 @@ const handleTimeseries = async (
     }
     const date = new Date(time);
     const bucketDate =
-      granularity === "week" ? getWeekStartUtc(date) : date;
+      resolvedGranularity === "week" ? getWeekStartUtc(date) : date;
     const key = toDateKey(bucketDate);
     const entry = buckets.get(key) ?? {
-      reviews_total: 0,
-      reviews_with_text: 0,
+      review_count: 0,
       rating_sum: 0,
       rating_count: 0,
-      negative_count: 0
+      negative_count: 0,
+      replyable_count: 0,
+      replied_count: 0
     };
-    entry.reviews_total += 1;
-    if (typeof row.comment === "string" && row.comment.trim().length > 0) {
-      entry.reviews_with_text += 1;
+    entry.review_count += 1;
+    if (isReplyable(row)) {
+      entry.replyable_count += 1;
+      if (isReplied(row)) {
+        entry.replied_count += 1;
+      }
     }
     if (typeof row.rating === "number") {
       entry.rating_sum += row.rating;
@@ -604,30 +631,45 @@ const handleTimeseries = async (
     buckets.set(key, entry);
   });
 
-  const points = Array.from(buckets.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([key, entry]) => {
-      const avg_rating =
-        entry.rating_count > 0
-          ? Number((entry.rating_sum / entry.rating_count).toFixed(1))
-          : null;
-      const negative_share_pct =
-        entry.rating_count > 0
-          ? Math.round((entry.negative_count / entry.rating_count) * 100)
-          : null;
-      return {
-        bucket_start: new Date(`${key}T00:00:00.000Z`).toISOString(),
-        reviews_total: entry.reviews_total,
-        avg_rating,
-        negative_share_pct,
-        reviews_with_text: entry.reviews_with_text
-      };
+  const bucketStart =
+    resolvedGranularity === "week"
+      ? getWeekStartUtc(rangeStart)
+      : startOfDayUtc(rangeStart);
+  const bucketEnd =
+    resolvedGranularity === "week"
+      ? getWeekStartUtc(rangeEnd)
+      : startOfDayUtc(rangeEnd);
+  const stepDays = resolvedGranularity === "week" ? 7 : 1;
+  const points: AnalyticsTimeseries["points"] = [];
+  for (
+    let cursor = bucketStart;
+    cursor <= bucketEnd;
+    cursor = addDaysUtc(cursor, stepDays)
+  ) {
+    const key = toDateKey(cursor);
+    const entry = buckets.get(key);
+    const review_count = entry?.review_count ?? 0;
+    const avg_rating =
+      entry && entry.rating_count > 0
+        ? Number((entry.rating_sum / entry.rating_count).toFixed(1))
+        : null;
+    const neg_share =
+      review_count > 0 ? entry!.negative_count / review_count : null;
+    const reply_rate =
+      entry && entry.replyable_count > 0
+        ? entry.replied_count / entry.replyable_count
+        : null;
+    points.push({
+      date: key,
+      review_count,
+      avg_rating,
+      neg_share,
+      reply_rate
     });
+  }
 
   const timeseries: AnalyticsTimeseries = {
-    scope,
-    data_status: "ok",
-    reasons: [],
+    granularity: resolvedGranularity,
     points
   };
 
@@ -636,7 +678,7 @@ const handleTimeseries = async (
     preset,
     locationIdsCount: locationIds.length,
     status: "ok",
-    granularity
+    granularity: resolvedGranularity
   });
 
   return res.status(200).json(timeseries);
@@ -653,16 +695,12 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
   }
   const { userId, supabaseAdmin } = auth;
 
-  const opParam = req.query.op;
-  const op = Array.isArray(opParam) ? opParam[0] : opParam;
-  if (op === "overview") {
-    return handleOverview(req, res, userId, supabaseAdmin);
-  }
-  if (op === "timeseries") {
+  const viewParam =
+    getQueryParam(req.query, "view") ?? getQueryParam(req.query, "op");
+  if (viewParam === "timeseries") {
     return handleTimeseries(req, res, userId, supabaseAdmin);
   }
-
-  return res.status(400).json({ error: "Missing or invalid op" });
+  return handleOverview(req, res, userId, supabaseAdmin);
 };
 
 export default handler;

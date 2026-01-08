@@ -31,21 +31,12 @@ export type AnalyticsOverview = {
 };
 
 export type AnalyticsTimeseries = {
-  scope: {
-    preset: string;
-    from: string | null;
-    to: string | null;
-    location_id: string | null;
-    location_ids_count: number;
-    granularity: "day" | "week";
-  };
-  data_status: "ok" | "empty" | "partial";
-  reasons: string[];
+  granularity: "day" | "week";
   points: Array<{
-    bucket_start: string;
-    reviews_total: number;
+    date: string;
+    review_count: number;
     avg_rating: number | null;
-    negative_share_pct: number | null;
-    reviews_with_text: number;
+    neg_share: number | null;
+    reply_rate: number | null;
   }>;
 };

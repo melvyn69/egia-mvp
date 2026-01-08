@@ -23,6 +23,9 @@ const formatPercent = (value: number | null): string =>
 const formatRating = (value: number | null): string =>
   value === null ? "—" : `${value.toFixed(1)}/5`;
 
+const formatRatio = (value: number | null): string =>
+  value === null ? "—" : `${Math.round(value * 100)}%`;
+
 const formatCount = (value: number | null | undefined): string =>
   value === null || value === undefined ? "—" : String(value);
 
@@ -88,9 +91,14 @@ const Analytics = ({
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [locationId, setLocationId] = useState("all");
-  const [granularity, setGranularity] = useState<"day" | "week">("day");
+  const [granularity, setGranularity] = useState<"auto" | "day" | "week">(
+    "auto"
+  );
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
   const [timeseries, setTimeseries] = useState<AnalyticsTimeseries | null>(null);
+  const [metric, setMetric] = useState<
+    "reviews" | "avg_rating" | "neg_share" | "reply_rate"
+  >("reviews");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -124,9 +132,9 @@ const Analytics = ({
       setError(null);
       const params = new URLSearchParams();
       if (locationId !== "all") {
-        params.set("location_id", locationId);
+        params.set("location", locationId);
       }
-      params.set("preset", preset);
+      params.set("period", preset);
       params.set("tz", timeZone);
       if (preset === "custom") {
         if (from) {
@@ -139,10 +147,10 @@ const Analytics = ({
       params.set("granularity", granularity);
       try {
         const [overviewRes, seriesRes] = await Promise.all([
-          fetch(`/api/analytics?op=overview&${params.toString()}`, {
+          fetch(`/api/analytics?view=overview&${params.toString()}`, {
             headers: { Authorization: `Bearer ${session.access_token}` }
           }),
-          fetch(`/api/analytics?op=timeseries&${params.toString()}`, {
+          fetch(`/api/analytics?view=timeseries&${params.toString()}`, {
             headers: { Authorization: `Bearer ${session.access_token}` }
           })
         ]);
@@ -196,12 +204,43 @@ const Analytics = ({
     );
   }, [overview]);
 
-  const trendMax = useMemo(() => {
-    if (!timeseries?.points.length) {
-      return 1;
+  const chartPoints = useMemo(
+    () => (timeseries?.points ?? []).slice(-14),
+    [timeseries]
+  );
+
+  const metricMax = useMemo(() => {
+    if (metric === "reviews") {
+      return Math.max(...chartPoints.map((point) => point.review_count), 1);
     }
-    return Math.max(...timeseries.points.map((point) => point.reviews_total), 1);
-  }, [timeseries]);
+    if (metric === "avg_rating") {
+      return 5;
+    }
+    return 1;
+  }, [chartPoints, metric]);
+
+  const metricLabel = useMemo(() => {
+    switch (metric) {
+      case "avg_rating":
+        return "Note";
+      case "neg_share":
+        return "Négatifs";
+      case "reply_rate":
+        return "Réponse";
+      default:
+        return "Avis";
+    }
+  }, [metric]);
+
+  const formatMetricValue = (value: number | null) => {
+    if (metric === "reviews") {
+      return formatCount(value);
+    }
+    if (metric === "avg_rating") {
+      return formatRating(value);
+    }
+    return formatRatio(value);
+  };
 
   const reasonLabel = overview ? getReasonLabel(overview.reasons) : "";
   const showGranularityToggle = rangeDays > 30 || preset === "all_time";
@@ -276,6 +315,13 @@ const Analytics = ({
               </label>
               <div className="flex rounded-xl border border-slate-200 bg-white p-1">
                 <Button
+                  variant={granularity === "auto" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setGranularity("auto")}
+                >
+                  Auto
+                </Button>
+                <Button
                   variant={granularity === "day" ? "default" : "ghost"}
                   size="sm"
                   onClick={() => setGranularity("day")}
@@ -315,38 +361,61 @@ const Analytics = ({
 
       <section className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
         <Card>
-          <CardHeader>
-            <CardTitle>Tendances</CardTitle>
+          <CardHeader className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle>Évolution</CardTitle>
+              <select
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
+                value={metric}
+                onChange={(event) =>
+                  setMetric(event.target.value as typeof metric)
+                }
+              >
+                <option value="reviews">Avis</option>
+                <option value="avg_rating">Note</option>
+                <option value="neg_share">Négatifs</option>
+                <option value="reply_rate">Réponse</option>
+              </select>
+            </div>
             <p className="text-sm text-slate-500">
-              Avis et note moyenne sur la période.
+              {metricLabel} sur la période sélectionnée.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
             {loading ? (
               <Skeleton className="h-40 w-full" />
-            ) : timeseries && timeseries.points.length > 0 ? (
+            ) : chartPoints.length > 0 ? (
               <div className="space-y-3">
-                {timeseries.points.slice(-10).map((point) => (
-                  <div key={point.bucket_start} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs text-slate-500">
-                      <span>{point.bucket_start.slice(0, 10)}</span>
-                      <span>
-                        {formatCount(point.reviews_total)} avis ·{" "}
-                        {formatRating(point.avg_rating)}
-                      </span>
+                {chartPoints.map((point) => {
+                  const value =
+                    metric === "reviews"
+                      ? point.review_count
+                      : metric === "avg_rating"
+                        ? point.avg_rating
+                        : metric === "neg_share"
+                          ? point.neg_share
+                          : point.reply_rate;
+                  const width =
+                    value === null || metricMax === 0
+                      ? 0
+                      : Math.round((value / metricMax) * 100);
+                  return (
+                    <div key={point.date} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs text-slate-500">
+                        <span>{point.date}</span>
+                        <span>
+                          {metricLabel}: {formatMetricValue(value)}
+                        </span>
+                      </div>
+                      <div className="h-2 w-full rounded-full bg-slate-100">
+                        <div
+                          className="h-2 rounded-full bg-ink"
+                          style={{ width: `${width}%` }}
+                        />
+                      </div>
                     </div>
-                    <div className="h-2 w-full rounded-full bg-slate-100">
-                      <div
-                        className="h-2 rounded-full bg-ink"
-                        style={{
-                          width: `${Math.round(
-                            (point.reviews_total / trendMax) * 100
-                          )}%`
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <p className="text-sm text-slate-500">
