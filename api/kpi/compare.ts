@@ -110,6 +110,12 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
     const summaryAData = summaryA.data ?? null;
     const summaryBData = summaryB.data ?? null;
+    if (!summaryAData || !summaryBData) {
+      return res.status(500).json({
+        error: "Failed to load KPI summaries",
+        reason: "null_summary"
+      });
+    }
     return res.status(200).json({
       before: summaryAData,
       after: summaryBData,

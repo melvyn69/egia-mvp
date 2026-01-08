@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "../_shared/database.types.js";
+import type { Database } from "../../_shared/database.types.js";
 
 type AiTag = {
   name: string;
@@ -565,13 +565,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
     });
-    const locationIds = Array.from(
-      new Set(
-        candidateRows
-          .map((review) => review.location_id)
-          .filter((value): value is string => Boolean(value))
-      )
-    );
+    const locationIds = Array.from(locationUserMap.keys());
     const lockedLocations = new Set<string>();
     const locationStats = new Map<
       string,
