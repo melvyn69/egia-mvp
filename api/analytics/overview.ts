@@ -1,0 +1,357 @@
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { requireUser } from "../_shared/_auth.js";
+import { resolveDateRange } from "../_shared/_date.js";
+import { parseFilters } from "../_shared/_filters.js";
+
+type AnalyticsOverview = {
+  scope: {
+    preset: string;
+    from: string | null;
+    to: string | null;
+    location_id: string | null;
+    location_ids_count: number;
+  };
+  data_status: "ok" | "empty" | "partial";
+  reasons: string[];
+  kpis: {
+    reviews_total: number;
+    reviews_with_text: number;
+    avg_rating: number | null;
+    negative_share_pct: number | null;
+    response_rate_pct: number | null;
+    replied_count: number;
+    replyable_count: number;
+  };
+  ratings: { "1": number; "2": number; "3": number; "4": number; "5": number };
+  sentiment: null | {
+    positive: number;
+    neutral: number;
+    negative: number;
+    positive_pct: number | null;
+  };
+  topics: {
+    strengths: Array<{ label: string; count: number }>;
+    irritants: Array<{ label: string; count: number }>;
+  };
+};
+
+const buildEmptyOverview = (
+  scope: AnalyticsOverview["scope"],
+  reasons: string[]
+): AnalyticsOverview => ({
+  scope,
+  data_status: "empty",
+  reasons,
+  kpis: {
+    reviews_total: 0,
+    reviews_with_text: 0,
+    avg_rating: null,
+    negative_share_pct: null,
+    response_rate_pct: null,
+    replied_count: 0,
+    replyable_count: 0
+  },
+  ratings: { "1": 0, "2": 0, "3": 0, "4": 0, "5": 0 },
+  sentiment: null,
+  topics: { strengths: [], irritants: [] }
+});
+
+const handler = async (req: VercelRequest, res: VercelResponse) => {
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const auth = await requireUser(req, res);
+  if (!auth) {
+    return;
+  }
+  const { userId, supabaseAdmin } = auth;
+
+  const filters = parseFilters(req.query);
+  if (filters.reject) {
+    const empty = buildEmptyOverview(
+      {
+        preset: filters.preset,
+        from: null,
+        to: null,
+        location_id: null,
+        location_ids_count: 0
+      },
+      ["invalid_source"]
+    );
+    return res.status(200).json(empty);
+  }
+  const preset = filters.preset;
+  const timeZone = filters.tz;
+  const range = resolveDateRange(
+    preset as Parameters<typeof resolveDateRange>[0],
+    filters.from,
+    filters.to,
+    timeZone
+  );
+  const scopeBase = {
+    preset,
+    from: preset === "all_time" ? null : range.from,
+    to: range.to,
+    location_id: null as string | null,
+    location_ids_count: 0
+  };
+
+  const locationParam = req.query.location_id;
+  const locationId = Array.isArray(locationParam)
+    ? locationParam[0]
+    : locationParam ?? null;
+  scopeBase.location_id = locationId;
+
+  let locationIds: string[] = [];
+  if (locationId) {
+    const { data: locationRow } = await supabaseAdmin
+      .from("google_locations")
+      .select("location_resource_name")
+      .eq("user_id", userId)
+      .eq("location_resource_name", locationId)
+      .maybeSingle();
+    if (!locationRow) {
+      return res.status(404).json({ error: "Location not found" });
+    }
+    locationIds = [locationId];
+  } else {
+    const { data: locations } = await supabaseAdmin
+      .from("google_locations")
+      .select("location_resource_name")
+      .eq("user_id", userId);
+    locationIds = (locations ?? [])
+      .map((location) => location.location_resource_name)
+      .filter(Boolean);
+    if (locationIds.length === 0) {
+      const { data: reviewLocations } = await supabaseAdmin
+        .from("google_reviews")
+        .select("location_id")
+        .eq("user_id", userId);
+      const deduped = new Set(
+        (reviewLocations ?? [])
+          .map((row) => row.location_id)
+          .filter((value): value is string => Boolean(value))
+      );
+      locationIds = Array.from(deduped);
+    }
+  }
+
+  scopeBase.location_ids_count = locationIds.length;
+  if (locationIds.length === 0) {
+    console.log("[analytics/overview]", {
+      userId,
+      preset,
+      status: "empty",
+      locationsCount: 0
+    });
+    return res
+      .status(200)
+      .json(buildEmptyOverview(scopeBase, ["no_locations"]));
+  }
+
+  let reviewsQuery = supabaseAdmin
+    .from("google_reviews")
+    .select(
+      "id, rating, comment, reply_text, replied_at, owner_reply, owner_reply_time, status, create_time, update_time, created_at"
+    )
+    .eq("user_id", userId);
+
+  reviewsQuery =
+    locationIds.length === 1
+      ? reviewsQuery.eq("location_id", locationIds[0])
+      : reviewsQuery.in("location_id", locationIds);
+
+  reviewsQuery = reviewsQuery.or(
+    `and(create_time.gte.${range.from},create_time.lte.${range.to}),` +
+      `and(create_time.is.null,update_time.gte.${range.from},update_time.lte.${range.to}),` +
+      `and(create_time.is.null,update_time.is.null,created_at.gte.${range.from},created_at.lte.${range.to})`
+  );
+
+  const { data: reviewRows, error: reviewsError } = await reviewsQuery;
+  if (reviewsError) {
+    console.error("[analytics/overview] reviews error", reviewsError);
+    return res.status(500).json({ error: "Failed to load reviews" });
+  }
+
+  const reviews = reviewRows ?? [];
+  if (reviews.length === 0) {
+    const empty = buildEmptyOverview(scopeBase, ["no_reviews_in_range"]);
+    console.log("[analytics/overview]", {
+      userId,
+      preset,
+      status: "empty",
+      locationsCount: locationIds.length
+    });
+    return res.status(200).json(empty);
+  }
+
+  const isReplyable = (row: (typeof reviews)[number]) =>
+    typeof row.comment === "string" && row.comment.trim().length > 0;
+  const isReplied = (row: (typeof reviews)[number]) =>
+    Boolean(
+      row.reply_text ||
+        row.replied_at ||
+        row.owner_reply ||
+        row.owner_reply_time ||
+        row.status === "replied"
+    );
+
+  const replyableRows = reviews.filter(isReplyable);
+  const replyableCount = replyableRows.length;
+  const repliedCount = replyableRows.filter(isReplied).length;
+
+  const ratings = reviews
+    .map((row) => row.rating)
+    .filter((value): value is number => typeof value === "number");
+  const avg_rating =
+    ratings.length > 0
+      ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1))
+      : null;
+
+  const ratingBuckets = { "1": 0, "2": 0, "3": 0, "4": 0, "5": 0 };
+  ratings.forEach((value) => {
+    const rounded = Math.round(value);
+    if (rounded >= 1 && rounded <= 5) {
+      ratingBuckets[String(rounded) as keyof typeof ratingBuckets] += 1;
+    }
+  });
+
+  const negativeCount = ratings.filter((value) => value <= 2).length;
+  const negative_share_pct =
+    ratings.length > 0
+      ? Math.round((negativeCount / ratings.length) * 100)
+      : null;
+
+  let response_rate_pct: number | null =
+    replyableCount > 0
+      ? Math.round((repliedCount / replyableCount) * 100)
+      : null;
+  if (
+    response_rate_pct !== null &&
+    (response_rate_pct < 0 || response_rate_pct > 100)
+  ) {
+    response_rate_pct = null;
+  }
+
+  const reviewIds = reviews.map((row) => row.id);
+  const { data: sentiments, error: sentimentsError } = await supabaseAdmin
+    .from("review_ai_insights")
+    .select("review_pk, sentiment")
+    .in("review_pk", reviewIds);
+  if (sentimentsError) {
+    console.error("[analytics/overview] sentiment error", sentimentsError);
+  }
+
+  const sentimentRows = sentiments ?? [];
+  const sentiment_samples = sentimentRows.length;
+  const sentimentCounts = {
+    positive: sentimentRows.filter((row) => row.sentiment === "positive").length,
+    neutral: sentimentRows.filter((row) => row.sentiment === "neutral").length,
+    negative: sentimentRows.filter((row) => row.sentiment === "negative").length
+  };
+  const sentiment =
+    sentiment_samples > 0
+      ? {
+          ...sentimentCounts,
+          positive_pct: Math.round(
+            (sentimentCounts.positive / sentiment_samples) * 100
+          )
+        }
+      : null;
+
+  const sentimentByReview = new Map(
+    sentimentRows.map((row) => [row.review_pk, row.sentiment])
+  );
+  const { data: tagLinks } = await supabaseAdmin
+    .from("review_ai_tags")
+    .select("review_pk, tag_id")
+    .in("review_pk", reviewIds);
+  const tagIds = Array.from(
+    new Set((tagLinks ?? []).map((link) => link.tag_id))
+  );
+  const { data: tagsData } = await supabaseAdmin
+    .from("ai_tags")
+    .select("id, tag")
+    .in("id", tagIds);
+  const tagLookup = new Map(
+    (tagsData ?? []).map((tag) => [tag.id, tag.tag])
+  );
+
+  const strengthCounts = new Map<string, number>();
+  const irritantCounts = new Map<string, number>();
+  for (const link of tagLinks ?? []) {
+    const tagLabel = tagLookup.get(link.tag_id);
+    if (!tagLabel) {
+      continue;
+    }
+    const sentimentLabel = sentimentByReview.get(link.review_pk) ?? null;
+    if (sentimentLabel === "negative") {
+      irritantCounts.set(tagLabel, (irritantCounts.get(tagLabel) ?? 0) + 1);
+    } else if (sentimentLabel === "positive") {
+      strengthCounts.set(tagLabel, (strengthCounts.get(tagLabel) ?? 0) + 1);
+    } else if (!sentimentLabel) {
+      strengthCounts.set(tagLabel, (strengthCounts.get(tagLabel) ?? 0) + 1);
+    }
+  }
+
+  const toTopList = (map: Map<string, number>) =>
+    Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([label, count]) => ({ label, count }));
+
+  const strengths = toTopList(strengthCounts);
+  const irritants = toTopList(irritantCounts);
+
+  const reasons: string[] = [];
+  let data_status: AnalyticsOverview["data_status"] = "ok";
+  if (reviews.length === 0) {
+    data_status = "empty";
+    reasons.push("no_reviews_in_range");
+  }
+  if (!sentiment) {
+    reasons.push("no_sentiment_data");
+    if (data_status === "ok") {
+      data_status = "partial";
+    }
+  }
+  if (strengths.length === 0 && irritants.length === 0) {
+    reasons.push("no_ai_topics");
+    if (data_status === "ok") {
+      data_status = "partial";
+    }
+  }
+  if (replyableCount === 0) {
+    reasons.push("no_replyable_reviews");
+  }
+
+  const overview: AnalyticsOverview = {
+    scope: scopeBase,
+    data_status,
+    reasons,
+    kpis: {
+      reviews_total: reviews.length,
+      reviews_with_text: replyableCount,
+      avg_rating,
+      negative_share_pct,
+      response_rate_pct,
+      replied_count: repliedCount,
+      replyable_count: replyableCount
+    },
+    ratings: ratingBuckets,
+    sentiment,
+    topics: { strengths, irritants }
+  };
+
+  console.log("[analytics/overview]", {
+    userId,
+    preset,
+    locationIdsCount: locationIds.length,
+    status: data_status
+  });
+
+  return res.status(200).json(overview);
+};
+
+export default handler;

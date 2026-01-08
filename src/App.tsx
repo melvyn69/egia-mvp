@@ -8,6 +8,7 @@ import { Topbar } from "./components/layout/Topbar";
 import { Dashboard } from "./pages/Dashboard";
 import { Inbox } from "./pages/Inbox";
 import { Connect } from "./pages/Connect";
+import { Analytics } from "./pages/Analytics";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
 import { Button } from "./components/ui/button";
@@ -93,6 +94,13 @@ const App = () => {
       return {
         title: "Boîte de réception",
         subtitle: "Réponses aux avis et suivi des interactions."
+      };
+    }
+
+    if (location.pathname === "/analytics") {
+      return {
+        title: "Analytics",
+        subtitle: "Tendances, répartition et thèmes clients."
       };
     }
 
@@ -530,6 +538,17 @@ const App = () => {
                       locationsLoading={locationsLoading}
                       locationsError={locationsError}
                       syncing={syncingLocations}
+                    />
+                  }
+                />
+                <Route
+                  path="/analytics"
+                  element={
+                    <Analytics
+                      session={session}
+                      locations={locations}
+                      locationsLoading={locationsLoading}
+                      locationsError={locationsError}
                     />
                   }
                 />
