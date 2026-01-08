@@ -13,6 +13,9 @@ type GoogleLocation = {
   storefrontAddress?: unknown;
   primaryPhone?: string;
   websiteUri?: string;
+  metadata?: { placeId?: string };
+  primaryCategory?: unknown;
+  phoneNumbers?: { primaryPhoneNumber?: string };
 };
 
 const refreshAccessToken = async (refreshToken: string) => {
@@ -99,6 +102,20 @@ const listLocationsForAccount = async (
   } while (pageToken);
 
   return locations;
+};
+
+const isRealLocation = (location: GoogleLocation) => {
+  const nameOk =
+    typeof location?.name === "string" && location.name.startsWith("locations/");
+  const titleOk =
+    typeof location?.title === "string" && location.title.trim().length > 0;
+  const hasSignals =
+    Boolean(location?.metadata?.placeId) ||
+    Boolean(location?.storefrontAddress) ||
+    Boolean(location?.primaryCategory) ||
+    Boolean(location?.websiteUri) ||
+    Boolean(location?.phoneNumbers?.primaryPhoneNumber);
+  return nameOk && titleOk && hasSignals;
 };
 
 const handler = async (req: IncomingMessage, res: ServerResponse) => {
@@ -207,13 +224,14 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
         continue;
       }
       const locations = await listLocationsForAccount(accessToken, account.name);
-      locationsCount += locations.length;
+      const filteredLocations = locations.filter(isRealLocation);
+      locationsCount += filteredLocations.length;
 
-      if (locations.length === 0) {
+      if (filteredLocations.length === 0) {
         continue;
       }
 
-      const rows = locations.map((location) => ({
+      const rows = filteredLocations.map((location) => ({
         user_id: userId,
         provider: "google",
         account_resource_name: account.name,

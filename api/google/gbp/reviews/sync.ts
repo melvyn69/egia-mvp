@@ -123,6 +123,14 @@ const listReviewsForLocation = async (
   return { reviews, notFound: false };
 };
 
+const stripGoogleTranslation = (value?: string | null) => {
+  if (!value) {
+    return null;
+  }
+  const cut = value.split("(Translated by Google)")[0]?.trim();
+  return cut || null;
+};
+
 const upsertImportStatus = async (
   supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
   userId: string,
@@ -395,6 +403,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
               ? rawReview.originalText.text
               : null) ??
             (typeof rawReview.comment === "string" ? rawReview.comment : null);
+          const cleanComment = stripGoogleTranslation(comment);
           return {
             user_id: userId,
             location_id: location.location_resource_name,
@@ -403,7 +412,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
             review_id: reviewId,
             author_name: review.reviewer?.displayName ?? null,
             rating: mapRating(review.starRating),
-            comment,
+            comment: cleanComment,
             create_time: review.createTime ?? null,
             update_time: review.updateTime ?? null,
             owner_reply: review.reviewReply?.comment ?? null,
