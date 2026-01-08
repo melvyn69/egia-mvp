@@ -1,6 +1,13 @@
 type QueryFilters = {
   location_id?: string;
-  preset: "this_week" | "this_month" | "this_quarter" | "this_year" | "last_year" | "custom";
+  preset:
+    | "this_week"
+    | "this_month"
+    | "this_quarter"
+    | "this_year"
+    | "last_year"
+    | "all_time"
+    | "custom";
   from?: string;
   to?: string;
   tz: string;

@@ -5,7 +5,7 @@ import { parseFilters } from "../_shared/_filters.js";
 import { requireUser } from "../_shared/_auth.js";
 
 type KpiSummary = {
-  period: { preset: string; from: string; to: string; tz: string };
+  period: { preset: string; from: string | null; to: string | null; tz: string };
   scope: { locationId?: string | null; locationsCount: number };
   counts: {
     reviews_total: number;
@@ -17,7 +17,7 @@ type KpiSummary = {
     avg_rating: number | null;
   };
   response: {
-    response_rate: number | null;
+    response_rate_pct: number | null;
   };
   sentiment: {
     sentiment_positive_pct: number | null;
@@ -89,7 +89,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     const filters = parseFilters(req.query);
     if (filters.reject) {
       return res.status(200).json({
-        period: { preset: filters.preset, from: "", to: "", tz: filters.tz },
+        period: { preset: filters.preset, from: null, to: null, tz: filters.tz },
         scope: { locationId: null, locationsCount: 0 },
         counts: {
           reviews_total: 0,
@@ -98,7 +98,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           reviews_replyable: 0
         },
         ratings: { avg_rating: null },
-        response: { response_rate: null },
+        response: { response_rate_pct: null },
         sentiment: { sentiment_positive_pct: null, sentiment_samples: 0 },
         nps: { nps_score: null, nps_samples: 0 },
         meta: { data_status: "no_data", reasons: ["invalid_source"] },
@@ -122,6 +122,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       to,
       timeZone
     );
+    const periodFrom = preset === "all_time" ? null : range.from;
+    const periodTo = range.to;
     let locationIds: string[] = [];
     if (locationId) {
       const { data: locationRow } = await supabaseAdmin
@@ -146,7 +148,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
     if (locationIds.length === 0) {
       const summary: KpiSummary = {
-        period: { preset, from: range.from, to: range.to, tz: timeZone },
+        period: { preset, from: periodFrom, to: periodTo, tz: timeZone },
         scope: { locationId, locationsCount: 0 },
         counts: {
           reviews_total: 0,
@@ -155,7 +157,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           reviews_replyable: 0
         },
         ratings: { avg_rating: null },
-        response: { response_rate: null },
+        response: { response_rate_pct: null },
         sentiment: { sentiment_positive_pct: null, sentiment_samples: 0 },
         nps: { nps_score: null, nps_samples: 0 },
         meta: { data_status: "no_data", reasons: ["no_locations"] },
@@ -221,12 +223,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     const reviews_replied = reviews.filter(isReplied).length;
 
     // Replyable = avis avec texte non vide, non déjà répondu.
-    const reviews_replyable = reviews.filter(
-      (row) =>
-        typeof row.comment === "string" &&
-        row.comment.trim().length > 0 &&
-        !isReplied(row)
-    ).length;
+    const reviews_replyable = reviews_with_text;
 
     const ratings = reviews
       .map((row) => row.rating)
@@ -248,10 +245,13 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         ? Math.round(((promoters - detractors) / nps_samples) * 100)
         : null;
 
-    const response_rate =
+    let response_rate: number | null =
       reviews_replyable > 0
         ? Math.round((reviews_replied / reviews_replyable) * 100)
         : null;
+    if (response_rate !== null && (response_rate < 0 || response_rate > 100)) {
+      response_rate = null;
+    }
 
     const reviewIds = reviews.map((row) => row.id);
     let sentiment_samples = 0;
@@ -282,6 +282,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       data_status = "no_data";
       reasons.push("no_reviews_in_range");
     }
+    if (response_rate === null && reviews_replyable > 0) {
+      reasons.push("invalid_response_rate");
+    }
     if (sentiment_samples === 0) {
       reasons.push("no_sentiment_yet");
       if (data_status === "ok") {
@@ -290,7 +293,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     }
 
     const summary: KpiSummary = {
-      period: { preset, from: range.from, to: range.to, tz: timeZone },
+      period: { preset, from: periodFrom, to: periodTo, tz: timeZone },
       scope: { locationId, locationsCount: locationIds.length },
       counts: {
         reviews_total,
@@ -299,7 +302,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         reviews_replyable
       },
       ratings: { avg_rating },
-      response: { response_rate },
+      response: { response_rate_pct: response_rate },
       sentiment: { sentiment_positive_pct, sentiment_samples },
       nps: { nps_score, nps_samples },
       meta: { data_status, reasons },

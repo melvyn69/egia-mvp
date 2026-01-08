@@ -7,7 +7,6 @@ import {
   MapPin,
   MessageSquare,
   RefreshCw,
-  Shield,
   Star
 } from "lucide-react";
 import { Badge } from "../components/ui/badge";
@@ -20,9 +19,7 @@ import {
   type NotificationKind,
   type NotificationSeverity,
   addNotificationDedup,
-  clearNotifications,
   getNotifications,
-  resolveNotificationAction,
   STORAGE_KEY_READ_NOTIFICATIONS,
   getReadNotificationIds,
   dispatchNotificationsUpdated
@@ -49,7 +46,7 @@ type DashboardProps = {
 };
 
 type KpiSummary = {
-  period: { preset: string; from: string; to: string; tz: string };
+  period: { preset: string; from: string | null; to: string | null; tz: string };
   scope: { locationId?: string | null; locationsCount: number };
   counts: {
     reviews_total: number;
@@ -61,7 +58,7 @@ type KpiSummary = {
     avg_rating: number | null;
   };
   response: {
-    response_rate: number | null;
+    response_rate_pct: number | null;
   };
   sentiment: {
     sentiment_positive_pct: number | null;
@@ -161,33 +158,26 @@ const getKpiReason = (reasons?: string[]): string => {
   return "Pas assez de données";
 };
 
-type ActivityEvent = {
-  id: string;
-  message: string;
-  timestamp: Date;
-  type: "connection" | "sync" | "review";
-};
-
-const mockActivityEvents: ActivityEvent[] = [
-  {
-    id: "1",
-    message: "Connexion Google réussie",
-    timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
-    type: "connection"
-  },
-  {
-    id: "2",
-    message: "Synchronisation lancée",
-    timestamp: new Date(Date.now() - 45 * 60 * 1000),
-    type: "sync"
-  },
-  {
-    id: "3",
-    message: "Aucun avis négatif détecté",
-    timestamp: new Date(Date.now() - 15 * 60 * 1000),
-    type: "review"
+const getPresetLabel = (preset: string): string => {
+  switch (preset) {
+    case "this_week":
+      return "Cette semaine";
+    case "this_month":
+      return "Ce mois";
+    case "this_quarter":
+      return "Ce trimestre";
+    case "this_year":
+      return "Cette année";
+    case "last_year":
+      return "Année dernière";
+    case "all_time":
+      return "Depuis toujours";
+    case "custom":
+      return "Personnalisé";
+    default:
+      return "—";
   }
-];
+};
 
 const getSeverityOrder = (severity: NotificationSeverity): number => {
   const order: Record<NotificationSeverity, number> = {
@@ -290,11 +280,17 @@ const Dashboard = ({
   const prevLocationsErrorRef = useRef<string | null>(locationsError);
   const didMountRef = useRef(false);
 
-  const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(
+  const [readNotificationIds] = useState<Set<string>>(
     getReadNotificationIds
   );
   const [kpiPreset, setKpiPreset] = useState<
-    "this_week" | "this_month" | "this_quarter" | "this_year" | "last_year" | "custom"
+    | "this_week"
+    | "this_month"
+    | "this_quarter"
+    | "this_year"
+    | "last_year"
+    | "all_time"
+    | "custom"
   >("this_month");
   const [kpiFrom, setKpiFrom] = useState("");
   const [kpiTo, setKpiTo] = useState("");
@@ -380,29 +376,10 @@ const Dashboard = ({
   }, [kpiLocationId, kpiPreset, kpiFrom, kpiTo, session, timeZone]);
 
   useEffect(() => {
-    const prevGoogleConnected = prevGoogleConnectedRef.current;
     if (!didMountRef.current) {
       didMountRef.current = true;
       prevGoogleConnectedRef.current = googleConnected;
       return;
-    }
-
-    if (prevGoogleConnected !== googleConnected) {
-      if (prevGoogleConnected !== true && googleConnected === true) {
-        createNotification({
-          kind: "connection",
-          severity: "info",
-          title: "Connexion Google établie",
-          message: "Votre compte Google Business Profile est connecté."
-        });
-      } else if (prevGoogleConnected === true && googleConnected !== true) {
-        createNotification({
-          kind: "connection",
-          severity: "high",
-          title: "Connexion Google perdue",
-          message: "Reconnecte ton compte pour synchroniser."
-        });
-      }
     }
 
     prevGoogleConnectedRef.current = googleConnected;
@@ -459,11 +436,8 @@ const Dashboard = ({
     status: readNotificationIds.has(notif.id) ? ("read" as const) : ("unread" as const)
   }));
 
-  const unreadCount = notificationsWithStatus.filter(
-    (n) => n.status === "unread"
-  ).length;
   const urgentActionsCount = notificationsWithStatus.filter(
-    (n) => n.requiresAction === true && n.status === "unread"
+    (n) => n.requiresAction === true
   ).length;
 
   const sortedNotifications = notificationsWithStatus
@@ -484,32 +458,10 @@ const Dashboard = ({
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
 
-  const markAsRead = (id: string) => {
-    setReadNotificationIds((prev) => {
-      const next = new Set(prev);
-      next.add(id);
-      return next;
-    });
-  };
+  const recentActivities = sortedNotifications.slice(0, 5);
 
-  const markAllAsRead = () => {
-    setReadNotificationIds(new Set(notificationsWithStatus.map((n) => n.id)));
-  };
-
-  const handleReplyToReview = () => {
-    alert("Bientôt disponible");
-  };
-
-  const handleViewLocation = (locationId?: string | null) => {
-    const locationTarget = locationId
-      ? document.getElementById(`location-${locationId}`)
-      : null;
-    const sectionTarget = document.getElementById("locations-section");
-    const target = locationTarget ?? sectionTarget;
-
-    if (target) {
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+  const handleOpenInbox = () => {
+    window.location.href = "/inbox";
   };
 
   const getLocationName = (locationId?: string | null): string => {
@@ -525,10 +477,22 @@ const Dashboard = ({
     return location.location_title ?? location.location_resource_name ?? "—";
   };
 
+  const connectionStatusText = connectedStatus
+    ? locationsError
+      ? "Synchronisation en erreur."
+      : syncing
+        ? "Synchronisation en cours."
+        : "Synchronisation active."
+    : "Aucune connexion active.";
+
   const kpiReason = getKpiReason(kpiData?.meta?.reasons);
   const noData = kpiData?.meta?.data_status === "no_data";
+  const responseRate = kpiData?.response.response_rate_pct ?? null;
+  const responseRateValid =
+    responseRate !== null && responseRate >= 0 && responseRate <= 100;
   const kpiCards = [
     {
+      id: "reviews_total",
       label: "Volume d'avis",
       value: noData ? "—" : formatCount(kpiData?.counts.reviews_total),
       caption: noData
@@ -536,20 +500,23 @@ const Dashboard = ({
         : `Avec texte: ${formatCount(kpiData?.counts.reviews_with_text)}`
     },
     {
+      id: "avg_rating",
       label: "Note moyenne",
       value: formatRating(kpiData?.ratings.avg_rating ?? null),
       caption:
         kpiData?.ratings.avg_rating === null ? kpiReason : "Sur 5"
     },
     {
+      id: "response_rate",
       label: "Taux de réponse",
-      value: formatPercent(kpiData?.response.response_rate ?? null),
+      value: responseRateValid ? formatPercent(responseRate) : "—",
       caption:
-        kpiData?.response.response_rate === null
+        !responseRateValid
           ? kpiReason
           : `Sur ${formatCount(kpiData?.counts.reviews_replyable)} avis`
     },
     {
+      id: "sentiment_positive",
       label: "Sentiment positif",
       value: formatPercent(kpiData?.sentiment.sentiment_positive_pct ?? null),
       caption:
@@ -558,7 +525,18 @@ const Dashboard = ({
           : `Sur ${formatCount(kpiData?.sentiment.sentiment_samples)} avis`
     },
     {
-      label: "NPS",
+      id: "nps",
+      label: (
+        <span className="inline-flex items-center gap-1">
+          Indice de recommandation
+          <span
+            className="text-xs text-slate-400"
+            title="Mesure la probabilite que vos clients vous recommandent."
+          >
+            ⓘ
+          </span>
+        </span>
+      ),
       value: kpiData?.nps.nps_score ?? "—",
       caption:
         kpiData?.nps.nps_score === null
@@ -611,6 +589,7 @@ const Dashboard = ({
               <option value="this_quarter">Ce trimestre</option>
               <option value="this_year">Cette année</option>
               <option value="last_year">Année dernière</option>
+              <option value="all_time">Depuis toujours</option>
               <option value="custom">Personnalisé</option>
             </select>
           </div>
@@ -634,9 +613,12 @@ const Dashboard = ({
             <span className="text-xs text-amber-700">{kpiError}</span>
           )}
         </div>
+        <p className="text-xs text-slate-500">
+          Période: {getPresetLabel(kpiPreset)}
+        </p>
         <div className="grid gap-4 md:grid-cols-3">
           {kpiCards.map((kpi) => (
-            <Card key={kpi.label}>
+            <Card key={kpi.id}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold text-slate-500">
                   {kpi.label}
@@ -687,16 +669,13 @@ const Dashboard = ({
                 </Badge>
               )}
               <p className="text-sm text-slate-600">
-                {connectedStatus
-                  ? "Synchronisation active."
-                  : "Aucune connexion active."}
+                {connectionStatusText}
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
               <Button onClick={onConnect}>
-                {connectedStatus ? "Actualiser la connexion" : "Connecter Google"}
+                {connectedStatus ? "Reconnecter Google" : "Connecter Google"}
               </Button>
-              <Button variant="outline">Voir les permissions</Button>
             </div>
           </CardContent>
         </Card>
@@ -716,10 +695,6 @@ const Dashboard = ({
               <p className="mt-2 text-sm font-semibold text-slate-900">
                 {session?.user.email ?? "Non connecte"}
               </p>
-            </div>
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <RefreshCw size={14} />
-              Derniere verification il y a 2 minutes
             </div>
           </CardContent>
         </Card>
@@ -772,19 +747,23 @@ const Dashboard = ({
                       {location.location_title ??
                         location.location_resource_name}
                     </p>
-                    <div className="mt-2 flex items-center gap-2 text-sm text-slate-500">
-                      <MapPin size={14} />
-                      {location.phone ?? "Telephone non renseigne"}
-                    </div>
+                    {location.phone && (
+                      <div className="mt-2 flex items-center gap-2 text-sm text-slate-500">
+                        <MapPin size={14} />
+                        {location.phone}
+                      </div>
+                    )}
                   </div>
                   <div className="text-right">
                     <div className="flex items-center justify-end gap-1 text-sm font-semibold text-slate-900">
                       <Star size={14} className="text-amber-500" />
                       Actif
                     </div>
-                    <p className="text-xs text-slate-500">
-                      {location.website_uri ?? "Site non renseigne"}
-                    </p>
+                    {location.website_uri && (
+                      <p className="text-xs text-slate-500">
+                        {location.website_uri}
+                      </p>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -793,224 +772,79 @@ const Dashboard = ({
       </section>
 
       <section className="grid gap-6 lg:grid-cols-2">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-900">Flux d'activité</h2>
-          <Card className="mt-4">
-            <CardContent className="pt-6">
-              {mockActivityEvents.length === 0 ? (
-                <p className="text-sm text-slate-500">Aucune activité récente</p>
-              ) : (
-                <div className="space-y-4">
-                  {mockActivityEvents
-                    .slice()
-                    .sort(
-                      (a, b) =>
-                        b.timestamp.getTime() - a.timestamp.getTime()
-                    )
-                    .map((event) => (
-                      <div
-                        key={event.id}
-                        className="flex items-start gap-3 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0"
-                      >
-                        <div className="mt-0.5">
-                          {event.type === "connection" && (
-                            <CheckCircle
-                              size={16}
-                              className="text-green-600"
-                            />
-                          )}
-                          {event.type === "sync" && (
-                            <RefreshCw size={16} className="text-blue-600" />
-                          )}
-                          {event.type === "review" && (
-                            <Shield size={16} className="text-amber-600" />
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-sm font-medium text-slate-900">
-                            {event.message ?? "Événement"}
-                          </p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {formatRelativeTime(
-                              event.timestamp instanceof Date
-                                ? event.timestamp.toISOString()
-                                : event.timestamp
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div id="notifications-section">
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-semibold text-slate-900">Notifications</h2>
-            <div className="flex items-center gap-2">
-              {import.meta.env.DEV && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    clearNotifications();
-                    setReadNotificationIds(new Set());
-                  }}
-                >
-                  Reset (dev)
-                </Button>
-              )}
-              {unreadCount > 0 && (
-                <Badge variant="success">
-                  {unreadCount} nouveau{unreadCount > 1 ? "x" : ""}
-                </Badge>
-              )}
-            </div>
-          </div>
-          {urgentActionsCount > 0 && (
-            <p className="mt-2 text-sm font-semibold text-red-700">
-              🔴 {urgentActionsCount} action
-              {urgentActionsCount > 1 ? "s urgentes" : " urgente"} à traiter
+        <Card>
+          <CardHeader>
+            <CardTitle>À traiter maintenant</CardTitle>
+            <p className="text-sm text-slate-500">
+              Les actions prioritaires du moment.
             </p>
-          )}
-          {urgentActionsCount === 0 && notificationsWithStatus.length > 0 && (
-            <p className="mt-2 text-sm font-semibold text-emerald-700">
-              ✅ Aucune action urgente pour le moment
-            </p>
-          )}
-
-          <Card className="mt-4">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-slate-500">
-                Avis & alertes
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {sortedNotifications.length === 0 ? (
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-slate-700">
-                    💤 Aucune notification pour le moment
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Tout est à jour. Revenez plus tard.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {sortedNotifications.map((notif) => (
-                    <div
-                      key={notif.id}
-                      className={`flex items-start gap-3 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0 ${
-                        notif.requiresAction && notif.severity === "critical"
-                          ? "rounded-2xl border border-red-200 bg-red-50 p-3"
-                          : ""
-                      }`}
-                    >
-                      <div
-                        onClick={() => markAsRead(notif.id)}
-                        className="flex flex-1 cursor-pointer items-start gap-3 transition-colors hover:bg-slate-50"
-                      >
-                        <div className="mt-0.5">
-                          {getNotificationIcon(notif.kind, notif.severity)}
-                        </div>
-
-                        <div className="flex-1">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-center gap-2">
-                              <p className="text-sm font-semibold text-slate-900">
-                                {notif.title || "Notification"}
-                              </p>
-                              {notif.requiresAction && (
-                                <Badge className="border-red-600 bg-red-600 text-white">
-                                  Action requise
-                                </Badge>
-                              )}
-                            </div>
-                            {notif.status === "unread" && (
-                              <span className="mt-0.5 inline-flex h-2 w-2 rounded-full bg-amber-500" />
-                            )}
-                          </div>
-
-                          <p className="mt-1 text-sm text-slate-600">
-                            {notif.message || "—"}
-                          </p>
-
-                          {notif.locationId && (
-                            <p className="mt-2 text-xs text-slate-500">
-                              Lieu : {getLocationName(notif.locationId)}
-                            </p>
-                          )}
-
-                          <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
-                            <span>
-                              {notif.rating ? `${notif.rating}★` : "—"}
-                            </span>
-                            <span>{formatRelativeTime(notif.createdAt)}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col gap-2 pt-1">
-                        {notif.requiresAction && (
-                          <Button
-                            variant="default"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              markAsRead(notif.id);
-                              resolveNotificationAction(notif.id);
-                            }}
-                          >
-                            Marquer comme traité
-                          </Button>
-                        )}
-                        {notif.kind === "review" && (
-                          <Button
-                            variant={notif.requiresAction ? "default" : "outline"}
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleReplyToReview();
-                            }}
-                          >
-                            Répondre
-                          </Button>
-                        )}
-                        {notif.locationId && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleViewLocation(notif.locationId);
-                            }}
-                          >
-                            Voir le lieu
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex flex-wrap gap-3 pt-2">
-                <Button
-                  variant="outline"
-                  onClick={markAllAsRead}
-                  disabled={unreadCount === 0}
-                >
-                  Tout marquer comme lu
-                </Button>
-                <Button variant="outline" disabled>
-                  Voir tous les avis
-                </Button>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {urgentActionsCount === 0 ? (
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-slate-900">
+                  Tout est sous contrôle.
+                </p>
+                <p className="text-xs text-slate-500">
+                  Aucun avis urgent à traiter.
+                </p>
               </div>
-            </CardContent>
-          </Card>
-        </div>
+            ) : (
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-slate-900">
+                  {urgentActionsCount} action
+                  {urgentActionsCount > 1 ? "s" : ""} urgente
+                  {urgentActionsCount > 1 ? "s" : ""}.
+                </p>
+                <p className="text-xs text-slate-500">
+                  Priorité aux avis négatifs sans réponse.
+                </p>
+              </div>
+            )}
+            <Button onClick={handleOpenInbox}>Aller à la boîte de réception</Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Activité récente</CardTitle>
+            <p className="text-sm text-slate-500">
+              Derniers événements utiles (max 5).
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {recentActivities.length === 0 ? (
+              <p className="text-sm text-slate-500">Aucune activité récente.</p>
+            ) : (
+              recentActivities.map((notif) => (
+                <div
+                  key={notif.id}
+                  className="flex items-start gap-3 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0"
+                >
+                  <div className="mt-0.5">
+                    {getNotificationIcon(notif.kind, notif.severity)}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-slate-900">
+                      {notif.title || "Événement"}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {notif.message || "—"}
+                    </p>
+                    <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
+                      <span>
+                        {notif.locationId
+                          ? `Lieu : ${getLocationName(notif.locationId)}`
+                          : "Tous les lieux"}
+                      </span>
+                      <span>{formatRelativeTime(notif.createdAt)}</span>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
       </section>
     </div>
   );

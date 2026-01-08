@@ -4,6 +4,7 @@ type Preset =
   | "this_quarter"
   | "this_year"
   | "last_year"
+  | "all_time"
   | "custom";
 
 const getTzOffsetMinutes = (date: Date, timeZone: string): number => {
@@ -87,6 +88,9 @@ const resolveDateRange = (
 ) => {
   const tz = timeZone || "UTC";
   const now = new Date();
+  if (preset === "all_time") {
+    return { from: new Date(0).toISOString(), to: now.toISOString() };
+  }
   if (preset === "custom") {
     if (!from || !to) {
       throw new Error("Missing from/to for custom range.");
