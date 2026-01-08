@@ -166,6 +166,8 @@ const getPresetLabel = (preset: string): string => {
       return "Ce mois";
     case "this_quarter":
       return "Ce trimestre";
+    case "last_quarter":
+      return "Trimestre précédent";
     case "this_year":
       return "Cette année";
     case "last_year":
@@ -287,6 +289,7 @@ const Dashboard = ({
     | "this_week"
     | "this_month"
     | "this_quarter"
+    | "last_quarter"
     | "this_year"
     | "last_year"
     | "all_time"
@@ -587,6 +590,7 @@ const Dashboard = ({
               <option value="this_week">Cette semaine</option>
               <option value="this_month">Ce mois</option>
               <option value="this_quarter">Ce trimestre</option>
+              <option value="last_quarter">Trimestre précédent</option>
               <option value="this_year">Cette année</option>
               <option value="last_year">Année dernière</option>
               <option value="all_time">Depuis toujours</option>
