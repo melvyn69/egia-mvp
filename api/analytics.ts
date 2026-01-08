@@ -329,20 +329,55 @@ const handleOverview = async (
     (tagsData ?? []).map((tag) => [tag.id, tag.tag])
   );
 
-  const strengthCounts = new Map<string, number>();
-  const irritantCounts = new Map<string, number>();
+  const normalizeTagLabel = (value: string) =>
+    value
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+  const tagSentimentCounts = new Map<
+    string,
+    { positive: number; negative: number; neutral: number; unknown: number }
+  >();
+
   for (const link of tagLinks ?? []) {
-    const tagLabel = tagLookup.get(link.tag_id);
+    const rawLabel = tagLookup.get(link.tag_id);
+    if (!rawLabel) {
+      continue;
+    }
+    const tagLabel = normalizeTagLabel(rawLabel);
     if (!tagLabel) {
       continue;
     }
+    const counts =
+      tagSentimentCounts.get(tagLabel) ?? {
+        positive: 0,
+        negative: 0,
+        neutral: 0,
+        unknown: 0
+      };
     const sentimentLabel = sentimentByReview.get(link.review_pk) ?? null;
     if (sentimentLabel === "negative") {
-      irritantCounts.set(tagLabel, (irritantCounts.get(tagLabel) ?? 0) + 1);
+      counts.negative += 1;
     } else if (sentimentLabel === "positive") {
-      strengthCounts.set(tagLabel, (strengthCounts.get(tagLabel) ?? 0) + 1);
-    } else if (!sentimentLabel) {
-      strengthCounts.set(tagLabel, (strengthCounts.get(tagLabel) ?? 0) + 1);
+      counts.positive += 1;
+    } else if (sentimentLabel === "neutral") {
+      counts.neutral += 1;
+    } else {
+      counts.unknown += 1;
+    }
+    tagSentimentCounts.set(tagLabel, counts);
+  }
+
+  const strengthCounts = new Map<string, number>();
+  const irritantCounts = new Map<string, number>();
+  for (const [tagLabel, counts] of tagSentimentCounts.entries()) {
+    const positiveScore = counts.positive + counts.neutral + counts.unknown;
+    if (counts.negative >= 2 && counts.negative > counts.positive) {
+      irritantCounts.set(tagLabel, counts.negative);
+    } else if (positiveScore > 0) {
+      strengthCounts.set(tagLabel, positiveScore);
     }
   }
 
