@@ -679,25 +679,6 @@ const Dashboard = ({
             </div>
           </CardContent>
         </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Compte actif</CardTitle>
-            <p className="text-sm text-slate-500">
-              Session Supabase en cours.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                Utilisateur
-              </p>
-              <p className="mt-2 text-sm font-semibold text-slate-900">
-                {session?.user.email ?? "Non connecte"}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
       </section>
 
       <section id="locations-section">

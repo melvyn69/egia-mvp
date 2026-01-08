@@ -2,6 +2,7 @@ type Preset =
   | "this_week"
   | "this_month"
   | "this_quarter"
+  | "last_quarter"
   | "this_year"
   | "last_year"
   | "all_time"
@@ -119,6 +120,16 @@ const resolveDateRange = (
   } else if (preset === "this_quarter") {
     startMonth = Math.floor((parts.month - 1) / 3) * 3 + 1;
     startDay = 1;
+  } else if (preset === "last_quarter") {
+    const currentQuarterStartMonth = Math.floor((parts.month - 1) / 3) * 3 + 1;
+    const lastQuarterStartMonth =
+      currentQuarterStartMonth === 1
+        ? 10
+        : currentQuarterStartMonth - 3;
+    startYear =
+      currentQuarterStartMonth === 1 ? parts.year - 1 : parts.year;
+    startMonth = lastQuarterStartMonth;
+    startDay = 1;
   } else if (preset === "this_year") {
     startMonth = 1;
     startDay = 1;
@@ -129,10 +140,13 @@ const resolveDateRange = (
   }
 
   const fromDate = zonedDateToUtc(startYear, startMonth, startDay, 0, 0, 0, tz);
-  const toDate =
-    preset === "last_year"
-      ? zonedDateToUtc(parts.year, 1, 1, 0, 0, 0, tz)
-      : now;
+  let toDate = now;
+  if (preset === "last_year") {
+    toDate = zonedDateToUtc(parts.year, 1, 1, 0, 0, 0, tz);
+  } else if (preset === "last_quarter") {
+    const currentQuarterStartMonth = Math.floor((parts.month - 1) / 3) * 3 + 1;
+    toDate = zonedDateToUtc(parts.year, currentQuarterStartMonth, 1, 0, 0, 0, tz);
+  }
 
   return { from: fromDate.toISOString(), to: toDate.toISOString() };
 };

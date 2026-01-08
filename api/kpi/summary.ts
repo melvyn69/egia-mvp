@@ -208,9 +208,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
     const reviews = reviewRows ?? [];
     const reviews_total = reviews.length;
-    const reviews_with_text = reviews.filter(
+    const reviewsWithTextRows = reviews.filter(
       (row) => typeof row.comment === "string" && row.comment.trim().length > 0
-    ).length;
+    );
+    const reviews_with_text = reviewsWithTextRows.length;
 
     const isReplied = (row: typeof reviews[number]) =>
       Boolean(
@@ -220,9 +221,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           row.owner_reply_time ||
           row.status === "replied"
       );
-    const reviews_replied = reviews.filter(isReplied).length;
+    const reviews_replied = reviewsWithTextRows.filter(isReplied).length;
 
-    // Replyable = avis avec texte non vide, non déjà répondu.
+    // Replyable = avis avec texte non vide.
     const reviews_replyable = reviews_with_text;
 
     const ratings = reviews
@@ -284,6 +285,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     }
     if (response_rate === null && reviews_replyable > 0) {
       reasons.push("invalid_response_rate");
+    }
+    if (reviews_replyable === 0) {
+      reasons.push("no_replyable_reviews");
     }
     if (sentiment_samples === 0) {
       reasons.push("no_sentiment_yet");

@@ -4,6 +4,7 @@ type QueryFilters = {
     | "this_week"
     | "this_month"
     | "this_quarter"
+    | "last_quarter"
     | "this_year"
     | "last_year"
     | "all_time"
