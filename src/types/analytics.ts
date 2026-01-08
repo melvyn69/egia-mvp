@@ -40,3 +40,47 @@ export type AnalyticsTimeseries = {
     reply_rate: number | null;
   }>;
 };
+
+export type AnalyticsCompare = {
+  periodA: { start: string; end: string; label: string };
+  periodB: { start: string; end: string; label: string };
+  metrics: {
+    review_count: {
+      a: number;
+      b: number;
+      delta: number;
+      delta_pct: number | null;
+    };
+    avg_rating: {
+      a: number | null;
+      b: number | null;
+      delta: number | null;
+      delta_pct: null;
+    };
+    neg_share: {
+      a: number | null;
+      b: number | null;
+      delta: number | null;
+      delta_pct: number | null;
+    };
+    reply_rate: {
+      a: number | null;
+      b: number | null;
+      delta: number | null;
+      delta_pct: number | null;
+    };
+  };
+};
+
+export type AnalyticsInsight = {
+  title: string;
+  detail: string;
+  severity: "good" | "warn" | "bad";
+  metric_keys: string[];
+};
+
+export type AnalyticsInsights = {
+  mode: "ai" | "basic";
+  used_ai: boolean;
+  insights: AnalyticsInsight[];
+};

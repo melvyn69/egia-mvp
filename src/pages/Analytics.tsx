@@ -4,7 +4,12 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
-import type { AnalyticsOverview, AnalyticsTimeseries } from "../types/analytics";
+import type {
+  AnalyticsCompare,
+  AnalyticsInsights,
+  AnalyticsOverview,
+  AnalyticsTimeseries
+} from "../types/analytics";
 
 type AnalyticsProps = {
   session: Session | null;
@@ -28,6 +33,27 @@ const formatRatio = (value: number | null): string =>
 
 const formatCount = (value: number | null | undefined): string =>
   value === null || value === undefined ? "—" : String(value);
+
+const formatDelta = (value: number | null): string =>
+  value === null ? "—" : `${value > 0 ? "+" : ""}${value.toFixed(1)}`;
+
+const formatDeltaCount = (value: number | null): string =>
+  value === null ? "—" : `${value > 0 ? "+" : ""}${Math.round(value)}`;
+
+const formatDeltaPct = (value: number | null): string =>
+  value === null ? "—" : `${value > 0 ? "+" : ""}${Math.round(value * 100)}%`;
+
+const getSeverityVariant = (
+  severity: "good" | "warn" | "bad"
+): "success" | "warning" | "neutral" => {
+  if (severity === "good") {
+    return "success";
+  }
+  if (severity === "bad") {
+    return "warning";
+  }
+  return "neutral";
+};
 
 const getReasonLabel = (reasons: string[]): string => {
   if (reasons.includes("no_locations")) {
@@ -96,6 +122,8 @@ const Analytics = ({
   );
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
   const [timeseries, setTimeseries] = useState<AnalyticsTimeseries | null>(null);
+  const [compare, setCompare] = useState<AnalyticsCompare | null>(null);
+  const [insights, setInsights] = useState<AnalyticsInsights | null>(null);
   const [metric, setMetric] = useState<
     "reviews" | "avg_rating" | "neg_share" | "reply_rate"
   >("reviews");
@@ -124,6 +152,8 @@ const Analytics = ({
     if (!session?.access_token) {
       setOverview(null);
       setTimeseries(null);
+      setCompare(null);
+      setInsights(null);
       return;
     }
     let cancelled = false;
@@ -146,16 +176,25 @@ const Analytics = ({
       }
       params.set("granularity", granularity);
       try {
-        const [overviewRes, seriesRes] = await Promise.all([
+        const [overviewRes, seriesRes, compareRes, insightsRes] =
+          await Promise.all([
           fetch(`/api/analytics?view=overview&${params.toString()}`, {
             headers: { Authorization: `Bearer ${session.access_token}` }
           }),
           fetch(`/api/analytics?view=timeseries&${params.toString()}`, {
             headers: { Authorization: `Bearer ${session.access_token}` }
+          }),
+          fetch(`/api/analytics?view=compare&${params.toString()}`, {
+            headers: { Authorization: `Bearer ${session.access_token}` }
+          }),
+          fetch(`/api/analytics?view=insights&mode=auto&${params.toString()}`, {
+            headers: { Authorization: `Bearer ${session.access_token}` }
           })
         ]);
         const overviewPayload = await overviewRes.json().catch(() => null);
         const seriesPayload = await seriesRes.json().catch(() => null);
+        const comparePayload = await compareRes.json().catch(() => null);
+        const insightsPayload = await insightsRes.json().catch(() => null);
         if (cancelled) {
           return;
         }
@@ -163,21 +202,29 @@ const Analytics = ({
           setError("Impossible de charger l'aperçu analytics.");
           setOverview(null);
           setTimeseries(null);
+          setCompare(null);
+          setInsights(null);
           return;
         }
         if (!seriesRes.ok || !seriesPayload) {
           setError("Impossible de charger les tendances.");
           setOverview(overviewPayload as AnalyticsOverview);
           setTimeseries(null);
+          setCompare(compareRes.ok ? (comparePayload as AnalyticsCompare) : null);
+          setInsights(insightsRes.ok ? (insightsPayload as AnalyticsInsights) : null);
           return;
         }
         setOverview(overviewPayload as AnalyticsOverview);
         setTimeseries(seriesPayload as AnalyticsTimeseries);
+        setCompare(compareRes.ok ? (comparePayload as AnalyticsCompare) : null);
+        setInsights(insightsRes.ok ? (insightsPayload as AnalyticsInsights) : null);
       } catch {
         if (!cancelled) {
           setError("Impossible de charger les analytics.");
           setOverview(null);
           setTimeseries(null);
+          setCompare(null);
+          setInsights(null);
         }
       } finally {
         if (!cancelled) {
@@ -241,6 +288,46 @@ const Analytics = ({
     }
     return formatRatio(value);
   };
+
+  const compareRows = useMemo(() => {
+    if (!compare) {
+      return [];
+    }
+    return [
+      {
+        key: "review_count",
+        label: "Avis",
+        a: formatCount(compare.metrics.review_count.a),
+        b: formatCount(compare.metrics.review_count.b),
+        delta: formatDeltaCount(compare.metrics.review_count.delta),
+        deltaPct: formatDeltaPct(compare.metrics.review_count.delta_pct)
+      },
+      {
+        key: "avg_rating",
+        label: "Note",
+        a: formatRating(compare.metrics.avg_rating.a),
+        b: formatRating(compare.metrics.avg_rating.b),
+        delta: formatDelta(compare.metrics.avg_rating.delta),
+        deltaPct: "—"
+      },
+      {
+        key: "neg_share",
+        label: "Négatifs",
+        a: formatRatio(compare.metrics.neg_share.a),
+        b: formatRatio(compare.metrics.neg_share.b),
+        delta: formatDeltaPct(compare.metrics.neg_share.delta),
+        deltaPct: formatDeltaPct(compare.metrics.neg_share.delta_pct)
+      },
+      {
+        key: "reply_rate",
+        label: "Réponse",
+        a: formatRatio(compare.metrics.reply_rate.a),
+        b: formatRatio(compare.metrics.reply_rate.b),
+        delta: formatDeltaPct(compare.metrics.reply_rate.delta),
+        deltaPct: formatDeltaPct(compare.metrics.reply_rate.delta_pct)
+      }
+    ];
+  }, [compare]);
 
   const reasonLabel = overview ? getReasonLabel(overview.reasons) : "";
   const showGranularityToggle = rangeDays > 30 || preset === "all_time";
@@ -457,6 +544,98 @@ const Analytics = ({
                 {formatPercent(overview?.kpis.negative_share_pct ?? null)}
               </span>
             </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Comparaison</CardTitle>
+            <p className="text-sm text-slate-500">
+              Période actuelle vs période précédente.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {loading ? (
+              <Skeleton className="h-36 w-full" />
+            ) : compare ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span>Période A</span>
+                  <span>
+                    {compare.periodA.start.slice(0, 10)} ->{" "}
+                    {compare.periodA.end.slice(0, 10)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span>Période B</span>
+                  <span>
+                    {compare.periodB.start.slice(0, 10)} ->{" "}
+                    {compare.periodB.end.slice(0, 10)}
+                  </span>
+                </div>
+                <div className="grid gap-3">
+                  {compareRows.map((row) => (
+                    <div
+                      key={row.key}
+                      className="rounded-xl border border-slate-100 bg-white px-3 py-2"
+                    >
+                      <div className="flex items-center justify-between text-sm text-slate-600">
+                        <span>{row.label}</span>
+                        <span className="font-semibold text-slate-900">
+                          {row.delta}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
+                        <span>A: {row.a}</span>
+                        <span>B: {row.b}</span>
+                        <span>{row.deltaPct}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">—</p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Insights</CardTitle>
+            <p className="text-sm text-slate-500">
+              Points d'action prioritaires.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {loading ? (
+              <Skeleton className="h-36 w-full" />
+            ) : insights && insights.insights.length > 0 ? (
+              <div className="space-y-3">
+                {insights.insights.map((insight, index) => (
+                  <div
+                    key={`${insight.title}-${index}`}
+                    className="rounded-xl border border-slate-100 bg-white px-3 py-2"
+                  >
+                    <div className="flex items-center justify-between text-sm text-slate-700">
+                      <span className="font-semibold">{insight.title}</span>
+                      <Badge variant={getSeverityVariant(insight.severity)}>
+                        {insight.severity === "good"
+                          ? "OK"
+                          : insight.severity === "bad"
+                            ? "Alerte"
+                            : "À suivre"}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">{insight.detail}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">—</p>
+            )}
           </CardContent>
         </Card>
       </section>

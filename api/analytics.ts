@@ -46,6 +46,50 @@ type AnalyticsTimeseries = {
   }>;
 };
 
+type AnalyticsCompare = {
+  periodA: { start: string; end: string; label: string };
+  periodB: { start: string; end: string; label: string };
+  metrics: {
+    review_count: {
+      a: number;
+      b: number;
+      delta: number;
+      delta_pct: number | null;
+    };
+    avg_rating: {
+      a: number | null;
+      b: number | null;
+      delta: number | null;
+      delta_pct: null;
+    };
+    neg_share: {
+      a: number | null;
+      b: number | null;
+      delta: number | null;
+      delta_pct: number | null;
+    };
+    reply_rate: {
+      a: number | null;
+      b: number | null;
+      delta: number | null;
+      delta_pct: number | null;
+    };
+  };
+};
+
+type AnalyticsInsight = {
+  title: string;
+  detail: string;
+  severity: "good" | "warn" | "bad";
+  metric_keys: string[];
+};
+
+type AnalyticsInsights = {
+  mode: "ai" | "basic";
+  used_ai: boolean;
+  insights: AnalyticsInsight[];
+};
+
 const buildEmptyOverview = (
   scope: AnalyticsOverview["scope"],
   reasons: string[]
@@ -125,6 +169,636 @@ const isReplied = (row: {
       row.owner_reply_time ||
       row.status === "replied"
   );
+
+type ReviewRow = {
+  rating: number | null;
+  comment: string | null;
+  reply_text: string | null;
+  replied_at: string | null;
+  owner_reply: string | null;
+  owner_reply_time: string | null;
+  status: string | null;
+  create_time: string | null;
+  update_time: string | null;
+  created_at: string | null;
+  location_id: string | null;
+};
+
+const buildReviewsQuery = (
+  supabaseAdmin: ReturnType<typeof requireUser> extends Promise<infer R>
+    ? R extends { supabaseAdmin: infer C }
+      ? C
+      : never
+    : never,
+  userId: string,
+  locationIds: string[],
+  range: { from: string; to: string }
+) => {
+  let query = supabaseAdmin
+    .from("google_reviews")
+    .select(
+      "rating, comment, reply_text, replied_at, owner_reply, owner_reply_time, status, create_time, update_time, created_at, location_id"
+    )
+    .eq("user_id", userId);
+
+  query =
+    locationIds.length === 1
+      ? query.eq("location_id", locationIds[0])
+      : query.in("location_id", locationIds);
+
+  return query.or(
+    `and(create_time.gte.${range.from},create_time.lte.${range.to}),` +
+      `and(create_time.is.null,update_time.gte.${range.from},update_time.lte.${range.to}),` +
+      `and(create_time.is.null,update_time.is.null,created_at.gte.${range.from},created_at.lte.${range.to})`
+  );
+};
+
+const fetchReviewsForRange = async (
+  supabaseAdmin: ReturnType<typeof requireUser> extends Promise<infer R>
+    ? R extends { supabaseAdmin: infer C }
+      ? C
+      : never
+    : never,
+  userId: string,
+  locationIds: string[],
+  range: { from: string; to: string }
+) => {
+  const rows: ReviewRow[] = [];
+  const pageSize = 1000;
+  const maxRows = 20000;
+  for (let offset = 0; offset < maxRows; offset += pageSize) {
+    const { data: pageData, error: pageError } = await buildReviewsQuery(
+      supabaseAdmin,
+      userId,
+      locationIds,
+      range
+    ).range(offset, offset + pageSize - 1);
+    if (pageError) {
+      throw pageError;
+    }
+    const pageRows = pageData ?? [];
+    rows.push(...pageRows);
+    if (pageRows.length < pageSize) {
+      break;
+    }
+  }
+  return rows;
+};
+
+const resolveGranularity = (
+  raw: string | undefined,
+  range: { from: string; to: string }
+) => {
+  if (raw === "day" || raw === "week") {
+    return raw;
+  }
+  const rangeStart = new Date(range.from);
+  const rangeEnd = new Date(range.to);
+  const rangeDays = Math.max(
+    1,
+    Math.ceil((rangeEnd.getTime() - rangeStart.getTime()) / (1000 * 60 * 60 * 24)) + 1
+  );
+  return rangeDays <= 90 ? "day" : "week";
+};
+
+const buildTimeseriesPoints = (
+  rows: ReviewRow[],
+  range: { from: string; to: string },
+  granularity: "day" | "week"
+) => {
+  const buckets = new Map<
+    string,
+    {
+      review_count: number;
+      rating_sum: number;
+      rating_count: number;
+      negative_count: number;
+      replyable_count: number;
+      replied_count: number;
+    }
+  >();
+
+  rows.forEach((row) => {
+    const time = row.create_time ?? row.update_time ?? row.created_at ?? null;
+    if (!time) {
+      return;
+    }
+    const date = new Date(time);
+    const bucketDate = granularity === "week" ? getWeekStartUtc(date) : date;
+    const key = toDateKey(bucketDate);
+    const entry = buckets.get(key) ?? {
+      review_count: 0,
+      rating_sum: 0,
+      rating_count: 0,
+      negative_count: 0,
+      replyable_count: 0,
+      replied_count: 0
+    };
+    entry.review_count += 1;
+    if (isReplyable(row)) {
+      entry.replyable_count += 1;
+      if (isReplied(row)) {
+        entry.replied_count += 1;
+      }
+    }
+    if (typeof row.rating === "number") {
+      entry.rating_sum += row.rating;
+      entry.rating_count += 1;
+      if (row.rating <= 2) {
+        entry.negative_count += 1;
+      }
+    }
+    buckets.set(key, entry);
+  });
+
+  const rangeStart = new Date(range.from);
+  const rangeEnd = new Date(range.to);
+  const bucketStart =
+    granularity === "week" ? getWeekStartUtc(rangeStart) : startOfDayUtc(rangeStart);
+  const bucketEnd =
+    granularity === "week" ? getWeekStartUtc(rangeEnd) : startOfDayUtc(rangeEnd);
+  const stepDays = granularity === "week" ? 7 : 1;
+  const points: AnalyticsTimeseries["points"] = [];
+  for (
+    let cursor = bucketStart;
+    cursor <= bucketEnd;
+    cursor = addDaysUtc(cursor, stepDays)
+  ) {
+    const key = toDateKey(cursor);
+    const entry = buckets.get(key);
+    const review_count = entry?.review_count ?? 0;
+    const avg_rating =
+      entry && entry.rating_count > 0
+        ? Number((entry.rating_sum / entry.rating_count).toFixed(1))
+        : null;
+    const neg_share = review_count > 0 ? entry!.negative_count / review_count : null;
+    const reply_rate =
+      entry && entry.replyable_count > 0
+        ? entry.replied_count / entry.replyable_count
+        : null;
+    points.push({
+      date: key,
+      review_count,
+      avg_rating,
+      neg_share,
+      reply_rate
+    });
+  }
+  return points;
+};
+
+const computeCompareMetrics = (rows: ReviewRow[]) => {
+  const review_count = rows.length;
+  const ratings = rows
+    .map((row) => row.rating)
+    .filter((value): value is number => typeof value === "number");
+  const avg_rating =
+    ratings.length > 0
+      ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1))
+      : null;
+  const negative_count = rows.filter(
+    (row) => typeof row.rating === "number" && row.rating <= 2
+  ).length;
+  const neg_share = review_count > 0 ? negative_count / review_count : null;
+  const replyableRows = rows.filter(isReplyable);
+  const replyable_count = replyableRows.length;
+  const replied_count = replyableRows.filter(isReplied).length;
+  const reply_rate =
+    replyable_count > 0 ? replied_count / replyable_count : null;
+
+  return {
+    review_count,
+    avg_rating,
+    neg_share,
+    reply_rate
+  };
+};
+
+const buildCompareResponse = (
+  preset: string,
+  rangeA: { from: string; to: string },
+  rangeB: { from: string; to: string },
+  metricsA: ReturnType<typeof computeCompareMetrics>,
+  metricsB: ReturnType<typeof computeCompareMetrics>
+): AnalyticsCompare => {
+  const reviewDelta = metricsA.review_count - metricsB.review_count;
+  const reviewDeltaPct =
+    metricsB.review_count > 0 ? reviewDelta / metricsB.review_count : null;
+  const avgDelta =
+    metricsA.avg_rating !== null && metricsB.avg_rating !== null
+      ? Number((metricsA.avg_rating - metricsB.avg_rating).toFixed(2))
+      : null;
+  const negDelta =
+    metricsA.neg_share !== null && metricsB.neg_share !== null
+      ? metricsA.neg_share - metricsB.neg_share
+      : null;
+  const negDeltaPct =
+    metricsB.neg_share !== null && metricsB.neg_share > 0 && negDelta !== null
+      ? negDelta / metricsB.neg_share
+      : null;
+  const replyDelta =
+    metricsA.reply_rate !== null && metricsB.reply_rate !== null
+      ? metricsA.reply_rate - metricsB.reply_rate
+      : null;
+  const replyDeltaPct =
+    metricsB.reply_rate !== null && metricsB.reply_rate > 0 && replyDelta !== null
+      ? replyDelta / metricsB.reply_rate
+      : null;
+
+  return {
+    periodA: { start: rangeA.from, end: rangeA.to, label: preset },
+    periodB: { start: rangeB.from, end: rangeB.to, label: `previous_${preset}` },
+    metrics: {
+      review_count: {
+        a: metricsA.review_count,
+        b: metricsB.review_count,
+        delta: reviewDelta,
+        delta_pct: reviewDeltaPct
+      },
+      avg_rating: {
+        a: metricsA.avg_rating,
+        b: metricsB.avg_rating,
+        delta: avgDelta,
+        delta_pct: null
+      },
+      neg_share: {
+        a: metricsA.neg_share,
+        b: metricsB.neg_share,
+        delta: negDelta,
+        delta_pct: negDeltaPct
+      },
+      reply_rate: {
+        a: metricsA.reply_rate,
+        b: metricsB.reply_rate,
+        delta: replyDelta,
+        delta_pct: replyDeltaPct
+      }
+    }
+  };
+};
+
+const buildBasicInsights = (
+  compare: AnalyticsCompare,
+  timeseries: AnalyticsTimeseries["points"]
+): AnalyticsInsight[] => {
+  const insights: AnalyticsInsight[] = [];
+  const addInsight = (insight: AnalyticsInsight) => {
+    insights.push(insight);
+  };
+  const toPercent = (value: number | null) =>
+    value === null ? null : Math.round(value * 100);
+
+  const replyRate = compare.metrics.reply_rate.a;
+  if (replyRate === null) {
+    addInsight({
+      title: "Réponses : données insuffisantes",
+      detail:
+        "Aucun avis avec commentaire exploitable sur la période. Encouragez les clients à laisser un avis détaillé.",
+      severity: "warn",
+      metric_keys: ["reply_rate"]
+    });
+  } else if (replyRate < 0.5) {
+    addInsight({
+      title: "Taux de réponse faible",
+      detail:
+        "Moins de 50% des avis reçoivent une réponse. Fixez un objectif interne de réponse sous 48h.",
+      severity: "bad",
+      metric_keys: ["reply_rate"]
+    });
+  } else if (replyRate < 0.7) {
+    addInsight({
+      title: "Taux de réponse perfectible",
+      detail:
+        "Le taux de réponse reste en dessous de 70%. Priorisez les avis récents pour remonter la réactivité.",
+      severity: "warn",
+      metric_keys: ["reply_rate"]
+    });
+  } else {
+    addInsight({
+      title: "Bonne réactivité",
+      detail:
+        "Vous répondez à la majorité des avis. Maintenez ce rythme avec un suivi hebdo.",
+      severity: "good",
+      metric_keys: ["reply_rate"]
+    });
+  }
+
+  const negShare = compare.metrics.neg_share.a;
+  if (negShare === null) {
+    addInsight({
+      title: "Avis négatifs : données insuffisantes",
+      detail:
+        "Pas assez d'avis notés pour mesurer les irritants. Continuez la collecte d'avis.",
+      severity: "warn",
+      metric_keys: ["neg_share"]
+    });
+  } else if (negShare >= 0.15) {
+    addInsight({
+      title: "Part d'avis négatifs élevée",
+      detail:
+        "La part d'avis <=2★ dépasse 15%. Analysez les irritants récurrents et corrigez un point prioritaire.",
+      severity: "bad",
+      metric_keys: ["neg_share"]
+    });
+  } else if (negShare >= 0.08) {
+    addInsight({
+      title: "Avis négatifs à surveiller",
+      detail:
+        "La part d'avis négatifs est autour de 8-15%. Travaillez sur un irritant clé pour repasser sous 8%.",
+      severity: "warn",
+      metric_keys: ["neg_share"]
+    });
+  } else {
+    addInsight({
+      title: "Faible part d'avis négatifs",
+      detail:
+        "Les avis négatifs restent sous 8%. Capitalisez sur ce niveau de qualité.",
+      severity: "good",
+      metric_keys: ["neg_share"]
+    });
+  }
+
+  const avgDelta = compare.metrics.avg_rating.delta;
+  if (avgDelta === null) {
+    addInsight({
+      title: "Note moyenne non mesurable",
+      detail:
+        "La note moyenne ne peut pas être comparée sur la période. Accumulez plus d'avis pour suivre la tendance.",
+      severity: "warn",
+      metric_keys: ["avg_rating"]
+    });
+  } else if (avgDelta <= -0.4) {
+    addInsight({
+      title: "Baisse marquée de la note",
+      detail:
+        "La note moyenne recule d'au moins 0.4★ vs période précédente. Identifiez les causes principales via les avis récents.",
+      severity: "bad",
+      metric_keys: ["avg_rating"]
+    });
+  } else if (avgDelta <= -0.2) {
+    addInsight({
+      title: "Note moyenne en baisse",
+      detail:
+        "La note moyenne baisse d'environ 0.2★. Lancez un plan d'amélioration rapide sur les points cités.",
+      severity: "warn",
+      metric_keys: ["avg_rating"]
+    });
+  } else if (avgDelta >= 0.2) {
+    addInsight({
+      title: "Note moyenne en hausse",
+      detail:
+        "La note moyenne progresse. Mettez en avant ce signal positif dans vos communications locales.",
+      severity: "good",
+      metric_keys: ["avg_rating"]
+    });
+  } else {
+    addInsight({
+      title: "Note moyenne stable",
+      detail:
+        "La note moyenne reste stable. Concentrez-vous sur la réduction des irritants pour créer une hausse.",
+      severity: "warn",
+      metric_keys: ["avg_rating"]
+    });
+  }
+
+  const reviewDeltaPct = compare.metrics.review_count.delta_pct;
+  if (reviewDeltaPct === null) {
+    addInsight({
+      title: "Volume d'avis difficile à comparer",
+      detail:
+        "La période précédente n'a pas assez de volume pour comparer. Continuez à solliciter des avis.",
+      severity: "warn",
+      metric_keys: ["review_count"]
+    });
+  } else if (reviewDeltaPct <= -0.3) {
+    addInsight({
+      title: "Baisse du volume d'avis",
+      detail:
+        "Le volume recule nettement vs période précédente. Relancez des demandes d'avis après chaque visite.",
+      severity: "warn",
+      metric_keys: ["review_count"]
+    });
+  } else if (reviewDeltaPct >= 0.3) {
+    addInsight({
+      title: "Hausse du volume d'avis",
+      detail:
+        "Le volume d'avis est en forte hausse. Assurez-vous de répondre rapidement pour capitaliser.",
+      severity: "good",
+      metric_keys: ["review_count"]
+    });
+  } else {
+    addInsight({
+      title: "Volume d'avis stable",
+      detail:
+        "Le volume d'avis est relativement stable. Testez une action simple pour stimuler la collecte.",
+      severity: "warn",
+      metric_keys: ["review_count"]
+    });
+  }
+
+  const lastPoint = timeseries[timeseries.length - 1];
+  const prevPoint = timeseries[timeseries.length - 2];
+  if (lastPoint && prevPoint && lastPoint.review_count !== prevPoint.review_count) {
+    const trend = lastPoint.review_count - prevPoint.review_count;
+    addInsight({
+      title: trend > 0 ? "Accélération récente" : "Ralentissement récent",
+      detail:
+        trend > 0
+          ? "Le dernier bucket montre une hausse d'avis. Profitez-en pour répondre vite et ancrer la dynamique."
+          : "Le dernier bucket montre un léger creux. Identifiez une action locale pour relancer la collecte.",
+      severity: trend > 0 ? "good" : "warn",
+      metric_keys: ["timeseries", "review_count"]
+    });
+  }
+
+  const goodCount = insights.filter((item) => item.severity === "good").length;
+  if (goodCount === 0) {
+    const fallbackGood =
+      (replyRate !== null && replyRate >= 0.7) ||
+      (negShare !== null && negShare < 0.08) ||
+      (compare.metrics.avg_rating.a !== null &&
+        compare.metrics.avg_rating.a >= 4.2);
+    if (fallbackGood) {
+      addInsight({
+        title: "Point fort à valoriser",
+        detail:
+          "Un indicateur qualité est positif. Mettez-le en avant sur votre fiche et vos supports locaux.",
+        severity: "good",
+        metric_keys: ["avg_rating", "neg_share", "reply_rate"]
+      });
+    }
+  }
+
+  return insights.slice(0, 7);
+};
+
+const extractOpenAiText = (payload: unknown) => {
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    if (typeof record.output_text === "string" && record.output_text.trim()) {
+      return record.output_text;
+    }
+    const outputItems = Array.isArray(record.output) ? record.output : [];
+    const chunks: string[] = [];
+    for (const item of outputItems) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const contentItems = Array.isArray((item as Record<string, unknown>).content)
+        ? ((item as Record<string, unknown>).content as Array<Record<string, unknown>>)
+        : [];
+      for (const content of contentItems) {
+        const text = typeof content?.text === "string" ? content.text : undefined;
+        if (text) {
+          chunks.push(text);
+        }
+      }
+    }
+    if (chunks.length) {
+      return chunks.join("\n");
+    }
+  }
+  return null;
+};
+
+const isValidInsightsPayload = (
+  payload: unknown
+): payload is { insights: AnalyticsInsight[] } => {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+  const insights = (payload as { insights?: unknown }).insights;
+  if (!Array.isArray(insights) || insights.length < 4 || insights.length > 7) {
+    return false;
+  }
+  const allowed = new Set([
+    "review_count",
+    "avg_rating",
+    "neg_share",
+    "reply_rate",
+    "timeseries"
+  ]);
+  return insights.every((item) => {
+    if (!item || typeof item !== "object") {
+      return false;
+    }
+    const insight = item as AnalyticsInsight;
+    if (
+      typeof insight.title !== "string" ||
+      typeof insight.detail !== "string" ||
+      (insight.severity !== "good" &&
+        insight.severity !== "warn" &&
+        insight.severity !== "bad")
+    ) {
+      return false;
+    }
+    if (!Array.isArray(insight.metric_keys)) {
+      return false;
+    }
+    return insight.metric_keys.every((key) => allowed.has(key));
+  });
+};
+
+const requestAiInsights = async (
+  apiKey: string,
+  context: Record<string, unknown>,
+  mode: "auto" | "ai" | "basic"
+) => {
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const systemPrompt =
+    "Tu es un analyste produit B2B spécialisé en e-réputation (avis Google).\n" +
+    "Règles: ne jamais inventer des chiffres/causes, se baser uniquement sur le JSON fourni.\n" +
+    "Retourner UNIQUEMENT un JSON valide, sans texte autour.\n" +
+    'Format obligatoire:\n{"insights":[{"title":string,"detail":string,"severity":"good"|"warn"|"bad","metric_keys":string[]}]}\n' +
+    'Contraintes: 4 à 7 insights max. metric_keys ∈ ["review_count","avg_rating","neg_share","reply_rate","timeseries"].\n' +
+    "Ne pas mentionner OpenAI/prompt/JSON.";
+
+  const userPrompt =
+    "Génère 4 à 7 insights à partir du contexte ci-dessous. \n" +
+    "Objectif: prioriser ce qui impacte le business. Proposer une action simple dans chaque detail.\n" +
+    "Seuils guide:\n" +
+    "- reply_rate <0.50 bad; 0.50-0.70 warn; >=0.70 good si stable/hausse\n" +
+    "- neg_share >=0.15 bad; 0.08-0.15 warn; <0.08 good\n" +
+    "- avg_rating baisse >=0.2 warn; >=0.4 bad\n" +
+    "- review_count: hausse forte good si qualité stable; baisse forte warn\n" +
+    "Anti-hallucination: n’invente aucune cause sans preuve chiffrée.\n" +
+    "CONTEXTE (JSON):\n" +
+    JSON.stringify(context);
+
+  const buildBody = (prompt: string) =>
+    JSON.stringify({
+      model,
+      input: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: prompt }
+      ]
+    });
+
+  const doRequest = async (prompt: string) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        signal: controller.signal,
+        body: buildBody(prompt)
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenAI error: ${errorText.slice(0, 200)}`);
+      }
+      const payload = await response.json();
+      const outputText = extractOpenAiText(payload);
+      if (!outputText) {
+        throw new Error("OpenAI response missing output_text");
+      }
+      return outputText;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  if (mode === "basic") {
+    return { insights: null, used_ai: false };
+  }
+
+  try {
+    const outputText = await doRequest(userPrompt);
+    let parsed: unknown = null;
+    let parsedOk = false;
+    try {
+      parsed = JSON.parse(outputText);
+      parsedOk = isValidInsightsPayload(parsed);
+    } catch {
+      parsedOk = false;
+    }
+
+    if (!parsedOk) {
+      const repairText = await doRequest(
+        "Corrige et retourne uniquement le JSON valide au format demandé.\n" +
+          `Réponse précédente:\n${outputText}`
+      );
+      parsed = JSON.parse(repairText);
+      if (!isValidInsightsPayload(parsed)) {
+        throw new Error("OpenAI insights invalid");
+      }
+    }
+
+    const validParsed = parsed as { insights: AnalyticsInsight[] };
+    return { insights: validParsed.insights, used_ai: true };
+  } catch (error) {
+    if ((error as Error).name === "AbortError") {
+      console.error("[analytics/insights] OpenAI timeout");
+    } else {
+      console.error("[analytics/insights] OpenAI error", error);
+    }
+    return { insights: null, used_ai: false };
+  }
+};
 
 const resolveLocationIds = async (
   supabaseAdmin: ReturnType<typeof requireUser> extends Promise<infer R>
@@ -502,18 +1176,7 @@ const handleTimeseries = async (
   }
 
   const rawGranularity = getQueryParam(req.query, "granularity") ?? "auto";
-  const rangeStart = new Date(range.from);
-  const rangeEnd = new Date(range.to);
-  const rangeDays = Math.max(
-    1,
-    Math.ceil((rangeEnd.getTime() - rangeStart.getTime()) / (1000 * 60 * 60 * 24)) + 1
-  );
-  const resolvedGranularity: "day" | "week" =
-    rawGranularity === "day" || rawGranularity === "week"
-      ? rawGranularity
-      : rangeDays <= 90
-        ? "day"
-        : "week";
+  const resolvedGranularity = resolveGranularity(rawGranularity, range);
 
   if (locationIds.length === 0) {
     const empty: AnalyticsTimeseries = { granularity: resolvedGranularity, points: [] };
@@ -526,147 +1189,22 @@ const handleTimeseries = async (
     return res.status(200).json(empty);
   }
 
-  const buildReviewsQuery = () => {
-    let query = supabaseAdmin
-      .from("google_reviews")
-      .select(
-        "rating, comment, reply_text, replied_at, owner_reply, owner_reply_time, status, create_time, update_time, created_at, location_id"
-      )
-      .eq("user_id", userId);
-
-    query =
-      locationIds.length === 1
-        ? query.eq("location_id", locationIds[0])
-        : query.in("location_id", locationIds);
-
-    return query.or(
-      `and(create_time.gte.${range.from},create_time.lte.${range.to}),` +
-        `and(create_time.is.null,update_time.gte.${range.from},update_time.lte.${range.to}),` +
-        `and(create_time.is.null,update_time.is.null,created_at.gte.${range.from},created_at.lte.${range.to})`
-    );
-  };
-
-  const rows: Array<{
-    rating: number | null;
-    comment: string | null;
-    reply_text: string | null;
-    replied_at: string | null;
-    owner_reply: string | null;
-    owner_reply_time: string | null;
-    status: string | null;
-    create_time: string | null;
-    update_time: string | null;
-    created_at: string | null;
-    location_id: string | null;
-  }> = [];
-  const pageSize = 1000;
-  const maxRows = 20000;
-  for (let offset = 0; offset < maxRows; offset += pageSize) {
-    const { data: pageData, error: pageError } = await buildReviewsQuery().range(
-      offset,
-      offset + pageSize - 1
-    );
-    if (pageError) {
-      console.error("[analytics/timeseries] reviews error", pageError);
-      return res.status(500).json({ error: "Failed to load reviews" });
-    }
-    const pageRows = pageData ?? [];
-    rows.push(...pageRows);
-    if (pageRows.length < pageSize) {
-      break;
-    }
+  let rows: ReviewRow[] = [];
+  try {
+    rows = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, range);
+  } catch (error) {
+    console.error("[analytics/timeseries] reviews error", error);
+    return res.status(500).json({ error: "Failed to load reviews" });
   }
-  if (rows.length >= maxRows) {
+  if (rows.length >= 20000) {
     console.warn("[analytics/timeseries] max rows reached", {
       userId,
       preset,
-      maxRows
+      maxRows: 20000
     });
   }
 
-  const buckets = new Map<
-    string,
-    {
-      review_count: number;
-      rating_sum: number;
-      rating_count: number;
-      negative_count: number;
-      replyable_count: number;
-      replied_count: number;
-    }
-  >();
-
-  rows.forEach((row) => {
-    const time =
-      row.create_time ?? row.update_time ?? row.created_at ?? null;
-    if (!time) {
-      return;
-    }
-    const date = new Date(time);
-    const bucketDate =
-      resolvedGranularity === "week" ? getWeekStartUtc(date) : date;
-    const key = toDateKey(bucketDate);
-    const entry = buckets.get(key) ?? {
-      review_count: 0,
-      rating_sum: 0,
-      rating_count: 0,
-      negative_count: 0,
-      replyable_count: 0,
-      replied_count: 0
-    };
-    entry.review_count += 1;
-    if (isReplyable(row)) {
-      entry.replyable_count += 1;
-      if (isReplied(row)) {
-        entry.replied_count += 1;
-      }
-    }
-    if (typeof row.rating === "number") {
-      entry.rating_sum += row.rating;
-      entry.rating_count += 1;
-      if (row.rating <= 2) {
-        entry.negative_count += 1;
-      }
-    }
-    buckets.set(key, entry);
-  });
-
-  const bucketStart =
-    resolvedGranularity === "week"
-      ? getWeekStartUtc(rangeStart)
-      : startOfDayUtc(rangeStart);
-  const bucketEnd =
-    resolvedGranularity === "week"
-      ? getWeekStartUtc(rangeEnd)
-      : startOfDayUtc(rangeEnd);
-  const stepDays = resolvedGranularity === "week" ? 7 : 1;
-  const points: AnalyticsTimeseries["points"] = [];
-  for (
-    let cursor = bucketStart;
-    cursor <= bucketEnd;
-    cursor = addDaysUtc(cursor, stepDays)
-  ) {
-    const key = toDateKey(cursor);
-    const entry = buckets.get(key);
-    const review_count = entry?.review_count ?? 0;
-    const avg_rating =
-      entry && entry.rating_count > 0
-        ? Number((entry.rating_sum / entry.rating_count).toFixed(1))
-        : null;
-    const neg_share =
-      review_count > 0 ? entry!.negative_count / review_count : null;
-    const reply_rate =
-      entry && entry.replyable_count > 0
-        ? entry.replied_count / entry.replyable_count
-        : null;
-    points.push({
-      date: key,
-      review_count,
-      avg_rating,
-      neg_share,
-      reply_rate
-    });
-  }
+  const points = buildTimeseriesPoints(rows, range, resolvedGranularity);
 
   const timeseries: AnalyticsTimeseries = {
     granularity: resolvedGranularity,
@@ -684,6 +1222,184 @@ const handleTimeseries = async (
   return res.status(200).json(timeseries);
 };
 
+const handleCompare = async (
+  req: VercelRequest,
+  res: VercelResponse,
+  userId: string,
+  supabaseAdmin: ReturnType<typeof requireUser> extends Promise<infer R>
+    ? R extends { supabaseAdmin: infer C }
+      ? C
+      : never
+    : never
+) => {
+  const filters = parseFilters(normalizeAnalyticsQuery(req.query));
+  const preset = filters.preset;
+  const timeZone = filters.tz;
+  const rangeA = resolveDateRange(
+    preset as Parameters<typeof resolveDateRange>[0],
+    filters.from,
+    filters.to,
+    timeZone
+  );
+  const rangeStart = new Date(rangeA.from);
+  const rangeEnd = new Date(rangeA.to);
+  const durationMs = rangeEnd.getTime() - rangeStart.getTime();
+  const rangeB = {
+    from: new Date(rangeStart.getTime() - durationMs).toISOString(),
+    to: new Date(rangeEnd.getTime() - durationMs).toISOString()
+  };
+
+  const locationId = filters.location_id ?? null;
+  const { locationIds, missing } = await resolveLocationIds(
+    supabaseAdmin,
+    userId,
+    locationId
+  );
+  if (missing) {
+    return res.status(404).json({ error: "Location not found" });
+  }
+
+  if (filters.reject || locationIds.length === 0) {
+    const emptyMetrics = computeCompareMetrics([]);
+    const compare = buildCompareResponse(preset, rangeA, rangeB, emptyMetrics, emptyMetrics);
+    return res.status(200).json(compare);
+  }
+
+  let rowsA: ReviewRow[] = [];
+  let rowsB: ReviewRow[] = [];
+  try {
+    rowsA = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeA);
+    rowsB = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeB);
+  } catch (error) {
+    console.error("[analytics/compare] reviews error", error);
+    return res.status(500).json({ error: "Failed to load reviews" });
+  }
+
+  const metricsA = computeCompareMetrics(rowsA);
+  const metricsB = computeCompareMetrics(rowsB);
+  const compare = buildCompareResponse(preset, rangeA, rangeB, metricsA, metricsB);
+
+  console.log("[analytics/compare]", {
+    userId,
+    preset,
+    locationIdsCount: locationIds.length
+  });
+
+  return res.status(200).json(compare);
+};
+
+const handleInsights = async (
+  req: VercelRequest,
+  res: VercelResponse,
+  userId: string,
+  supabaseAdmin: ReturnType<typeof requireUser> extends Promise<infer R>
+    ? R extends { supabaseAdmin: infer C }
+      ? C
+      : never
+    : never
+) => {
+  const filters = parseFilters(normalizeAnalyticsQuery(req.query));
+  const preset = filters.preset;
+  const timeZone = filters.tz;
+  const rangeA = resolveDateRange(
+    preset as Parameters<typeof resolveDateRange>[0],
+    filters.from,
+    filters.to,
+    timeZone
+  );
+  const rangeStart = new Date(rangeA.from);
+  const rangeEnd = new Date(rangeA.to);
+  const durationMs = rangeEnd.getTime() - rangeStart.getTime();
+  const rangeB = {
+    from: new Date(rangeStart.getTime() - durationMs).toISOString(),
+    to: new Date(rangeEnd.getTime() - durationMs).toISOString()
+  };
+
+  const modeParam = getQueryParam(req.query, "mode") ?? "auto";
+  const mode =
+    modeParam === "ai" || modeParam === "basic" || modeParam === "auto"
+      ? modeParam
+      : "auto";
+
+  const locationId = filters.location_id ?? null;
+  const { locationIds, missing } = await resolveLocationIds(
+    supabaseAdmin,
+    userId,
+    locationId
+  );
+  if (missing) {
+    return res.status(404).json({ error: "Location not found" });
+  }
+
+  const emptyMetrics = computeCompareMetrics([]);
+  let metricsA = emptyMetrics;
+  let metricsB = emptyMetrics;
+  let rowsA: ReviewRow[] = [];
+  let rowsB: ReviewRow[] = [];
+
+  if (!filters.reject && locationIds.length > 0) {
+    try {
+      rowsA = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeA);
+      rowsB = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeB);
+      metricsA = computeCompareMetrics(rowsA);
+      metricsB = computeCompareMetrics(rowsB);
+    } catch (error) {
+      console.error("[analytics/insights] reviews error", error);
+      return res.status(500).json({ error: "Failed to load reviews" });
+    }
+  }
+
+  const compare = buildCompareResponse(preset, rangeA, rangeB, metricsA, metricsB);
+  const granularity = resolveGranularity("auto", rangeA);
+  const rangeEndBucket =
+    granularity === "week" ? getWeekStartUtc(rangeEnd) : startOfDayUtc(rangeEnd);
+  const rawTailStart = addDaysUtc(
+    rangeEndBucket,
+    granularity === "week" ? -77 : -11
+  );
+  const clampedTailStart =
+    rawTailStart < rangeStart ? rangeStart : rawTailStart;
+  const tailRange = { from: clampedTailStart.toISOString(), to: rangeA.to };
+  const timeseriesPoints = buildTimeseriesPoints(rowsA, tailRange, granularity);
+  const basicInsights = buildBasicInsights(compare, timeseriesPoints);
+
+  const apiKey = process.env.OPENAI_API_KEY ?? "";
+  const shouldUseAi = mode !== "basic" && apiKey.length > 0;
+  let used_ai = false;
+  let insights = basicInsights;
+  if (shouldUseAi) {
+    const context = {
+      periodA: compare.periodA,
+      periodB: compare.periodB,
+      location: locationId ?? "all",
+      metrics: compare.metrics,
+      granularity,
+      timeseries_last_12: timeseriesPoints.slice(-12)
+    };
+    const aiResult = await requestAiInsights(apiKey, context, mode);
+    if (aiResult.insights) {
+      insights = aiResult.insights;
+      used_ai = aiResult.used_ai;
+    }
+  }
+
+  const response: AnalyticsInsights = {
+    mode: shouldUseAi ? "ai" : "basic",
+    used_ai,
+    insights
+  };
+
+  console.log("[analytics/insights]", {
+    userId,
+    preset,
+    locationIdsCount: locationIds.length,
+    mode: response.mode,
+    used_ai
+  });
+
+  return res.status(200).json(response);
+};
+
 const handler = async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -697,6 +1413,12 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
   const viewParam =
     getQueryParam(req.query, "view") ?? getQueryParam(req.query, "op");
+  if (viewParam === "compare") {
+    return handleCompare(req, res, userId, supabaseAdmin);
+  }
+  if (viewParam === "insights") {
+    return handleInsights(req, res, userId, supabaseAdmin);
+  }
   if (viewParam === "timeseries") {
     return handleTimeseries(req, res, userId, supabaseAdmin);
   }
