@@ -1,6 +1,7 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "../database.types";
 
-type SupabaseAdminClient = ReturnType<typeof createClient>;
+type SupabaseAdminClient = SupabaseClient<Database>;
 
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
@@ -13,15 +14,18 @@ const getRequiredEnv = (key: string) => {
 };
 
 const createSupabaseAdmin = (): SupabaseAdminClient => {
-  const supabaseUrl = getRequiredEnv("SUPABASE_URL");
-  const serviceRoleKey = getRequiredEnv("SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(supabaseUrl, serviceRoleKey, {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error("Missing SUPABASE env vars");
+  }
+  return createClient<Database>(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false }
   });
 };
 
-const getBearerToken = (req: { headers: Record<string, string | undefined> }) => {
-  const header = req.headers.authorization ?? req.headers.Authorization;
+const getBearerToken = (headers: Record<string, string | undefined>) => {
+  const header = headers.authorization ?? headers.Authorization;
   if (header && header.startsWith("Bearer ")) {
     return header.slice(7);
   }
@@ -29,10 +33,10 @@ const getBearerToken = (req: { headers: Record<string, string | undefined> }) =>
 };
 
 const getUserFromRequest = async (
-  req: { headers: Record<string, string | undefined> },
+  req: { headers: Record<string, string | undefined>; url?: string },
   supabaseAdmin: SupabaseAdminClient
 ) => {
-  const token = getBearerToken(req);
+  const token = getBearerToken(req.headers);
   if (!token) {
     return { userId: null, error: new Error("Missing bearer token.") };
   }

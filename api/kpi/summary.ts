@@ -1,27 +1,74 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { randomUUID } from "crypto";
 import { resolveDateRange } from "../_date.js";
 import { parseFilters } from "../_filters.js";
 import { requireUser } from "../_auth.js";
+
+const getRequestId = (req: VercelRequest) => {
+  const header = req.headers["x-vercel-id"] ?? req.headers["x-request-id"];
+  if (Array.isArray(header)) {
+    return header[0] ?? randomUUID();
+  }
+  if (typeof header === "string" && header.length > 0) {
+    return header;
+  }
+  return randomUUID();
+};
+
+const isMissingEnvError = (err: unknown) =>
+  err instanceof Error && err.message === "Missing SUPABASE env vars";
 
 const handler = async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  const route = "/api/kpi/summary";
+  const requestId = getRequestId(req);
+  let userId: string | null = null;
+  let locationId: string | null = null;
+
   try {
-    const auth = await requireUser(req, res);
+    let auth;
+    try {
+      auth = await requireUser(req, res);
+    } catch (err) {
+      const missingEnv = isMissingEnvError(err);
+      console.error("[kpi-summary] auth error", {
+        route,
+        query: req.query,
+        reason: missingEnv ? "missing_env" : undefined,
+        error: {
+          message: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : null
+        },
+        requestId
+      });
+      return res.status(500).json({
+        error: "Internal server error",
+        requestId,
+        reason: missingEnv ? "missing_env" : undefined
+      });
+    }
     if (!auth) {
       return;
     }
-    const { userId, supabaseAdmin } = auth;
+    userId = auth.userId;
+    const { supabaseAdmin } = auth;
 
     const locationParam = req.query.location_id;
-    const locationId = Array.isArray(locationParam)
+    locationId = Array.isArray(locationParam)
       ? locationParam[0]
       : locationParam;
     if (!locationId) {
       return res.status(400).json({ error: "Missing location_id" });
     }
+    console.log("[kpi-summary]", {
+      route,
+      query: req.query,
+      userId,
+      location_id: locationId
+    });
 
     const { data: locationRow } = await supabaseAdmin
       .from("google_locations")
@@ -83,37 +130,54 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       .maybeSingle();
 
     if (summaryError) {
-      console.error("kpi_summary rpc error", {
-        route: "/api/kpi/summary",
-        args,
+      console.error("[kpi-summary] rpc error", {
+        route,
+        query: req.query,
+        userId,
+        location_id: locationId,
         error: {
           message: summaryError.message,
           details: (summaryError as { details?: string }).details,
           hint: (summaryError as { hint?: string }).hint,
           code: (summaryError as { code?: string }).code
-        }
+        },
+        requestId
       });
-      return res.status(500).json({
-        error: "Failed to load KPI summary",
-        code: (summaryError as { code?: string }).code,
-        message: summaryError.message
-      });
+      return res.status(500).json({ error: "Internal server error", requestId });
     }
 
+    const summaryData = summary ?? null;
     return res.status(200).json({
-      reviews_total: summary?.reviews_total ?? 0,
-      reviews_with_text: summary?.reviews_with_text ?? 0,
-      avg_rating: summary?.avg_rating ?? null,
+      reviews_total: summaryData?.reviews_total ?? 0,
+      reviews_with_text: summaryData?.reviews_with_text ?? 0,
+      avg_rating: summaryData?.avg_rating ?? null,
       sentiment_breakdown: {
-        positive: summary?.sentiment_positive ?? 0,
-        neutral: summary?.sentiment_neutral ?? 0,
-        negative: summary?.sentiment_negative ?? 0
+        positive: summaryData?.sentiment_positive ?? 0,
+        neutral: summaryData?.sentiment_neutral ?? 0,
+        negative: summaryData?.sentiment_negative ?? 0
       },
-      top_tags: summary?.top_tags ?? [],
+      top_tags: summaryData?.top_tags ?? [],
       range
     });
-  } catch {
-    return res.status(500).json({ error: "Failed to load KPI summary" });
+  } catch (err) {
+    const missingEnv = isMissingEnvError(err);
+    console.error("[kpi-summary] error", {
+      route,
+      query: req.query,
+      userId,
+      location_id: locationId,
+      reason: missingEnv ? "missing_env" : undefined,
+      error: {
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : null
+      },
+      requestId
+    });
+    return res.status(500).json({
+      error: "Internal server error",
+      requestId,
+      reason: missingEnv ? "missing_env" : undefined
+    });
   }
 };
 

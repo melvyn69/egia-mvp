@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "../../database.types";
 
 type GoogleReview = {
   reviewId?: string;
@@ -50,7 +51,7 @@ const getMissingEnv = () => {
   return missing;
 };
 
-const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+const supabaseAdmin = createClient<Database>(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false }
 });
 

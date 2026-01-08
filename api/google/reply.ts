@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "../database.types";
 
 const getEnv = (keys: string[]) => {
   for (const key of keys) {
@@ -29,7 +30,7 @@ const getMissingEnv = () => {
   return missing;
 };
 
-const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+const supabaseAdmin = createClient<Database>(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false }
 });
 
@@ -117,7 +118,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (typeof payload === "string") {
       try {
         payload = JSON.parse(payload);
-      } catch {
+      } catch (err) {
+        console.error("[reply]", requestId, "payload parse failed", err);
         payload = {};
       }
     }

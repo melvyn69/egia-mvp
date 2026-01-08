@@ -108,25 +108,28 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       return res.status(500).json({ error: "Failed to load KPI compare" });
     }
 
+    const summaryAData = summaryA.data ?? null;
+    const summaryBData = summaryB.data ?? null;
     return res.status(200).json({
-      before: summaryA.data ?? null,
-      after: summaryB.data ?? null,
-      a: summaryA.data ?? null,
-      b: summaryB.data ?? null,
+      before: summaryAData,
+      after: summaryBData,
+      a: summaryAData,
+      b: summaryBData,
       delta: {
         reviews_total:
-          (summaryB.data?.reviews_total ?? 0) -
-          (summaryA.data?.reviews_total ?? 0),
+          (summaryBData?.reviews_total ?? 0) -
+          (summaryAData?.reviews_total ?? 0),
         reviews_with_text:
-          (summaryB.data?.reviews_with_text ?? 0) -
-          (summaryA.data?.reviews_with_text ?? 0),
+          (summaryBData?.reviews_with_text ?? 0) -
+          (summaryAData?.reviews_with_text ?? 0),
         avg_rating:
-          (summaryB.data?.avg_rating ?? 0) -
-          (summaryA.data?.avg_rating ?? 0)
+          (summaryBData?.avg_rating ?? 0) -
+          (summaryAData?.avg_rating ?? 0)
       },
       ranges: { a: rangeA, b: rangeB }
     });
-  } catch {
+  } catch (err) {
+    console.error("[kpi-compare] error", err);
     return res.status(500).json({ error: "Failed to load KPI compare" });
   }
 };

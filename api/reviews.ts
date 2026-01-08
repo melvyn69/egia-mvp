@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { randomUUID } from "crypto";
 import { resolveDateRange } from "./_date.js";
 import { parseFilters } from "./_filters.js";
 import { requireUser } from "./_auth.js";
@@ -37,7 +38,8 @@ const parseCursor = (cursorParam: string | undefined): Cursor | null => {
       return parsed;
     }
     return null;
-  } catch {
+  } catch (err) {
+    console.error("[reviews] invalid cursor", err);
     return null;
   }
 };
@@ -45,46 +47,81 @@ const parseCursor = (cursorParam: string | undefined): Cursor | null => {
 const buildCursor = (cursor: Cursor) =>
   Buffer.from(JSON.stringify(cursor), "utf-8").toString("base64");
 
+const getRequestId = (req: VercelRequest) => {
+  const header = req.headers["x-vercel-id"] ?? req.headers["x-request-id"];
+  if (Array.isArray(header)) {
+    return header[0] ?? randomUUID();
+  }
+  if (typeof header === "string" && header.length > 0) {
+    return header;
+  }
+  return randomUUID();
+};
+
+const isMissingEnvError = (err: unknown) =>
+  err instanceof Error && err.message === "Missing SUPABASE env vars";
+
 const handler = async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  const route = "/api/reviews";
+  const requestId = getRequestId(req);
+  let userId: string | null = null;
+  let locationId: string | null = null;
+
   try {
-    const auth = await requireUser(req, res);
+    let auth;
+    try {
+      auth = await requireUser(req, res);
+    } catch (err) {
+      const missingEnv = isMissingEnvError(err);
+      console.error("[reviews] auth error", {
+        route,
+        query: req.query,
+        reason: missingEnv ? "missing_env" : undefined,
+        error: {
+          message: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : null
+        },
+        requestId
+      });
+      return res.status(500).json({
+        error: "Internal server error",
+        requestId,
+        reason: missingEnv ? "missing_env" : undefined
+      });
+    }
     if (!auth) {
       return;
     }
-    const { userId, supabaseAdmin } = auth;
+    userId = auth.userId;
+    const { supabaseAdmin } = auth;
 
     const filters = parseFilters(req.query);
+    locationId = filters.location_id ?? null;
+    if (!locationId) {
+      return res.status(400).json({ error: "Missing location_id" });
+    }
     if (filters.reject) {
       return res.status(200).json({ rows: [], nextCursor: null });
     }
-    const locationId = filters.location_id;
-    let locationIds: string[] = [];
-    if (locationId) {
-      const { data: locationRow } = (await supabaseAdmin
-        .from("google_locations")
-        .select("location_resource_name")
-        .eq("user_id", userId)
-        .eq("location_resource_name", locationId)
-        .maybeSingle()) as { data: GoogleLocationRow | null; error: unknown };
-      if (!locationRow) {
-        return res.status(404).json({ error: "Location not found" });
-      }
-      locationIds = [locationId];
-    } else {
-      const { data: locations } = (await supabaseAdmin
-        .from("google_locations")
-        .select("location_resource_name")
-        .eq("user_id", userId)) as { data: GoogleLocationRow[] | null; error: unknown };
-      locationIds = (locations ?? [])
-        .map((location) => location.location_resource_name)
-        .filter(Boolean);
-      if (locationIds.length === 0) {
-        return res.status(200).json({ rows: [], nextCursor: null });
-      }
+    console.log("[reviews]", {
+      route,
+      query: req.query,
+      userId,
+      location_id: locationId
+    });
+
+    const { data: locationRow } = (await supabaseAdmin
+      .from("google_locations")
+      .select("location_resource_name")
+      .eq("user_id", userId)
+      .eq("location_resource_name", locationId)
+      .maybeSingle()) as { data: GoogleLocationRow | null; error: unknown };
+    if (!locationRow) {
+      return res.status(404).json({ error: "Location not found" });
     }
 
     const preset = filters.preset;
@@ -124,11 +161,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       .order("created_at", { ascending: false, nullsFirst: false })
       .order("id", { ascending: false })
       .limit(limit * 3);
-    if (locationIds.length === 1) {
-      query = query.eq("location_id", locationIds[0]);
-    } else {
-      query = query.in("location_id", locationIds);
-    }
+    query = query.eq("location_id", locationId);
 
     query = query.or(
       `and(update_time.gte.${range.from},update_time.lte.${range.to}),` +
@@ -151,7 +184,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       error: unknown;
     };
     if (baseError) {
-      return res.status(500).json({ error: "Failed to load reviews" });
+      throw baseError;
     }
 
     const rows = (baseRows ?? []).filter((row) => {
@@ -237,8 +270,25 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       })),
       nextCursor
     });
-  } catch {
-    return res.status(500).json({ error: "Failed to load reviews" });
+  } catch (err) {
+    const missingEnv = isMissingEnvError(err);
+    console.error("[reviews] error", {
+      route,
+      query: req.query,
+      userId,
+      location_id: locationId,
+      reason: missingEnv ? "missing_env" : undefined,
+      error: {
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : null
+      },
+      requestId
+    });
+    return res.status(500).json({
+      error: "Internal server error",
+      requestId,
+      reason: missingEnv ? "missing_env" : undefined
+    });
   }
 };
 

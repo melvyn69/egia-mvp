@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "../database.types";
 
 const requiredEnv = [
   "SUPABASE_URL",
@@ -43,7 +44,7 @@ const handler = async (req: any, res: any) => {
     return;
   }
 
-  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+  const supabaseAdmin = createClient<Database>(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false }
   });
 

@@ -95,7 +95,10 @@ const listReviewsForLocation = async (
         Authorization: `Bearer ${accessToken}`
       }
     });
-    const data = await response.json().catch(() => null);
+    const data = await response.json().catch((err) => {
+      console.error("google reviews response parse failed:", err);
+      return null;
+    });
     if (response.status === 404) {
       console.warn("google reviews 404:", {
         account_resource_name: accountResourceName,
@@ -246,8 +249,8 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
         try {
           const parsed = JSON.parse(body) as { location_id?: string };
           locationId = parsed.location_id ?? null;
-        } catch {
-          // ignore body parse errors
+        } catch (err) {
+          console.error("google reviews request body parse failed:", err);
         }
       }
     }

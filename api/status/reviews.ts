@@ -57,8 +57,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq("key", aiKey)
       .maybeSingle();
 
-    const importStatus = toStatus(importState?.value);
-    const aiStatus = toStatus(aiState?.value);
+    const importStatus = toStatus(importState?.value ?? null);
+    const aiStatus = toStatus(aiState?.value ?? null);
 
     return res.status(200).json({
       location_id: locationId,
