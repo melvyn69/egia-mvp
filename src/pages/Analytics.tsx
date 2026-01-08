@@ -139,10 +139,10 @@ const Analytics = ({
       params.set("granularity", granularity);
       try {
         const [overviewRes, seriesRes] = await Promise.all([
-          fetch(`/api/analytics/overview?${params.toString()}`, {
+          fetch(`/api/analytics?op=overview&${params.toString()}`, {
             headers: { Authorization: `Bearer ${session.access_token}` }
           }),
-          fetch(`/api/analytics/timeseries?${params.toString()}`, {
+          fetch(`/api/analytics?op=timeseries&${params.toString()}`, {
             headers: { Authorization: `Bearer ${session.access_token}` }
           })
         ]);
