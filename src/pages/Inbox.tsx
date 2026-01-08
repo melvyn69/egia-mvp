@@ -416,15 +416,31 @@ const Inbox = () => {
     }
   };
 
+  const locationReviewCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    reviews.forEach((review) => {
+      const key = review.locationId;
+      if (!key) {
+        return;
+      }
+      counts[key] = (counts[key] ?? 0) + 1;
+    });
+    return counts;
+  }, [reviews]);
+
   const locations = useMemo(() => {
     return [
       { id: "all", label: "Tous" },
-      ...locationOptions.map((option) => ({
-        id: option.id,
-        label: option.label
-      }))
+      ...locationOptions.map((option) => {
+        const count = locationReviewCounts[option.id];
+        const suffix = count === 0 ? " (0 avis)" : "";
+        return {
+          id: option.id,
+          label: `${option.label}${suffix}`
+        };
+      })
     ];
-  }, [locationOptions]);
+  }, [locationOptions, locationReviewCounts]);
 
   const filteredReviews = useMemo(() => {
     return reviews.filter((review) => {
@@ -1286,7 +1302,12 @@ const Inbox = () => {
             {reviewsLoading ? (
               <p className="text-sm text-slate-500">Chargement des avis...</p>
             ) : filteredReviews.length === 0 ? (
-              <p className="text-sm text-slate-500">Aucun avis à afficher.</p>
+              <div className="space-y-1 text-sm text-slate-500">
+                <p>Aucun avis à afficher.</p>
+                {selectedLocation !== "all" && (
+                  <p>Aucun avis sur cette fiche.</p>
+                )}
+              </div>
             ) : (
               filteredReviews.map((review) => (
                 <button
