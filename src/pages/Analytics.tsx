@@ -564,14 +564,14 @@ const Analytics = ({
                 <div className="flex items-center justify-between text-xs text-slate-500">
                   <span>Période A</span>
                   <span>
-                    {compare.periodA.start.slice(0, 10)} ->{" "}
+                    {compare.periodA.start.slice(0, 10)} {" - "}{" "}
                     {compare.periodA.end.slice(0, 10)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs text-slate-500">
                   <span>Période B</span>
                   <span>
-                    {compare.periodB.start.slice(0, 10)} ->{" "}
+                    {compare.periodB.start.slice(0, 10)} {" - "}{" "}
                     {compare.periodB.end.slice(0, 10)}
                   </span>
                 </div>
