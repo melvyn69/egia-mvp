@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { requireUser } from "./_shared/_auth.js";
-import { resolveDateRange } from "./_shared/_date.js";
-import { parseFilters } from "./_shared/_filters.js";
+import { requireUser } from "../server/_shared/_auth.js";
+import { resolveDateRange } from "../server/_shared/_date.js";
+import { parseFilters } from "../server/_shared/_filters.js";
 
 type AnalyticsOverview = {
   scope: {

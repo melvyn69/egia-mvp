@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "../../_shared/database.types.js";
+import type { Database } from "../../../server/_shared/database.types.js";
 
 const requiredEnv = [
   "SUPABASE_URL",

@@ -3,7 +3,7 @@ import {
   createSupabaseAdmin,
   getRequiredEnv,
   getUserFromRequest
-} from "../../../_shared/google/_utils.js";
+} from "../../../../server/_shared/google/_utils.js";
 
 type GoogleReview = {
   reviewId?: string;
