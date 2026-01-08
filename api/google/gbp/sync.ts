@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import { createSupabaseAdmin, getRequiredEnv, getUserFromRequest } from "../../../server/google/_utils.ts";
+import { createSupabaseAdmin, getRequiredEnv, getUserFromRequest } from "../../_shared/google/_utils";
+import type { Json } from "../../_shared/database.types";
 
 type GoogleAccount = {
   name: string;
@@ -219,7 +220,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
         location_resource_name: location.name,
         location_title: location.title ?? null,
         store_code: location.storeCode ?? null,
-        address_json: location.storefrontAddress ?? null,
+        address_json: (location.storefrontAddress ?? null) as Json | null,
         phone: location.primaryPhone ?? null,
         website_uri: location.websiteUri ?? null,
         updated_at: new Date().toISOString()

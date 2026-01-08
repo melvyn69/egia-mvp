@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { randomUUID } from "crypto";
-import { createSupabaseAdmin } from '../server/google/_utils.ts';
+import { createSupabaseAdmin } from '../_shared/google/_utils';
 
 const getRequestId = (req: VercelRequest) => {
   const header = req.headers["x-vercel-id"] ?? req.headers["x-request-id"];
