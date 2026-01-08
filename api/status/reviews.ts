@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { requireUser } from "../_auth.js";
+import { requireUser } from '../server/_auth.ts';
 
 type CronStatus = {
   status: "idle" | "running" | "done" | "error";

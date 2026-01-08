@@ -5,7 +5,7 @@ import {
   getOauthStateExpiry,
   getRequiredEnv,
   getUserFromRequest
-} from "../_utils.js";
+} from "../../../server/google/_utils.ts";
 
 const sendJson = (
   res: ServerResponse,

@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import { createSupabaseAdmin, getRequiredEnv, getUserFromRequest } from "../_utils.js";
+import { createSupabaseAdmin, getRequiredEnv, getUserFromRequest } from "../../../server/google/_utils.ts";
 
 type GoogleAccount = {
   name: string;

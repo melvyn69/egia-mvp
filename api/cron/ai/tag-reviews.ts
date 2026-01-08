@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "../../server/database.types.js";
+import type { Database } from "../../server/database.types";
 
 type AiTag = {
   name: string;
@@ -136,6 +136,16 @@ const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const asString = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value == null) {
+    return "";
+  }
+  return String(value);
+};
 
 const normalizeTopics = (topics: AiTag[]) => {
   const maxTopics = Number(process.env.AI_TAG_MAX_TOPICS ?? 8);
@@ -678,12 +688,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (timeUp() || reviewsScanned >= MAX_REVIEWS) {
         break;
       }
+      const reviewId = asString(review.id);
       const effectiveUpdateTime =
         review.update_time ?? review.create_time ?? review.created_at ?? null;
       const locationId = review.location_id ?? null;
       if (!effectiveUpdateTime) {
-        errors.push({ reviewId: review.id, message: "Missing source_time" });
-        console.error("[ai-tag]", requestId, "missing source_time", review.id);
+        errors.push({ reviewId, message: "Missing source_time" });
+        console.error("[ai-tag]", requestId, "missing source_time", reviewId);
         if (locationId) {
           errorsByLocation.set(
             locationId,
@@ -699,7 +710,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         reviewsProcessed += 1;
         const analysis = await analyzeReview(
           {
-            id: review.id,
+            id: reviewId,
             comment: review.comment
           },
           requestId,
@@ -710,7 +721,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { error: insightError } = await supabaseAdmin
           .from("review_ai_insights")
           .upsert({
-            review_pk: review.id,
+            review_pk: reviewId,
             user_id: review.user_id,
             location_resource_name: review.location_id ?? review.location_name,
             sentiment: analysis.sentiment,
@@ -736,17 +747,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             );
           }
           await supabaseAdmin.from("review_ai_insights").upsert({
-            review_pk: review.id,
+            review_pk: reviewId,
             user_id: review.user_id,
             location_resource_name: review.location_id ?? review.location_name,
             processed_at: nowIso,
             source_update_time: effectiveUpdateTime,
             error: insightError.message ?? "insight upsert failed"
           });
-          errors.push({ reviewId: review.id, message: insightError.message });
+          errors.push({ reviewId, message: insightError.message });
           await saveCursor({
             last_source_time: effectiveUpdateTime,
-            last_review_pk: review.id
+            last_review_pk: reviewId
           });
           continue;
         }
@@ -763,7 +774,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           if (tagError || !tagRow?.id) {
             errors.push({
-              reviewId: review.id,
+              reviewId,
               message: tagError?.message ?? "tag upsert failed"
             });
             continue;
@@ -772,7 +783,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           await supabaseAdmin
             .from("review_ai_tags")
             .upsert({
-              review_pk: review.id,
+              review_pk: reviewId,
               tag_id: tagRow.id,
               polarity: tag.polarity ?? null,
               confidence: tag.confidence ?? null,
@@ -795,11 +806,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         await saveCursor({
           last_source_time: effectiveUpdateTime,
-          last_review_pk: review.id
+          last_review_pk: reviewId
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        errors.push({ reviewId: review.id, message });
+        errors.push({ reviewId, message });
         console.error("[ai]", requestId, "review failed", message);
         if (review.location_id) {
           errorsByLocation.set(
@@ -810,7 +821,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         await saveCursor({
           last_source_time: effectiveUpdateTime ?? lastSourceTime,
-          last_review_pk: review.id
+          last_review_pk: reviewId
         });
       }
     }
