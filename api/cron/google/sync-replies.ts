@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "../../_shared/database.types.js";
+import type { Database, Json } from "../../_shared/database.types.js";
 
 type GoogleReview = {
   reviewId?: string;
@@ -17,6 +17,9 @@ type GoogleReview = {
     updateTime?: string;
   };
 };
+
+type GoogleReviewUpsert =
+  Database["public"]["Tables"]["google_reviews"]["Insert"];
 
 const CURSOR_KEY = "google_sync_replies_cursor_v1";
 const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000;
@@ -343,24 +346,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               continue;
             }
 
-            const row: Record<string, unknown> = {
-              user_id: location.user_id,
-              location_id: location.location_resource_name,
-              location_name: displayName,
-              review_id: reviewId,
-              review_name: reviewName,
-              author_name: review.reviewer?.displayName ?? null,
-              rating: mapRating(review.starRating),
-              comment: review.comment ?? null,
-              create_time: review.createTime ?? null,
-              update_time: review.updateTime ?? null,
-              last_synced_at: nowIso
+            const rating = mapRating(review.starRating);
+            const row: GoogleReviewUpsert = {
+              user_id: String(location.user_id),
+              location_id: String(location.location_resource_name),
+              location_name: displayName ? String(displayName) : null,
+              review_id: String(reviewId),
+              review_name: reviewName ? String(reviewName) : null,
+              author_name: review.reviewer?.displayName
+                ? String(review.reviewer.displayName)
+                : null,
+              rating: typeof rating === "number" ? rating : null,
+              comment: review.comment ? String(review.comment) : null,
+              create_time: review.createTime ? String(review.createTime) : null,
+              update_time: review.updateTime ? String(review.updateTime) : null,
+              last_synced_at: nowIso,
+              raw: review as unknown as Json
             };
 
             if (replyComment) {
               row.status = "replied";
-              row.reply_text = replyComment;
-              row.replied_at = replyUpdateTime ?? nowIso;
+              row.reply_text = String(replyComment);
+              row.replied_at = replyUpdateTime ? String(replyUpdateTime) : nowIso;
             }
 
             const { data: upserted, error: upsertError } = await supabaseAdmin

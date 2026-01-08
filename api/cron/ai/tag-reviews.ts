@@ -559,10 +559,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const nowIso = new Date().toISOString();
     candidateRows.forEach((review) => {
-      if (review.location_id && review.user_id) {
-        if (!locationUserMap.has(review.location_id)) {
-          locationUserMap.set(review.location_id, review.user_id);
-        }
+      const locationId = review.location_id ? String(review.location_id) : "";
+      const userId = review.user_id ? String(review.user_id) : "";
+      if (locationId && userId && !locationUserMap.has(locationId)) {
+        locationUserMap.set(locationId, userId);
       }
     });
     const locationIds = Array.from(locationUserMap.keys());
@@ -674,7 +674,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const reviewId = String((review as any)?.id ?? "");
       const effectiveUpdateTime =
-        review.update_time ?? review.create_time ?? review.created_at ?? null;
+        review.update_time ?? review.create_time ?? null;
       const locationId = review.location_id ?? null;
       if (!effectiveUpdateTime) {
         errors.push({ reviewId, message: "Missing source_time" });

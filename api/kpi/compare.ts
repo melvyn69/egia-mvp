@@ -4,6 +4,15 @@ import { parseFilters } from '../_shared/_filters.js';
 import { requireUser } from '../_shared/_auth.js';
 
 type Range = { from: string; to: string };
+type KpiSummary = {
+  reviews_total: number | null;
+  reviews_with_text: number | null;
+  avg_rating: number | null;
+  sentiment_positive?: number | null;
+  sentiment_neutral?: number | null;
+  sentiment_negative?: number | null;
+  top_tags?: unknown;
+};
 
 const handler = async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== "GET") {
@@ -116,21 +125,19 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         reason: "null_summary"
       });
     }
+    const A = summaryAData as unknown as KpiSummary;
+    const B = summaryBData as unknown as KpiSummary;
     return res.status(200).json({
-      before: summaryAData,
-      after: summaryBData,
-      a: summaryAData,
-      b: summaryBData,
+      before: A,
+      after: B,
+      a: A,
+      b: B,
       delta: {
         reviews_total:
-          (summaryBData?.reviews_total ?? 0) -
-          (summaryAData?.reviews_total ?? 0),
+          (B.reviews_total ?? 0) - (A.reviews_total ?? 0),
         reviews_with_text:
-          (summaryBData?.reviews_with_text ?? 0) -
-          (summaryAData?.reviews_with_text ?? 0),
-        avg_rating:
-          (summaryBData?.avg_rating ?? 0) -
-          (summaryAData?.avg_rating ?? 0)
+          (B.reviews_with_text ?? 0) - (A.reviews_with_text ?? 0),
+        avg_rating: (B.avg_rating ?? 0) - (A.avg_rating ?? 0)
       },
       ranges: { a: rangeA, b: rangeB }
     });
