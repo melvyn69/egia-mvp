@@ -49,15 +49,33 @@ type DashboardProps = {
 };
 
 type KpiSummary = {
-  reviews_total: number;
-  reviews_with_text: number;
-  avg_rating: number | null;
-  sentiment_breakdown: {
-    positive: number;
-    neutral: number;
-    negative: number;
+  period: { preset: string; from: string; to: string; tz: string };
+  scope: { locationId?: string | null; locationsCount: number };
+  counts: {
+    reviews_total: number;
+    reviews_with_text: number;
+    reviews_replied: number;
+    reviews_replyable: number;
   };
-  top_tags: Array<{ tag: string; count: number }>;
+  ratings: {
+    avg_rating: number | null;
+  };
+  response: {
+    response_rate: number | null;
+  };
+  sentiment: {
+    sentiment_positive_pct: number | null;
+    sentiment_samples: number;
+  };
+  nps: {
+    nps_score: number | null;
+    nps_samples: number;
+  };
+  meta: {
+    data_status: "ok" | "no_data" | "collecting";
+    reasons: string[];
+  };
+  top_tags?: Array<{ tag: string; count: number }>;
 };
 
 const getGreeting = (): string => {
@@ -113,6 +131,34 @@ const formatKpiValue = (value: string | number | undefined | null): string => {
     return "—";
   }
   return stringValue;
+};
+
+const formatPercent = (value: number | null): string =>
+  value === null ? "—" : `${Math.round(value)}%`;
+
+const formatRating = (value: number | null): string =>
+  value === null ? "—" : `${value.toFixed(1)}/5`;
+
+const formatCount = (value: number | null | undefined): string =>
+  value === null || value === undefined ? "—" : String(value);
+
+const getKpiReason = (reasons?: string[]): string => {
+  if (!reasons || reasons.length === 0) {
+    return "Pas assez de données";
+  }
+  if (reasons.includes("no_locations")) {
+    return "Aucune fiche connectée";
+  }
+  if (reasons.includes("no_reviews_in_range")) {
+    return "Aucun avis sur la période";
+  }
+  if (reasons.includes("no_sentiment_yet")) {
+    return "Analyse en cours";
+  }
+  if (reasons.includes("invalid_source")) {
+    return "Source incompatible";
+  }
+  return "Pas assez de données";
 };
 
 type ActivityEvent = {
@@ -271,14 +317,14 @@ const Dashboard = ({
   }, [readNotificationIds]);
 
   useEffect(() => {
-    if (!kpiLocationId && locations.length > 0) {
-      setKpiLocationId(locations[0].location_resource_name);
+    if (!kpiLocationId) {
+      setKpiLocationId("all");
     }
-  }, [kpiLocationId, locations]);
+  }, [kpiLocationId]);
 
   useEffect(() => {
     const token = session?.access_token;
-    if (!token || !kpiLocationId) {
+    if (!token) {
       setKpiData(null);
       return;
     }
@@ -287,7 +333,9 @@ const Dashboard = ({
       setKpiLoading(true);
       setKpiError(null);
       const params = new URLSearchParams();
-      params.set("location_id", kpiLocationId);
+      if (kpiLocationId && kpiLocationId !== "all") {
+        params.set("location_id", kpiLocationId);
+      }
       params.set("preset", kpiPreset);
       params.set("tz", timeZone);
       if (kpiPreset === "custom") {
@@ -477,30 +525,45 @@ const Dashboard = ({
     return location.location_title ?? location.location_resource_name ?? "—";
   };
 
-  const sentimentTotal =
-    (kpiData?.sentiment_breakdown.positive ?? 0) +
-    (kpiData?.sentiment_breakdown.neutral ?? 0) +
-    (kpiData?.sentiment_breakdown.negative ?? 0);
-  const positiveRate = sentimentTotal
-    ? Math.round(
-        ((kpiData?.sentiment_breakdown.positive ?? 0) / sentimentTotal) * 100
-      )
-    : null;
+  const kpiReason = getKpiReason(kpiData?.meta?.reasons);
+  const noData = kpiData?.meta?.data_status === "no_data";
   const kpiCards = [
     {
       label: "Volume d'avis",
-      value: kpiData?.reviews_total ?? "—",
-      caption: `Avec texte: ${kpiData?.reviews_with_text ?? "—"}`
+      value: noData ? "—" : formatCount(kpiData?.counts.reviews_total),
+      caption: noData
+        ? kpiReason
+        : `Avec texte: ${formatCount(kpiData?.counts.reviews_with_text)}`
     },
     {
       label: "Note moyenne",
-      value: kpiData?.avg_rating ? kpiData.avg_rating.toFixed(2) : "—",
-      caption: "Sur 5"
+      value: formatRating(kpiData?.ratings.avg_rating ?? null),
+      caption:
+        kpiData?.ratings.avg_rating === null ? kpiReason : "Sur 5"
+    },
+    {
+      label: "Taux de réponse",
+      value: formatPercent(kpiData?.response.response_rate ?? null),
+      caption:
+        kpiData?.response.response_rate === null
+          ? kpiReason
+          : `Sur ${formatCount(kpiData?.counts.reviews_replyable)} avis`
     },
     {
       label: "Sentiment positif",
-      value: positiveRate !== null ? `${positiveRate}%` : "—",
-      caption: "Sur avis taggés"
+      value: formatPercent(kpiData?.sentiment.sentiment_positive_pct ?? null),
+      caption:
+        kpiData?.sentiment.sentiment_positive_pct === null
+          ? kpiReason
+          : `Sur ${formatCount(kpiData?.sentiment.sentiment_samples)} avis`
+    },
+    {
+      label: "NPS",
+      value: kpiData?.nps.nps_score ?? "—",
+      caption:
+        kpiData?.nps.nps_score === null
+          ? kpiReason
+          : `Sur ${formatCount(kpiData?.nps.nps_samples)} avis`
     }
   ];
 
@@ -521,6 +584,7 @@ const Dashboard = ({
               value={kpiLocationId}
               onChange={(event) => setKpiLocationId(event.target.value)}
             >
+              <option value="all">Toutes les fiches</option>
               {locations.map((location) => (
                 <option
                   key={location.location_resource_name}

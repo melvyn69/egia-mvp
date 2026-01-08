@@ -1,8 +1,38 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { randomUUID } from "crypto";
-import { resolveDateRange } from '../_shared/_date.js';
-import { parseFilters } from '../_shared/_filters.js';
-import { requireUser } from '../_shared/_auth.js';
+import { resolveDateRange } from "../_shared/_date.js";
+import { parseFilters } from "../_shared/_filters.js";
+import { requireUser } from "../_shared/_auth.js";
+
+type KpiSummary = {
+  period: { preset: string; from: string; to: string; tz: string };
+  scope: { locationId?: string | null; locationsCount: number };
+  counts: {
+    reviews_total: number;
+    reviews_with_text: number;
+    reviews_replied: number;
+    reviews_replyable: number;
+  };
+  ratings: {
+    avg_rating: number | null;
+  };
+  response: {
+    response_rate: number | null;
+  };
+  sentiment: {
+    sentiment_positive_pct: number | null;
+    sentiment_samples: number;
+  };
+  nps: {
+    nps_score: number | null;
+    nps_samples: number;
+  };
+  meta: {
+    data_status: "ok" | "no_data" | "collecting";
+    reasons: string[];
+  };
+  top_tags?: Array<{ tag: string; count: number }>;
+};
 
 const getRequestId = (req: VercelRequest) => {
   const header = req.headers["x-vercel-id"] ?? req.headers["x-request-id"];
@@ -56,41 +86,30 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     userId = auth.userId;
     const { supabaseAdmin } = auth;
 
-    const locationParam = req.query.location_id;
-    locationId = Array.isArray(locationParam)
-      ? locationParam[0]
-      : locationParam;
-    if (!locationId) {
-      return res.status(400).json({ error: "Missing location_id" });
-    }
-    console.log("[kpi-summary]", {
-      route,
-      query: req.query,
-      userId,
-      location_id: locationId
-    });
-
-    const { data: locationRow } = await supabaseAdmin
-      .from("google_locations")
-      .select("location_resource_name")
-      .eq("user_id", userId)
-      .eq("location_resource_name", locationId)
-      .maybeSingle();
-    if (!locationRow) {
-      return res.status(404).json({ error: "Location not found" });
-    }
-
     const filters = parseFilters(req.query);
     if (filters.reject) {
       return res.status(200).json({
-        reviews_total: 0,
-        reviews_with_text: 0,
-        avg_rating: null,
-        sentiment_breakdown: { positive: 0, neutral: 0, negative: 0 },
-        top_tags: [],
-        range: { from: null, to: null }
-      });
+        period: { preset: filters.preset, from: "", to: "", tz: filters.tz },
+        scope: { locationId: null, locationsCount: 0 },
+        counts: {
+          reviews_total: 0,
+          reviews_with_text: 0,
+          reviews_replied: 0,
+          reviews_replyable: 0
+        },
+        ratings: { avg_rating: null },
+        response: { response_rate: null },
+        sentiment: { sentiment_positive_pct: null, sentiment_samples: 0 },
+        nps: { nps_score: null, nps_samples: 0 },
+        meta: { data_status: "no_data", reasons: ["invalid_source"] },
+        top_tags: []
+      } satisfies KpiSummary);
     }
+
+    const locationParam = req.query.location_id;
+    locationId = Array.isArray(locationParam)
+      ? locationParam[0]
+      : locationParam ?? null;
 
     const preset = filters.preset;
     const from = filters.from;
@@ -103,62 +122,200 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       to,
       timeZone
     );
-    console.log("[kpi-summary] range", {
-      preset,
-      from: range.from,
-      to: range.to,
-      tz: timeZone
-    });
-
-    const args = {
-      p_location_id: locationId,
-      p_from: range.from,
-      p_to: range.to,
-      p_rating_min: filters.rating_min ?? null,
-      p_rating_max: filters.rating_max ?? null,
-      p_sentiment:
-        filters.sentiment && filters.sentiment !== "all"
-          ? filters.sentiment
-          : null,
-      p_status:
-        filters.status && filters.status !== "all" ? filters.status : null,
-      p_tags: Array.isArray(filters.tags) && filters.tags.length ? filters.tags : null
-    };
-
-    const { data: summary, error: summaryError } = await supabaseAdmin
-      .rpc("kpi_summary", args)
-      .maybeSingle();
-
-    if (summaryError) {
-      console.error("[kpi-summary] rpc error", {
-        route,
-        query: req.query,
-        userId,
-        location_id: locationId,
-        error: {
-          message: summaryError.message,
-          details: (summaryError as { details?: string }).details,
-          hint: (summaryError as { hint?: string }).hint,
-          code: (summaryError as { code?: string }).code
-        },
-        requestId
-      });
-      return res.status(500).json({ error: "Internal server error", requestId });
+    let locationIds: string[] = [];
+    if (locationId) {
+      const { data: locationRow } = await supabaseAdmin
+        .from("google_locations")
+        .select("location_resource_name")
+        .eq("user_id", userId)
+        .eq("location_resource_name", locationId)
+        .maybeSingle();
+      if (!locationRow) {
+        return res.status(404).json({ error: "Location not found" });
+      }
+      locationIds = [locationId];
+    } else {
+      const { data: locations } = await supabaseAdmin
+        .from("google_locations")
+        .select("location_resource_name")
+        .eq("user_id", userId);
+      locationIds = (locations ?? [])
+        .map((location) => location.location_resource_name)
+        .filter(Boolean);
     }
 
-    const summaryData = summary ?? null;
-    return res.status(200).json({
-      reviews_total: summaryData?.reviews_total ?? 0,
-      reviews_with_text: summaryData?.reviews_with_text ?? 0,
-      avg_rating: summaryData?.avg_rating ?? null,
-      sentiment_breakdown: {
-        positive: summaryData?.sentiment_positive ?? 0,
-        neutral: summaryData?.sentiment_neutral ?? 0,
-        negative: summaryData?.sentiment_negative ?? 0
+    if (locationIds.length === 0) {
+      const summary: KpiSummary = {
+        period: { preset, from: range.from, to: range.to, tz: timeZone },
+        scope: { locationId, locationsCount: 0 },
+        counts: {
+          reviews_total: 0,
+          reviews_with_text: 0,
+          reviews_replied: 0,
+          reviews_replyable: 0
+        },
+        ratings: { avg_rating: null },
+        response: { response_rate: null },
+        sentiment: { sentiment_positive_pct: null, sentiment_samples: 0 },
+        nps: { nps_score: null, nps_samples: 0 },
+        meta: { data_status: "no_data", reasons: ["no_locations"] },
+        top_tags: []
+      };
+      console.log("[kpi-summary]", {
+        route,
+        userId,
+        location_id: locationId ?? "all",
+        locationsCount: 0,
+        preset
+      });
+      return res.status(200).json(summary);
+    }
+
+    const buildReviewQuery = () => {
+      let query = supabaseAdmin
+        .from("google_reviews")
+        .select(
+          "id, rating, comment, reply_text, replied_at, owner_reply, owner_reply_time, status"
+        );
+      if (locationIds.length === 1) {
+        query = query.eq("location_id", locationIds[0]);
+      } else {
+        query = query.in("location_id", locationIds);
+      }
+      query = query.or(
+        `and(update_time.gte.${range.from},update_time.lte.${range.to}),` +
+          `and(update_time.is.null,create_time.gte.${range.from},create_time.lte.${range.to}),` +
+          `and(update_time.is.null,create_time.is.null,created_at.gte.${range.from},created_at.lte.${range.to})`
+      );
+      if (filters.rating_min !== undefined) {
+        query = query.gte("rating", filters.rating_min);
+      }
+      if (filters.rating_max !== undefined) {
+        query = query.lte("rating", filters.rating_max);
+      }
+      if (filters.status) {
+        query = query.eq("status", filters.status);
+      }
+      return query;
+    };
+
+    const { data: reviewRows, error: reviewsError } = await buildReviewQuery();
+    if (reviewsError) {
+      throw reviewsError;
+    }
+
+    const reviews = reviewRows ?? [];
+    const reviews_total = reviews.length;
+    const reviews_with_text = reviews.filter(
+      (row) => typeof row.comment === "string" && row.comment.trim().length > 0
+    ).length;
+
+    const isReplied = (row: typeof reviews[number]) =>
+      Boolean(
+        row.reply_text ||
+          row.replied_at ||
+          row.owner_reply ||
+          row.owner_reply_time ||
+          row.status === "replied"
+      );
+    const reviews_replied = reviews.filter(isReplied).length;
+
+    // Replyable = avis avec texte non vide, non déjà répondu.
+    const reviews_replyable = reviews.filter(
+      (row) =>
+        typeof row.comment === "string" &&
+        row.comment.trim().length > 0 &&
+        !isReplied(row)
+    ).length;
+
+    const ratings = reviews
+      .map((row) => row.rating)
+      .filter((value): value is number => typeof value === "number");
+    const avg_rating =
+      ratings.length > 0
+        ? Number(
+            (
+              ratings.reduce((acc, value) => acc + value, 0) / ratings.length
+            ).toFixed(1)
+          )
+        : null;
+
+    const promoters = ratings.filter((value) => value >= 5).length;
+    const detractors = ratings.filter((value) => value <= 3).length;
+    const nps_samples = ratings.length;
+    const nps_score =
+      nps_samples > 0
+        ? Math.round(((promoters - detractors) / nps_samples) * 100)
+        : null;
+
+    const response_rate =
+      reviews_replyable > 0
+        ? Math.round((reviews_replied / reviews_replyable) * 100)
+        : null;
+
+    const reviewIds = reviews.map((row) => row.id);
+    let sentiment_samples = 0;
+    let sentiment_positive_pct: number | null = null;
+    if (reviewIds.length > 0) {
+      const { data: sentiments, error: sentimentsError } = await supabaseAdmin
+        .from("review_ai_insights")
+        .select("sentiment, review_pk")
+        .in("review_pk", reviewIds);
+      if (sentimentsError) {
+        throw sentimentsError;
+      }
+      sentiment_samples = (sentiments ?? []).filter(
+        (row) => typeof row.sentiment === "string"
+      ).length;
+      const positives = (sentiments ?? []).filter(
+        (row) => row.sentiment === "positive"
+      ).length;
+      sentiment_positive_pct =
+        sentiment_samples > 0
+          ? Math.round((positives / sentiment_samples) * 100)
+          : null;
+    }
+
+    const reasons: string[] = [];
+    let data_status: KpiSummary["meta"]["data_status"] = "ok";
+    if (reviews_total === 0) {
+      data_status = "no_data";
+      reasons.push("no_reviews_in_range");
+    }
+    if (sentiment_samples === 0) {
+      reasons.push("no_sentiment_yet");
+      if (data_status === "ok") {
+        data_status = "collecting";
+      }
+    }
+
+    const summary: KpiSummary = {
+      period: { preset, from: range.from, to: range.to, tz: timeZone },
+      scope: { locationId, locationsCount: locationIds.length },
+      counts: {
+        reviews_total,
+        reviews_with_text,
+        reviews_replied,
+        reviews_replyable
       },
-      top_tags: summaryData?.top_tags ?? [],
-      range
+      ratings: { avg_rating },
+      response: { response_rate },
+      sentiment: { sentiment_positive_pct, sentiment_samples },
+      nps: { nps_score, nps_samples },
+      meta: { data_status, reasons },
+      top_tags: []
+    };
+
+    console.log("[kpi-summary]", {
+      route,
+      userId,
+      location_id: locationId ?? "all",
+      locationsCount: locationIds.length,
+      reviews_total,
+      data_status
     });
+
+    return res.status(200).json(summary);
   } catch (err) {
     const missingEnv = isMissingEnvError(err);
     console.error("[kpi-summary] error", {
