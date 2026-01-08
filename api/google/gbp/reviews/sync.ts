@@ -381,6 +381,20 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
           if (!reviewId) {
             return null;
           }
+          const rawReview = review as {
+            comment?: string;
+            comment_original?: string;
+            originalText?: { text?: string };
+          };
+          const comment =
+            (typeof rawReview.comment_original === "string"
+              ? rawReview.comment_original
+              : null) ??
+            (rawReview.originalText &&
+            typeof rawReview.originalText.text === "string"
+              ? rawReview.originalText.text
+              : null) ??
+            (typeof rawReview.comment === "string" ? rawReview.comment : null);
           return {
             user_id: userId,
             location_id: location.location_resource_name,
@@ -389,7 +403,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
             review_id: reviewId,
             author_name: review.reviewer?.displayName ?? null,
             rating: mapRating(review.starRating),
-            comment: review.comment ?? null,
+            comment,
             create_time: review.createTime ?? null,
             update_time: review.updateTime ?? null,
             owner_reply: review.reviewReply?.comment ?? null,

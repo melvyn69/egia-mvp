@@ -101,9 +101,6 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
     const filters = parseFilters(req.query);
     locationId = filters.location_id ?? null;
-    if (!locationId) {
-      return res.status(400).json({ error: "Missing location_id" });
-    }
     if (filters.reject) {
       return res.status(200).json({ rows: [], nextCursor: null });
     }
@@ -111,17 +108,37 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       route,
       query: req.query,
       userId,
-      location_id: locationId
+      location_id: locationId ?? "all"
     });
 
-    const { data: locationRow } = (await supabaseAdmin
-      .from("google_locations")
-      .select("location_resource_name")
-      .eq("user_id", userId)
-      .eq("location_resource_name", locationId)
-      .maybeSingle()) as { data: GoogleLocationRow | null; error: unknown };
-    if (!locationRow) {
-      return res.status(404).json({ error: "Location not found" });
+    let locationIds: string[] = [];
+    if (locationId) {
+      const { data: locationRow } = (await supabaseAdmin
+        .from("google_locations")
+        .select("location_resource_name")
+        .eq("user_id", userId)
+        .eq("location_resource_name", locationId)
+        .maybeSingle()) as { data: GoogleLocationRow | null; error: unknown };
+      if (!locationRow) {
+        return res.status(404).json({ error: "Location not found" });
+      }
+      locationIds = [locationId];
+    } else {
+      const { data: locations } = (await supabaseAdmin
+        .from("google_locations")
+        .select("location_resource_name")
+        .eq("user_id", userId)) as { data: GoogleLocationRow[] | null; error: unknown };
+      locationIds = (locations ?? [])
+        .map((location) => location.location_resource_name)
+        .filter(Boolean);
+    }
+
+    if (!locationIds || locationIds.length === 0) {
+      return res.status(200).json({
+        rows: [],
+        nextCursor: null,
+        reason: "no_locations_or_no_reviews"
+      });
     }
 
     const preset = filters.preset;
@@ -161,7 +178,11 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       .order("created_at", { ascending: false, nullsFirst: false })
       .order("id", { ascending: false })
       .limit(limit * 3);
-    query = query.eq("location_id", locationId);
+    if (locationIds.length === 1) {
+      query = query.eq("location_id", locationIds[0]);
+    } else {
+      query = query.in("location_id", locationIds);
+    }
 
     query = query.or(
       `and(update_time.gte.${range.from},update_time.lte.${range.to}),` +
