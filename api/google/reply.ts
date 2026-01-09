@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "../server/_shared/database.types.js";
-import { generateAiReply } from "../server/_shared/ai_reply.js";
+import type { Database } from "../../server/_shared/database.types";
+import { generateAiReply } from "../../server/_shared/ai_reply";
 
 const getEnv = (keys: string[]) => {
   for (const key of keys) {
