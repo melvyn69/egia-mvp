@@ -46,6 +46,62 @@ type AnalyticsTimeseries = {
   }>;
 };
 
+type AnalyticsDrivers = {
+  period: {
+    preset: string;
+    from: string | null;
+    to: string | null;
+    location_id: string | null;
+  };
+  totals: {
+    tagged_count: number;
+  };
+  positives: Array<{
+    label: string;
+    count: number;
+    share_pct: number | null;
+    net_sentiment: number;
+    delta: number | null;
+    delta_pct: number | null;
+    source: "ai" | "manual";
+    tag_ids?: string[];
+  }>;
+  irritants: Array<{
+    label: string;
+    count: number;
+    share_pct: number | null;
+    net_sentiment: number;
+    delta: number | null;
+    delta_pct: number | null;
+    source: "ai" | "manual";
+    tag_ids?: string[];
+  }>;
+};
+
+type AnalyticsQuality = {
+  reply_rate: number | null;
+  avg_reply_delay_hours: number | null;
+  sla_24h: number | null;
+  replyable_count: number;
+  replied_count: number;
+  replied_with_time_count: number;
+};
+
+type AnalyticsDrilldown = {
+  items: Array<{
+    id: string;
+    review_id: string | null;
+    rating: number | null;
+    comment: string | null;
+    author_name: string | null;
+    create_time: string | null;
+    location_id: string | null;
+  }>;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+};
+
 type AnalyticsCompare = {
   periodA: { start: string; end: string; label: string };
   periodB: { start: string; end: string; label: string };
@@ -434,6 +490,135 @@ const buildCompareResponse = (
         delta_pct: replyDeltaPct
       }
     }
+  };
+};
+
+const buildPreviousRange = (rangeA: { from: string; to: string }) => {
+  const rangeStart = new Date(rangeA.from);
+  const rangeEnd = new Date(rangeA.to);
+  const durationMs = rangeEnd.getTime() - rangeStart.getTime();
+  return {
+    from: new Date(rangeStart.getTime() - durationMs).toISOString(),
+    to: new Date(rangeEnd.getTime() - durationMs).toISOString()
+  };
+};
+
+const mapSentimentFromRating = (rating: number | null) => {
+  if (typeof rating !== "number") {
+    return "neutral";
+  }
+  if (rating <= 2) {
+    return "negative";
+  }
+  if (rating >= 4) {
+    return "positive";
+  }
+  return "neutral";
+};
+
+const computeTagStats = (params: {
+  reviewRows: ReviewRow[];
+  tagLinks: Array<{ review_id: string; tag_label: string; tag_id?: string }>;
+  sentiments: Map<string, string | null>;
+}) => {
+  const { reviewRows, tagLinks, sentiments } = params;
+  const ratingByReview = new Map(
+    reviewRows.map((row) => [row.id, row.rating])
+  );
+  const tagStats = new Map<
+    string,
+    {
+      label: string;
+      count: number;
+      positive: number;
+      negative: number;
+      neutral: number;
+      tag_ids: Set<string>;
+    }
+  >();
+
+  tagLinks.forEach((link) => {
+    const normalized = normalizeTagLabel(link.tag_label);
+    if (!normalized) {
+      return;
+    }
+    const stats =
+      tagStats.get(normalized) ?? {
+        label: link.tag_label.trim(),
+        count: 0,
+        positive: 0,
+        negative: 0,
+        neutral: 0,
+        tag_ids: new Set<string>()
+      };
+    stats.count += 1;
+    if (link.tag_id) {
+      stats.tag_ids.add(link.tag_id);
+    }
+    const sentiment =
+      sentiments.get(link.review_id) ?? mapSentimentFromRating(ratingByReview.get(link.review_id) ?? null);
+    if (sentiment === "positive") {
+      stats.positive += 1;
+    } else if (sentiment === "negative") {
+      stats.negative += 1;
+    } else {
+      stats.neutral += 1;
+    }
+    tagStats.set(normalized, stats);
+  });
+
+  return tagStats;
+};
+
+const mapDrivers = (params: {
+  tagStats: Map<
+    string,
+    {
+      label: string;
+      count: number;
+      positive: number;
+      negative: number;
+      neutral: number;
+      tag_ids: Set<string>;
+    }
+  >;
+  totalCount: number;
+  previousCounts: Map<string, number>;
+  source: "ai" | "manual";
+}) => {
+  const { tagStats, totalCount, previousCounts, source } = params;
+  const positives: AnalyticsDrivers["positives"] = [];
+  const irritants: AnalyticsDrivers["irritants"] = [];
+
+  for (const [labelKey, stats] of tagStats.entries()) {
+    const positiveScore = stats.positive + stats.neutral;
+    const net = stats.positive - stats.negative;
+    const prevCount = previousCounts.get(labelKey) ?? 0;
+    const delta = stats.count - prevCount;
+    const deltaPct = prevCount > 0 ? delta / prevCount : null;
+    const sharePct = totalCount > 0 ? (stats.count / totalCount) * 100 : null;
+    const item = {
+      label: stats.label || labelKey,
+      count: stats.count,
+      share_pct: sharePct !== null ? Number(sharePct.toFixed(1)) : null,
+      net_sentiment: net,
+      delta: prevCount > 0 ? delta : null,
+      delta_pct: deltaPct !== null ? Number(deltaPct.toFixed(2)) : null,
+      source,
+      tag_ids: stats.tag_ids.size ? Array.from(stats.tag_ids) : undefined
+    };
+    if (stats.negative >= 2 && stats.negative > stats.positive) {
+      irritants.push(item);
+    } else if (positiveScore > 0) {
+      positives.push(item);
+    }
+  }
+
+  positives.sort((a, b) => b.count - a.count);
+  irritants.sort((a, b) => b.count - a.count);
+  return {
+    positives: positives.slice(0, 5),
+    irritants: irritants.slice(0, 5)
   };
 };
 
@@ -845,6 +1030,13 @@ const resolveLocationIds = async (
   return { locationIds, missing: false };
 };
 
+const normalizeTagLabel = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
 const handleOverview = async (
   req: VercelRequest,
   res: VercelResponse,
@@ -1028,13 +1220,6 @@ const handleOverview = async (
   const tagLookup = new Map(
     (tagsData ?? []).map((tag) => [tag.id, tag.tag])
   );
-
-  const normalizeTagLabel = (value: string) =>
-    value
-      .trim()
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
 
   const tagSentimentCounts = new Map<
     string,
@@ -1222,6 +1407,405 @@ const handleTimeseries = async (
   return res.status(200).json(timeseries);
 };
 
+const handleDrivers = async (
+  req: VercelRequest,
+  res: VercelResponse,
+  userId: string,
+  supabaseAdmin: ReturnType<typeof requireUser> extends Promise<infer R>
+    ? R extends { supabaseAdmin: infer C }
+      ? C
+      : never
+    : never
+) => {
+  const filters = parseFilters(normalizeAnalyticsQuery(req.query));
+  const preset = filters.preset;
+  const timeZone = filters.tz;
+  const rangeA = resolveDateRange(
+    preset as Parameters<typeof resolveDateRange>[0],
+    filters.from,
+    filters.to,
+    timeZone
+  );
+  const rangeB = buildPreviousRange(rangeA);
+  const locationId = filters.location_id ?? null;
+
+  const { locationIds, missing } = await resolveLocationIds(
+    supabaseAdmin,
+    userId,
+    locationId
+  );
+  if (missing) {
+    return res.status(404).json({ error: "Location not found" });
+  }
+
+  if (filters.reject || locationIds.length === 0) {
+    const empty: AnalyticsDrivers = {
+      period: {
+        preset,
+        from: preset === "all_time" ? null : rangeA.from,
+        to: rangeA.to,
+        location_id: locationId
+      },
+      totals: { tagged_count: 0 },
+      positives: [],
+      irritants: []
+    };
+    return res.status(200).json(empty);
+  }
+
+  let reviewsA: ReviewRow[] = [];
+  let reviewsB: ReviewRow[] = [];
+  try {
+    reviewsA = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeA);
+    reviewsB = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeB);
+  } catch (error) {
+    console.error("[analytics/drivers] reviews error", error);
+    return res.status(500).json({ error: "Failed to load reviews" });
+  }
+
+  const reviewIdsA = reviewsA.map((row) => row.id);
+  const reviewIdsB = reviewsB.map((row) => row.id);
+  if (reviewIdsA.length === 0) {
+    const empty: AnalyticsDrivers = {
+      period: {
+        preset,
+        from: preset === "all_time" ? null : rangeA.from,
+        to: rangeA.to,
+        location_id: locationId
+      },
+      totals: { tagged_count: 0 },
+      positives: [],
+      irritants: []
+    };
+    return res.status(200).json(empty);
+  }
+
+  const { data: sentimentRows } = await supabaseAdmin
+    .from("review_ai_insights")
+    .select("review_pk, sentiment")
+    .in("review_pk", reviewIdsA);
+  const sentiments = new Map(
+    (sentimentRows ?? []).map((row) => [row.review_pk, row.sentiment])
+  );
+
+  const { data: aiTagLinksA } = await supabaseAdmin
+    .from("review_ai_tags")
+    .select("review_pk, tag_id")
+    .in("review_pk", reviewIdsA);
+
+  let source: "ai" | "manual" = "manual";
+  let tagLinksA: Array<{ review_id: string; tag_label: string; tag_id?: string }> =
+    [];
+  let tagLinksB: Array<{ review_id: string; tag_label: string; tag_id?: string }> =
+    [];
+
+  if ((aiTagLinksA ?? []).length > 0) {
+    source = "ai";
+    const aiTagIds = Array.from(
+      new Set((aiTagLinksA ?? []).map((row) => row.tag_id))
+    );
+    const { data: tagsData } = await supabaseAdmin
+      .from("ai_tags")
+      .select("id, tag")
+      .in("id", aiTagIds);
+    const tagLookup = new Map(
+      (tagsData ?? []).map((tag) => [tag.id, tag.tag ?? ""])
+    );
+    tagLinksA = (aiTagLinksA ?? [])
+      .map((row) => ({
+        review_id: row.review_pk,
+        tag_id: row.tag_id,
+        tag_label: tagLookup.get(row.tag_id) ?? ""
+      }))
+      .filter((row) => row.tag_label);
+
+    const { data: aiTagLinksB } = await supabaseAdmin
+      .from("review_ai_tags")
+      .select("review_pk, tag_id")
+      .in("review_pk", reviewIdsB);
+    tagLinksB = (aiTagLinksB ?? [])
+      .map((row) => ({
+        review_id: row.review_pk,
+        tag_id: row.tag_id,
+        tag_label: tagLookup.get(row.tag_id) ?? ""
+      }))
+      .filter((row) => row.tag_label);
+  } else {
+    const { data: reviewTagsA } = await supabaseAdmin
+      .from("review_tags")
+      .select("review_id, tag")
+      .in("review_id", reviewIdsA);
+    tagLinksA = (reviewTagsA ?? [])
+      .map((row) => ({
+        review_id: row.review_id,
+        tag_label: row.tag
+      }))
+      .filter((row) => row.tag_label);
+
+    const { data: reviewTagsB } = await supabaseAdmin
+      .from("review_tags")
+      .select("review_id, tag")
+      .in("review_id", reviewIdsB);
+    tagLinksB = (reviewTagsB ?? [])
+      .map((row) => ({
+        review_id: row.review_id,
+        tag_label: row.tag
+      }))
+      .filter((row) => row.tag_label);
+  }
+
+  const tagStats = computeTagStats({
+    reviewRows: reviewsA,
+    tagLinks: tagLinksA,
+    sentiments
+  });
+  const totalCount = Array.from(tagStats.values()).reduce(
+    (sum, stat) => sum + stat.count,
+    0
+  );
+  const previousCounts = new Map<string, number>();
+  tagLinksB.forEach((link) => {
+    const normalized = normalizeTagLabel(link.tag_label);
+    if (!normalized) {
+      return;
+    }
+    previousCounts.set(normalized, (previousCounts.get(normalized) ?? 0) + 1);
+  });
+
+  const mapped = mapDrivers({
+    tagStats,
+    totalCount,
+    previousCounts,
+    source
+  });
+
+  const response: AnalyticsDrivers = {
+    period: {
+      preset,
+      from: preset === "all_time" ? null : rangeA.from,
+      to: rangeA.to,
+      location_id: locationId
+    },
+    totals: { tagged_count: totalCount },
+    positives: mapped.positives,
+    irritants: mapped.irritants
+  };
+
+  return res.status(200).json(response);
+};
+
+const handleQuality = async (
+  req: VercelRequest,
+  res: VercelResponse,
+  userId: string,
+  supabaseAdmin: ReturnType<typeof requireUser> extends Promise<infer R>
+    ? R extends { supabaseAdmin: infer C }
+      ? C
+      : never
+    : never
+) => {
+  const filters = parseFilters(normalizeAnalyticsQuery(req.query));
+  const preset = filters.preset;
+  const timeZone = filters.tz;
+  const range = resolveDateRange(
+    preset as Parameters<typeof resolveDateRange>[0],
+    filters.from,
+    filters.to,
+    timeZone
+  );
+  const locationId = filters.location_id ?? null;
+
+  const { locationIds, missing } = await resolveLocationIds(
+    supabaseAdmin,
+    userId,
+    locationId
+  );
+  if (missing) {
+    return res.status(404).json({ error: "Location not found" });
+  }
+
+  if (filters.reject || locationIds.length === 0) {
+    const empty: AnalyticsQuality = {
+      reply_rate: null,
+      avg_reply_delay_hours: null,
+      sla_24h: null,
+      replyable_count: 0,
+      replied_count: 0,
+      replied_with_time_count: 0
+    };
+    return res.status(200).json(empty);
+  }
+
+  let reviews: ReviewRow[] = [];
+  try {
+    reviews = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, range);
+  } catch (error) {
+    console.error("[analytics/quality] reviews error", error);
+    return res.status(500).json({ error: "Failed to load reviews" });
+  }
+
+  const replyable = reviews.filter(isReplyable);
+  const replyableCount = replyable.length;
+  const replied = replyable.filter(isReplied);
+  const repliedCount = replied.length;
+
+  const delays: number[] = [];
+  replied.forEach((row) => {
+    const replyTime = row.replied_at ? new Date(row.replied_at) : null;
+    const baseTime = row.create_time ?? row.update_time ?? row.created_at ?? null;
+    if (!replyTime || !baseTime) {
+      return;
+    }
+    const baseDate = new Date(baseTime);
+    const diffMs = replyTime.getTime() - baseDate.getTime();
+    if (Number.isFinite(diffMs) && diffMs >= 0) {
+      delays.push(diffMs / (1000 * 60 * 60));
+    }
+  });
+
+  const avgDelay =
+    delays.length > 0
+      ? Number((delays.reduce((a, b) => a + b, 0) / delays.length).toFixed(1))
+      : null;
+  const sla24 =
+    delays.length > 0
+      ? delays.filter((value) => value <= 24).length / delays.length
+      : null;
+
+  const response: AnalyticsQuality = {
+    reply_rate: replyableCount > 0 ? repliedCount / replyableCount : null,
+    avg_reply_delay_hours: avgDelay,
+    sla_24h: sla24 !== null ? Number(sla24.toFixed(2)) : null,
+    replyable_count: replyableCount,
+    replied_count: repliedCount,
+    replied_with_time_count: delays.length
+  };
+
+  return res.status(200).json(response);
+};
+
+const handleDrilldown = async (
+  req: VercelRequest,
+  res: VercelResponse,
+  userId: string,
+  supabaseAdmin: ReturnType<typeof requireUser> extends Promise<infer R>
+    ? R extends { supabaseAdmin: infer C }
+      ? C
+      : never
+    : never
+) => {
+  const filters = parseFilters(normalizeAnalyticsQuery(req.query));
+  const preset = filters.preset;
+  const timeZone = filters.tz;
+  const range = resolveDateRange(
+    preset as Parameters<typeof resolveDateRange>[0],
+    filters.from,
+    filters.to,
+    timeZone
+  );
+  const locationId = filters.location_id ?? null;
+  const { locationIds, missing } = await resolveLocationIds(
+    supabaseAdmin,
+    userId,
+    locationId
+  );
+  if (missing) {
+    return res.status(404).json({ error: "Location not found" });
+  }
+
+  const tagParam = getQueryParam(req.query, "tag") ?? "";
+  const sourceParam = getQueryParam(req.query, "source") ?? "manual";
+  const tagIdsParam = getQueryParam(req.query, "tag_ids") ?? "";
+  const offsetParam = Number(getQueryParam(req.query, "offset") ?? 0);
+  const limitParam = Number(getQueryParam(req.query, "limit") ?? 10);
+  const offset = Number.isFinite(offsetParam) ? Math.max(0, offsetParam) : 0;
+  const limit = Number.isFinite(limitParam) ? Math.min(50, Math.max(1, limitParam)) : 10;
+
+  if (filters.reject || locationIds.length === 0 || !tagParam) {
+    const empty: AnalyticsDrilldown = {
+      items: [],
+      offset,
+      limit,
+      has_more: false
+    };
+    return res.status(200).json(empty);
+  }
+
+  let reviews: ReviewRow[] = [];
+  try {
+    reviews = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, range);
+  } catch (error) {
+    console.error("[analytics/drilldown] reviews error", error);
+    return res.status(500).json({ error: "Failed to load reviews" });
+  }
+
+  const reviewIds = reviews.map((row) => row.id);
+  const normalizedTag = normalizeTagLabel(tagParam);
+  let matchingReviewIds = new Set<string>();
+  if (reviewIds.length === 0) {
+    const empty: AnalyticsDrilldown = {
+      items: [],
+      offset,
+      limit,
+      has_more: false
+    };
+    return res.status(200).json(empty);
+  }
+
+  if (sourceParam === "ai") {
+    const tagIds = tagIdsParam
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const { data: aiTagLinks } = await supabaseAdmin
+      .from("review_ai_tags")
+      .select("review_pk, tag_id")
+      .in("review_pk", reviewIds);
+    const allowed = new Set(tagIds);
+    (aiTagLinks ?? []).forEach((row) => {
+      if (allowed.has(row.tag_id)) {
+        matchingReviewIds.add(row.review_pk);
+      }
+    });
+  } else {
+    const { data: reviewTags } = await supabaseAdmin
+      .from("review_tags")
+      .select("review_id, tag")
+      .in("review_id", reviewIds);
+    (reviewTags ?? []).forEach((row) => {
+      if (normalizeTagLabel(row.tag) === normalizedTag) {
+        matchingReviewIds.add(row.review_id);
+      }
+    });
+  }
+
+  const matchingReviews = reviews.filter((row) => matchingReviewIds.has(row.id));
+  matchingReviews.sort((a, b) =>
+    (b.create_time ?? "").localeCompare(a.create_time ?? "")
+  );
+
+  const sliced = matchingReviews.slice(offset, offset + limit);
+  const items = sliced.map((row) => ({
+    id: row.id,
+    review_id: row.review_id,
+    rating: row.rating,
+    comment: row.comment,
+    author_name: row.author_name,
+    create_time: row.create_time,
+    location_id: row.location_id
+  }));
+  const hasMore = offset + limit < matchingReviews.length;
+
+  const response: AnalyticsDrilldown = {
+    items,
+    offset,
+    limit,
+    has_more: hasMore
+  };
+
+  return res.status(200).json(response);
+};
+
 const handleCompare = async (
   req: VercelRequest,
   res: VercelResponse,
@@ -1241,13 +1825,7 @@ const handleCompare = async (
     filters.to,
     timeZone
   );
-  const rangeStart = new Date(rangeA.from);
-  const rangeEnd = new Date(rangeA.to);
-  const durationMs = rangeEnd.getTime() - rangeStart.getTime();
-  const rangeB = {
-    from: new Date(rangeStart.getTime() - durationMs).toISOString(),
-    to: new Date(rangeEnd.getTime() - durationMs).toISOString()
-  };
+  const rangeB = buildPreviousRange(rangeA);
 
   const locationId = filters.location_id ?? null;
   const { locationIds, missing } = await resolveLocationIds(
@@ -1309,11 +1887,7 @@ const handleInsights = async (
   );
   const rangeStart = new Date(rangeA.from);
   const rangeEnd = new Date(rangeA.to);
-  const durationMs = rangeEnd.getTime() - rangeStart.getTime();
-  const rangeB = {
-    from: new Date(rangeStart.getTime() - durationMs).toISOString(),
-    to: new Date(rangeEnd.getTime() - durationMs).toISOString()
-  };
+  const rangeB = buildPreviousRange(rangeA);
 
   const modeParam = getQueryParam(req.query, "mode") ?? "auto";
   const mode =
@@ -1413,6 +1987,15 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
   const viewParam =
     getQueryParam(req.query, "view") ?? getQueryParam(req.query, "op");
+  if (viewParam === "drivers") {
+    return handleDrivers(req, res, userId, supabaseAdmin);
+  }
+  if (viewParam === "drilldown") {
+    return handleDrilldown(req, res, userId, supabaseAdmin);
+  }
+  if (viewParam === "quality") {
+    return handleQuality(req, res, userId, supabaseAdmin);
+  }
   if (viewParam === "compare") {
     return handleCompare(req, res, userId, supabaseAdmin);
   }

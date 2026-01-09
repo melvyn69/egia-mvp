@@ -41,6 +41,62 @@ export type AnalyticsTimeseries = {
   }>;
 };
 
+export type AnalyticsDrivers = {
+  period: {
+    preset: string;
+    from: string | null;
+    to: string | null;
+    location_id: string | null;
+  };
+  totals: {
+    tagged_count: number;
+  };
+  positives: Array<{
+    label: string;
+    count: number;
+    share_pct: number | null;
+    net_sentiment: number;
+    delta: number | null;
+    delta_pct: number | null;
+    source: "ai" | "manual";
+    tag_ids?: string[];
+  }>;
+  irritants: Array<{
+    label: string;
+    count: number;
+    share_pct: number | null;
+    net_sentiment: number;
+    delta: number | null;
+    delta_pct: number | null;
+    source: "ai" | "manual";
+    tag_ids?: string[];
+  }>;
+};
+
+export type AnalyticsQuality = {
+  reply_rate: number | null;
+  avg_reply_delay_hours: number | null;
+  sla_24h: number | null;
+  replyable_count: number;
+  replied_count: number;
+  replied_with_time_count: number;
+};
+
+export type AnalyticsDrilldown = {
+  items: Array<{
+    id: string;
+    review_id: string | null;
+    rating: number | null;
+    comment: string | null;
+    author_name: string | null;
+    create_time: string | null;
+    location_id: string | null;
+  }>;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+};
+
 export type AnalyticsCompare = {
   periodA: { start: string; end: string; label: string };
   periodB: { start: string; end: string; label: string };

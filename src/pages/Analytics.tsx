@@ -5,7 +5,10 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
 import type {
+  AnalyticsDrilldown,
+  AnalyticsDrivers,
   AnalyticsCompare,
+  AnalyticsQuality,
   AnalyticsInsights,
   AnalyticsOverview,
   AnalyticsTimeseries
@@ -42,6 +45,12 @@ const formatDeltaCount = (value: number | null): string =>
 
 const formatDeltaPct = (value: number | null): string =>
   value === null ? "—" : `${value > 0 ? "+" : ""}${Math.round(value * 100)}%`;
+
+const formatHours = (value: number | null): string =>
+  value === null ? "—" : `${value.toFixed(1)} h`;
+
+const formatShare = (value: number | null): string =>
+  value === null ? "—" : `${value.toFixed(1)}%`;
 
 const getSeverityVariant = (
   severity: "good" | "warn" | "bad"
@@ -124,6 +133,16 @@ const Analytics = ({
   const [timeseries, setTimeseries] = useState<AnalyticsTimeseries | null>(null);
   const [compare, setCompare] = useState<AnalyticsCompare | null>(null);
   const [insights, setInsights] = useState<AnalyticsInsights | null>(null);
+  const [drivers, setDrivers] = useState<AnalyticsDrivers | null>(null);
+  const [quality, setQuality] = useState<AnalyticsQuality | null>(null);
+  const [drilldown, setDrilldown] = useState<AnalyticsDrilldown | null>(null);
+  const [drilldownLoading, setDrilldownLoading] = useState(false);
+  const [drilldownError, setDrilldownError] = useState<string | null>(null);
+  const [drilldownDriver, setDrilldownDriver] = useState<{
+    label: string;
+    source: "ai" | "manual";
+    tag_ids?: string[];
+  } | null>(null);
   const [metric, setMetric] = useState<
     "reviews" | "avg_rating" | "neg_share" | "reply_rate"
   >("reviews");
@@ -154,6 +173,10 @@ const Analytics = ({
       setTimeseries(null);
       setCompare(null);
       setInsights(null);
+      setDrivers(null);
+      setQuality(null);
+      setDrilldown(null);
+      setDrilldownDriver(null);
       return;
     }
     let cancelled = false;
@@ -176,7 +199,14 @@ const Analytics = ({
       }
       params.set("granularity", granularity);
       try {
-        const [overviewRes, seriesRes, compareRes, insightsRes] =
+        const [
+          overviewRes,
+          seriesRes,
+          compareRes,
+          insightsRes,
+          driversRes,
+          qualityRes
+        ] =
           await Promise.all([
           fetch(`/api/analytics?view=overview&${params.toString()}`, {
             headers: { Authorization: `Bearer ${session.access_token}` }
@@ -189,12 +219,20 @@ const Analytics = ({
           }),
           fetch(`/api/analytics?view=insights&mode=auto&${params.toString()}`, {
             headers: { Authorization: `Bearer ${session.access_token}` }
+          }),
+          fetch(`/api/analytics?view=drivers&${params.toString()}`, {
+            headers: { Authorization: `Bearer ${session.access_token}` }
+          }),
+          fetch(`/api/analytics?view=quality&${params.toString()}`, {
+            headers: { Authorization: `Bearer ${session.access_token}` }
           })
         ]);
         const overviewPayload = await overviewRes.json().catch(() => null);
         const seriesPayload = await seriesRes.json().catch(() => null);
         const comparePayload = await compareRes.json().catch(() => null);
         const insightsPayload = await insightsRes.json().catch(() => null);
+        const driversPayload = await driversRes.json().catch(() => null);
+        const qualityPayload = await qualityRes.json().catch(() => null);
         if (cancelled) {
           return;
         }
@@ -204,6 +242,8 @@ const Analytics = ({
           setTimeseries(null);
           setCompare(null);
           setInsights(null);
+          setDrivers(null);
+          setQuality(null);
           return;
         }
         if (!seriesRes.ok || !seriesPayload) {
@@ -212,12 +252,16 @@ const Analytics = ({
           setTimeseries(null);
           setCompare(compareRes.ok ? (comparePayload as AnalyticsCompare) : null);
           setInsights(insightsRes.ok ? (insightsPayload as AnalyticsInsights) : null);
+          setDrivers(driversRes.ok ? (driversPayload as AnalyticsDrivers) : null);
+          setQuality(qualityRes.ok ? (qualityPayload as AnalyticsQuality) : null);
           return;
         }
         setOverview(overviewPayload as AnalyticsOverview);
         setTimeseries(seriesPayload as AnalyticsTimeseries);
         setCompare(compareRes.ok ? (comparePayload as AnalyticsCompare) : null);
         setInsights(insightsRes.ok ? (insightsPayload as AnalyticsInsights) : null);
+        setDrivers(driversRes.ok ? (driversPayload as AnalyticsDrivers) : null);
+        setQuality(qualityRes.ok ? (qualityPayload as AnalyticsQuality) : null);
       } catch {
         if (!cancelled) {
           setError("Impossible de charger les analytics.");
@@ -225,6 +269,8 @@ const Analytics = ({
           setTimeseries(null);
           setCompare(null);
           setInsights(null);
+          setDrivers(null);
+          setQuality(null);
         }
       } finally {
         if (!cancelled) {
@@ -289,6 +335,15 @@ const Analytics = ({
     return formatRatio(value);
   };
 
+  const locationLabelById = useMemo(() => {
+    return new Map(
+      locations.map((location) => [
+        location.location_resource_name,
+        location.location_title ?? location.location_resource_name
+      ])
+    );
+  }, [locations]);
+
   const compareRows = useMemo(() => {
     if (!compare) {
       return [];
@@ -328,6 +383,70 @@ const Analytics = ({
       }
     ];
   }, [compare]);
+
+  const loadDrilldown = async (
+    driver: { label: string; source: "ai" | "manual"; tag_ids?: string[] },
+    offset: number,
+    append = false
+  ) => {
+    if (!session?.access_token) {
+      return;
+    }
+    setDrilldownLoading(true);
+    setDrilldownError(null);
+    if (!append) {
+      setDrilldown(null);
+    }
+    setDrilldownDriver(driver);
+    const params = new URLSearchParams();
+    if (locationId !== "all") {
+      params.set("location", locationId);
+    }
+    params.set("period", preset);
+    params.set("tz", timeZone);
+    if (preset === "custom") {
+      if (from) {
+        params.set("from", from);
+      }
+      if (to) {
+        params.set("to", to);
+      }
+    }
+    params.set("tag", driver.label);
+    params.set("source", driver.source);
+    if (driver.tag_ids && driver.tag_ids.length > 0) {
+      params.set("tag_ids", driver.tag_ids.join(","));
+    }
+    params.set("offset", String(offset));
+    params.set("limit", "10");
+    try {
+      const response = await fetch(
+        `/api/analytics?view=drilldown&${params.toString()}`,
+        {
+          headers: { Authorization: `Bearer ${session.access_token}` }
+        }
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload) {
+        setDrilldownError("Impossible de charger les avis.");
+        setDrilldownLoading(false);
+        return;
+      }
+      setDrilldown((prev) => {
+        if (append && prev) {
+          return {
+            ...payload,
+            items: [...prev.items, ...payload.items]
+          } as AnalyticsDrilldown;
+        }
+        return payload as AnalyticsDrilldown;
+      });
+    } catch {
+      setDrilldownError("Impossible de charger les avis.");
+    } finally {
+      setDrilldownLoading(false);
+    }
+  };
 
   const reasonLabel = overview ? getReasonLabel(overview.reasons) : "";
   const showGranularityToggle = rangeDays > 30 || preset === "all_time";
@@ -640,6 +759,138 @@ const Analytics = ({
         </Card>
       </section>
 
+      <section className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Drivers positifs</CardTitle>
+            <p className="text-sm text-slate-500">
+              Sujets qui tirent la satisfaction vers le haut.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {loading ? (
+              <Skeleton className="h-32 w-full" />
+            ) : drivers && drivers.positives.length > 0 ? (
+              drivers.positives.map((item) => (
+                <button
+                  key={`pos-${item.label}`}
+                  type="button"
+                  onClick={() =>
+                    loadDrilldown(
+                      { label: item.label, source: item.source, tag_ids: item.tag_ids },
+                      0
+                    )
+                  }
+                  className="w-full rounded-xl border border-slate-100 bg-white px-3 py-2 text-left text-sm text-slate-700 transition hover:border-slate-200"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold">{item.label}</span>
+                    <span className="text-xs text-slate-500">
+                      {formatDeltaCount(item.delta)} · {formatDeltaPct(item.delta_pct)}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                    <span>{item.count} mentions</span>
+                    <span>{formatShare(item.share_pct)}</span>
+                    <span>Solde: {item.net_sentiment}</span>
+                  </div>
+                </button>
+              ))
+            ) : (
+              <p className="text-sm text-slate-500">
+                {overview ? reasonLabel : "—"}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Irritants principaux</CardTitle>
+            <p className="text-sm text-slate-500">
+              Sujets qui tirent la satisfaction vers le bas.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {loading ? (
+              <Skeleton className="h-32 w-full" />
+            ) : drivers && drivers.irritants.length > 0 ? (
+              drivers.irritants.map((item) => (
+                <button
+                  key={`neg-${item.label}`}
+                  type="button"
+                  onClick={() =>
+                    loadDrilldown(
+                      { label: item.label, source: item.source, tag_ids: item.tag_ids },
+                      0
+                    )
+                  }
+                  className="w-full rounded-xl border border-slate-100 bg-white px-3 py-2 text-left text-sm text-slate-700 transition hover:border-slate-200"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold">{item.label}</span>
+                    <span className="text-xs text-slate-500">
+                      {formatDeltaCount(item.delta)} · {formatDeltaPct(item.delta_pct)}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                    <span>{item.count} mentions</span>
+                    <span>{formatShare(item.share_pct)}</span>
+                    <span>Solde: {item.net_sentiment}</span>
+                  </div>
+                </button>
+              ))
+            ) : (
+              <p className="text-sm text-slate-500">
+                {overview ? reasonLabel : "—"}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Qualité de réponse</CardTitle>
+            <p className="text-sm text-slate-500">
+              Suivi du temps et du taux de réponse.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {loading ? (
+              <Skeleton className="h-24 w-full" />
+            ) : quality ? (
+              <>
+                <div className="flex items-center justify-between text-sm text-slate-600">
+                  <span>Taux de réponse</span>
+                  <span className="font-semibold text-slate-900">
+                    {formatRatio(quality.reply_rate)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm text-slate-600">
+                  <span>Délai moyen</span>
+                  <span className="font-semibold text-slate-900">
+                    {formatHours(quality.avg_reply_delay_hours)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm text-slate-600">
+                  <span>Réponses &lt; 24h</span>
+                  <span className="font-semibold text-slate-900">
+                    {formatRatio(quality.sla_24h)}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  {quality.replied_with_time_count} réponses avec délai mesuré.
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-slate-500">—</p>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
       <section className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
         <Card>
           <CardHeader>
@@ -775,6 +1026,77 @@ const Analytics = ({
           </CardContent>
         </Card>
       </section>
+
+      {drilldownDriver && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <Card className="w-full max-w-3xl">
+            <CardHeader>
+              <CardTitle>Exemples d'avis</CardTitle>
+              <p className="text-sm text-slate-500">
+                {drilldownDriver.label}
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {drilldownLoading && <Skeleton className="h-32 w-full" />}
+              {drilldownError && (
+                <p className="text-sm text-amber-700">{drilldownError}</p>
+              )}
+              {!drilldownLoading && !drilldownError && drilldown ? (
+                <div className="space-y-3">
+                  {drilldown.items.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-xl border border-slate-100 bg-white px-3 py-2 text-sm text-slate-700"
+                    >
+                      <div className="flex items-center justify-between text-xs text-slate-500">
+                        <span>
+                          {item.rating ?? "—"}★ ·{" "}
+                          {item.create_time ? item.create_time.slice(0, 10) : "—"}
+                        </span>
+                        <span>
+                          {item.location_id
+                            ? locationLabelById.get(item.location_id) ?? item.location_id
+                            : "—"}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-700">
+                        {item.comment ?? "Avis sans commentaire."}
+                      </p>
+                    </div>
+                  ))}
+                  {drilldown.has_more && (
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        loadDrilldown(
+                          drilldownDriver,
+                          drilldown.items.length,
+                          true
+                        )
+                      }
+                      disabled={drilldownLoading}
+                    >
+                      Voir plus
+                    </Button>
+                  )}
+                </div>
+              ) : null}
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setDrilldownDriver(null);
+                    setDrilldown(null);
+                    setDrilldownError(null);
+                  }}
+                >
+                  Fermer
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };
