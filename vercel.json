@@ -1,4 +1,14 @@
 {
+  "crons": [
+    {
+      "path": "/api/cron/google/sync-replies",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/ai/tag-reviews",
+      "schedule": "*/10 * * * *"
+    }
+  ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/" }
