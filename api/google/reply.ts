@@ -68,6 +68,19 @@ const refreshGoogleAccessToken = async (refreshToken: string) => {
   return json.access_token as string;
 };
 
+const getLookupPath = (params: {
+  id?: string | null;
+  review_id?: string | null;
+  review_name?: string | null;
+  location_id?: string | null;
+}) => {
+  if (params.id) return "id";
+  if (params.review_name) return "review_name";
+  if (params.review_id && params.location_id) return "review_id+location_id";
+  if (params.review_id) return "review_id";
+  return "missing";
+};
+
 const resolveReviewRecord = async (
   userId: string,
   params: {
@@ -92,16 +105,19 @@ const resolveReviewRecord = async (
   } else if (params.review_id) {
     query = query.eq("review_id", params.review_id);
   } else {
-    return null;
+    return { data: null, error: null };
   }
   const { data, error } = await query.maybeSingle();
   if (error) {
-    throw new Error("Review lookup failed");
+    return { data: null, error };
   }
   if (!data) {
-    return null;
+    return { data: null, error: null };
   }
-  return { reviewName: data.review_name ?? null, status: data.status ?? null };
+  return {
+    data: { reviewName: data.review_name ?? null, status: data.status ?? null },
+    error: null
+  };
 };
 
 const resolveDraftReview = async (
@@ -134,9 +150,9 @@ const resolveDraftReview = async (
   }
   const { data, error } = await query.maybeSingle();
   if (error) {
-    throw new Error("Review lookup failed");
+    return { data: null, error };
   }
-  return data ?? null;
+  return { data: data ?? null, error: null };
 };
 
 const extractOpenAiText = (payload: unknown) => {
@@ -235,6 +251,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? resolvedReviewId
         : null);
     const resolvedId = id ?? googleReviewId ?? null;
+    const lookupPath = getLookupPath({
+      id: resolvedId,
+      review_id: resolvedReviewId,
+      review_name: resolvedReviewName,
+      location_id
+    });
     if (!resolvedId && !resolvedReviewId && !resolvedReviewName) {
       console.error("[reply]", requestId, "missing review identifiers");
       return res.status(400).json({ error: "Missing review identifiers" });
@@ -249,20 +271,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ? tone
           : "professional";
 
-      const review = await resolveDraftReview(userId, {
+      console.log("[reply]", requestId, "lookup", lookupPath);
+      const { data: review, error: lookupError } = await resolveDraftReview(userId, {
         id: resolvedId,
         review_id: resolvedReviewId,
         review_name: resolvedReviewName,
         location_id
       });
+      if (lookupError) {
+        console.error("[reply]", requestId, "draft lookup error", lookupError);
+        return res.status(500).json({ error: "Review lookup failed" });
+      }
       if (!review) {
         return res.status(404).json({
           error: "Review not found",
+          user_id: userId,
           lookup: {
             id: resolvedId,
             review_id: resolvedReviewId,
             review_name: resolvedReviewName,
-            location_id
+            location_id,
+            lookup_path: lookupPath
           }
         });
       }
@@ -329,20 +358,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: "Missing replyText" });
     }
 
-    const reviewRecord = await resolveReviewRecord(userId, {
+    console.log("[reply]", requestId, "lookup", lookupPath);
+    const { data: reviewRecord, error: reviewLookupError } =
+      await resolveReviewRecord(userId, {
       id: resolvedId,
       review_id: resolvedReviewId,
       review_name: resolvedReviewName,
       location_id
     });
+    if (reviewLookupError) {
+      console.error("[reply]", requestId, "reply lookup error", reviewLookupError);
+      return res.status(500).json({ error: "Review lookup failed" });
+    }
     if (!reviewRecord) {
       return res.status(404).json({
         error: "Review not found",
+        user_id: userId,
         lookup: {
           id: resolvedId,
           review_id: resolvedReviewId,
           review_name: resolvedReviewName,
-          location_id
+          location_id,
+          lookup_path: lookupPath
         }
       });
     }
