@@ -592,6 +592,7 @@ const Automation = ({
                     <p className="text-xs text-slate-500">
                       Note: {testResult.review.rating ?? "—"} ·{" "}
                       {formatLocationLabel(
+                        null,
                         testResult.review.location_id,
                         locations
                       )}
