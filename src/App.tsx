@@ -9,6 +9,8 @@ import { Dashboard } from "./pages/Dashboard";
 import { Inbox } from "./pages/Inbox";
 import { Connect } from "./pages/Connect";
 import { Analytics } from "./pages/Analytics";
+import { Automation } from "./pages/Automation";
+import { AutomationBuilder } from "./pages/AutomationBuilder";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
 import { Button } from "./components/ui/button";
@@ -101,6 +103,13 @@ const App = () => {
       return {
         title: "Analytics",
         subtitle: "Tendances, répartition et thèmes clients."
+      };
+    }
+
+    if (location.pathname.startsWith("/automation")) {
+      return {
+        title: "Automatisations",
+        subtitle: "Workflows, conditions et brouillons assistés."
       };
     }
 
@@ -567,6 +576,23 @@ const App = () => {
                   }
                 />
                 <Route path="/inbox" element={<Inbox />} />
+                <Route
+                  path="/automation"
+                  element={
+                    <Automation
+                      session={session}
+                      locations={locations}
+                      locationsLoading={locationsLoading}
+                      locationsError={locationsError}
+                    />
+                  }
+                />
+                <Route
+                  path="/automation/builder"
+                  element={
+                    <AutomationBuilder session={session} locations={locations} />
+                  }
+                />
                 <Route
                   path="/google_oauth_callback"
                   element={<OAuthCallback />}

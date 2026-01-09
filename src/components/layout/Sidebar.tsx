@@ -1,5 +1,12 @@
 import { NavLink } from "react-router-dom";
-import { BarChart3, Building2, LayoutDashboard, Link2, Mailbox } from "lucide-react";
+import {
+  BarChart3,
+  Building2,
+  LayoutDashboard,
+  Link2,
+  Mailbox,
+  Sparkles
+} from "lucide-react";
 import { cn } from "../../lib/utils";
 
 const navLinkBase =
@@ -77,6 +84,20 @@ const Sidebar = () => (
         >
           <Mailbox size={18} />
           Boîte de réception
+        </NavLink>
+        <NavLink
+          to="/automation"
+          className={({ isActive }) =>
+            cn(
+              navLinkBase,
+              isActive
+                ? "bg-ink text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            )
+          }
+        >
+          <Sparkles size={18} />
+          Automatisations
         </NavLink>
       </nav>
     </div>

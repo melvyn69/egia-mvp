@@ -19,14 +19,19 @@ const googleClientSecret = getEnv([
   "GOOGLE_OAUTH_CLIENT_SECRET",
   "GOOGLE_CLIENT_SECRET"
 ]);
+const openaiApiKey = process.env.OPENAI_API_KEY ?? "";
+const openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-const getMissingEnv = () => {
+const getMissingEnv = (mode: "reply" | "draft") => {
   const missing = [];
   if (!supabaseUrl) missing.push("SUPABASE_URL");
   if (!serviceRoleKey) missing.push("SUPABASE_SERVICE_ROLE_KEY");
-  if (!googleClientId) missing.push("GOOGLE_OAUTH_CLIENT_ID|GOOGLE_CLIENT_ID");
-  if (!googleClientSecret)
-    missing.push("GOOGLE_OAUTH_CLIENT_SECRET|GOOGLE_CLIENT_SECRET");
+  if (mode === "reply") {
+    if (!googleClientId) missing.push("GOOGLE_OAUTH_CLIENT_ID|GOOGLE_CLIENT_ID");
+    if (!googleClientSecret)
+      missing.push("GOOGLE_OAUTH_CLIENT_SECRET|GOOGLE_CLIENT_SECRET");
+  }
+  if (mode === "draft" && !openaiApiKey) missing.push("OPENAI_API_KEY");
   return missing;
 };
 
@@ -88,6 +93,54 @@ const resolveReviewRecord = async (
   return { reviewName, status: data?.status ?? null };
 };
 
+const resolveDraftReview = async (userId: string, reviewId: string) => {
+  let query = supabaseAdmin
+    .from("google_reviews")
+    .select(
+      "id, review_id, review_name, rating, comment, location_id, author_name, create_time"
+    )
+    .eq("user_id", userId);
+  if (reviewId.includes("accounts/")) {
+    query = query.eq("review_name", reviewId);
+  } else {
+    query = query.or(`review_id.eq.${reviewId},id.eq.${reviewId}`);
+  }
+  const { data, error } = await query.maybeSingle();
+  if (error || !data) {
+    throw new Error("Review lookup failed");
+  }
+  return data;
+};
+
+const extractOpenAiText = (payload: unknown) => {
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    if (typeof record.output_text === "string" && record.output_text.trim()) {
+      return record.output_text;
+    }
+    const outputItems = Array.isArray(record.output) ? record.output : [];
+    const chunks: string[] = [];
+    for (const item of outputItems) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const contentItems = Array.isArray((item as Record<string, unknown>).content)
+        ? ((item as Record<string, unknown>).content as Array<Record<string, unknown>>)
+        : [];
+      for (const content of contentItems) {
+        const text = typeof content?.text === "string" ? content.text : undefined;
+        if (text) {
+          chunks.push(text);
+        }
+      }
+    }
+    if (chunks.length) {
+      return chunks.join("\n");
+    }
+  }
+  return null;
+};
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -96,13 +149,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId =
     req.headers["x-request-id"]?.toString() ??
     `req_${crypto.randomUUID()}`;
-  const missingEnv = getMissingEnv();
-  if (missingEnv.length) {
-    console.error("[reply]", requestId, "missing env:", missingEnv);
-    return res
-      .status(500)
-      .json({ error: `Missing env: ${missingEnv.join(", ")}` });
-  }
 
   try {
     const auth = req.headers.authorization || "";
@@ -123,35 +169,121 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         payload = {};
       }
     }
-    const { reviewId, replyText, draftReplyId, googleReviewId } = payload as {
-      reviewId?: string;
-      replyText?: string;
-      draftReplyId?: string;
-      googleReviewId?: string;
-    };
-    if (!reviewId || !replyText) {
-      console.error("[reply]", requestId, "missing payload", {
-        hasReviewId: Boolean(reviewId),
+    const mode = payload?.mode === "draft" ? "draft" : "reply";
+    const missingEnv = getMissingEnv(mode);
+    if (missingEnv.length) {
+      console.error("[reply]", requestId, "missing env:", missingEnv);
+      return res
+        .status(500)
+        .json({ error: `Missing env: ${missingEnv.join(", ")}` });
+    }
+
+    const { reviewId, review_id, replyText, draftReplyId, googleReviewId, tone } =
+      payload as {
+        reviewId?: string;
+        review_id?: string;
+        replyText?: string;
+        draftReplyId?: string;
+        googleReviewId?: string;
+        tone?: string;
+      };
+
+    const resolvedReviewId = review_id ?? reviewId;
+    if (!resolvedReviewId) {
+      console.error("[reply]", requestId, "missing reviewId", {
+        hasReviewId: Boolean(resolvedReviewId)
+      });
+      return res.status(400).json({ error: "Missing reviewId" });
+    }
+
+    if (mode === "draft") {
+      const toneValue =
+        tone === "professional" ||
+        tone === "enthusiastic" ||
+        tone === "empathic" ||
+        tone === "apology"
+          ? tone
+          : "professional";
+
+      const review = await resolveDraftReview(userId, resolvedReviewId);
+      const reviewText = typeof review.comment === "string" ? review.comment : "";
+      const rating =
+        typeof review.rating === "number" ? `${review.rating}` : "inconnue";
+      const systemPrompt =
+        "Tu es un expert en reponses aux avis Google pour une entreprise locale. " +
+        "Reste factuel, ne devine pas de details. " +
+        "Ecris dans la langue de l'avis (francais par defaut). " +
+        "2 a 4 phrases maximum, ton adapte au contexte.";
+      const userPrompt =
+        "Genere un brouillon de reponse a cet avis.\n" +
+        `Note: ${rating}\n` +
+        `Ton: ${toneValue}\n` +
+        `Avis: ${reviewText || "Avis sans commentaire."}`;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await fetch("https://api.openai.com/v1/responses", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${openaiApiKey}`,
+            "Content-Type": "application/json"
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: openaiModel,
+            input: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt }
+            ]
+          })
+        });
+        if (!response.ok) {
+          const txt = await response.text();
+          console.error("[reply]", requestId, "draft openai failed", txt);
+          return res.status(502).json({ error: "OpenAI request failed" });
+        }
+        const payload = await response.json();
+        const outputText = extractOpenAiText(payload);
+        if (!outputText) {
+          console.error("[reply]", requestId, "draft missing output");
+          return res.status(502).json({ error: "OpenAI response missing output" });
+        }
+        return res.status(200).json({ draft_text: outputText.trim() });
+      } catch (error) {
+        if ((error as Error).name === "AbortError") {
+          console.error("[reply]", requestId, "draft openai timeout");
+          return res.status(504).json({ error: "OpenAI request timeout" });
+        }
+        console.error("[reply]", requestId, "draft openai error", error);
+        return res.status(502).json({ error: "OpenAI request failed" });
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
+    if (!replyText) {
+      console.error("[reply]", requestId, "missing replyText", {
         hasReplyText: Boolean(replyText)
       });
-      return res.status(400).json({ error: "Missing reviewId or replyText" });
+      return res.status(400).json({ error: "Missing replyText" });
     }
 
     const reviewRecord = await resolveReviewRecord(
       userId,
-      reviewId,
+      resolvedReviewId,
       googleReviewId ?? null
     );
     if (reviewRecord.status === "replied") {
       console.error("[reply]", requestId, "already replied", {
-        reviewId,
+        reviewId: resolvedReviewId,
         googleReviewId
       });
       return res.status(409).json({ error: "already_replied" });
     }
     if (!reviewRecord.reviewName) {
       console.error("[reply]", requestId, "review name missing", {
-        reviewId,
+        reviewId: resolvedReviewId,
         googleReviewId
       });
       return res.status(400).json({ error: "Review name not found" });
