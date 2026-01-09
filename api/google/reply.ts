@@ -70,46 +70,73 @@ const refreshGoogleAccessToken = async (refreshToken: string) => {
 
 const resolveReviewRecord = async (
   userId: string,
-  reviewId: string,
-  googleReviewId?: string | null
+  params: {
+    id?: string | null;
+    review_id?: string | null;
+    review_name?: string | null;
+    location_id?: string | null;
+  }
 ) => {
   let query = supabaseAdmin
     .from("google_reviews")
     .select("review_name, status")
     .eq("user_id", userId);
-  if (googleReviewId) {
-    query = query.eq("id", googleReviewId);
-  } else if (reviewId.includes("accounts/")) {
-    query = query.eq("review_name", reviewId);
+  if (params.id) {
+    query = query.eq("id", params.id);
+  } else if (params.review_name) {
+    query = query.eq("review_name", params.review_name);
+  } else if (params.review_id && params.location_id) {
+    query = query
+      .eq("review_id", params.review_id)
+      .eq("location_id", params.location_id);
+  } else if (params.review_id) {
+    query = query.eq("review_id", params.review_id);
   } else {
-    query = query.eq("review_id", reviewId);
+    return null;
   }
   const { data, error } = await query.maybeSingle();
   if (error) {
     throw new Error("Review lookup failed");
   }
-  const reviewName =
-    data?.review_name ?? (reviewId.includes("accounts/") ? reviewId : null);
-  return { reviewName, status: data?.status ?? null };
+  if (!data) {
+    return null;
+  }
+  return { reviewName: data.review_name ?? null, status: data.status ?? null };
 };
 
-const resolveDraftReview = async (userId: string, reviewId: string) => {
+const resolveDraftReview = async (
+  userId: string,
+  params: {
+    id?: string | null;
+    review_id?: string | null;
+    review_name?: string | null;
+    location_id?: string | null;
+  }
+) => {
   let query = supabaseAdmin
     .from("google_reviews")
     .select(
       "id, review_id, review_name, rating, comment, location_id, author_name, create_time"
     )
     .eq("user_id", userId);
-  if (reviewId.includes("accounts/")) {
-    query = query.eq("review_name", reviewId);
+  if (params.id) {
+    query = query.eq("id", params.id);
+  } else if (params.review_name) {
+    query = query.eq("review_name", params.review_name);
+  } else if (params.review_id && params.location_id) {
+    query = query
+      .eq("review_id", params.review_id)
+      .eq("location_id", params.location_id);
+  } else if (params.review_id) {
+    query = query.eq("review_id", params.review_id);
   } else {
-    query = query.or(`review_id.eq.${reviewId},id.eq.${reviewId}`);
+    return null;
   }
   const { data, error } = await query.maybeSingle();
-  if (error || !data) {
+  if (error) {
     throw new Error("Review lookup failed");
   }
-  return data;
+  return data ?? null;
 };
 
 const extractOpenAiText = (payload: unknown) => {
@@ -178,22 +205,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .json({ error: `Missing env: ${missingEnv.join(", ")}` });
     }
 
-    const { reviewId, review_id, replyText, draftReplyId, googleReviewId, tone } =
+    const {
+      id,
+      reviewId,
+      review_id,
+      review_name,
+      location_id,
+      replyText,
+      draftReplyId,
+      googleReviewId,
+      tone
+    } =
       payload as {
+        id?: string;
         reviewId?: string;
         review_id?: string;
+        review_name?: string;
+        location_id?: string;
         replyText?: string;
         draftReplyId?: string;
         googleReviewId?: string;
         tone?: string;
       };
 
-    const resolvedReviewId = review_id ?? reviewId;
-    if (!resolvedReviewId) {
-      console.error("[reply]", requestId, "missing reviewId", {
-        hasReviewId: Boolean(resolvedReviewId)
-      });
-      return res.status(400).json({ error: "Missing reviewId" });
+    const resolvedReviewId = review_id ?? reviewId ?? null;
+    const resolvedReviewName =
+      review_name ??
+      (resolvedReviewId && resolvedReviewId.includes("accounts/")
+        ? resolvedReviewId
+        : null);
+    const resolvedId = id ?? googleReviewId ?? null;
+    if (!resolvedId && !resolvedReviewId && !resolvedReviewName) {
+      console.error("[reply]", requestId, "missing review identifiers");
+      return res.status(400).json({ error: "Missing review identifiers" });
     }
 
     if (mode === "draft") {
@@ -205,7 +249,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ? tone
           : "professional";
 
-      const review = await resolveDraftReview(userId, resolvedReviewId);
+      const review = await resolveDraftReview(userId, {
+        id: resolvedId,
+        review_id: resolvedReviewId,
+        review_name: resolvedReviewName,
+        location_id
+      });
+      if (!review) {
+        return res.status(404).json({
+          error: "Review not found",
+          lookup: {
+            id: resolvedId,
+            review_id: resolvedReviewId,
+            review_name: resolvedReviewName,
+            location_id
+          }
+        });
+      }
       const reviewText = typeof review.comment === "string" ? review.comment : "";
       const rating =
         typeof review.rating === "number" ? `${review.rating}` : "inconnue";
@@ -269,22 +329,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: "Missing replyText" });
     }
 
-    const reviewRecord = await resolveReviewRecord(
-      userId,
-      resolvedReviewId,
-      googleReviewId ?? null
-    );
+    const reviewRecord = await resolveReviewRecord(userId, {
+      id: resolvedId,
+      review_id: resolvedReviewId,
+      review_name: resolvedReviewName,
+      location_id
+    });
+    if (!reviewRecord) {
+      return res.status(404).json({
+        error: "Review not found",
+        lookup: {
+          id: resolvedId,
+          review_id: resolvedReviewId,
+          review_name: resolvedReviewName,
+          location_id
+        }
+      });
+    }
     if (reviewRecord.status === "replied") {
       console.error("[reply]", requestId, "already replied", {
         reviewId: resolvedReviewId,
-        googleReviewId
+        googleReviewId: resolvedId
       });
       return res.status(409).json({ error: "already_replied" });
     }
     if (!reviewRecord.reviewName) {
       console.error("[reply]", requestId, "review name missing", {
         reviewId: resolvedReviewId,
-        googleReviewId
+        googleReviewId: resolvedId
       });
       return res.status(400).json({ error: "Review name not found" });
     }
@@ -358,10 +430,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("google_reviews")
       .update({ status: "replied", reply_text: replyText, replied_at: sentAt })
       .eq("user_id", userId);
-    if (googleReviewId) {
-      reviewUpdate = reviewUpdate.eq("id", googleReviewId);
-    } else {
-      reviewUpdate = reviewUpdate.eq("review_id", reviewId);
+    if (resolvedId) {
+      reviewUpdate = reviewUpdate.eq("id", resolvedId);
+    } else if (resolvedReviewId) {
+      reviewUpdate = reviewUpdate.eq("review_id", resolvedReviewId);
     }
     const { error: reviewUpdateError } = await reviewUpdate;
     if (reviewUpdateError) {

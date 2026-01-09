@@ -335,7 +335,9 @@ const Automation = ({
             },
             body: JSON.stringify({
               mode: "draft",
+              id: match.id,
               review_id: match.review_id ?? match.id,
+              location_id: match.location_id ?? undefined,
               tone
             })
           });
