@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "node16",
+    "lib": ["ES2023"],
+    "rootDir": "server/_shared",
+    "outDir": "server/_shared",
+    "declaration": false,
+    "sourceMap": false,
+    "noEmit": false,
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["server/_shared/**/*.ts"]
+}

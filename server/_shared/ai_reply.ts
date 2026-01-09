@@ -1,0 +1,116 @@
+import type { Database } from "./database.types.js";
+
+type BrandVoiceRow = Database["public"]["Tables"]["brand_voice"]["Row"];
+
+type GenerateAiReplyParams = {
+  reviewText: string;
+  rating: number | null;
+  brandVoice: BrandVoiceRow | null;
+  overrideTone: string | null;
+  openaiApiKey: string;
+  model: string;
+  requestId?: string;
+};
+
+const DEFAULT_REPLY = "Merci pour votre avis.";
+
+const toneMap: Record<string, string> = {
+  professional: "professionnel",
+  friendly: "amical",
+  warm: "chaleureux",
+  formal: "formel"
+};
+
+const stripEmojis = (text: string) =>
+  text.replace(/[\p{Extended_Pictographic}]/gu, "");
+
+const applyForbiddenWords = (text: string, forbidden: string[]) => {
+  return forbidden.reduce((acc, word) => {
+    if (!word) return acc;
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return acc.replace(new RegExp(escaped, "gi"), "").trim();
+  }, text);
+};
+
+export const generateAiReply = async ({
+  reviewText,
+  rating,
+  brandVoice,
+  overrideTone,
+  openaiApiKey,
+  model,
+  requestId
+}: GenerateAiReplyParams) => {
+  if (!openaiApiKey) {
+    return DEFAULT_REPLY;
+  }
+
+  const enabled = brandVoice?.enabled ?? false;
+  const toneKey = overrideTone ?? (enabled ? brandVoice?.tone : null) ?? "professional";
+  const toneLabel = toneMap[toneKey] ?? toneKey;
+  const languageLevel = enabled
+    ? brandVoice?.language_level ?? "vouvoiement"
+    : "vouvoiement";
+  const context = enabled ? brandVoice?.context?.trim() : null;
+  const useEmojis = enabled ? Boolean(brandVoice?.use_emojis) : false;
+  const forbiddenWords = enabled ? brandVoice?.forbidden_words ?? [] : [];
+
+  const system = [
+    "Tu es un expert en e-reputation.",
+    "Tu rediges une reponse courte a un avis Google.",
+    "Ne jamais inventer de details ou de causes.",
+    "2 a 4 phrases maximum.",
+    "Reponds dans la langue de l'avis, francais par defaut.",
+    useEmojis ? "Les emojis sont autorises." : "N'utilise aucun emoji."
+  ].join(" ");
+
+  const user = [
+    `Avis: """${reviewText.trim()}"""`,
+    rating !== null ? `Note: ${rating}/5.` : "Note: inconnue.",
+    `Ton souhaite: ${toneLabel}.`,
+    `Niveau de langage: ${languageLevel}.`,
+    context ? `Contexte a integrer: ${context}` : "",
+    forbiddenWords.length ? `Mots interdits: ${forbiddenWords.join(", ")}.` : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${openaiApiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user }
+        ],
+        temperature: 0.6,
+        max_tokens: 220,
+        user: requestId
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`OpenAI error: ${text}`);
+    }
+
+    const json = await response.json();
+    const reply = json?.choices?.[0]?.message?.content?.trim() ?? "";
+    const sanitized = applyForbiddenWords(
+      useEmojis ? reply : stripEmojis(reply),
+      forbiddenWords
+    );
+    return sanitized || DEFAULT_REPLY;
+  } finally {
+    clearTimeout(timeout);
+  }
+};
