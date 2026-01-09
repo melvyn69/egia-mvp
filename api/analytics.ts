@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import type { Database } from "../server/_shared/database.types.js";
 import { requireUser } from "../server/_shared/_auth.js";
 import { resolveDateRange } from "../server/_shared/_date.js";
 import { parseFilters } from "../server/_shared/_filters.js";
@@ -226,19 +227,7 @@ const isReplied = (row: {
       row.status === "replied"
   );
 
-type ReviewRow = {
-  rating: number | null;
-  comment: string | null;
-  reply_text: string | null;
-  replied_at: string | null;
-  owner_reply: string | null;
-  owner_reply_time: string | null;
-  status: string | null;
-  create_time: string | null;
-  update_time: string | null;
-  created_at: string | null;
-  location_id: string | null;
-};
+type GoogleReviewRow = Database["public"]["Tables"]["google_reviews"]["Row"];
 
 const buildReviewsQuery = (
   supabaseAdmin: ReturnType<typeof requireUser> extends Promise<infer R>
@@ -279,7 +268,7 @@ const fetchReviewsForRange = async (
   locationIds: string[],
   range: { from: string; to: string }
 ) => {
-  const rows: ReviewRow[] = [];
+  const rows: GoogleReviewRow[] = [];
   const pageSize = 1000;
   const maxRows = 20000;
   for (let offset = 0; offset < maxRows; offset += pageSize) {
@@ -318,7 +307,7 @@ const resolveGranularity = (
 };
 
 const buildTimeseriesPoints = (
-  rows: ReviewRow[],
+  rows: GoogleReviewRow[],
   range: { from: string; to: string },
   granularity: "day" | "week"
 ) => {
@@ -403,7 +392,7 @@ const buildTimeseriesPoints = (
   return points;
 };
 
-const computeCompareMetrics = (rows: ReviewRow[]) => {
+const computeCompareMetrics = (rows: GoogleReviewRow[]) => {
   const review_count = rows.length;
   const ratings = rows
     .map((row) => row.rating)
@@ -517,7 +506,7 @@ const mapSentimentFromRating = (rating: number | null) => {
 };
 
 const computeTagStats = (params: {
-  reviewRows: ReviewRow[];
+  reviewRows: GoogleReviewRow[];
   tagLinks: Array<{ review_id: string; tag_label: string; tag_id?: string }>;
   sentiments: Map<string, string | null>;
 }) => {
@@ -1374,7 +1363,7 @@ const handleTimeseries = async (
     return res.status(200).json(empty);
   }
 
-  let rows: ReviewRow[] = [];
+  let rows: GoogleReviewRow[] = [];
   try {
     rows = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, range);
   } catch (error) {
@@ -1453,8 +1442,8 @@ const handleDrivers = async (
     return res.status(200).json(empty);
   }
 
-  let reviewsA: ReviewRow[] = [];
-  let reviewsB: ReviewRow[] = [];
+  let reviewsA: GoogleReviewRow[] = [];
+  let reviewsB: GoogleReviewRow[] = [];
   try {
     reviewsA = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeA);
     reviewsB = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeB);
@@ -1636,7 +1625,7 @@ const handleQuality = async (
     return res.status(200).json(empty);
   }
 
-  let reviews: ReviewRow[] = [];
+  let reviews: GoogleReviewRow[] = [];
   try {
     reviews = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, range);
   } catch (error) {
@@ -1731,7 +1720,7 @@ const handleDrilldown = async (
     return res.status(200).json(empty);
   }
 
-  let reviews: ReviewRow[] = [];
+  let reviews: GoogleReviewRow[] = [];
   try {
     reviews = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, range);
   } catch (error) {
@@ -1843,8 +1832,8 @@ const handleCompare = async (
     return res.status(200).json(compare);
   }
 
-  let rowsA: ReviewRow[] = [];
-  let rowsB: ReviewRow[] = [];
+  let rowsA: GoogleReviewRow[] = [];
+  let rowsB: GoogleReviewRow[] = [];
   try {
     rowsA = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeA);
     rowsB = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeB);
@@ -1908,8 +1897,8 @@ const handleInsights = async (
   const emptyMetrics = computeCompareMetrics([]);
   let metricsA = emptyMetrics;
   let metricsB = emptyMetrics;
-  let rowsA: ReviewRow[] = [];
-  let rowsB: ReviewRow[] = [];
+  let rowsA: GoogleReviewRow[] = [];
+  let rowsB: GoogleReviewRow[] = [];
 
   if (!filters.reject && locationIds.length > 0) {
     try {
