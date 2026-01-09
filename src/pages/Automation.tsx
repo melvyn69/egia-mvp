@@ -185,6 +185,9 @@ const Automation = ({
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<TesterResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
+  const [activeLocationIds, setActiveLocationIds] = useState<string[] | null>(
+    null
+  );
   const supabaseClient = supabase;
 
   const workflowById = useMemo(
@@ -289,6 +292,37 @@ const Automation = ({
     };
   }, [session]);
 
+  useEffect(() => {
+    if (!supabaseClient || !session) {
+      setActiveLocationIds(null);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      const { data, error } = await supabaseClient
+        .from("business_settings")
+        .select("active_location_ids")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+      if (cancelled) {
+        return;
+      }
+      if (error) {
+        console.error("business_settings fetch error:", error);
+        setActiveLocationIds(null);
+        return;
+      }
+      const ids = Array.isArray(data?.active_location_ids)
+        ? data.active_location_ids.filter(Boolean)
+        : null;
+      setActiveLocationIds(ids && ids.length > 0 ? ids : null);
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, supabaseClient]);
+
   const toggleWorkflow = async (workflow: WorkflowRow) => {
     if (!supabaseClient) return;
     const nextEnabled = !(workflow.enabled ?? false);
@@ -334,10 +368,25 @@ const Automation = ({
       workflow.location_id ?? null,
       locations
     );
-    if (locationResourceNames.length === 1) {
-      query = query.eq("location_id", locationResourceNames[0]);
-    } else if (locationResourceNames.length > 1) {
-      query = query.in("location_id", locationResourceNames);
+    const activeResourceNames =
+      activeLocationIds && activeLocationIds.length > 0
+        ? locations
+            .filter((location) => activeLocationIds.includes(location.id))
+            .map((location) => location.location_resource_name)
+        : null;
+    const allowedResourceNames = activeResourceNames
+      ? locationResourceNames.filter((name) =>
+          activeResourceNames.includes(name)
+        )
+      : locationResourceNames;
+    if (allowedResourceNames.length === 1) {
+      query = query.eq("location_id", allowedResourceNames[0]);
+    } else if (allowedResourceNames.length > 1) {
+      query = query.in("location_id", allowedResourceNames);
+    } else if (activeResourceNames) {
+      setTestError("Aucun lieu actif pour ce workflow.");
+      setTestingId(null);
+      return;
     }
 
     const { data: reviewData, error: reviewError } = await query;

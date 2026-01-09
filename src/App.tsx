@@ -13,6 +13,7 @@ import { BrandVoice } from "./pages/BrandVoice";
 import { Automation } from "./pages/Automation";
 import { AutomationBuilder } from "./pages/AutomationBuilder";
 import { TestLab } from "./pages/TestLab";
+import { SyncStatus } from "./pages/SyncStatus";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
 import { Button } from "./components/ui/button";
@@ -625,6 +626,10 @@ const App = () => {
                 <Route
                   path="/settings/test-lab"
                   element={<TestLab session={session} />}
+                />
+                <Route
+                  path="/sync-status"
+                  element={<SyncStatus session={session} />}
                 />
                 <Route
                   path="/google_oauth_callback"

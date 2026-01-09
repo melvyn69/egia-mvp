@@ -283,8 +283,10 @@ export type Database = {
       }
       business_settings: {
         Row: {
+          active_location_ids: string[] | null
           business_id: string
           business_name: string
+          created_at: string | null
           default_length: string
           default_tone: string
           do_not_say: string | null
@@ -296,8 +298,10 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          active_location_ids?: string[] | null
           business_id?: string
           business_name: string
+          created_at?: string | null
           default_length?: string
           default_tone?: string
           do_not_say?: string | null
@@ -309,8 +313,10 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          active_location_ids?: string[] | null
           business_id?: string
           business_name?: string
+          created_at?: string | null
           default_length?: string
           default_tone?: string
           do_not_say?: string | null

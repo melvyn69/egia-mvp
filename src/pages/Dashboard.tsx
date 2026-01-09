@@ -25,6 +25,7 @@ import {
   dispatchNotificationsUpdated
 } from "../lib/notifications";
 import { mockGoogleConnected } from "../mock/mockData";
+import { supabase } from "../lib/supabase";
 
 type DashboardProps = {
   session: Session | null;
@@ -301,6 +302,8 @@ const Dashboard = ({
   const [kpiData, setKpiData] = useState<KpiSummary | null>(null);
   const [kpiLoading, setKpiLoading] = useState(false);
   const [kpiError, setKpiError] = useState<string | null>(null);
+  const [selectedActiveIds, setSelectedActiveIds] = useState<string[]>([]);
+  const [activeLocationsSaving, setActiveLocationsSaving] = useState(false);
 
   useEffect(() => {
     try {
@@ -377,6 +380,70 @@ const Dashboard = ({
       cancelled = true;
     };
   }, [kpiLocationId, kpiPreset, kpiFrom, kpiTo, session, timeZone]);
+
+  useEffect(() => {
+    if (!supabase || !session) {
+      setActiveLocationIds(null);
+      setSelectedActiveIds([]);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      const { data, error } = await supabase
+        .from("business_settings")
+        .select("active_location_ids")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+      if (cancelled) {
+        return;
+      }
+      if (error) {
+        console.error("business_settings load error:", error);
+        setSelectedActiveIds(locations.map((location) => location.id));
+        return;
+      }
+      const ids = Array.isArray(data?.active_location_ids)
+        ? data.active_location_ids.filter(Boolean)
+        : null;
+      const resolved =
+        ids && ids.length > 0 ? ids : locations.map((location) => location.id);
+      setSelectedActiveIds(resolved);
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, locations]);
+
+  const saveActiveLocations = async () => {
+    if (!supabase || !session) {
+      return;
+    }
+    setActiveLocationsSaving(true);
+    const allIds = locations.map((location) => location.id);
+    const nextActive =
+      selectedActiveIds.length === 0 || selectedActiveIds.length === allIds.length
+        ? null
+        : selectedActiveIds;
+    const payload = {
+      user_id: session.user.id,
+      business_id: session.user.id,
+      business_name: session.user.email ?? "Business",
+      active_location_ids: nextActive,
+      updated_at: new Date().toISOString()
+    };
+    const { error } = await supabase
+      .from("business_settings")
+      .upsert(payload, { onConflict: "business_id" });
+    if (error) {
+      console.error("business_settings save error:", error);
+    } else {
+      setSelectedActiveIds(
+        nextActive ?? locations.map((location) => location.id)
+      );
+    }
+    setActiveLocationsSaving(false);
+  };
 
   useEffect(() => {
     if (!didMountRef.current) {
@@ -693,6 +760,13 @@ const Dashboard = ({
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
+              onClick={saveActiveLocations}
+              disabled={activeLocationsSaving || locationsLoading}
+            >
+              {activeLocationsSaving ? "Enregistrement..." : "Enregistrer"}
+            </Button>
+            <Button
+              variant="outline"
               onClick={onSyncLocations}
               disabled={syncing || syncDisabled}
             >
@@ -740,10 +814,21 @@ const Dashboard = ({
                     )}
                   </div>
                   <div className="text-right">
-                    <div className="flex items-center justify-end gap-1 text-sm font-semibold text-slate-900">
-                      <Star size={14} className="text-amber-500" />
-                      Actif
-                    </div>
+                    <label className="flex items-center justify-end gap-2 text-sm font-semibold text-slate-900">
+                      <input
+                        type="checkbox"
+                        checked={selectedActiveIds.includes(location.id)}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setSelectedActiveIds((prev) =>
+                            checked
+                              ? [...prev, location.id]
+                              : prev.filter((id) => id !== location.id)
+                          );
+                        }}
+                      />
+                      {selectedActiveIds.includes(location.id) ? "Actif" : "Inactif"}
+                    </label>
                     {location.website_uri && (
                       <p className="text-xs text-slate-500">
                         {location.website_uri}

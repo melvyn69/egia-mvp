@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   Link2,
   Mailbox,
+  RefreshCw,
   Settings,
   Sparkles
 } from "lucide-react";
@@ -127,6 +128,20 @@ const Sidebar = () => (
         >
           <Settings size={18} />
           Test Lab
+        </NavLink>
+        <NavLink
+          to="/sync-status"
+          className={({ isActive }) =>
+            cn(
+              navLinkBase,
+              isActive
+                ? "bg-ink text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            )
+          }
+        >
+          <RefreshCw size={18} />
+          Sync status
         </NavLink>
       </nav>
     </div>

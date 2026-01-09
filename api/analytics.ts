@@ -1023,27 +1023,51 @@ const resolveLocationIds = async (
   userId: string,
   locationId: string | null
 ) => {
+  const { data: settings } = await supabaseAdmin
+    .from("business_settings")
+    .select("active_location_ids")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const activeLocationIds = Array.isArray(settings?.active_location_ids)
+    ? settings?.active_location_ids.filter(Boolean)
+    : null;
   let locationIds: string[] = [];
   if (locationId) {
     const { data: locationRow } = await supabaseAdmin
       .from("google_locations")
-      .select("location_resource_name")
+      .select("id, location_resource_name")
       .eq("user_id", userId)
       .eq("location_resource_name", locationId)
       .maybeSingle();
     if (!locationRow) {
       return { locationIds: [], missing: true };
     }
+    if (
+      activeLocationIds &&
+      activeLocationIds.length > 0 &&
+      !activeLocationIds.includes(locationRow.id)
+    ) {
+      return { locationIds: [], missing: true };
+    }
     locationIds = [locationId];
   } else {
     const { data: locations } = await supabaseAdmin
       .from("google_locations")
-      .select("location_resource_name")
+      .select("id, location_resource_name")
       .eq("user_id", userId);
-    locationIds = (locations ?? [])
+    const filtered =
+      activeLocationIds && activeLocationIds.length > 0
+        ? (locations ?? []).filter((location) =>
+            activeLocationIds.includes(location.id)
+          )
+        : locations ?? [];
+    locationIds = filtered
       .map((location) => location.location_resource_name)
       .filter(Boolean);
     if (locationIds.length === 0) {
+      if (activeLocationIds && activeLocationIds.length > 0) {
+        return { locationIds: [], missing: false };
+      }
       const { data: reviewLocations } = await supabaseAdmin
         .from("google_reviews")
         .select("location_id")

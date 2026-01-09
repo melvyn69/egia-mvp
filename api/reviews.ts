@@ -6,7 +6,7 @@ import { requireUser } from "../server/_shared_dist/_auth.js";
 
 type Cursor = { source_time: string; id: string };
 
-type GoogleLocationRow = { location_resource_name: string };
+type GoogleLocationRow = { id: string; location_resource_name: string };
 
 type GoogleReviewRow = {
   id: string;
@@ -46,6 +46,25 @@ const parseCursor = (cursorParam: string | undefined): Cursor | null => {
 
 const buildCursor = (cursor: Cursor) =>
   Buffer.from(JSON.stringify(cursor), "utf-8").toString("base64");
+
+const fetchActiveLocationIds = async (
+  supabaseAdmin: ReturnType<typeof requireUser> extends Promise<infer R>
+    ? R extends { supabaseAdmin: infer C }
+      ? C
+      : never
+    : never,
+  userId: string
+) => {
+  const { data } = await supabaseAdmin
+    .from("business_settings")
+    .select("active_location_ids")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const activeIds = Array.isArray(data?.active_location_ids)
+    ? data?.active_location_ids.filter(Boolean)
+    : null;
+  return activeIds && activeIds.length > 0 ? new Set(activeIds) : null;
+};
 
 const getRequestId = (req: VercelRequest) => {
   const header = req.headers["x-vercel-id"] ?? req.headers["x-request-id"];
@@ -112,23 +131,35 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     });
 
     let locationIds: string[] = [];
+    const activeLocationIds = await fetchActiveLocationIds(
+      supabaseAdmin,
+      userId
+    );
     if (locationId) {
       const { data: locationRow } = (await supabaseAdmin
         .from("google_locations")
-        .select("location_resource_name")
+        .select("id, location_resource_name")
         .eq("user_id", userId)
         .eq("location_resource_name", locationId)
         .maybeSingle()) as { data: GoogleLocationRow | null; error: unknown };
       if (!locationRow) {
         return res.status(404).json({ error: "Location not found" });
       }
+      if (activeLocationIds && !activeLocationIds.has(locationRow.id)) {
+        return res.status(404).json({ error: "Location not found" });
+      }
       locationIds = [locationId];
     } else {
       const { data: locations } = (await supabaseAdmin
         .from("google_locations")
-        .select("location_resource_name")
+        .select("id, location_resource_name")
         .eq("user_id", userId)) as { data: GoogleLocationRow[] | null; error: unknown };
-      locationIds = (locations ?? [])
+      const filtered = activeLocationIds
+        ? (locations ?? []).filter((location) =>
+            activeLocationIds.has(location.id)
+          )
+        : locations ?? [];
+      locationIds = filtered
         .map((location) => location.location_resource_name)
         .filter(Boolean);
     }

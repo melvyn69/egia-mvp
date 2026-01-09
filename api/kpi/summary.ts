@@ -48,6 +48,25 @@ const getRequestId = (req: VercelRequest) => {
 const isMissingEnvError = (err: unknown) =>
   err instanceof Error && err.message === "Missing SUPABASE env vars";
 
+const fetchActiveLocationIds = async (
+  supabaseAdmin: ReturnType<typeof requireUser> extends Promise<infer R>
+    ? R extends { supabaseAdmin: infer C }
+      ? C
+      : never
+    : never,
+  userId: string
+) => {
+  const { data } = await supabaseAdmin
+    .from("business_settings")
+    .select("active_location_ids")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const activeIds = Array.isArray(data?.active_location_ids)
+    ? data?.active_location_ids.filter(Boolean)
+    : null;
+  return activeIds && activeIds.length > 0 ? new Set(activeIds) : null;
+};
+
 const handler = async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -125,23 +144,35 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     const periodFrom = preset === "all_time" ? null : range.from;
     const periodTo = range.to;
     let locationIds: string[] = [];
+    const activeLocationIds = await fetchActiveLocationIds(
+      supabaseAdmin,
+      userId
+    );
     if (locationId) {
       const { data: locationRow } = await supabaseAdmin
         .from("google_locations")
-        .select("location_resource_name")
+        .select("id, location_resource_name")
         .eq("user_id", userId)
         .eq("location_resource_name", locationId)
         .maybeSingle();
       if (!locationRow) {
         return res.status(404).json({ error: "Location not found" });
       }
+      if (activeLocationIds && !activeLocationIds.has(locationRow.id)) {
+        return res.status(404).json({ error: "Location not found" });
+      }
       locationIds = [locationId];
     } else {
       const { data: locations } = await supabaseAdmin
         .from("google_locations")
-        .select("location_resource_name")
+        .select("id, location_resource_name")
         .eq("user_id", userId);
-      locationIds = (locations ?? [])
+      const filtered = activeLocationIds
+        ? (locations ?? []).filter((location) =>
+            activeLocationIds.has(location.id)
+          )
+        : locations ?? [];
+      locationIds = filtered
         .map((location) => location.location_resource_name)
         .filter(Boolean);
     }
