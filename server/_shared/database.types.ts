@@ -105,6 +105,111 @@ export type Database = {
         };
         Relationships: [];
       };
+      automation_workflows: {
+        Row: {
+          id: string;
+          user_id: string;
+          business_id: string | null;
+          name: string | null;
+          trigger: string | null;
+          enabled: boolean | null;
+          location_id: string | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          business_id?: string | null;
+          name?: string | null;
+          trigger?: string | null;
+          enabled?: boolean | null;
+          location_id?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          business_id?: string | null;
+          name?: string | null;
+          trigger?: string | null;
+          enabled?: boolean | null;
+          location_id?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      automation_conditions: {
+        Row: {
+          id: string;
+          workflow_id: string;
+          user_id: string;
+          field: string | null;
+          operator: string | null;
+          value: string | null;
+          position: number | null;
+          sort_order: number | null;
+          created_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          workflow_id: string;
+          user_id: string;
+          field?: string | null;
+          operator?: string | null;
+          value?: string | null;
+          position?: number | null;
+          sort_order?: number | null;
+          created_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          workflow_id?: string;
+          user_id?: string;
+          field?: string | null;
+          operator?: string | null;
+          value?: string | null;
+          position?: number | null;
+          sort_order?: number | null;
+          created_at?: string | null;
+        };
+        Relationships: [];
+      };
+      automation_actions: {
+        Row: {
+          id: string;
+          workflow_id: string;
+          user_id: string;
+          type: string | null;
+          config: Json | null;
+          position: number | null;
+          sort_order: number | null;
+          created_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          workflow_id: string;
+          user_id: string;
+          type?: string | null;
+          config?: Json | null;
+          position?: number | null;
+          sort_order?: number | null;
+          created_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          workflow_id?: string;
+          user_id?: string;
+          type?: string | null;
+          config?: Json | null;
+          position?: number | null;
+          sort_order?: number | null;
+          created_at?: string | null;
+        };
+        Relationships: [];
+      };
       google_connections: {
         Row: {
           id: string;
@@ -339,6 +444,75 @@ export type Database = {
           polarity?: number | null;
           confidence?: number | null;
           evidence?: string | null;
+        };
+        Relationships: [];
+      };
+      review_drafts: {
+        Row: {
+          id: string;
+          user_id: string;
+          review_id: string;
+          source: string | null;
+          location_id: string | null;
+          business_name: string | null;
+          tone: string | null;
+          length: string | null;
+          draft_text: string;
+          status: string | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          review_id: string;
+          source?: string | null;
+          location_id?: string | null;
+          business_name?: string | null;
+          tone?: string | null;
+          length?: string | null;
+          draft_text: string;
+          status?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          review_id?: string;
+          source?: string | null;
+          location_id?: string | null;
+          business_name?: string | null;
+          tone?: string | null;
+          length?: string | null;
+          draft_text?: string;
+          status?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      review_tags: {
+        Row: {
+          id: string;
+          user_id: string;
+          review_id: string;
+          tag: string;
+          created_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          review_id: string;
+          tag: string;
+          created_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          review_id?: string;
+          tag?: string;
+          created_at?: string | null;
         };
         Relationships: [];
       };

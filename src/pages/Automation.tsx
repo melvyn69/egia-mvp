@@ -5,6 +5,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
+import type { Database } from "../database.types";
 import { supabase } from "../lib/supabase";
 
 type AutomationProps = {
@@ -18,40 +19,10 @@ type AutomationProps = {
   locationsError: string | null;
 };
 
-type WorkflowRow = {
-  id: string;
-  name: string | null;
-  trigger: string | null;
-  location_id: string | null;
-  enabled: boolean | null;
-};
-
-type ConditionRow = {
-  id: string;
-  workflow_id: string;
-  field: string | null;
-  operator: string | null;
-  value: string | null;
-  created_at?: string | null;
-};
-
-type ActionRow = {
-  id: string;
-  workflow_id: string;
-  type: string | null;
-  config: unknown | null;
-  created_at?: string | null;
-};
-
-type ReviewRow = {
-  id: string;
-  review_id: string | null;
-  location_id: string | null;
-  author_name: string | null;
-  rating: number | null;
-  comment: string | null;
-  create_time: string | null;
-};
+type WorkflowRow = Database["public"]["Tables"]["automation_workflows"]["Row"];
+type ConditionRow = Database["public"]["Tables"]["automation_conditions"]["Row"];
+type ActionRow = Database["public"]["Tables"]["automation_actions"]["Row"];
+type ReviewRow = Database["public"]["Tables"]["google_reviews"]["Row"];
 
 type TesterResult = {
   review: ReviewRow;
@@ -182,6 +153,7 @@ const Automation = ({
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<TesterResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
+  const supabaseClient = supabase;
 
   const workflowById = useMemo(
     () =>
@@ -193,7 +165,7 @@ const Automation = ({
   );
 
   useEffect(() => {
-    if (!supabase || !session) {
+    if (!supabaseClient || !session) {
       setWorkflows([]);
       return;
     }
@@ -201,7 +173,7 @@ const Automation = ({
     const load = async () => {
       setLoading(true);
       setError(null);
-      const { data, error } = await supabase
+      const { data, error } = await supabaseClient
         .from("automation_workflows")
         .select("*")
         .order("updated_at", { ascending: false });
@@ -215,7 +187,7 @@ const Automation = ({
         setLoading(false);
         return;
       }
-      const rows = (data ?? []) as WorkflowRow[];
+      const rows = data ?? [];
       setWorkflows(rows);
       const ids = rows.map((row) => row.id);
       if (ids.length === 0) {
@@ -225,11 +197,11 @@ const Automation = ({
         return;
       }
       const [conditionsRes, actionsRes] = await Promise.all([
-        supabase
+        supabaseClient
           .from("automation_conditions")
           .select("*")
           .in("workflow_id", ids),
-        supabase
+        supabaseClient
           .from("automation_actions")
           .select("*")
           .in("workflow_id", ids)
@@ -243,8 +215,8 @@ const Automation = ({
       if (actionsRes.error) {
         console.error("automation_actions fetch error:", actionsRes.error);
       }
-      const conditionsRows = (conditionsRes.data ?? []) as ConditionRow[];
-      const actionsRows = (actionsRes.data ?? []) as ActionRow[];
+      const conditionsRows = conditionsRes.data ?? [];
+      const actionsRows = actionsRes.data ?? [];
       const nextConditions: Record<string, ConditionRow[]> = {};
       const nextActions: Record<string, ActionRow[]> = {};
       conditionsRows.forEach((row) => {
@@ -286,9 +258,9 @@ const Automation = ({
   }, [session]);
 
   const toggleWorkflow = async (workflow: WorkflowRow) => {
-    if (!supabase) return;
+    if (!supabaseClient) return;
     const nextEnabled = !(workflow.enabled ?? false);
-    const { error } = await supabase
+    const { error } = await supabaseClient
       .from("automation_workflows")
       .update({ enabled: nextEnabled })
       .eq("id", workflow.id);
@@ -305,7 +277,7 @@ const Automation = ({
   };
 
   const runTest = async (workflowId: string) => {
-    if (!supabase || !session) {
+    if (!supabaseClient || !session) {
       return;
     }
     setTestingId(workflowId);
@@ -320,7 +292,7 @@ const Automation = ({
     const workflowConditions = conditionsMap[workflowId] ?? [];
     const workflowActions = actionsMap[workflowId] ?? [];
 
-    let query = supabase
+    let query = supabaseClient
       .from("google_reviews")
       .select("id, review_id, rating, comment, location_id, author_name, create_time")
       .order("create_time", { ascending: false })
@@ -336,7 +308,7 @@ const Automation = ({
       setTestingId(null);
       return;
     }
-    const reviews = (reviewData ?? []) as ReviewRow[];
+    const reviews = reviewData ?? [];
     const match = reviews.find((review) =>
       workflowConditions.every((condition) => matchesCondition(review, condition))
     );
@@ -374,7 +346,7 @@ const Automation = ({
           const payload = (await res.json()) as { draft_text?: string };
           draftText = payload.draft_text ?? null;
           if (draftText) {
-            const { error } = await supabase.from("review_drafts").insert({
+            const { error } = await supabaseClient.from("review_drafts").insert({
               user_id: session.user.id,
               review_id: match.review_id ?? match.id,
               draft_text: draftText,
@@ -395,7 +367,7 @@ const Automation = ({
           continue;
         }
         tags.push(tag);
-        const { error } = await supabase.from("review_tags").insert({
+        const { error } = await supabaseClient.from("review_tags").insert({
           user_id: session.user.id,
           review_id: match.review_id ?? match.id,
           tag
@@ -414,6 +386,26 @@ const Automation = ({
     setTestResult(null);
     setTestError(null);
   };
+
+  if (!supabaseClient) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-900">
+            Automatisations
+          </h2>
+          <p className="text-sm text-slate-500">
+            Orchestration des reponses et tags assistes.
+          </p>
+        </div>
+        <Card>
+          <CardContent className="pt-6 text-sm text-slate-500">
+            Configuration Supabase manquante.
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

@@ -74,6 +74,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
   const [enabled, setEnabled] = useState(true);
   const [conditions, setConditions] = useState<ConditionInput[]>([]);
   const [actions, setActions] = useState<ActionInput[]>([]);
+  const supabaseClient = supabase;
 
   const locationOptions = useMemo(
     () => [
@@ -87,14 +88,14 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
   );
 
   useEffect(() => {
-    if (!supabase || !session || !workflowId) {
+    if (!supabaseClient || !session || !workflowId) {
       return;
     }
     let cancelled = false;
     const load = async () => {
       setLoading(true);
       setError(null);
-      const { data: workflow, error: workflowError } = await supabase
+      const { data: workflow, error: workflowError } = await supabaseClient
         .from("automation_workflows")
         .select("*")
         .eq("id", workflowId)
@@ -114,11 +115,11 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
       setLocationId(workflow.location_id ?? "all");
 
       const [conditionsRes, actionsRes] = await Promise.all([
-        supabase
+        supabaseClient
           .from("automation_conditions")
           .select("*")
           .eq("workflow_id", workflowId),
-        supabase
+        supabaseClient
           .from("automation_actions")
           .select("*")
           .eq("workflow_id", workflowId)
@@ -150,9 +151,9 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
           config = item.config as ActionInput["config"];
         }
         return {
-        id: item.id,
-        type: (item.type ?? "ai_draft") as ActionInput["type"],
-        config
+          id: item.id,
+          type: (item.type ?? "ai_draft") as ActionInput["type"],
+          config
         };
       });
       setConditions(loadedConditions);
@@ -200,7 +201,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
   };
 
   const handleSave = async () => {
-    if (!supabase || !session) {
+    if (!supabaseClient || !session) {
       return;
     }
     setSaving(true);
@@ -213,7 +214,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
       enabled,
       location_id: locationId === "all" ? null : locationId
     };
-    const { data: savedWorkflow, error: workflowError } = await supabase
+    const { data: savedWorkflow, error: workflowError } = await supabaseClient
       .from("automation_workflows")
       .upsert(workflowPayload)
       .select("*")
@@ -226,7 +227,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
     }
     const savedId = savedWorkflow.id as string;
 
-    const { error: deleteConditionsError } = await supabase
+    const { error: deleteConditionsError } = await supabaseClient
       .from("automation_conditions")
       .delete()
       .eq("workflow_id", savedId);
@@ -234,7 +235,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
       console.error("automation_conditions delete error:", deleteConditionsError);
     }
 
-    const { error: deleteActionsError } = await supabase
+    const { error: deleteActionsError } = await supabaseClient
       .from("automation_actions")
       .delete()
       .eq("workflow_id", savedId);
@@ -250,7 +251,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
         operator: condition.operator,
         value: condition.value
       }));
-      const { error: insertConditionsError } = await supabase
+      const { error: insertConditionsError } = await supabaseClient
         .from("automation_conditions")
         .insert(conditionRows);
       if (insertConditionsError) {
@@ -267,7 +268,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
           type: action.type,
           config: action.config
         }));
-      const { error: insertActionsError } = await supabase
+      const { error: insertActionsError } = await supabaseClient
         .from("automation_actions")
         .insert(actionRows);
       if (insertActionsError) {
@@ -278,6 +279,26 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
     setSaving(false);
     navigate("/automation");
   };
+
+  if (!supabaseClient) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-900">
+            Automatisations
+          </h2>
+          <p className="text-sm text-slate-500">
+            Definissez le declencheur, les conditions et les actions.
+          </p>
+        </div>
+        <Card>
+          <CardContent className="pt-6 text-sm text-slate-500">
+            Configuration Supabase manquante.
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
