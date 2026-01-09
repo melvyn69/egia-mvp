@@ -173,6 +173,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       .select(
         "id, review_id, location_id, author_name, rating, comment, create_time, update_time, created_at, status"
       )
+      .eq("user_id", userId)
       .order("update_time", { ascending: false, nullsFirst: false })
       .order("create_time", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false, nullsFirst: false })

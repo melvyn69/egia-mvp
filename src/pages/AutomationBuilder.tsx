@@ -70,20 +70,19 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
 
   const [name, setName] = useState("");
   const [trigger, setTrigger] = useState("new_review");
-  const [locationId, setLocationId] = useState<string>("all");
+  const [locationScope, setLocationScope] = useState<"all" | "selected">("all");
+  const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([]);
   const [enabled, setEnabled] = useState(true);
   const [conditions, setConditions] = useState<ConditionInput[]>([]);
   const [actions, setActions] = useState<ActionInput[]>([]);
   const supabaseClient = supabase;
 
   const locationOptions = useMemo(
-    () => [
-      { id: "all", label: "Toutes les fiches" },
-      ...locations.map((location) => ({
-        id: location.location_resource_name,
+    () =>
+      locations.map((location) => ({
+        id: location.id,
         label: location.location_title ?? location.location_resource_name
-      }))
-    ],
+      })),
     [locations]
   );
 
@@ -112,7 +111,23 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
       setName(workflow.name ?? "");
       setTrigger(workflow.trigger ?? "new_review");
       setEnabled(Boolean(workflow.enabled));
-      setLocationId(workflow.location_id ?? "all");
+      const storedIds = Array.isArray(workflow.location_ids)
+        ? workflow.location_ids.filter(Boolean)
+        : [];
+      const fallbackId = workflow.location_id
+        ? locations.find(
+            (location) =>
+              location.location_resource_name === workflow.location_id
+          )?.id
+        : null;
+      const nextIds =
+        storedIds.length > 0
+          ? storedIds
+          : fallbackId
+            ? [fallbackId]
+            : [];
+      setLocationScope(nextIds.length > 0 ? "selected" : "all");
+      setSelectedLocationIds(nextIds);
 
       const [conditionsRes, actionsRes] = await Promise.all([
         supabaseClient
@@ -164,7 +179,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
     return () => {
       cancelled = true;
     };
-  }, [session, workflowId]);
+  }, [session, workflowId, locations]);
 
   const addCondition = () => {
     setConditions((prev) => [
@@ -212,7 +227,10 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
       name: name.trim() || "Workflow sans nom",
       trigger,
       enabled,
-      location_id: locationId === "all" ? null : locationId
+      location_ids:
+        locationScope === "all" || selectedLocationIds.length === 0
+          ? null
+          : selectedLocationIds
     };
     const { data: savedWorkflow, error: workflowError } = await supabaseClient
       .from("automation_workflows")
@@ -348,21 +366,53 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-500">
-                    Lieu
+                    Appliquer a
                   </label>
-                  <select
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                    value={locationId}
-                    onChange={(event) => setLocationId(event.target.value)}
-                  >
-                    {locationOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="mt-1 flex items-center gap-2 text-sm text-slate-600">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="location_scope"
+                        checked={locationScope === "all"}
+                        onChange={() => setLocationScope("all")}
+                      />
+                      Tous les etablissements
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="location_scope"
+                        checked={locationScope === "selected"}
+                        onChange={() => setLocationScope("selected")}
+                      />
+                      Salons selectionnes
+                    </label>
+                  </div>
                 </div>
               </div>
+              {locationScope === "selected" && (
+                <div className="rounded-xl border border-slate-100 bg-white p-3 text-sm text-slate-600">
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {locationOptions.map((option) => (
+                      <label key={option.id} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedLocationIds.includes(option.id)}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setSelectedLocationIds((prev) =>
+                              checked
+                                ? [...prev, option.id]
+                                : prev.filter((id) => id !== option.id)
+                            );
+                          }}
+                        />
+                        {option.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
               <label className="flex items-center gap-2 text-sm text-slate-600">
                 <input
                   type="checkbox"

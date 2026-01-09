@@ -123,17 +123,49 @@ const matchesCondition = (review: ReviewRow, condition: ConditionRow): boolean =
   return false;
 };
 
-const formatLocationLabel = (
-  locationId: string | null,
+const resolveLocationResourceNames = (
+  locationIds: string[] | null,
+  legacyLocationId: string | null,
   locations: AutomationProps["locations"]
 ) => {
-  if (!locationId) {
+  if (Array.isArray(locationIds) && locationIds.length > 0) {
+    return locationIds
+      .map(
+        (id) =>
+          locations.find((location) => location.id === id)
+            ?.location_resource_name
+      )
+      .filter((value): value is string => Boolean(value));
+  }
+  if (legacyLocationId) {
+    return [legacyLocationId];
+  }
+  return [];
+};
+
+const formatLocationLabel = (
+  locationIds: string[] | null,
+  legacyLocationId: string | null,
+  locations: AutomationProps["locations"]
+) => {
+  const resolved = resolveLocationResourceNames(
+    locationIds,
+    legacyLocationId,
+    locations
+  );
+  if (resolved.length === 0) {
     return "Toutes les fiches";
   }
-  const match = locations.find(
-    (location) => location.location_resource_name === locationId
-  );
-  return match?.location_title ?? locationId;
+  const labels = resolved.map((resource) => {
+    const match = locations.find(
+      (location) => location.location_resource_name === resource
+    );
+    return match?.location_title ?? resource;
+  });
+  if (labels.length === 1) {
+    return labels[0];
+  }
+  return `${labels[0]} +${labels.length - 1}`;
 };
 
 const Automation = ({
@@ -297,8 +329,15 @@ const Automation = ({
       .select("*")
       .order("create_time", { ascending: false })
       .limit(20);
-    if (workflow.location_id) {
-      query = query.eq("location_id", workflow.location_id);
+    const locationResourceNames = resolveLocationResourceNames(
+      workflow.location_ids ?? null,
+      workflow.location_id ?? null,
+      locations
+    );
+    if (locationResourceNames.length === 1) {
+      query = query.eq("location_id", locationResourceNames[0]);
+    } else if (locationResourceNames.length > 1) {
+      query = query.in("location_id", locationResourceNames);
     }
 
     const { data: reviewData, error: reviewError } = await query;
@@ -483,7 +522,11 @@ const Automation = ({
                       </p>
                       <p className="text-xs text-slate-500">
                         {workflow.trigger ?? "new_review"} ·{" "}
-                        {formatLocationLabel(workflow.location_id, locations)}
+                        {formatLocationLabel(
+                          workflow.location_ids ?? null,
+                          workflow.location_id ?? null,
+                          locations
+                        )}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">

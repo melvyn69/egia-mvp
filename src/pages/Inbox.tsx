@@ -276,7 +276,10 @@ const Inbox = () => {
   const [batchError, setBatchError] = useState<string | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsLoadingMore, setReviewsLoadingMore] = useState(false);
   const [reviewsError, setReviewsError] = useState<string | null>(null);
+  const [reviewsCursor, setReviewsCursor] = useState<string | null>(null);
+  const [reviewsHasMore, setReviewsHasMore] = useState(false);
   const [lastCronSyncAt, setLastCronSyncAt] = useState<string | null>(null);
   const [cronErrors, setCronErrors] = useState<number>(0);
   const [locationOptions, setLocationOptions] = useState<
@@ -293,6 +296,70 @@ const Inbox = () => {
   const isCooldownActive = cooldownUntil ? cooldownUntil > Date.now() : false;
   const projectRef = getProjectRef(supabaseUrl);
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
+
+  const buildReviewParams = (cursor?: string | null) => {
+    const params = new URLSearchParams();
+    if (selectedLocation !== "all") {
+      params.set("location_id", selectedLocation);
+    }
+    params.set("preset", datePreset);
+    params.set("tz", timeZone);
+    if (datePreset === "custom") {
+      if (dateFrom) {
+        params.set("from", dateFrom);
+      }
+      if (dateTo) {
+        params.set("to", dateTo);
+      }
+    }
+    if (sentimentFilter !== "all") {
+      params.set("sentiment", sentimentFilter);
+    }
+    if (statusFilter !== "all") {
+      params.set("status", statusFilter);
+    }
+    if (ratingMin) {
+      params.set("rating_min", ratingMin);
+    }
+    if (ratingMax) {
+      params.set("rating_max", ratingMax);
+    }
+    if (tagFilter.trim()) {
+      params.set("tags", tagFilter.trim());
+    }
+    params.set("limit", "50");
+    if (cursor) {
+      params.set("cursor", cursor);
+    }
+    return params;
+  };
+
+  const mapReviewRows = (
+    rows: ReviewRow[],
+    locationLabels: Record<string, string>,
+    userId: string
+  ) =>
+    rows.map((row) => {
+      const createdAt = row.create_time ?? row.update_time ?? new Date().toISOString();
+      const updatedAt = row.update_time ?? createdAt;
+      const status = isReviewStatus(row.status) ? row.status : "new";
+      return {
+        id: row.id,
+        reviewId: row.review_id ?? row.id,
+        locationName:
+          locationLabels[row.location_id] ?? row.location_id ?? "—",
+        locationId: row.location_id,
+        businessId: userId,
+        authorName: row.author_name ?? "Anonyme",
+        rating: row.rating ?? 0,
+        source: "Google",
+        status,
+        createdAt,
+        updatedAt,
+        text: row.comment ?? "",
+        tags: []
+      } satisfies Review;
+    });
 
   const loadInboxData = async () => {
     if (!supabase) {
@@ -334,36 +401,7 @@ const Inbox = () => {
       setLocationOptions(nextLocationOptions);
 
       const token = await getAccessToken(supabase);
-      const params = new URLSearchParams();
-      if (selectedLocation !== "all") {
-        params.set("location_id", selectedLocation);
-      }
-      params.set("preset", datePreset);
-      params.set("tz", timeZone);
-      if (datePreset === "custom") {
-        if (dateFrom) {
-          params.set("from", dateFrom);
-        }
-        if (dateTo) {
-          params.set("to", dateTo);
-        }
-      }
-      if (sentimentFilter !== "all") {
-        params.set("sentiment", sentimentFilter);
-      }
-      if (statusFilter !== "all") {
-        params.set("status", statusFilter);
-      }
-      if (ratingMin) {
-        params.set("rating_min", ratingMin);
-      }
-      if (ratingMax) {
-        params.set("rating_max", ratingMax);
-      }
-      if (tagFilter.trim()) {
-        params.set("tags", tagFilter.trim());
-      }
-      params.set("limit", "50");
+      const params = buildReviewParams(null);
 
       const response = await fetch(`/api/reviews?${params.toString()}`, {
         headers: {
@@ -378,29 +416,9 @@ const Inbox = () => {
       }
 
       const rows = (payload.rows ?? []) as ReviewRow[];
-      const mapped = rows.map((row) => {
-        const createdAt = row.create_time ?? row.update_time ?? new Date().toISOString();
-        const updatedAt = row.update_time ?? createdAt;
-        const status = isReviewStatus(row.status) ? row.status : "new";
-        return {
-          id: row.id,
-          reviewId: row.review_id ?? row.id,
-          locationName:
-            nextLocationsMap[row.location_id] ?? row.location_id ?? "—",
-          locationId: row.location_id,
-          businessId: userId,
-          authorName: row.author_name ?? "Anonyme",
-          rating: row.rating ?? 0,
-          source: "Google",
-          status,
-          createdAt,
-          updatedAt,
-          text: row.comment ?? "",
-          tags: []
-        } satisfies Review;
-      });
-
-      setReviews(mapped);
+      setReviews(mapReviewRows(rows, nextLocationsMap, userId));
+      setReviewsCursor(payload.nextCursor ?? null);
+      setReviewsHasMore(Boolean(payload.nextCursor));
 
       const { data: cronState } = await supabase
         .from("cron_state")
@@ -413,6 +431,54 @@ const Inbox = () => {
       setCronErrors(Number(errorsCount ?? 0));
     } finally {
       setReviewsLoading(false);
+    }
+  };
+
+  const loadMoreReviews = async () => {
+    if (!supabase || !reviewsCursor || reviewsLoadingMore) {
+      return;
+    }
+    setReviewsLoadingMore(true);
+    setReviewsError(null);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData.session?.user?.id ?? null;
+      if (!userId) {
+        setReviewsError("Session introuvable.");
+        return;
+      }
+      const token = await getAccessToken(supabase);
+      const params = buildReviewParams(reviewsCursor);
+      const response = await fetch(`/api/reviews?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.rows) {
+        setReviewsError("Impossible de charger plus d'avis.");
+        return;
+      }
+      const { data: locationsData } = await supabase
+        .from("google_locations")
+        .select("location_resource_name, location_title")
+        .order("updated_at", { ascending: false });
+      const locationLabels: Record<string, string> = {};
+      (locationsData ?? []).forEach((location) => {
+        if (location.location_resource_name) {
+          locationLabels[location.location_resource_name] =
+            location.location_title ?? location.location_resource_name;
+        }
+      });
+      const rows = (payload.rows ?? []) as ReviewRow[];
+      setReviews((prev) => [
+        ...prev,
+        ...mapReviewRows(rows, locationLabels, userId)
+      ]);
+      setReviewsCursor(payload.nextCursor ?? null);
+      setReviewsHasMore(Boolean(payload.nextCursor));
+    } finally {
+      setReviewsLoadingMore(false);
     }
   };
 
@@ -1380,47 +1446,61 @@ const Inbox = () => {
                 )}
               </div>
             ) : (
-              filteredReviews.map((review) => (
-                <button
-                  key={review.id}
-                  type="button"
-                  onClick={() => setSelectedReviewId(review.id)}
-                  className={`w-full rounded-2xl border p-4 text-left transition hover:border-slate-300 ${
-                    selectedReviewId === review.id
-                      ? "border-slate-400 bg-slate-50"
-                      : "border-slate-200"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">
-                        {review.authorName}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {review.locationName}
-                      </p>
+              <>
+                {filteredReviews.map((review) => (
+                  <button
+                    key={review.id}
+                    type="button"
+                    onClick={() => setSelectedReviewId(review.id)}
+                    className={`w-full rounded-2xl border p-4 text-left transition hover:border-slate-300 ${
+                      selectedReviewId === review.id
+                        ? "border-slate-400 bg-slate-50"
+                        : "border-slate-200"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">
+                          {review.authorName}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {review.locationName}
+                        </p>
+                      </div>
+                      <Badge variant={statusVariantMap[review.status]}>
+                        {statusLabelMap[review.status]}
+                      </Badge>
+                      {draftByReview[review.id] && (
+                        <Badge variant="success">Draft saved</Badge>
+                      )}
                     </div>
-                    <Badge variant={statusVariantMap[review.status]}>
-                      {statusLabelMap[review.status]}
-                    </Badge>
-                    {draftByReview[review.id] && (
-                      <Badge variant="success">Draft saved</Badge>
-                    )}
+                    <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+                      <span>
+                        {"★".repeat(Math.max(0, Math.min(5, review.rating)))}
+                        {"☆".repeat(5 - Math.max(0, Math.min(5, review.rating)))}
+                      </span>
+                      <span>{review.source}</span>
+                      <span>•</span>
+                      <span>{formatDate(review.createdAt)}</span>
+                    </div>
+                    <p className="mt-3 line-clamp-2 text-sm text-slate-600">
+                      {review.text}
+                    </p>
+                  </button>
+                ))}
+                {reviewsHasMore && (
+                  <div className="flex justify-center pt-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={loadMoreReviews}
+                      disabled={reviewsLoadingMore}
+                    >
+                      {reviewsLoadingMore ? "Chargement..." : "Voir plus"}
+                    </Button>
                   </div>
-                  <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-                    <span>
-                      {"★".repeat(Math.max(0, Math.min(5, review.rating)))}
-                      {"☆".repeat(5 - Math.max(0, Math.min(5, review.rating)))}
-                    </span>
-                    <span>{review.source}</span>
-                    <span>•</span>
-                    <span>{formatDate(review.createdAt)}</span>
-                  </div>
-                  <p className="mt-3 line-clamp-2 text-sm text-slate-600">
-                    {review.text}
-                  </p>
-                </button>
-              ))
+                )}
+              </>
             )}
           </CardContent>
         </Card>

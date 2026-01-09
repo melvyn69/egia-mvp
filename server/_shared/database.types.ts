@@ -114,6 +114,7 @@ export type Database = {
           enabled: boolean
           id: string
           location_id: string | null
+          location_ids: string[] | null
           name: string
           trigger: string
           updated_at: string | null
@@ -124,6 +125,7 @@ export type Database = {
           enabled?: boolean
           id?: string
           location_id?: string | null
+          location_ids?: string[] | null
           name: string
           trigger?: string
           updated_at?: string | null
@@ -134,6 +136,7 @@ export type Database = {
           enabled?: boolean
           id?: string
           location_id?: string | null
+          location_ids?: string[] | null
           name?: string
           trigger?: string
           updated_at?: string | null
@@ -179,6 +182,24 @@ export type Database = {
           tone?: Database["public"]["Enums"]["brand_voice_tone"]
           updated_at?: string | null
           use_emojis?: boolean
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string | null
+          role: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          role?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          role?: string
           user_id?: string
         }
         Relationships: []

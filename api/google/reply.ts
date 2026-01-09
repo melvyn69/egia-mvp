@@ -50,6 +50,19 @@ const getUserIdFromJwt = async (jwt: string) => {
   return data.user.id;
 };
 
+const isAdminUser = async (userId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) {
+    console.error("[reply] user_roles lookup failed", error);
+    return false;
+  }
+  return data?.role === "admin";
+};
+
 const refreshGoogleAccessToken = async (refreshToken: string) => {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -250,6 +263,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res
         .status(500)
         .json({ error: `Missing env: ${missingEnv.join(", ")}` });
+    }
+    if (mode === "automation") {
+      const isAdmin = await isAdminUser(userId);
+      if (!isAdmin) {
+        return res.status(403).json({ error: "Admin role required" });
+      }
     }
 
     const {
