@@ -294,7 +294,7 @@ const Automation = ({
 
     let query = supabaseClient
       .from("google_reviews")
-      .select("id, review_id, rating, comment, location_id, author_name, create_time")
+      .select("*")
       .order("create_time", { ascending: false })
       .limit(20);
     if (workflow.location_id) {
