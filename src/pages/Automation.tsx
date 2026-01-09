@@ -351,6 +351,8 @@ const Automation = ({
             const { error } = await supabaseClient.from("review_drafts").insert({
               user_id: session.user.id,
               review_id: match.review_id ?? match.id,
+              location_id: match.location_id ?? null,
+              tone,
               draft_text: draftText,
               status: "draft"
             });
@@ -372,6 +374,7 @@ const Automation = ({
         const { error } = await supabaseClient.from("review_tags").insert({
           user_id: session.user.id,
           review_id: match.review_id ?? match.id,
+          location_id: match.location_id ?? null,
           tag
         });
         if (error) {

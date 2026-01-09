@@ -228,6 +228,7 @@ const isReplied = (row: {
 
 type ReviewLite = {
   id: string;
+  user_id: string;
   review_id: string | null;
   author_name: string | null;
   location_id: string | null;
@@ -256,7 +257,7 @@ const buildReviewsQuery = (
   let query = supabaseAdmin
     .from("google_reviews")
     .select(
-      "id, review_id, author_name, rating, comment, reply_text, replied_at, owner_reply, owner_reply_time, status, create_time, update_time, created_at, location_id"
+      "id, user_id, review_id, author_name, rating, comment, reply_text, replied_at, owner_reply, owner_reply_time, status, create_time, update_time, created_at, location_id"
     )
     .eq("user_id", userId);
 
