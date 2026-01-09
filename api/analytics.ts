@@ -1,5 +1,4 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import type { Database } from "../server/_shared/database.types.js";
 import { requireUser } from "../server/_shared/_auth.js";
 import { resolveDateRange } from "../server/_shared/_date.js";
 import { parseFilters } from "../server/_shared/_filters.js";
@@ -227,7 +226,22 @@ const isReplied = (row: {
       row.status === "replied"
   );
 
-type GoogleReviewRow = Database["public"]["Tables"]["google_reviews"]["Row"];
+type ReviewLite = {
+  id: string;
+  review_id: string | null;
+  author_name: string | null;
+  location_id: string | null;
+  rating: number | null;
+  comment: string | null;
+  create_time: string | null;
+  update_time: string | null;
+  created_at: string | null;
+  owner_reply?: string | null;
+  owner_reply_time?: string | null;
+  reply_text?: string | null;
+  replied_at?: string | null;
+  status?: string | null;
+};
 
 const buildReviewsQuery = (
   supabaseAdmin: ReturnType<typeof requireUser> extends Promise<infer R>
@@ -242,7 +256,7 @@ const buildReviewsQuery = (
   let query = supabaseAdmin
     .from("google_reviews")
     .select(
-      "rating, comment, reply_text, replied_at, owner_reply, owner_reply_time, status, create_time, update_time, created_at, location_id"
+      "id, review_id, author_name, rating, comment, reply_text, replied_at, owner_reply, owner_reply_time, status, create_time, update_time, created_at, location_id"
     )
     .eq("user_id", userId);
 
@@ -268,7 +282,7 @@ const fetchReviewsForRange = async (
   locationIds: string[],
   range: { from: string; to: string }
 ) => {
-  const rows: GoogleReviewRow[] = [];
+  const rows: ReviewLite[] = [];
   const pageSize = 1000;
   const maxRows = 20000;
   for (let offset = 0; offset < maxRows; offset += pageSize) {
@@ -307,7 +321,7 @@ const resolveGranularity = (
 };
 
 const buildTimeseriesPoints = (
-  rows: GoogleReviewRow[],
+  rows: ReviewLite[],
   range: { from: string; to: string },
   granularity: "day" | "week"
 ) => {
@@ -392,7 +406,7 @@ const buildTimeseriesPoints = (
   return points;
 };
 
-const computeCompareMetrics = (rows: GoogleReviewRow[]) => {
+const computeCompareMetrics = (rows: ReviewLite[]) => {
   const review_count = rows.length;
   const ratings = rows
     .map((row) => row.rating)
@@ -506,7 +520,7 @@ const mapSentimentFromRating = (rating: number | null) => {
 };
 
 const computeTagStats = (params: {
-  reviewRows: GoogleReviewRow[];
+  reviewRows: ReviewLite[];
   tagLinks: Array<{ review_id: string; tag_label: string; tag_id?: string }>;
   sentiments: Map<string, string | null>;
 }) => {
@@ -1363,7 +1377,7 @@ const handleTimeseries = async (
     return res.status(200).json(empty);
   }
 
-  let rows: GoogleReviewRow[] = [];
+  let rows: ReviewLite[] = [];
   try {
     rows = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, range);
   } catch (error) {
@@ -1442,8 +1456,8 @@ const handleDrivers = async (
     return res.status(200).json(empty);
   }
 
-  let reviewsA: GoogleReviewRow[] = [];
-  let reviewsB: GoogleReviewRow[] = [];
+  let reviewsA: ReviewLite[] = [];
+  let reviewsB: ReviewLite[] = [];
   try {
     reviewsA = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeA);
     reviewsB = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeB);
@@ -1625,7 +1639,7 @@ const handleQuality = async (
     return res.status(200).json(empty);
   }
 
-  let reviews: GoogleReviewRow[] = [];
+  let reviews: ReviewLite[] = [];
   try {
     reviews = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, range);
   } catch (error) {
@@ -1720,7 +1734,7 @@ const handleDrilldown = async (
     return res.status(200).json(empty);
   }
 
-  let reviews: GoogleReviewRow[] = [];
+  let reviews: ReviewLite[] = [];
   try {
     reviews = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, range);
   } catch (error) {
@@ -1832,8 +1846,8 @@ const handleCompare = async (
     return res.status(200).json(compare);
   }
 
-  let rowsA: GoogleReviewRow[] = [];
-  let rowsB: GoogleReviewRow[] = [];
+  let rowsA: ReviewLite[] = [];
+  let rowsB: ReviewLite[] = [];
   try {
     rowsA = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeA);
     rowsB = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeB);
@@ -1897,8 +1911,8 @@ const handleInsights = async (
   const emptyMetrics = computeCompareMetrics([]);
   let metricsA = emptyMetrics;
   let metricsB = emptyMetrics;
-  let rowsA: GoogleReviewRow[] = [];
-  let rowsB: GoogleReviewRow[] = [];
+  let rowsA: ReviewLite[] = [];
+  let rowsB: ReviewLite[] = [];
 
   if (!filters.reject && locationIds.length > 0) {
     try {
