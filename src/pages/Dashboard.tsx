@@ -6,8 +6,7 @@ import {
   CheckCircle,
   MapPin,
   MessageSquare,
-  RefreshCw,
-  Star
+  RefreshCw
 } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -383,7 +382,6 @@ const Dashboard = ({
 
   useEffect(() => {
     if (!supabase || !session) {
-      setActiveLocationIds(null);
       setSelectedActiveIds([]);
       return;
     }

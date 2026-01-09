@@ -15,6 +15,12 @@ type LocationRow = {
   last_synced_at: string | null;
 };
 
+type JobRow = {
+  status: string | null;
+  last_error: string | null;
+  updated_at: string | null;
+};
+
 const formatTimestamp = (value: string | null) => {
   if (!value) return "—";
   const date = new Date(value);
@@ -85,7 +91,7 @@ const SyncStatus = ({ session }: SyncStatusProps) => {
       const stats = { queued: 0, running: 0, failed: 0, lastError: null as string | null };
       let latestFailed: { updated_at: string | null; last_error: string | null } | null =
         null;
-      (jobs ?? []).forEach((job) => {
+      (jobs as JobRow[] | null ?? []).forEach((job) => {
         if (job.status === "queued") stats.queued += 1;
         if (job.status === "running") stats.running += 1;
         if (job.status === "failed") {
