@@ -9,8 +9,10 @@ import { Dashboard } from "./pages/Dashboard";
 import { Inbox } from "./pages/Inbox";
 import { Connect } from "./pages/Connect";
 import { Analytics } from "./pages/Analytics";
+import { BrandVoice } from "./pages/BrandVoice";
 import { Automation } from "./pages/Automation";
 import { AutomationBuilder } from "./pages/AutomationBuilder";
+import { TestLab } from "./pages/TestLab";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
 import { Button } from "./components/ui/button";
@@ -110,6 +112,19 @@ const App = () => {
       return {
         title: "Automatisations",
         subtitle: "Workflows, conditions et brouillons assistés."
+      };
+    }
+
+    if (location.pathname === "/settings/brand-voice") {
+      return {
+        title: "Brand Voice",
+        subtitle: "Uniformiser le ton des reponses IA."
+      };
+    }
+    if (location.pathname === "/settings/test-lab") {
+      return {
+        title: "Test Lab",
+        subtitle: "Simulation de reponse IA sans ecriture."
       };
     }
 
@@ -592,6 +607,14 @@ const App = () => {
                   element={
                     <AutomationBuilder session={session} locations={locations} />
                   }
+                />
+                <Route
+                  path="/settings/brand-voice"
+                  element={<BrandVoice session={session} />}
+                />
+                <Route
+                  path="/settings/test-lab"
+                  element={<TestLab session={session} />}
                 />
                 <Route
                   path="/google_oauth_callback"

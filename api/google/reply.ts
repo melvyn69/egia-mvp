@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from '../../server/_shared/database.types.js';
+import type { Database } from "../server/_shared/database.types.js";
+import { generateAiReply } from "../server/_shared/ai_reply.js";
 
 const getEnv = (keys: string[]) => {
   for (const key of keys) {
@@ -22,7 +23,7 @@ const googleClientSecret = getEnv([
 const openaiApiKey = process.env.OPENAI_API_KEY ?? "";
 const openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-const getMissingEnv = (mode: "reply" | "draft") => {
+const getMissingEnv = (mode: "reply" | "draft" | "test") => {
   const missing = [];
   if (!supabaseUrl) missing.push("SUPABASE_URL");
   if (!serviceRoleKey) missing.push("SUPABASE_SERVICE_ROLE_KEY");
@@ -31,7 +32,9 @@ const getMissingEnv = (mode: "reply" | "draft") => {
     if (!googleClientSecret)
       missing.push("GOOGLE_OAUTH_CLIENT_SECRET|GOOGLE_CLIENT_SECRET");
   }
-  if (mode === "draft" && !openaiApiKey) missing.push("OPENAI_API_KEY");
+  if ((mode === "draft" || mode === "test") && !openaiApiKey) {
+    missing.push("OPENAI_API_KEY");
+  }
   return missing;
 };
 
@@ -155,34 +158,6 @@ const resolveDraftReview = async (
   return { data: data ?? null, error: null };
 };
 
-const extractOpenAiText = (payload: unknown) => {
-  if (payload && typeof payload === "object") {
-    const record = payload as Record<string, unknown>;
-    if (typeof record.output_text === "string" && record.output_text.trim()) {
-      return record.output_text;
-    }
-    const outputItems = Array.isArray(record.output) ? record.output : [];
-    const chunks: string[] = [];
-    for (const item of outputItems) {
-      if (!item || typeof item !== "object") {
-        continue;
-      }
-      const contentItems = Array.isArray((item as Record<string, unknown>).content)
-        ? ((item as Record<string, unknown>).content as Array<Record<string, unknown>>)
-        : [];
-      for (const content of contentItems) {
-        const text = typeof content?.text === "string" ? content.text : undefined;
-        if (text) {
-          chunks.push(text);
-        }
-      }
-    }
-    if (chunks.length) {
-      return chunks.join("\n");
-    }
-  }
-  return null;
-};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -212,7 +187,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         payload = {};
       }
     }
-    const mode = payload?.mode === "draft" ? "draft" : "reply";
+    const mode =
+      payload?.mode === "draft" || payload?.mode === "test"
+        ? payload.mode
+        : "reply";
     const missingEnv = getMissingEnv(mode);
     if (missingEnv.length) {
       console.error("[reply]", requestId, "missing env:", missingEnv);
@@ -227,6 +205,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       review_id,
       review_name,
       location_id,
+      review_text,
+      rating,
       replyText,
       draftReplyId,
       googleReviewId,
@@ -238,11 +218,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         review_id?: string;
         review_name?: string;
         location_id?: string;
+        review_text?: string;
+        rating?: number;
         replyText?: string;
         draftReplyId?: string;
         googleReviewId?: string;
         tone?: string;
       };
+
+    if (mode === "test") {
+      const safeText =
+        typeof review_text === "string" ? review_text.trim() : "";
+      if (!safeText) {
+        return res.status(400).json({ error: "Missing review_text" });
+      }
+      try {
+        const { data: brandVoice, error: brandVoiceError } = await supabaseAdmin
+          .from("brand_voice")
+          .select(
+            "enabled, tone, language_level, context, use_emojis, forbidden_words"
+          )
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (brandVoiceError) {
+          console.error("[reply]", requestId, "brand_voice fetch failed", brandVoiceError);
+        }
+        const reply = await generateAiReply({
+          reviewText: safeText,
+          rating: typeof rating === "number" ? rating : null,
+          brandVoice: brandVoice ?? null,
+          overrideTone: tone ?? null,
+          openaiApiKey,
+          model: openaiModel,
+          requestId
+        });
+        return res.status(200).json({ reply_text: reply });
+      } catch (error) {
+        if ((error as Error).name === "AbortError") {
+          console.error("[reply]", requestId, "test openai timeout");
+          return res.status(504).json({ error: "OpenAI request timeout" });
+        }
+        console.error("[reply]", requestId, "test openai error", error);
+        return res.status(502).json({ error: "OpenAI request failed" });
+      }
+    }
 
     const resolvedReviewId = review_id ?? reviewId ?? null;
     const resolvedReviewName =
@@ -263,14 +282,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (mode === "draft") {
-      const toneValue =
-        tone === "professional" ||
-        tone === "enthusiastic" ||
-        tone === "empathic" ||
-        tone === "apology"
-          ? tone
-          : "professional";
-
       console.log("[reply]", requestId, "lookup", lookupPath);
       const { data: review, error: lookupError } = await resolveDraftReview(userId, {
         id: resolvedId,
@@ -296,49 +307,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       const reviewText = typeof review.comment === "string" ? review.comment : "";
-      const rating =
-        typeof review.rating === "number" ? `${review.rating}` : "inconnue";
-      const systemPrompt =
-        "Tu es un expert en reponses aux avis Google pour une entreprise locale. " +
-        "Reste factuel, ne devine pas de details. " +
-        "Ecris dans la langue de l'avis (francais par defaut). " +
-        "2 a 4 phrases maximum, ton adapte au contexte.";
-      const userPrompt =
-        "Genere un brouillon de reponse a cet avis.\n" +
-        `Note: ${rating}\n` +
-        `Ton: ${toneValue}\n` +
-        `Avis: ${reviewText || "Avis sans commentaire."}`;
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
       try {
-        const response = await fetch("https://api.openai.com/v1/responses", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${openaiApiKey}`,
-            "Content-Type": "application/json"
-          },
-          signal: controller.signal,
-          body: JSON.stringify({
-            model: openaiModel,
-            input: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userPrompt }
-            ]
-          })
+        const { data: brandVoice, error: brandVoiceError } = await supabaseAdmin
+          .from("brand_voice")
+          .select(
+            "enabled, tone, language_level, context, use_emojis, forbidden_words"
+          )
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (brandVoiceError) {
+          console.error("[reply]", requestId, "brand_voice fetch failed", brandVoiceError);
+        }
+        const reply = await generateAiReply({
+          reviewText: reviewText || "Avis sans commentaire.",
+          rating: typeof review.rating === "number" ? review.rating : null,
+          brandVoice: brandVoice ?? null,
+          overrideTone: tone ?? null,
+          openaiApiKey,
+          model: openaiModel,
+          requestId
         });
-        if (!response.ok) {
-          const txt = await response.text();
-          console.error("[reply]", requestId, "draft openai failed", txt);
-          return res.status(502).json({ error: "OpenAI request failed" });
-        }
-        const payload = await response.json();
-        const outputText = extractOpenAiText(payload);
-        if (!outputText) {
-          console.error("[reply]", requestId, "draft missing output");
-          return res.status(502).json({ error: "OpenAI response missing output" });
-        }
-        return res.status(200).json({ draft_text: outputText.trim() });
+        return res.status(200).json({ draft_text: reply });
       } catch (error) {
         if ((error as Error).name === "AbortError") {
           console.error("[reply]", requestId, "draft openai timeout");
@@ -346,8 +335,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         console.error("[reply]", requestId, "draft openai error", error);
         return res.status(502).json({ error: "OpenAI request failed" });
-      } finally {
-        clearTimeout(timeout);
       }
     }
 
