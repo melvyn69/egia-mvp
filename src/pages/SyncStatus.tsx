@@ -89,9 +89,9 @@ const SyncStatus = ({ session }: SyncStatusProps) => {
       setLocations(filteredLocations);
 
       const stats = { queued: 0, running: 0, failed: 0, lastError: null as string | null };
-      let latestFailed: { updated_at: string | null; last_error: string | null } | null =
-        null;
-      (jobs as JobRow[] | null ?? []).forEach((job) => {
+      const jobRows = (jobs ?? []) as JobRow[];
+      let latestFailed: JobRow | undefined;
+      jobRows.forEach((job) => {
         if (job.status === "queued") stats.queued += 1;
         if (job.status === "running") stats.running += 1;
         if (job.status === "failed") {
@@ -100,10 +100,7 @@ const SyncStatus = ({ session }: SyncStatusProps) => {
             !latestFailed ||
             (job.updated_at && job.updated_at > (latestFailed.updated_at ?? ""))
           ) {
-            latestFailed = {
-              updated_at: job.updated_at ?? null,
-              last_error: job.last_error ?? null
-            };
+            latestFailed = job;
           }
         }
       });

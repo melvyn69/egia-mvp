@@ -381,13 +381,14 @@ const Dashboard = ({
   }, [kpiLocationId, kpiPreset, kpiFrom, kpiTo, session, timeZone]);
 
   useEffect(() => {
-    if (!supabase || !session) {
+    const supabaseClient = supabase;
+    if (!supabaseClient || !session) {
       setSelectedActiveIds([]);
       return;
     }
     let cancelled = false;
     const load = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseClient
         .from("business_settings")
         .select("active_location_ids")
         .eq("user_id", session.user.id)
