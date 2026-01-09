@@ -102,6 +102,31 @@ type AnalyticsDrilldown = {
   has_more: boolean;
 };
 
+const toStringArray = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const result: string[] = [];
+  for (const item of value) {
+    if (typeof item === "string") {
+      result.push(item);
+    } else if (typeof item === "number") {
+      result.push(String(item));
+    }
+  }
+  return result;
+};
+
+const toString = (value: unknown, fallback = ""): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return fallback;
+};
+
 type AnalyticsCompare = {
   periodA: { start: string; end: string; label: string };
   periodB: { start: string; end: string; label: string };
@@ -1028,7 +1053,8 @@ const resolveLocationIds = async (
           .map((row) => row.location_id)
           .filter((value): value is string => Boolean(value))
       );
-      locationIds = Array.from(deduped);
+      // runtime guard: ensure array is string[] even if Supabase returns unknowns
+      locationIds = toStringArray(Array.from(deduped));
     }
   }
   return { locationIds, missing: false };
@@ -1235,7 +1261,8 @@ const handleOverview = async (
     if (!rawLabel) {
       continue;
     }
-    const tagLabel = normalizeTagLabel(rawLabel);
+    // runtime guard: tags can be unknown/nullable from DB
+    const tagLabel = normalizeTagLabel(toString(rawLabel));
     if (!tagLabel) {
       continue;
     }
@@ -1488,9 +1515,14 @@ const handleDrivers = async (
     .from("review_ai_insights")
     .select("review_pk, sentiment")
     .in("review_pk", reviewIdsA);
-  const sentiments = new Map(
-    (sentimentRows ?? []).map((row) => [row.review_pk, row.sentiment])
-  );
+  const sentiments = new Map<string, string | null>();
+  for (const row of sentimentRows ?? []) {
+    const key = toString(row.review_pk);
+    if (!key) {
+      continue;
+    }
+    sentiments.set(key, typeof row.sentiment === "string" ? row.sentiment : null);
+  }
 
   const { data: aiTagLinksA } = await supabaseAdmin
     .from("review_ai_tags")
