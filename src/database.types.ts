@@ -7,32 +7,206 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.1"
+  }
   public: {
     Tables: {
+      ai_tags: {
+        Row: {
+          category: string | null
+          created_at: string
+          id: string
+          tag: string
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          id?: string
+          tag: string
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          id?: string
+          tag?: string
+        }
+        Relationships: []
+      }
+      automation_actions: {
+        Row: {
+          config: Json
+          created_at: string | null
+          id: string
+          type: string
+          user_id: string
+          workflow_id: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string | null
+          id?: string
+          type: string
+          user_id: string
+          workflow_id: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string | null
+          id?: string
+          type?: string
+          user_id?: string
+          workflow_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "automation_actions_workflow_id_fkey"
+            columns: ["workflow_id"]
+            isOneToOne: false
+            referencedRelation: "automation_workflows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      automation_conditions: {
+        Row: {
+          created_at: string | null
+          field: string
+          id: string
+          operator: string
+          user_id: string
+          value: string
+          workflow_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          field: string
+          id?: string
+          operator: string
+          user_id: string
+          value: string
+          workflow_id: string
+        }
+        Update: {
+          created_at?: string | null
+          field?: string
+          id?: string
+          operator?: string
+          user_id?: string
+          value?: string
+          workflow_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "automation_conditions_workflow_id_fkey"
+            columns: ["workflow_id"]
+            isOneToOne: false
+            referencedRelation: "automation_workflows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      automation_workflows: {
+        Row: {
+          created_at: string | null
+          enabled: boolean
+          id: string
+          location_id: string | null
+          name: string
+          trigger: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          enabled?: boolean
+          id?: string
+          location_id?: string | null
+          name: string
+          trigger?: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          enabled?: boolean
+          id?: string
+          location_id?: string | null
+          name?: string
+          trigger?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      brand_voice: {
+        Row: {
+          context: string | null
+          created_at: string | null
+          enabled: boolean
+          forbidden_words: string[]
+          id: string
+          language_level: Database["public"]["Enums"]["brand_voice_language_level"]
+          tone: Database["public"]["Enums"]["brand_voice_tone"]
+          updated_at: string | null
+          use_emojis: boolean
+          user_id: string
+        }
+        Insert: {
+          context?: string | null
+          created_at?: string | null
+          enabled?: boolean
+          forbidden_words?: string[]
+          id?: string
+          language_level?: Database["public"]["Enums"]["brand_voice_language_level"]
+          tone?: Database["public"]["Enums"]["brand_voice_tone"]
+          updated_at?: string | null
+          use_emojis?: boolean
+          user_id: string
+        }
+        Update: {
+          context?: string | null
+          created_at?: string | null
+          enabled?: boolean
+          forbidden_words?: string[]
+          id?: string
+          language_level?: Database["public"]["Enums"]["brand_voice_language_level"]
+          tone?: Database["public"]["Enums"]["brand_voice_tone"]
+          updated_at?: string | null
+          use_emojis?: boolean
+          user_id?: string
+        }
+        Relationships: []
+      }
       business_memory: {
         Row: {
           business_id: string
           content: string
-          created_at: string | null
+          created_at: string
           id: string
-          is_active: boolean | null
-          kind: string | null
+          is_active: boolean
+          kind: string
+          user_id: string | null
         }
         Insert: {
           business_id: string
           content: string
-          created_at?: string | null
+          created_at?: string
           id?: string
-          is_active?: boolean | null
-          kind?: string | null
+          is_active?: boolean
+          kind?: string
+          user_id?: string | null
         }
         Update: {
           business_id?: string
           content?: string
-          created_at?: string | null
+          created_at?: string
           id?: string
-          is_active?: boolean | null
-          kind?: string | null
+          is_active?: boolean
+          kind?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -48,32 +222,59 @@ export type Database = {
         Row: {
           business_id: string
           business_name: string
-          default_length: string | null
-          default_tone: string | null
+          default_length: string
+          default_tone: string
           do_not_say: string | null
+          language_level: string | null
           preferred_phrases: string | null
           signature: string | null
-          updated_at: string | null
+          updated_at: string
+          use_emojis: boolean | null
+          user_id: string | null
         }
         Insert: {
-          business_id: string
+          business_id?: string
           business_name: string
-          default_length?: string | null
-          default_tone?: string | null
+          default_length?: string
+          default_tone?: string
           do_not_say?: string | null
+          language_level?: string | null
           preferred_phrases?: string | null
           signature?: string | null
-          updated_at?: string | null
+          updated_at?: string
+          use_emojis?: boolean | null
+          user_id?: string | null
         }
         Update: {
           business_id?: string
           business_name?: string
-          default_length?: string | null
-          default_tone?: string | null
+          default_length?: string
+          default_tone?: string
           do_not_say?: string | null
+          language_level?: string | null
           preferred_phrases?: string | null
           signature?: string | null
-          updated_at?: string | null
+          updated_at?: string
+          use_emojis?: boolean | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      cron_state: {
+        Row: {
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value?: Json
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: Json
         }
         Relationships: []
       }
@@ -113,9 +314,12 @@ export type Database = {
           created_at: string
           expires_at: string | null
           id: string
+          oauth_state: string | null
+          oauth_state_expires_at: string | null
           provider: string
-          refresh_token: string | null
+          refresh_token: string
           scope: string | null
+          token_expiry: string | null
           token_type: string | null
           updated_at: string
           user_id: string
@@ -125,9 +329,12 @@ export type Database = {
           created_at?: string
           expires_at?: string | null
           id?: string
+          oauth_state?: string | null
+          oauth_state_expires_at?: string | null
           provider?: string
-          refresh_token?: string | null
+          refresh_token: string
           scope?: string | null
+          token_expiry?: string | null
           token_type?: string | null
           updated_at?: string
           user_id: string
@@ -137,9 +344,12 @@ export type Database = {
           created_at?: string
           expires_at?: string | null
           id?: string
+          oauth_state?: string | null
+          oauth_state_expires_at?: string | null
           provider?: string
-          refresh_token?: string | null
+          refresh_token?: string
           scope?: string | null
+          token_expiry?: string | null
           token_type?: string | null
           updated_at?: string
           user_id?: string
@@ -191,10 +401,283 @@ export type Database = {
         }
         Relationships: []
       }
+      google_oauth_states: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          redirect_to: string | null
+          state: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          redirect_to?: string | null
+          state: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          redirect_to?: string | null
+          state?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      google_reviews: {
+        Row: {
+          account_resource_name: string | null
+          author_name: string | null
+          comment: string | null
+          create_time: string | null
+          created_at: string
+          id: string
+          last_seen_at: string | null
+          last_synced_at: string | null
+          location_id: string | null
+          location_name: string
+          needs_reply: boolean | null
+          owner_reply: string | null
+          owner_reply_time: string | null
+          provider: string
+          rating: number | null
+          raw: Json | null
+          replied_at: string | null
+          reply: Json | null
+          reply_text: string | null
+          review_id: string | null
+          review_name: string
+          reviewer: Json | null
+          star_rating: string | null
+          status: string | null
+          update_time: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_resource_name?: string | null
+          author_name?: string | null
+          comment?: string | null
+          create_time?: string | null
+          created_at?: string
+          id?: string
+          last_seen_at?: string | null
+          last_synced_at?: string | null
+          location_id?: string | null
+          location_name?: string
+          needs_reply?: boolean | null
+          owner_reply?: string | null
+          owner_reply_time?: string | null
+          provider?: string
+          rating?: number | null
+          raw?: Json | null
+          replied_at?: string | null
+          reply?: Json | null
+          reply_text?: string | null
+          review_id?: string | null
+          review_name: string
+          reviewer?: Json | null
+          star_rating?: string | null
+          status?: string | null
+          update_time?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_resource_name?: string | null
+          author_name?: string | null
+          comment?: string | null
+          create_time?: string | null
+          created_at?: string
+          id?: string
+          last_seen_at?: string | null
+          last_synced_at?: string | null
+          location_id?: string | null
+          location_name?: string
+          needs_reply?: boolean | null
+          owner_reply?: string | null
+          owner_reply_time?: string | null
+          provider?: string
+          rating?: number | null
+          raw?: Json | null
+          replied_at?: string | null
+          reply?: Json | null
+          reply_text?: string | null
+          review_id?: string | null
+          review_name?: string
+          reviewer?: Json | null
+          star_rating?: string | null
+          status?: string | null
+          update_time?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      review_ai_insights: {
+        Row: {
+          created_at: string
+          error: string | null
+          location_resource_name: string
+          model: string | null
+          processed_at: string | null
+          review_pk: string
+          sentiment: string | null
+          sentiment_score: number | null
+          source_update_time: string | null
+          summary: string | null
+          topics: Json | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          location_resource_name: string
+          model?: string | null
+          processed_at?: string | null
+          review_pk: string
+          sentiment?: string | null
+          sentiment_score?: number | null
+          source_update_time?: string | null
+          summary?: string | null
+          topics?: Json | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          location_resource_name?: string
+          model?: string | null
+          processed_at?: string | null
+          review_pk?: string
+          sentiment?: string | null
+          sentiment_score?: number | null
+          source_update_time?: string | null
+          summary?: string | null
+          topics?: Json | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "review_ai_insights_review_pk_fkey"
+            columns: ["review_pk"]
+            isOneToOne: true
+            referencedRelation: "google_reviews"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "review_ai_insights_review_pk_fkey"
+            columns: ["review_pk"]
+            isOneToOne: true
+            referencedRelation: "inbox_reviews"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      review_ai_tags: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          evidence: string | null
+          polarity: number | null
+          review_pk: string
+          tag_id: string
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          evidence?: string | null
+          polarity?: number | null
+          review_pk: string
+          tag_id: string
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          evidence?: string | null
+          polarity?: number | null
+          review_pk?: string
+          tag_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "review_ai_tags_review_pk_fkey"
+            columns: ["review_pk"]
+            isOneToOne: false
+            referencedRelation: "google_reviews"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "review_ai_tags_review_pk_fkey"
+            columns: ["review_pk"]
+            isOneToOne: false
+            referencedRelation: "inbox_reviews"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "review_ai_tags_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "ai_tags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      review_drafts: {
+        Row: {
+          created_at: string | null
+          draft_text: string
+          id: string
+          location_id: string | null
+          review_id: string
+          status: string
+          tone: string | null
+          user_id: string
+          workflow_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          draft_text: string
+          id?: string
+          location_id?: string | null
+          review_id: string
+          status?: string
+          tone?: string | null
+          user_id: string
+          workflow_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          draft_text?: string
+          id?: string
+          location_id?: string | null
+          review_id?: string
+          status?: string
+          tone?: string | null
+          user_id?: string
+          workflow_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "review_drafts_workflow_id_fkey"
+            columns: ["workflow_id"]
+            isOneToOne: false
+            referencedRelation: "automation_workflows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       review_replies: {
         Row: {
           business_name: string | null
-          created_at: string | null
+          created_at: string
           id: string
           length: string | null
           location_id: string | null
@@ -208,7 +691,7 @@ export type Database = {
         }
         Insert: {
           business_name?: string | null
-          created_at?: string | null
+          created_at?: string
           id?: string
           length?: string | null
           location_id?: string | null
@@ -222,7 +705,7 @@ export type Database = {
         }
         Update: {
           business_name?: string | null
-          created_at?: string | null
+          created_at?: string
           id?: string
           length?: string | null
           location_id?: string | null
@@ -236,15 +719,189 @@ export type Database = {
         }
         Relationships: []
       }
+      review_tags: {
+        Row: {
+          created_at: string | null
+          id: string
+          location_id: string | null
+          review_id: string
+          tag: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          location_id?: string | null
+          review_id: string
+          tag: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          location_id?: string | null
+          review_id?: string
+          tag?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
-      [_ in never]: never
+      business_memory_effective: {
+        Row: {
+          business_id: string | null
+          content: string | null
+          created_at: string | null
+          kind: string | null
+          user_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "business_memory_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "business_settings"
+            referencedColumns: ["business_id"]
+          },
+        ]
+      }
+      inbox_reviews: {
+        Row: {
+          account_resource_name: string | null
+          comment: string | null
+          create_time: string | null
+          created_at: string | null
+          id: string | null
+          last_synced_at: string | null
+          location_id: string | null
+          location_name: string | null
+          needs_reply: boolean | null
+          provider: string | null
+          replied_at: string | null
+          reply: Json | null
+          reply_text: string | null
+          review_id: string | null
+          review_name: string | null
+          reviewer: Json | null
+          star_rating: string | null
+          status: string | null
+          update_time: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          account_resource_name?: string | null
+          comment?: string | null
+          create_time?: string | null
+          created_at?: string | null
+          id?: string | null
+          last_synced_at?: string | null
+          location_id?: string | null
+          location_name?: string | null
+          needs_reply?: boolean | null
+          provider?: string | null
+          replied_at?: string | null
+          reply?: Json | null
+          reply_text?: string | null
+          review_id?: string | null
+          review_name?: string | null
+          reviewer?: Json | null
+          star_rating?: string | null
+          status?: string | null
+          update_time?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          account_resource_name?: string | null
+          comment?: string | null
+          create_time?: string | null
+          created_at?: string | null
+          id?: string | null
+          last_synced_at?: string | null
+          location_id?: string | null
+          location_name?: string | null
+          needs_reply?: boolean | null
+          provider?: string | null
+          replied_at?: string | null
+          reply?: Json | null
+          reply_text?: string | null
+          review_id?: string | null
+          review_name?: string | null
+          reviewer?: Json | null
+          star_rating?: string | null
+          status?: string | null
+          update_time?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
-      [_ in never]: never
+      ai_tag_candidates: {
+        Args: {
+          p_force?: boolean
+          p_limit?: number
+          p_location_id?: string
+          p_since_id?: string
+          p_since_time?: string
+          p_user_id?: string
+        }
+        Returns: {
+          comment: string
+          create_time: string
+          created_at: string
+          id: string
+          location_id: string
+          location_name: string
+          update_time: string
+          user_id: string
+        }[]
+      }
+      ai_tag_candidates_count: {
+        Args: { p_location_id?: string; p_user_id?: string }
+        Returns: number
+      }
+      kpi_summary:
+        | {
+            Args: { p_from: string; p_location_id: string; p_to: string }
+            Returns: {
+              avg_rating: number
+              reviews_total: number
+              reviews_with_text: number
+              sentiment_negative: number
+              sentiment_neutral: number
+              sentiment_positive: number
+              top_tags: Json
+            }[]
+          }
+        | {
+            Args: {
+              p_from: string
+              p_location_id: string
+              p_rating_max?: number
+              p_rating_min?: number
+              p_sentiment?: string
+              p_status?: string
+              p_tags?: string[]
+              p_to: string
+            }
+            Returns: {
+              avg_rating: number
+              reviews_total: number
+              reviews_with_text: number
+              sentiment_negative: number
+              sentiment_neutral: number
+              sentiment_positive: number
+              top_tags: Json
+            }[]
+          }
     }
     Enums: {
-      [_ in never]: never
+      brand_voice_language_level: "tutoiement" | "vouvoiement"
+      brand_voice_tone: "professional" | "friendly" | "warm" | "formal"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -371,7 +1028,9 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      brand_voice_language_level: ["tutoiement", "vouvoiement"],
+      brand_voice_tone: ["professional", "friendly", "warm", "formal"],
+    },
   },
 } as const
-
