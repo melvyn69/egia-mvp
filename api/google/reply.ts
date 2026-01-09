@@ -177,6 +177,38 @@ const resolveDraftReview = async (
   return { data: data ?? null, error: null };
 };
 
+const fetchBrandVoice = async (
+  userId: string,
+  locationId: string | null
+) => {
+  const selectFields =
+    "enabled, tone, language_level, context, use_emojis, forbidden_words, location_id";
+  if (locationId) {
+    const { data: specific, error } = await supabaseAdmin
+      .from("brand_voice")
+      .select(selectFields)
+      .eq("user_id", userId)
+      .eq("location_id", locationId)
+      .maybeSingle();
+    if (error) {
+      console.error("[reply] brand_voice fetch failed", error);
+    }
+    if (specific) {
+      return specific;
+    }
+  }
+  const { data: globalRow, error: globalError } = await supabaseAdmin
+    .from("brand_voice")
+    .select(selectFields)
+    .eq("user_id", userId)
+    .is("location_id", null)
+    .maybeSingle();
+  if (globalError) {
+    console.error("[reply] brand_voice fetch failed", globalError);
+  }
+  return globalRow ?? null;
+};
+
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -254,16 +286,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: "Missing review_text" });
       }
       try {
-        const { data: brandVoice, error: brandVoiceError } = await supabaseAdmin
-          .from("brand_voice")
-          .select(
-            "enabled, tone, language_level, context, use_emojis, forbidden_words"
-          )
-          .eq("user_id", userId)
-          .maybeSingle();
-        if (brandVoiceError) {
-          console.error("[reply]", requestId, "brand_voice fetch failed", brandVoiceError);
-        }
+        const brandVoice = await fetchBrandVoice(
+          userId,
+          typeof location_id === "string" ? location_id : null
+        );
         const reply = await generateAiReply({
           reviewText: safeText,
           rating: typeof rating === "number" ? rating : null,
@@ -336,16 +362,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const reviewText = typeof review.comment === "string" ? review.comment : "";
       try {
-        const { data: brandVoice, error: brandVoiceError } = await supabaseAdmin
-          .from("brand_voice")
-          .select(
-            "enabled, tone, language_level, context, use_emojis, forbidden_words"
-          )
-          .eq("user_id", userId)
-          .maybeSingle();
-        if (brandVoiceError) {
-          console.error("[reply]", requestId, "brand_voice fetch failed", brandVoiceError);
-        }
+        const brandVoice = await fetchBrandVoice(
+          userId,
+          review.location_id ?? (typeof location_id === "string" ? location_id : null)
+        );
         const reply = await generateAiReply({
           reviewText: reviewText || "Avis sans commentaire.",
           rating: typeof review.rating === "number" ? review.rating : null,

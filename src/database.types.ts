@@ -149,6 +149,7 @@ export type Database = {
           forbidden_words: string[]
           id: string
           language_level: Database["public"]["Enums"]["brand_voice_language_level"]
+          location_id: string | null
           tone: Database["public"]["Enums"]["brand_voice_tone"]
           updated_at: string | null
           use_emojis: boolean
@@ -161,6 +162,7 @@ export type Database = {
           forbidden_words?: string[]
           id?: string
           language_level?: Database["public"]["Enums"]["brand_voice_language_level"]
+          location_id?: string | null
           tone?: Database["public"]["Enums"]["brand_voice_tone"]
           updated_at?: string | null
           use_emojis?: boolean
@@ -173,6 +175,7 @@ export type Database = {
           forbidden_words?: string[]
           id?: string
           language_level?: Database["public"]["Enums"]["brand_voice_language_level"]
+          location_id?: string | null
           tone?: Database["public"]["Enums"]["brand_voice_tone"]
           updated_at?: string | null
           use_emojis?: boolean

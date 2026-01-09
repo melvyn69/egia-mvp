@@ -19,6 +19,12 @@ type BrandVoiceForm = {
   forbidden_words: string[];
 };
 
+type LocationOption = {
+  id: string;
+  location_title: string | null;
+  location_resource_name: string;
+};
+
 const defaultForm: BrandVoiceForm = {
   enabled: true,
   tone: "professional",
@@ -36,8 +42,41 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [newWord, setNewWord] = useState("");
+  const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
+  const [usingGlobalFallback, setUsingGlobalFallback] = useState(false);
 
   const canSave = Boolean(session?.user?.id);
+
+  useEffect(() => {
+    if (!supabaseClient || !session) {
+      return;
+    }
+    let cancelled = false;
+    const loadLocations = async () => {
+      const { data, error } = await supabaseClient
+        .from("google_locations")
+        .select("id, location_title, location_resource_name")
+        .eq("user_id", session.user.id)
+        .order("location_title", { ascending: true });
+      if (cancelled) {
+        return;
+      }
+      if (error) {
+        console.error("google_locations fetch error:", error);
+      }
+      setLocations((data ?? []) as LocationOption[]);
+    };
+    void loadLocations();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, supabaseClient]);
+
+  useEffect(() => {
+    setSuccess(null);
+    setError(null);
+  }, [selectedLocationId]);
 
   useEffect(() => {
     if (!supabaseClient || !session) {
@@ -47,30 +86,68 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
     const load = async () => {
       setLoading(true);
       setError(null);
-      const { data, error } = await supabaseClient
-        .from("brand_voice")
-        .select(
-          "enabled, tone, language_level, context, use_emojis, forbidden_words"
-        )
-        .eq("user_id", session.user.id)
-        .maybeSingle();
+      setUsingGlobalFallback(false);
+      let data: BrandVoiceForm | null = null;
+      if (selectedLocationId) {
+        const { data: specific, error } = await supabaseClient
+          .from("brand_voice")
+          .select(
+            "enabled, tone, language_level, context, use_emojis, forbidden_words, location_id"
+          )
+          .eq("user_id", session.user.id)
+          .eq("location_id", selectedLocationId)
+          .maybeSingle();
+        if (error) {
+          console.error("brand_voice fetch error:", error);
+          setError("Impossible de charger la configuration.");
+        }
+        if (specific) {
+          data = {
+            enabled: Boolean(specific.enabled),
+            tone: specific.tone ?? "professional",
+            language_level: specific.language_level ?? "vouvoiement",
+            context: specific.context ?? "",
+            use_emojis: Boolean(specific.use_emojis),
+            forbidden_words: Array.isArray(specific.forbidden_words)
+              ? specific.forbidden_words.filter(Boolean)
+              : []
+          };
+        }
+      }
+      if (!data) {
+        const { data: globalRow, error } = await supabaseClient
+          .from("brand_voice")
+          .select(
+            "enabled, tone, language_level, context, use_emojis, forbidden_words, location_id"
+          )
+          .eq("user_id", session.user.id)
+          .is("location_id", null)
+          .maybeSingle();
+        if (error) {
+          console.error("brand_voice fetch error:", error);
+          setError("Impossible de charger la configuration.");
+        }
+        if (globalRow) {
+          data = {
+            enabled: Boolean(globalRow.enabled),
+            tone: globalRow.tone ?? "professional",
+            language_level: globalRow.language_level ?? "vouvoiement",
+            context: globalRow.context ?? "",
+            use_emojis: Boolean(globalRow.use_emojis),
+            forbidden_words: Array.isArray(globalRow.forbidden_words)
+              ? globalRow.forbidden_words.filter(Boolean)
+              : []
+          };
+          if (selectedLocationId) {
+            setUsingGlobalFallback(true);
+          }
+        }
+      }
       if (cancelled) {
         return;
       }
-      if (error) {
-        console.error("brand_voice fetch error:", error);
-        setError("Impossible de charger la configuration.");
-      } else if (data) {
-        setForm({
-          enabled: Boolean(data.enabled),
-          tone: data.tone ?? "professional",
-          language_level: data.language_level ?? "vouvoiement",
-          context: data.context ?? "",
-          use_emojis: Boolean(data.use_emojis),
-          forbidden_words: Array.isArray(data.forbidden_words)
-            ? data.forbidden_words.filter(Boolean)
-            : []
-        });
+      if (data) {
+        setForm(data);
       } else {
         setForm(defaultForm);
       }
@@ -80,7 +157,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
     return () => {
       cancelled = true;
     };
-  }, [session, supabaseClient]);
+  }, [session, supabaseClient, selectedLocationId]);
 
   const words = useMemo(
     () => form.forbidden_words.filter(Boolean),
@@ -119,6 +196,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
     setSuccess(null);
     const payload = {
       user_id: session.user.id,
+      location_id: selectedLocationId,
       enabled: form.enabled,
       tone: form.tone,
       language_level: form.language_level,
@@ -126,6 +204,9 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
       use_emojis: form.use_emojis,
       forbidden_words: form.forbidden_words.filter(Boolean)
     };
+    const conflictTarget = selectedLocationId
+      ? "user_id,location_id"
+      : "user_id";
     const { data, error } = await supabaseClient
       .from("brand_voice")
       .upsert(
@@ -133,7 +214,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
           ...payload,
           updated_at: new Date().toISOString()
         },
-        { onConflict: "user_id" }
+        { onConflict: conflictTarget }
       )
       .select()
       .single();
@@ -179,6 +260,33 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
         <Skeleton className="h-40 w-full" />
       ) : (
         <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Appliquer a</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                  value={selectedLocationId ?? ""}
+                  onChange={(event) =>
+                    setSelectedLocationId(event.target.value || null)
+                  }
+                >
+                  <option value="">Tous les etablissements</option>
+                  {locations.map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.location_title || location.location_resource_name}
+                    </option>
+                  ))}
+                </select>
+                {usingGlobalFallback && selectedLocationId && (
+                  <Badge variant="neutral">Regle globale</Badge>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Activation</CardTitle>
