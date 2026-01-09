@@ -23,7 +23,7 @@ const googleClientSecret = getEnv([
 const openaiApiKey = process.env.OPENAI_API_KEY ?? "";
 const openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-const getMissingEnv = (mode: "reply" | "draft" | "test") => {
+const getMissingEnv = (mode: "reply" | "draft" | "test" | "automation") => {
   const missing = [];
   if (!supabaseUrl) missing.push("SUPABASE_URL");
   if (!serviceRoleKey) missing.push("SUPABASE_SERVICE_ROLE_KEY");
@@ -32,7 +32,7 @@ const getMissingEnv = (mode: "reply" | "draft" | "test") => {
     if (!googleClientSecret)
       missing.push("GOOGLE_OAUTH_CLIENT_SECRET|GOOGLE_CLIENT_SECRET");
   }
-  if ((mode === "draft" || mode === "test") && !openaiApiKey) {
+  if ((mode === "draft" || mode === "test" || mode === "automation") && !openaiApiKey) {
     missing.push("OPENAI_API_KEY");
   }
   return missing;
@@ -82,6 +82,25 @@ const getLookupPath = (params: {
   if (params.review_id && params.location_id) return "review_id+location_id";
   if (params.review_id) return "review_id";
   return "missing";
+};
+
+const insertReplyHistory = async (params: {
+  userId: string;
+  reviewId: string;
+  locationId: string | null;
+  replyText: string;
+  source: "manual" | "automation" | "test";
+}) => {
+  const { error } = await supabaseAdmin.from("review_replies").insert({
+    user_id: params.userId,
+    review_id: params.reviewId,
+    location_id: params.locationId,
+    reply_text: params.replyText,
+    source: params.source
+  });
+  if (error) {
+    console.warn("[reply] review_replies insert failed", error);
+  }
 };
 
 const resolveReviewRecord = async (
@@ -188,7 +207,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
     const mode =
-      payload?.mode === "draft" || payload?.mode === "test"
+      payload?.mode === "draft" ||
+      payload?.mode === "test" ||
+      payload?.mode === "automation"
         ? payload.mode
         : "reply";
     const missingEnv = getMissingEnv(mode);
@@ -252,6 +273,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           model: openaiModel,
           requestId
         });
+        void insertReplyHistory({
+          userId,
+          reviewId: "test",
+          locationId: null,
+          replyText: reply,
+          source: "test"
+        });
         return res.status(200).json({ reply_text: reply });
       } catch (error) {
         if ((error as Error).name === "AbortError") {
@@ -281,7 +309,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: "Missing review identifiers" });
     }
 
-    if (mode === "draft") {
+    if (mode === "draft" || mode === "automation") {
       console.log("[reply]", requestId, "lookup", lookupPath);
       const { data: review, error: lookupError } = await resolveDraftReview(userId, {
         id: resolvedId,
@@ -326,6 +354,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           openaiApiKey,
           model: openaiModel,
           requestId
+        });
+        void insertReplyHistory({
+          userId,
+          reviewId: review.review_id ?? review.id,
+          locationId: review.location_id ?? null,
+          replyText: reply,
+          source: mode === "automation" ? "automation" : "manual"
         });
         return res.status(200).json({ draft_text: reply });
       } catch (error) {

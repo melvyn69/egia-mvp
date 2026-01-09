@@ -321,7 +321,6 @@ const Automation = ({
     const tags: string[] = [];
     let draftText: string | null = null;
 
-    console.log("🚨 ACTION LOOP START", workflowActions);
     for (const action of workflowActions) {
       const type = action.type ?? "";
       const config = normalizeConfig(action.config);
@@ -372,19 +371,12 @@ const Automation = ({
           continue;
         }
         tags.push(tag);
-        console.log("🏷️ ADD TAG ACTION TRIGGERED", {
-          tag,
-          review_id: match.review_id ?? match.id,
-          location_id: match.location_id ?? null,
-          user_id: session.user.id
-        });
         const { error } = await supabaseClient.from("review_tags").insert({
           user_id: session.user.id,
           review_id: match.review_id ?? match.id,
           location_id: match.location_id ?? null,
           tag
         });
-        console.log("🏷️ TAG INSERT RESULT", { error });
         if (error) {
           console.error("review_tags insert error:", error);
         }

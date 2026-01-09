@@ -818,6 +818,77 @@ const Inbox = () => {
     }
   };
 
+  const handleGenerateBrandVoice = async () => {
+    if (!selectedReview) {
+      return;
+    }
+    if (!supabase) {
+      setGenerationError("Configuration Supabase manquante.");
+      return;
+    }
+    setIsGenerating(true);
+    setGenerationError(null);
+    try {
+      const token = await getAccessToken(supabase);
+      const response = await fetch("/api/google/reply", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          mode: "draft",
+          review_id: selectedReview.reviewId ?? selectedReview.id,
+          location_id: selectedReview.locationId
+        })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.draft_text) {
+        setGenerationError("Impossible de générer une réponse pour le moment.");
+        return;
+      }
+      setReplyText(payload.draft_text);
+      setDrafts((prev) => ({ ...prev, [selectedReview.id]: payload.draft_text }));
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session?.user) {
+        setGenerationError("Connecte-toi pour sauvegarder le brouillon.");
+      } else {
+        const locationId =
+          uuidRegex.test(selectedReview.locationId)
+            ? selectedReview.locationId
+            : null;
+        const { data: inserted, error: insertError } = await supabase
+          .from("review_replies")
+          .insert({
+            user_id: sessionData.session.user.id,
+            review_id: selectedReview.id,
+            source: selectedReview.source.toLowerCase(),
+            location_id: locationId,
+            business_name: selectedReview.locationName,
+            tone: tonePreset,
+            length: lengthPreset,
+            reply_text: payload.draft_text,
+            status: "draft"
+          })
+          .select("id, review_id, reply_text, status, created_at, sent_at")
+          .single();
+        if (!insertError && inserted) {
+          const row = inserted as ReviewReply;
+          setReplyHistory((prev) => [row, ...prev]);
+          setDraftReplyId(row.id);
+          setDraftByReview((prev) => ({ ...prev, [selectedReview.id]: true }));
+        } else if (import.meta.env.DEV) {
+          console.log("review_replies insert error:", insertError);
+        }
+      }
+    } catch {
+      setGenerationError("Erreur lors de la génération.");
+    } finally {
+      setIsGenerating(false);
+      setCooldownUntil(Date.now() + COOLDOWN_MS);
+    }
+  };
+
   const handleSave = async () => {
     if (!selectedReview) {
       return;
@@ -1573,6 +1644,19 @@ const Inbox = () => {
                     }
                   >
                     {isGenerating ? "Génération..." : "Générer"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleGenerateBrandVoice}
+                    disabled={
+                      isGenerating ||
+                      !selectedReview ||
+                      !isSupabaseAvailable ||
+                      isCooldownActive
+                    }
+                  >
+                    Générer IA
                   </Button>
                   <Button
                     type="button"

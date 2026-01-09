@@ -9,6 +9,45 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      brand_voice: {
+        Row: {
+          id: string;
+          user_id: string;
+          enabled: boolean;
+          tone: Database["public"]["Enums"]["brand_voice_tone"];
+          language_level: Database["public"]["Enums"]["brand_voice_language_level"];
+          context: string | null;
+          use_emojis: boolean;
+          forbidden_words: string[];
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          enabled?: boolean;
+          tone?: Database["public"]["Enums"]["brand_voice_tone"];
+          language_level?: Database["public"]["Enums"]["brand_voice_language_level"];
+          context?: string | null;
+          use_emojis?: boolean;
+          forbidden_words?: string[];
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          enabled?: boolean;
+          tone?: Database["public"]["Enums"]["brand_voice_tone"];
+          language_level?: Database["public"]["Enums"]["brand_voice_language_level"];
+          context?: string | null;
+          use_emojis?: boolean;
+          forbidden_words?: string[];
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
       business_memory: {
         Row: {
           id: string;
@@ -594,6 +633,8 @@ export type Database = {
       };
     };
     Enums: {
+      brand_voice_tone: "professional" | "friendly" | "warm" | "formal";
+      brand_voice_language_level: "tutoiement" | "vouvoiement";
       [_ in never]: never;
     };
     CompositeTypes: {
