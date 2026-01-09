@@ -179,6 +179,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         .select(
           "id, rating, comment, reply_text, replied_at, owner_reply, owner_reply_time, status"
         );
+      query = query.eq("user_id", userId);
       if (locationIds.length === 1) {
         query = query.eq("location_id", locationIds[0]);
       } else {
