@@ -126,8 +126,18 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
       use_emojis: form.use_emojis,
       forbidden_words: form.forbidden_words.filter(Boolean)
     };
-    const { error } = await supabaseClient.from("brand_voice").upsert(payload);
-    if (error) {
+    const { data, error } = await supabaseClient
+      .from("brand_voice")
+      .upsert(
+        {
+          ...payload,
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: "user_id" }
+      )
+      .select()
+      .single();
+    if (error || !data) {
       console.error("brand_voice save error:", error);
       setError("Impossible de sauvegarder.");
     } else {
