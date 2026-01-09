@@ -21,6 +21,13 @@ type GoogleReview = {
   };
 };
 
+const getErrorMessage = (err: unknown): string =>
+  err instanceof Error
+    ? err.message
+    : typeof err === "string"
+      ? err
+      : JSON.stringify(err);
+
 const mapRating = (starRating?: string): number | null => {
   switch (starRating) {
     case "ONE":
@@ -193,9 +200,10 @@ export const syncGoogleReviewsForUser = async (
       refreshed = await refreshAccessToken(connection.refresh_token);
     } catch (error) {
       const refreshError = error as Error & { code?: string };
+      const refreshMessage = getErrorMessage(error);
       const reauthRequired =
         refreshError.code === "invalid_grant" ||
-        /expired or revoked/i.test(refreshError.message);
+        /expired or revoked/i.test(refreshMessage);
       if (reauthRequired) {
         throw new Error("reauth_required");
       }
@@ -293,7 +301,7 @@ export const syncGoogleReviewsForUser = async (
           pages_exhausted: false,
           stats: { scanned: 0, upserted: 0 },
           errors_count: 1,
-          last_error: (error as Error)?.message ?? "Failed to sync reviews."
+          last_error: getErrorMessage(error)
         }
       );
       throw error;
@@ -525,7 +533,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       })
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
+    const message = getErrorMessage(error);
     if (message === "reauth_required") {
       res.statusCode = 401;
       res.setHeader("Content-Type", "application/json");
