@@ -183,6 +183,45 @@ export type Database = {
         }
         Relationships: []
       }
+      job_queue: {
+        Row: {
+          attempts: number
+          created_at: string
+          id: string
+          last_error: string | null
+          payload: Json
+          run_at: string
+          status: string
+          type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          payload?: Json
+          run_at?: string
+          status?: string
+          type: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          payload?: Json
+          run_at?: string
+          status?: string
+          type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string | null
@@ -861,6 +900,10 @@ export type Database = {
       }
     }
     Functions: {
+      job_queue_claim: {
+        Args: { max_jobs: number }
+        Returns: Database["public"]["Tables"]["job_queue"]["Row"][]
+      }
       ai_tag_candidates: {
         Args: {
           p_force?: boolean

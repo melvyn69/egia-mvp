@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database, Json } from "../../../server/_shared_dist/database.types.js";
+import { syncGoogleLocationsForUser } from "../../google/gbp/sync.js";
+import { syncGoogleReviewsForUser } from "../../google/gbp/reviews/sync.js";
 
 type GoogleReview = {
   reviewId?: string;
@@ -20,6 +22,7 @@ type GoogleReview = {
 
 type GoogleReviewUpsert =
   Database["public"]["Tables"]["google_reviews"]["Insert"];
+type JobQueueRow = Database["public"]["Tables"]["job_queue"]["Row"];
 
 const CURSOR_KEY = "google_sync_replies_cursor_v1";
 const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000;
@@ -156,6 +159,99 @@ const getAuthSecret = (req: VercelRequest) => {
   return secretParam ?? "";
 };
 
+const JOB_RATE_LIMIT_DELAY_MS = 60_000;
+
+const claimJobs = async (limit: number) => {
+  const { data, error } = await supabaseAdmin.rpc("job_queue_claim", {
+    max_jobs: limit
+  });
+  if (error) {
+    console.error("[jobs] claim failed", error);
+    return [];
+  }
+  return (data ?? []) as JobQueueRow[];
+};
+
+const updateJob = async (
+  jobId: string,
+  patch: Partial<Pick<JobQueueRow, "status" | "attempts" | "last_error" | "run_at" | "updated_at">>
+) => {
+  await supabaseAdmin.from("job_queue").update(patch).eq("id", jobId);
+};
+
+const processJobQueue = async () => {
+  const maxJobs = Number(process.env.JOB_QUEUE_MAX ?? 50);
+  const jobs = await claimJobs(maxJobs);
+  if (jobs.length === 0) {
+    return { processed: 0, failed: 0, skipped: 0 };
+  }
+
+  const jobIds = jobs.map((job) => job.id);
+  const userIds = Array.from(new Set(jobs.map((job) => job.user_id)));
+  const { data: runningRows } = await supabaseAdmin
+    .from("job_queue")
+    .select("id, user_id")
+    .eq("status", "running")
+    .in("user_id", userIds);
+  const activeUsers = new Set(
+    (runningRows ?? [])
+      .filter((row) => !jobIds.includes(row.id))
+      .map((row) => row.user_id)
+  );
+
+  const inBatchUsers = new Set<string>();
+  let processed = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  for (const job of jobs) {
+    const attempts = (job.attempts ?? 0) + 1;
+    if (activeUsers.has(job.user_id) || inBatchUsers.has(job.user_id)) {
+      skipped += 1;
+      await updateJob(job.id, {
+        status: "queued",
+        attempts,
+        last_error: "rate_limited",
+        run_at: new Date(Date.now() + JOB_RATE_LIMIT_DELAY_MS).toISOString(),
+        updated_at: new Date().toISOString()
+      });
+      continue;
+    }
+    inBatchUsers.add(job.user_id);
+    try {
+      if (job.type === "google_gbp_sync") {
+        await syncGoogleLocationsForUser(supabaseAdmin, job.user_id);
+        await syncGoogleReviewsForUser(supabaseAdmin, job.user_id, null);
+        await updateJob(job.id, {
+          status: "done",
+          attempts,
+          last_error: null,
+          updated_at: new Date().toISOString()
+        });
+        processed += 1;
+      } else {
+        await updateJob(job.id, {
+          status: "failed",
+          attempts,
+          last_error: `Unknown job type: ${job.type}`,
+          updated_at: new Date().toISOString()
+        });
+        failed += 1;
+      }
+    } catch (error) {
+      await updateJob(job.id, {
+        status: "failed",
+        attempts,
+        last_error: error instanceof Error ? error.message : "Job failed",
+        updated_at: new Date().toISOString()
+      });
+      failed += 1;
+    }
+  }
+
+  return { processed, failed, skipped };
+};
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId =
     req.headers["x-request-id"]?.toString() ?? `req_${crypto.randomUUID()}`;
@@ -194,6 +290,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       message: "Use POST to run the sync."
     });
   }
+
+  const jobStats = await processJobQueue();
 
   const errors: Array<{ locationId: string; message: string }> = [];
   let processedUsers = 0;
@@ -489,6 +587,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ok: true,
       requestId,
       aborted,
+      jobs: jobStats,
       stats: {
         users: processedUsers,
         locations: processedLocations,

@@ -79,9 +79,13 @@ const OAuthCallback = () => {
         setSyncMessage("Erreur de synchronisation.");
       }
     } else {
-      setSyncMessage(
-        `Synchronisation terminée: ${data?.locationsCount ?? 0} lieux.`
-      );
+      if (data?.queued) {
+        setSyncMessage("Synchronisation planifiée. Suivi en cours...");
+      } else {
+        setSyncMessage(
+          `Synchronisation terminée: ${data?.locationsCount ?? 0} lieux.`
+        );
+      }
       setSyncDisabled(false);
     }
     setSyncLoading(false);

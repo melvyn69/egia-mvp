@@ -1,5 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import { createSupabaseAdmin, getRequiredEnv, getUserFromRequest } from "../../../server/_shared_dist/google/_utils.js";
+import {
+  createSupabaseAdmin,
+  getRequiredEnv,
+  getUserFromRequest
+} from "../../../server/_shared_dist/google/_utils.js";
 import type { Json } from "../../../server/_shared_dist/database.types.js";
 
 type GoogleAccount = {
@@ -101,6 +105,110 @@ const listLocationsForAccount = async (
   return locations;
 };
 
+export const syncGoogleLocationsForUser = async (
+  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
+  userId: string
+) => {
+  const { data: connection, error: connectionError } = await supabaseAdmin
+    .from("google_connections")
+    .select("access_token,refresh_token,expires_at")
+    .eq("user_id", userId)
+    .eq("provider", "google")
+    .maybeSingle();
+
+  if (connectionError || !connection) {
+    throw new Error("google_not_connected");
+  }
+
+  let accessToken = connection.access_token ?? "";
+  const expiresAt = connection.expires_at
+    ? new Date(connection.expires_at).getTime()
+    : 0;
+  const shouldRefresh = !accessToken || expiresAt - Date.now() < 60_000;
+
+  if (shouldRefresh) {
+    if (!connection.refresh_token) {
+      throw new Error("reauth_required");
+    }
+    let refreshed: Awaited<ReturnType<typeof refreshAccessToken>>;
+    try {
+      refreshed = await refreshAccessToken(connection.refresh_token);
+    } catch (error) {
+      const refreshError = error as Error & { code?: string };
+      const reauthRequired =
+        refreshError.code === "invalid_grant" ||
+        /expired or revoked/i.test(refreshError.message);
+      if (reauthRequired) {
+        await supabaseAdmin
+          .from("google_connections")
+          .delete()
+          .eq("user_id", userId)
+          .eq("provider", "google");
+        throw new Error("reauth_required");
+      }
+      throw error;
+    }
+    accessToken = refreshed.access_token;
+    const newExpiresAt =
+      refreshed.expires_in && refreshed.expires_in > 0
+        ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
+        : null;
+
+    const { error: refreshError } = await supabaseAdmin
+      .from("google_connections")
+      .update({
+        access_token: accessToken,
+        expires_at: newExpiresAt,
+        scope: refreshed.scope ?? null,
+        token_type: refreshed.token_type ?? null
+      })
+      .eq("user_id", userId)
+      .eq("provider", "google");
+
+    if (refreshError) {
+      console.error("google token refresh update failed:", refreshError);
+    }
+  }
+
+  const accounts = await listAccounts(accessToken);
+  let locationsCount = 0;
+
+  for (const account of accounts) {
+    if (!account.name) {
+      continue;
+    }
+    const locations = await listLocationsForAccount(accessToken, account.name);
+    locationsCount += locations.length;
+
+    if (locations.length === 0) {
+      continue;
+    }
+
+    const rows = locations.map((location) => ({
+      user_id: userId,
+      provider: "google",
+      account_resource_name: account.name,
+      location_resource_name: location.name,
+      location_title: location.title ?? null,
+      store_code: location.storeCode ?? null,
+      address_json: (location.storefrontAddress ?? null) as Json | null,
+      phone: location.primaryPhone ?? null,
+      website_uri: location.websiteUri ?? null,
+      updated_at: new Date().toISOString()
+    }));
+
+    const { error: upsertError } = await supabaseAdmin
+      .from("google_locations")
+      .upsert(rows, { onConflict: "user_id,location_resource_name" });
+
+    if (upsertError) {
+      console.error("google locations upsert failed:", upsertError);
+    }
+  }
+
+  return { locationsCount };
+};
+
 const handler = async (req: IncomingMessage, res: ServerResponse) => {
   if (req.method !== "POST") {
     res.statusCode = 405;
@@ -125,119 +233,78 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
 
     const { data: connection, error: connectionError } = await supabaseAdmin
       .from("google_connections")
-      .select("access_token,refresh_token,expires_at")
+      .select("refresh_token")
       .eq("user_id", userId)
       .eq("provider", "google")
       .maybeSingle();
-
     if (connectionError || !connection) {
-      console.error("google connection missing:", connectionError);
       res.statusCode = 404;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ ok: false, error: "Google not connected." }));
       return;
     }
-
-    let accessToken = connection.access_token ?? "";
-    const expiresAt = connection.expires_at
-      ? new Date(connection.expires_at).getTime()
-      : 0;
-    const shouldRefresh = !accessToken || expiresAt - Date.now() < 60_000;
-
-    if (shouldRefresh) {
-      if (!connection.refresh_token) {
-        res.statusCode = 401;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: false, error: "Refresh token missing." }));
-        return;
-      }
-      let refreshed: Awaited<ReturnType<typeof refreshAccessToken>>;
-      try {
-        refreshed = await refreshAccessToken(connection.refresh_token);
-      } catch (error) {
-        const refreshError = error as Error & { code?: string };
-        const reauthRequired =
-          refreshError.code === "invalid_grant" ||
-          /expired or revoked/i.test(refreshError.message);
-        if (reauthRequired) {
-          await supabaseAdmin
-            .from("google_connections")
-            .delete()
-            .eq("user_id", userId)
-            .eq("provider", "google");
-          res.statusCode = 401;
-          res.setHeader("Content-Type", "application/json");
-          res.end(
-            JSON.stringify({
-              ok: false,
-              error: "reauth_required"
-            })
-          );
-          return;
-        }
-        throw error;
-      }
-      accessToken = refreshed.access_token;
-      const newExpiresAt =
-        refreshed.expires_in && refreshed.expires_in > 0
-          ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
-          : null;
-
-      const { error: refreshError } = await supabaseAdmin
-        .from("google_connections")
-        .update({
-          access_token: accessToken,
-          expires_at: newExpiresAt,
-          scope: refreshed.scope ?? null,
-          token_type: refreshed.token_type ?? null
-        })
-        .eq("user_id", userId)
-        .eq("provider", "google");
-
-      if (refreshError) {
-        console.error("google token refresh update failed:", refreshError);
-      }
+    if (!connection.refresh_token) {
+      res.statusCode = 401;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ ok: false, error: "reauth_required" }));
+      return;
     }
 
-    const accounts = await listAccounts(accessToken);
-    let locationsCount = 0;
+    const { data: existingJob } = await supabaseAdmin
+      .from("job_queue")
+      .select("id, status")
+      .eq("user_id", userId)
+      .eq("type", "google_gbp_sync")
+      .in("status", ["queued", "running"])
+      .order("created_at", { ascending: false })
+      .maybeSingle();
 
-    for (const account of accounts) {
-      if (!account.name) {
-        continue;
-      }
-      const locations = await listLocationsForAccount(accessToken, account.name);
-      locationsCount += locations.length;
+    if (existingJob) {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          ok: true,
+          queued: true,
+          job_id: existingJob.id,
+          status: existingJob.status
+        })
+      );
+      return;
+    }
 
-      if (locations.length === 0) {
-        continue;
-      }
-
-      const rows = locations.map((location) => ({
+    const nowIso = new Date().toISOString();
+    const { data: job, error: jobError } = await supabaseAdmin
+      .from("job_queue")
+      .insert({
         user_id: userId,
-        provider: "google",
-        account_resource_name: account.name,
-        location_resource_name: location.name,
-        location_title: location.title ?? null,
-        store_code: location.storeCode ?? null,
-        address_json: (location.storefrontAddress ?? null) as Json | null,
-        phone: location.primaryPhone ?? null,
-        website_uri: location.websiteUri ?? null,
-        updated_at: new Date().toISOString()
-      }));
+        type: "google_gbp_sync",
+        payload: { include_reviews: true } as Json,
+        status: "queued",
+        run_at: nowIso,
+        updated_at: nowIso
+      })
+      .select("id, status")
+      .single();
 
-      const { error: upsertError } = await supabaseAdmin
-        .from("google_locations")
-        .upsert(rows, { onConflict: "user_id,location_resource_name" });
-
-      if (upsertError) {
-        console.error("google locations upsert failed:", upsertError);
-      }
+    if (jobError || !job) {
+      console.error("job_queue insert failed:", jobError);
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ ok: false, error: "Queue failed." }));
+      return;
     }
 
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ ok: true, locationsCount }));
+    res.end(
+      JSON.stringify({
+        ok: true,
+        queued: true,
+        job_id: job.id,
+        status: job.status
+      })
+    );
   } catch (error) {
     console.error("google gbp sync error:", error);
     res.statusCode = 500;

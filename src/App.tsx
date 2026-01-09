@@ -321,12 +321,16 @@ const App = () => {
         return;
       }
 
-      const cooldown = Date.now() + 60_000;
-      window.localStorage.setItem(
-        "gbp_sync_cooldown_until",
-        cooldown.toString()
-      );
-      setSyncCooldownUntil(cooldown);
+      if (data?.queued) {
+        setLocationsError("Synchronisation planifiée.");
+      } else {
+        const cooldown = Date.now() + 60_000;
+        window.localStorage.setItem(
+          "gbp_sync_cooldown_until",
+          cooldown.toString()
+        );
+        setSyncCooldownUntil(cooldown);
+      }
 
       setGoogleReauthRequired(false);
       await fetchLocations(session.user.id);
@@ -378,11 +382,17 @@ const App = () => {
         }
         throw new Error("Sync failed.");
       }
-      setSyncAllMessage(
-        `Synchronisation terminée: ${data?.locationsCount ?? 0} lieux.`
-      );
-      setLastLogStatus("success");
-      setLastLogMessage("Synchronisation terminée avec succès.");
+      if (data?.queued) {
+        setSyncAllMessage("Synchronisation planifiée.");
+        setLastLogStatus("running");
+        setLastLogMessage("Synchronisation en file d'attente...");
+      } else {
+        setSyncAllMessage(
+          `Synchronisation terminée: ${data?.locationsCount ?? 0} lieux.`
+        );
+        setLastLogStatus("success");
+        setLastLogMessage("Synchronisation terminée avec succès.");
+      }
       setGoogleReauthRequired(false);
     } catch (error) {
       console.error(error);
