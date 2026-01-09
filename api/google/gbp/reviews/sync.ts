@@ -77,6 +77,7 @@ const listReviewsForLocation = async (
 ) => {
   const reviews: GoogleReview[] = [];
   let pageToken: string | undefined;
+  const maxRetries = 3;
 
   do {
     const baseUrl =
@@ -90,15 +91,31 @@ const listReviewsForLocation = async (
       location_resource_name: locationResourceName,
       url
     });
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`
+    let response: Response | null = null;
+    let data: Record<string, unknown> | null = null;
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
+      });
+      if (response.ok) {
+        break;
       }
-    });
-    const data = await response.json().catch((err) => {
+      if (response.status === 429 || response.status >= 500) {
+        const backoff = 500 * 2 ** attempt;
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+        continue;
+      }
+      break;
+    }
+    if (!response) {
+      throw new Error("No response from Google reviews API.");
+    }
+    data = (await response.json().catch((err) => {
       console.error("google reviews response parse failed:", err);
       return null;
-    });
+    })) as Record<string, unknown> | null;
     if (response.status === 404) {
       console.warn("google reviews 404:", {
         account_resource_name: accountResourceName,
@@ -228,6 +245,7 @@ export const syncGoogleReviewsForUser = async (
   let reviewsUpsertedCount = 0;
   let locationsFailed = 0;
   for (const location of locationList) {
+    const locationStart = Date.now();
     const runStartedAt = new Date().toISOString();
     await upsertImportStatus(
       supabaseAdmin,
@@ -300,6 +318,18 @@ export const syncGoogleReviewsForUser = async (
       continue;
     }
     if (reviews.length === 0) {
+      await supabaseAdmin
+        .from("google_locations")
+        .update({ last_synced_at: runStartedAt })
+        .eq("user_id", userId)
+        .eq("location_resource_name", location.location_resource_name);
+      console.log("[gbp_reviews]", {
+        user_id: userId,
+        location_id: location.location_resource_name,
+        fetched: 0,
+        upserted: 0,
+        duration_ms: Date.now() - locationStart
+      });
       await upsertImportStatus(
         supabaseAdmin,
         userId,
@@ -390,6 +420,18 @@ export const syncGoogleReviewsForUser = async (
     }
 
     reviewsUpsertedCount += rows.length;
+    await supabaseAdmin
+      .from("google_locations")
+      .update({ last_synced_at: nowIso })
+      .eq("user_id", userId)
+      .eq("location_resource_name", location.location_resource_name);
+    console.log("[gbp_reviews]", {
+      user_id: userId,
+      location_id: location.location_resource_name,
+      fetched: reviews.length,
+      upserted: rows.length,
+      duration_ms: Date.now() - locationStart
+    });
     await upsertImportStatus(
       supabaseAdmin,
       userId,
@@ -411,6 +453,14 @@ export const syncGoogleReviewsForUser = async (
     locationsCount: locationList.length,
     reviewsUpsertedCount
   });
+
+  if (locationList.length > 0) {
+    await supabaseAdmin
+      .from("google_connections")
+      .update({ last_synced_at: new Date().toISOString() })
+      .eq("user_id", userId)
+      .eq("provider", "google");
+  }
 
   return {
     locationsCount: locationList.length,

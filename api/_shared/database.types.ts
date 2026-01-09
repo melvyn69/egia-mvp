@@ -374,6 +374,7 @@ export type Database = {
           created_at: string
           expires_at: string | null
           id: string
+          last_synced_at: string | null
           oauth_state: string | null
           oauth_state_expires_at: string | null
           provider: string
@@ -389,6 +390,7 @@ export type Database = {
           created_at?: string
           expires_at?: string | null
           id?: string
+          last_synced_at?: string | null
           oauth_state?: string | null
           oauth_state_expires_at?: string | null
           provider?: string
@@ -404,6 +406,7 @@ export type Database = {
           created_at?: string
           expires_at?: string | null
           id?: string
+          last_synced_at?: string | null
           oauth_state?: string | null
           oauth_state_expires_at?: string | null
           provider?: string
@@ -422,6 +425,7 @@ export type Database = {
           address_json: Json | null
           created_at: string
           id: string
+          last_synced_at: string | null
           location_resource_name: string
           location_title: string | null
           phone: string | null
@@ -436,6 +440,7 @@ export type Database = {
           address_json?: Json | null
           created_at?: string
           id?: string
+          last_synced_at?: string | null
           location_resource_name: string
           location_title?: string | null
           phone?: string | null
@@ -450,6 +455,7 @@ export type Database = {
           address_json?: Json | null
           created_at?: string
           id?: string
+          last_synced_at?: string | null
           location_resource_name?: string
           location_title?: string | null
           phone?: string | null
