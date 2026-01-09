@@ -55,47 +55,282 @@ alter table public.automation_actions enable row level security;
 alter table public.review_drafts enable row level security;
 alter table public.review_tags enable row level security;
 
-create policy "automation_workflows_select_own" on public.automation_workflows
-  for select using (auth.uid() = user_id);
-create policy "automation_workflows_insert_own" on public.automation_workflows
-  for insert with check (auth.uid() = user_id);
-create policy "automation_workflows_update_own" on public.automation_workflows
-  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "automation_workflows_delete_own" on public.automation_workflows
-  for delete using (auth.uid() = user_id);
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'automation_workflows'
+      and policyname = 'automation_workflows_select_own'
+  ) then
+    create policy "automation_workflows_select_own"
+      on public.automation_workflows
+      for select using (auth.uid() = user_id);
+  end if;
+end $$;
 
-create policy "automation_conditions_select_own" on public.automation_conditions
-  for select using (auth.uid() = user_id);
-create policy "automation_conditions_insert_own" on public.automation_conditions
-  for insert with check (auth.uid() = user_id);
-create policy "automation_conditions_update_own" on public.automation_conditions
-  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "automation_conditions_delete_own" on public.automation_conditions
-  for delete using (auth.uid() = user_id);
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'automation_workflows'
+      and policyname = 'automation_workflows_insert_own'
+  ) then
+    create policy "automation_workflows_insert_own"
+      on public.automation_workflows
+      for insert with check (auth.uid() = user_id);
+  end if;
+end $$;
 
-create policy "automation_actions_select_own" on public.automation_actions
-  for select using (auth.uid() = user_id);
-create policy "automation_actions_insert_own" on public.automation_actions
-  for insert with check (auth.uid() = user_id);
-create policy "automation_actions_update_own" on public.automation_actions
-  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "automation_actions_delete_own" on public.automation_actions
-  for delete using (auth.uid() = user_id);
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'automation_workflows'
+      and policyname = 'automation_workflows_update_own'
+  ) then
+    create policy "automation_workflows_update_own"
+      on public.automation_workflows
+      for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  end if;
+end $$;
 
-create policy "review_drafts_select_own" on public.review_drafts
-  for select using (auth.uid() = user_id);
-create policy "review_drafts_insert_own" on public.review_drafts
-  for insert with check (auth.uid() = user_id);
-create policy "review_drafts_update_own" on public.review_drafts
-  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "review_drafts_delete_own" on public.review_drafts
-  for delete using (auth.uid() = user_id);
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'automation_workflows'
+      and policyname = 'automation_workflows_delete_own'
+  ) then
+    create policy "automation_workflows_delete_own"
+      on public.automation_workflows
+      for delete using (auth.uid() = user_id);
+  end if;
+end $$;
 
-create policy "review_tags_select_own" on public.review_tags
-  for select using (auth.uid() = user_id);
-create policy "review_tags_insert_own" on public.review_tags
-  for insert with check (auth.uid() = user_id);
-create policy "review_tags_update_own" on public.review_tags
-  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "review_tags_delete_own" on public.review_tags
-  for delete using (auth.uid() = user_id);
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'automation_conditions'
+      and policyname = 'automation_conditions_select_own'
+  ) then
+    create policy "automation_conditions_select_own"
+      on public.automation_conditions
+      for select using (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'automation_conditions'
+      and policyname = 'automation_conditions_insert_own'
+  ) then
+    create policy "automation_conditions_insert_own"
+      on public.automation_conditions
+      for insert with check (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'automation_conditions'
+      and policyname = 'automation_conditions_update_own'
+  ) then
+    create policy "automation_conditions_update_own"
+      on public.automation_conditions
+      for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'automation_conditions'
+      and policyname = 'automation_conditions_delete_own'
+  ) then
+    create policy "automation_conditions_delete_own"
+      on public.automation_conditions
+      for delete using (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'automation_actions'
+      and policyname = 'automation_actions_select_own'
+  ) then
+    create policy "automation_actions_select_own"
+      on public.automation_actions
+      for select using (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'automation_actions'
+      and policyname = 'automation_actions_insert_own'
+  ) then
+    create policy "automation_actions_insert_own"
+      on public.automation_actions
+      for insert with check (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'automation_actions'
+      and policyname = 'automation_actions_update_own'
+  ) then
+    create policy "automation_actions_update_own"
+      on public.automation_actions
+      for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'automation_actions'
+      and policyname = 'automation_actions_delete_own'
+  ) then
+    create policy "automation_actions_delete_own"
+      on public.automation_actions
+      for delete using (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'review_drafts'
+      and policyname = 'review_drafts_select_own'
+  ) then
+    create policy "review_drafts_select_own"
+      on public.review_drafts
+      for select using (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'review_drafts'
+      and policyname = 'review_drafts_insert_own'
+  ) then
+    create policy "review_drafts_insert_own"
+      on public.review_drafts
+      for insert with check (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'review_drafts'
+      and policyname = 'review_drafts_update_own'
+  ) then
+    create policy "review_drafts_update_own"
+      on public.review_drafts
+      for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'review_drafts'
+      and policyname = 'review_drafts_delete_own'
+  ) then
+    create policy "review_drafts_delete_own"
+      on public.review_drafts
+      for delete using (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'review_tags'
+      and policyname = 'review_tags_select_own'
+  ) then
+    create policy "review_tags_select_own"
+      on public.review_tags
+      for select using (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'review_tags'
+      and policyname = 'review_tags_insert_own'
+  ) then
+    create policy "review_tags_insert_own"
+      on public.review_tags
+      for insert with check (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'review_tags'
+      and policyname = 'review_tags_update_own'
+  ) then
+    create policy "review_tags_update_own"
+      on public.review_tags
+      for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'review_tags'
+      and policyname = 'review_tags_delete_own'
+  ) then
+    create policy "review_tags_delete_own"
+      on public.review_tags
+      for delete using (auth.uid() = user_id);
+  end if;
+end $$;
