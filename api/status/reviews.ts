@@ -65,7 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       import: importStatus,
       ai: aiStatus
     });
-  } catch (_error) {
+  } catch {
     return res.status(500).json({ error: "Failed to load status" });
   }
 }
