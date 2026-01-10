@@ -133,12 +133,17 @@ const listReviewsForLocation = async (
       return { reviews: [], notFound: true };
     }
     if (!response.ok) {
+      const apiError = getErrorMessage(
+        data && typeof data === "object"
+          ? (data as Record<string, unknown>).error
+          : data
+      );
       console.error(
         "google reviews fetch error:",
         response.status,
-        data?.error?.message ?? data
+        apiError
       );
-      throw new Error(data?.error?.message ?? "Failed to list reviews.");
+      throw new Error(apiError || "Failed to list reviews.");
     }
     reviews.push(...((data?.reviews ?? []) as GoogleReview[]));
     pageToken = data?.nextPageToken;
@@ -198,7 +203,7 @@ export const syncGoogleReviewsForUser = async (
     let refreshed: Awaited<ReturnType<typeof refreshAccessToken>>;
     try {
       refreshed = await refreshAccessToken(connection.refresh_token);
-    } catch (error) {
+    } catch (error: unknown) {
       const refreshError = error as Error & { code?: string };
       const refreshMessage = getErrorMessage(error);
       const reauthRequired =
@@ -288,7 +293,7 @@ export const syncGoogleReviewsForUser = async (
       );
       reviews = result.reviews;
       notFound = result.notFound;
-    } catch (error) {
+    } catch (error: unknown) {
       await upsertImportStatus(
         supabaseAdmin,
         userId,
@@ -532,7 +537,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
         locationsFailed: result.locationsFailed
       })
     );
-  } catch (error) {
+  } catch (error: unknown) {
     const message = getErrorMessage(error);
     if (message === "reauth_required") {
       res.statusCode = 401;
