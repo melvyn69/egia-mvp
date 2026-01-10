@@ -74,11 +74,6 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
   }, [session, supabaseClient]);
 
   useEffect(() => {
-    setSuccess(null);
-    setError(null);
-  }, [selectedLocationId]);
-
-  useEffect(() => {
     if (!supabaseClient || !session) {
       return;
     }
@@ -269,9 +264,11 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
                 <select
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
                   value={selectedLocationId ?? ""}
-                  onChange={(event) =>
-                    setSelectedLocationId(event.target.value || null)
-                  }
+                  onChange={(event) => {
+                    setSelectedLocationId(event.target.value || null);
+                    setSuccess(null);
+                    setError(null);
+                  }}
                 >
                   <option value="">Tous les etablissements</option>
                   {locations.map((location) => (

@@ -567,10 +567,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     const locationIds = Array.from(locationUserMap.keys());
     const lockedLocations = new Set<string>();
-    const locationStats = new Map<
-      string,
-      { withText: number; missingInsights: number }
-    >();
+    const locationStats = new Map<string, { missingInsights: number }>();
     for (const locationId of locationIds) {
       const { count } = await supabaseAdmin
         .from("google_reviews")
@@ -585,9 +582,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           p_location_id: locationId
         }
       );
-      const withText = count ?? 0;
       const missingInsights = Number(missingData ?? 0);
-      locationStats.set(locationId, { withText, missingInsights });
+      locationStats.set(locationId, { missingInsights });
       const userIdForLocation = locationUserMap.get(locationId);
       if (userIdForLocation) {
         const locked = await acquireLock(userIdForLocation, locationId);
@@ -821,7 +817,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       );
       const missingInsights = Number(missingData ?? 0);
-      const withText = locationStats.get(locationId)?.withText ?? 0;
       const errorsCount = errorsByLocation.get(locationId) ?? 0;
       const processedCount = processedByLocation.get(locationId) ?? 0;
       const tagsCount = tagsByLocation.get(locationId) ?? 0;

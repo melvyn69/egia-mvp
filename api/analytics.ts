@@ -659,8 +659,6 @@ const buildBasicInsights = (
   const addInsight = (insight: AnalyticsInsight) => {
     insights.push(insight);
   };
-  const toPercent = (value: number | null) =>
-    value === null ? null : Math.round(value * 100);
 
   const replyRate = compare.metrics.reply_rate.a;
   if (replyRate === null) {
@@ -1801,7 +1799,7 @@ const handleDrilldown = async (
 
   const reviewIds = reviews.map((row) => row.id);
   const normalizedTag = normalizeTagLabel(tagParam);
-  let matchingReviewIds = new Set<string>();
+  const matchingReviewIds = new Set<string>();
   if (reviewIds.length === 0) {
     const empty: AnalyticsDrilldown = {
       items: [],
