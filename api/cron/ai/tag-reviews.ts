@@ -569,12 +569,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const lockedLocations = new Set<string>();
     const locationStats = new Map<string, { missingInsights: number }>();
     for (const locationId of locationIds) {
-      const { count } = await supabaseAdmin
+      const { count: _count } = await supabaseAdmin
         .from("google_reviews")
         .select("id", { count: "exact", head: true })
         .eq("location_id", locationId)
         .not("comment", "is", null)
         .neq("comment", "");
+      void _count;
       const { data: missingData } = await supabaseAdmin.rpc(
         "ai_tag_candidates_count",
         {
