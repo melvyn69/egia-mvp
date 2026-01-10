@@ -146,7 +146,14 @@ const listReviewsForLocation = async (
       throw new Error(apiError || "Failed to list reviews.");
     }
     reviews.push(...((data?.reviews ?? []) as GoogleReview[]));
-    pageToken = data?.nextPageToken;
+    const nextToken =
+      data && typeof data === "object"
+        ? (data as Record<string, unknown>).nextPageToken
+        : null;
+    pageToken =
+      typeof nextToken === "string" && nextToken.length > 0
+        ? nextToken
+        : undefined;
   } while (pageToken);
 
   return { reviews, notFound: false };
