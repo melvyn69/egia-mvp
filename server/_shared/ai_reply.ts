@@ -45,6 +45,9 @@ export const generateAiReply = async ({
   rating,
   brandVoice,
   overrideTone,
+  businessTone,
+  signature,
+  insights,
   openaiApiKey,
   model,
   requestId
