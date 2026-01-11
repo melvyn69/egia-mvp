@@ -179,7 +179,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
     return () => {
       cancelled = true;
     };
-  }, [session, workflowId, locations]);
+  }, [session, workflowId, locations, supabaseClient]);
 
   const addCondition = () => {
     setConditions((prev) => [

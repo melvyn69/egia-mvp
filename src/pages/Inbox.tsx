@@ -596,8 +596,14 @@ const Inbox = () => {
     staleTime: 5 * 60 * 1000
   });
 
-  const locationLabels = locationsQuery.data?.labels ?? {};
-  const locationOptions = locationsQuery.data?.options ?? [];
+  const locationLabels = useMemo(
+    () => locationsQuery.data?.labels ?? {},
+    [locationsQuery.data]
+  );
+  const locationOptions = useMemo(
+    () => locationsQuery.data?.options ?? [],
+    [locationsQuery.data]
+  );
 
   const cronStateQuery = useQuery({
     queryKey: ["inbox-cron-state", sessionUserId],
@@ -796,7 +802,7 @@ const Inbox = () => {
       setImportStatus({ status: "idle" });
       setAiStatus({ status: "idle" });
     }
-  }, [activeLocationId, supabase]);
+  }, [activeLocationId]);
 
   useEffect(() => {
     void loadReviewStatuses();
@@ -817,7 +823,7 @@ const Inbox = () => {
     return () => {
       clearTimeout(timeoutId);
     };
-  }, [activeLocationId, aiStatus.status, importStatus.status, loadReviewStatuses, supabase]);
+  }, [activeLocationId, aiStatus.status, importStatus.status, loadReviewStatuses]);
 
   useEffect(() => {
     setSavedAt(null);

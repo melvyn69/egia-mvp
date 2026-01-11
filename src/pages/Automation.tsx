@@ -290,7 +290,7 @@ const Automation = ({
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, supabaseClient]);
 
   useEffect(() => {
     if (!supabaseClient || !session) {
