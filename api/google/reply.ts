@@ -222,6 +222,24 @@ const fetchBrandVoice = async (
   return globalRow ?? null;
 };
 
+const normalizeBrandVoiceOverride = (value: unknown) => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const raw = value as Record<string, unknown>;
+  return {
+    enabled: Boolean(raw.enabled),
+    tone: typeof raw.tone === "string" ? raw.tone : null,
+    language_level:
+      typeof raw.language_level === "string" ? raw.language_level : null,
+    context: typeof raw.context === "string" ? raw.context : null,
+    use_emojis: Boolean(raw.use_emojis),
+    forbidden_words: Array.isArray(raw.forbidden_words)
+      ? raw.forbidden_words.filter((word): word is string => typeof word === "string")
+      : []
+  };
+};
+
 const fetchBusinessSettings = async (userId: string) => {
   const { data: byUser, error: byUserError } = await supabaseAdmin
     .from("business_settings")
@@ -335,7 +353,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       replyText,
       draftReplyId,
       googleReviewId,
-      tone
+      tone,
+      brand_voice_override
     } =
       payload as {
         id?: string;
@@ -349,6 +368,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         draftReplyId?: string;
         googleReviewId?: string;
         tone?: string;
+        brand_voice_override?: unknown;
       };
 
     if (mode === "test") {
@@ -358,15 +378,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: "Missing review_text" });
       }
       try {
-        const brandVoice = await fetchBrandVoice(
-          userId,
-          typeof location_id === "string" ? location_id : null
-        );
+        const brandVoiceOverride = normalizeBrandVoiceOverride(brand_voice_override);
+        const [brandVoice, businessSettings] = await Promise.all([
+          brandVoiceOverride ??
+            fetchBrandVoice(
+              userId,
+              typeof location_id === "string" ? location_id : null
+            ),
+          fetchBusinessSettings(userId)
+        ]);
         const reply = await generateAiReply({
           reviewText: safeText,
           rating: typeof rating === "number" ? rating : null,
           brandVoice: brandVoice ?? null,
           overrideTone: tone ?? null,
+          businessTone: businessSettings?.default_tone ?? null,
+          signature: businessSettings?.signature ?? null,
           openaiApiKey,
           model: openaiModel,
           requestId

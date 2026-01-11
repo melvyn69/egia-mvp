@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -129,12 +130,6 @@ const Analytics = ({
   const [granularity, setGranularity] = useState<"auto" | "day" | "week">(
     "auto"
   );
-  const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
-  const [timeseries, setTimeseries] = useState<AnalyticsTimeseries | null>(null);
-  const [compare, setCompare] = useState<AnalyticsCompare | null>(null);
-  const [insights, setInsights] = useState<AnalyticsInsights | null>(null);
-  const [drivers, setDrivers] = useState<AnalyticsDrivers | null>(null);
-  const [quality, setQuality] = useState<AnalyticsQuality | null>(null);
   const [drilldown, setDrilldown] = useState<AnalyticsDrilldown | null>(null);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
   const [drilldownError, setDrilldownError] = useState<string | null>(null);
@@ -146,8 +141,12 @@ const Analytics = ({
   const [metric, setMetric] = useState<
     "reviews" | "avg_rating" | "neg_share" | "reply_rate"
   >("reviews");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const presetKey = useMemo(() => {
+    if (preset === "custom") {
+      return `${from || "?"}_${to || "?"}`;
+    }
+    return preset;
+  }, [preset, from, to]);
 
   useEffect(() => {
     if (!locationId) {
@@ -167,22 +166,19 @@ const Analytics = ({
     return 0;
   }, [preset, from, to]);
 
-  useEffect(() => {
-    if (!session?.access_token) {
-      setOverview(null);
-      setTimeseries(null);
-      setCompare(null);
-      setInsights(null);
-      setDrivers(null);
-      setQuality(null);
-      setDrilldown(null);
-      setDrilldownDriver(null);
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
+  const analyticsQuery = useQuery({
+    queryKey: [
+      "analytics",
+      session?.user?.id ?? null,
+      locationId,
+      presetKey,
+      timeZone,
+      granularity
+    ],
+    queryFn: async () => {
+      if (!session?.access_token) {
+        throw new Error("Missing session");
+      }
       const params = new URLSearchParams();
       if (locationId !== "all") {
         params.set("location", locationId);
@@ -198,91 +194,85 @@ const Analytics = ({
         }
       }
       params.set("granularity", granularity);
-      try {
-        const [
-          overviewRes,
-          seriesRes,
-          compareRes,
-          insightsRes,
-          driversRes,
-          qualityRes
-        ] =
-          await Promise.all([
-          fetch(`/api/analytics?view=overview&${params.toString()}`, {
-            headers: { Authorization: `Bearer ${session.access_token}` }
-          }),
-          fetch(`/api/analytics?view=timeseries&${params.toString()}`, {
-            headers: { Authorization: `Bearer ${session.access_token}` }
-          }),
-          fetch(`/api/analytics?view=compare&${params.toString()}`, {
-            headers: { Authorization: `Bearer ${session.access_token}` }
-          }),
-          fetch(`/api/analytics?view=insights&mode=auto&${params.toString()}`, {
-            headers: { Authorization: `Bearer ${session.access_token}` }
-          }),
-          fetch(`/api/analytics?view=drivers&${params.toString()}`, {
-            headers: { Authorization: `Bearer ${session.access_token}` }
-          }),
-          fetch(`/api/analytics?view=quality&${params.toString()}`, {
-            headers: { Authorization: `Bearer ${session.access_token}` }
-          })
-        ]);
-        const overviewPayload = await overviewRes.json().catch(() => null);
-        const seriesPayload = await seriesRes.json().catch(() => null);
-        const comparePayload = await compareRes.json().catch(() => null);
-        const insightsPayload = await insightsRes.json().catch(() => null);
-        const driversPayload = await driversRes.json().catch(() => null);
-        const qualityPayload = await qualityRes.json().catch(() => null);
-        if (cancelled) {
-          return;
-        }
-        if (!overviewRes.ok || !overviewPayload) {
-          setError("Impossible de charger l'aperçu analytics.");
-          setOverview(null);
-          setTimeseries(null);
-          setCompare(null);
-          setInsights(null);
-          setDrivers(null);
-          setQuality(null);
-          return;
-        }
-        if (!seriesRes.ok || !seriesPayload) {
-          setError("Impossible de charger les tendances.");
-          setOverview(overviewPayload as AnalyticsOverview);
-          setTimeseries(null);
-          setCompare(compareRes.ok ? (comparePayload as AnalyticsCompare) : null);
-          setInsights(insightsRes.ok ? (insightsPayload as AnalyticsInsights) : null);
-          setDrivers(driversRes.ok ? (driversPayload as AnalyticsDrivers) : null);
-          setQuality(qualityRes.ok ? (qualityPayload as AnalyticsQuality) : null);
-          return;
-        }
-        setOverview(overviewPayload as AnalyticsOverview);
-        setTimeseries(seriesPayload as AnalyticsTimeseries);
-        setCompare(compareRes.ok ? (comparePayload as AnalyticsCompare) : null);
-        setInsights(insightsRes.ok ? (insightsPayload as AnalyticsInsights) : null);
-        setDrivers(driversRes.ok ? (driversPayload as AnalyticsDrivers) : null);
-        setQuality(qualityRes.ok ? (qualityPayload as AnalyticsQuality) : null);
-      } catch {
-        if (!cancelled) {
-          setError("Impossible de charger les analytics.");
-          setOverview(null);
-          setTimeseries(null);
-          setCompare(null);
-          setInsights(null);
-          setDrivers(null);
-          setQuality(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+
+      const [
+        overviewRes,
+        seriesRes,
+        compareRes,
+        insightsRes,
+        driversRes,
+        qualityRes
+      ] = await Promise.all([
+        fetch(`/api/analytics?view=overview&${params.toString()}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` }
+        }),
+        fetch(`/api/analytics?view=timeseries&${params.toString()}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` }
+        }),
+        fetch(`/api/analytics?view=compare&${params.toString()}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` }
+        }),
+        fetch(`/api/analytics?view=insights&mode=auto&${params.toString()}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` }
+        }),
+        fetch(`/api/analytics?view=drivers&${params.toString()}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` }
+        }),
+        fetch(`/api/analytics?view=quality&${params.toString()}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` }
+        })
+      ]);
+
+      const overviewPayload = await overviewRes.json().catch(() => null);
+      if (!overviewRes.ok || !overviewPayload) {
+        return {
+          error: "Impossible de charger l'aperçu analytics.",
+          overview: null,
+          timeseries: null,
+          compare: null,
+          insights: null,
+          drivers: null,
+          quality: null
+        };
       }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [session, preset, from, to, locationId, timeZone, granularity]);
+
+      const seriesPayload = await seriesRes.json().catch(() => null);
+      const comparePayload = await compareRes.json().catch(() => null);
+      const insightsPayload = await insightsRes.json().catch(() => null);
+      const driversPayload = await driversRes.json().catch(() => null);
+      const qualityPayload = await qualityRes.json().catch(() => null);
+
+      return {
+        error: !seriesRes.ok || !seriesPayload
+          ? "Impossible de charger les tendances."
+          : null,
+        overview: overviewPayload as AnalyticsOverview,
+        timeseries: seriesRes.ok ? (seriesPayload as AnalyticsTimeseries) : null,
+        compare: compareRes.ok ? (comparePayload as AnalyticsCompare) : null,
+        insights: insightsRes.ok ? (insightsPayload as AnalyticsInsights) : null,
+        drivers: driversRes.ok ? (driversPayload as AnalyticsDrivers) : null,
+        quality: qualityRes.ok ? (qualityPayload as AnalyticsQuality) : null
+      };
+    },
+    enabled: Boolean(session?.access_token),
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    placeholderData: (prev) => prev
+  });
+
+  const overview = analyticsQuery.data?.overview ?? null;
+  const timeseries = analyticsQuery.data?.timeseries ?? null;
+  const compare = analyticsQuery.data?.compare ?? null;
+  const insights = analyticsQuery.data?.insights ?? null;
+  const drivers = analyticsQuery.data?.drivers ?? null;
+  const quality = analyticsQuery.data?.quality ?? null;
+  const loading = analyticsQuery.isLoading;
+  const isFetching = analyticsQuery.isFetching;
+  const error = analyticsQuery.isError
+    ? "Impossible de charger les analytics."
+    : analyticsQuery.data?.error ?? null;
 
   const ratingTotal = useMemo(() => {
     if (!overview) {
@@ -544,12 +534,23 @@ const Analytics = ({
               </div>
             </div>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => analyticsQuery.refetch()}
+            disabled={loading}
+          >
+            Rafraîchir
+          </Button>
           {locationsError && (
             <span className="text-xs text-amber-700">{locationsError}</span>
           )}
         </div>
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <span>Période: {getPresetLabel(preset)}</span>
+          {isFetching && !loading && (
+            <span className="text-xs text-slate-400">Actualisation...</span>
+          )}
           {overview && overview.data_status !== "ok" && (
             <Badge variant="warning">{reasonLabel || "Données partielles"}</Badge>
           )}

@@ -42,6 +42,10 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [newWord, setNewWord] = useState("");
+  const [testInput, setTestInput] = useState("");
+  const [testOutput, setTestOutput] = useState("");
+  const [testLoading, setTestLoading] = useState(false);
+  const [testError, setTestError] = useState<string | null>(null);
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
   const [usingGlobalFallback, setUsingGlobalFallback] = useState(false);
@@ -222,6 +226,53 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
     setSaving(false);
   };
 
+  const handleTest = async () => {
+    if (!supabaseClient || !session?.access_token) {
+      setTestError("Connectez-vous pour tester.");
+      return;
+    }
+    const input = testInput.trim();
+    if (!input) {
+      setTestError("Ajoutez une situation ou un avis.");
+      return;
+    }
+    setTestLoading(true);
+    setTestError(null);
+    try {
+      const response = await fetch("/api/google/reply", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          mode: "test",
+          review_text: input,
+          rating: null,
+          location_id: selectedLocationId,
+          brand_voice_override: {
+            enabled: form.enabled,
+            tone: form.tone,
+            language_level: form.language_level,
+            context: form.context,
+            use_emojis: form.use_emojis,
+            forbidden_words: form.forbidden_words
+          }
+        })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.reply_text) {
+        setTestError("Impossible de générer une réponse pour le moment.");
+        return;
+      }
+      setTestOutput(payload.reply_text);
+    } catch {
+      setTestError("Erreur lors de la génération.");
+    } finally {
+      setTestLoading(false);
+    }
+  };
+
   if (!supabaseClient) {
     return (
       <div className="space-y-6">
@@ -245,9 +296,9 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold text-slate-900">Brand Voice</h2>
+        <h2 className="text-2xl font-semibold text-slate-900">Identité IA</h2>
         <p className="text-sm text-slate-500">
-          Uniformisez le ton des réponses IA.
+          Définissez la voix de marque et testez vos réponses.
         </p>
       </div>
 
@@ -286,7 +337,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
 
           <Card>
             <CardHeader>
-              <CardTitle>Activation</CardTitle>
+              <CardTitle>Activer l'identité IA</CardTitle>
             </CardHeader>
             <CardContent>
               <label className="flex items-center gap-2 text-sm text-slate-600">
@@ -305,143 +356,188 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Ton</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <select
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                value={form.tone}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    tone: event.target.value as BrandVoiceForm["tone"]
-                  }))
-                }
-              >
-                <option value="professional">Professionnel</option>
-                <option value="friendly">Amical</option>
-                <option value="warm">Chaleureux</option>
-                <option value="formal">Formel</option>
-              </select>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Niveau de langue</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant={form.language_level === "tutoiement" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() =>
-                    setForm((prev) => ({
-                      ...prev,
-                      language_level: "tutoiement"
-                    }))
-                  }
-                >
-                  Tutoiement
-                </Button>
-                <Button
-                  variant={form.language_level === "vouvoiement" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() =>
-                    setForm((prev) => ({
-                      ...prev,
-                      language_level: "vouvoiement"
-                    }))
-                  }
-                >
-                  Vouvoiement
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Contexte</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <textarea
-                className="min-h-[120px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                value={form.context}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    context: event.target.value
-                  }))
-                }
-                placeholder="Ex: Toujours remercier pour la visite, mentionner notre equipe."
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Emojis</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={form.use_emojis}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      use_emojis: event.target.checked
-                    }))
-                  }
-                />
-                Autoriser les emojis
-              </label>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Mots a eviter</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex flex-wrap gap-2">
-                <input
-                  className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                  value={newWord}
-                  onChange={(event) => setNewWord(event.target.value)}
-                  placeholder="Ajouter un mot"
-                />
-                <Button variant="outline" onClick={addWord}>
-                  Ajouter
-                </Button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {words.length > 0 ? (
-                  words.map((word) => (
-                    <Badge
-                      key={word}
-                      variant="neutral"
-                      className="flex items-center gap-2"
+          <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Paramètres de voix</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500">
+                      Ton
+                    </label>
+                    <select
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                      value={form.tone}
+                      onChange={(event) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          tone: event.target.value as BrandVoiceForm["tone"]
+                        }))
+                      }
                     >
-                      {word}
-                      <button
-                        type="button"
-                        onClick={() => removeWord(word)}
-                        className="text-xs text-slate-500"
+                      <option value="professional">Professionnel</option>
+                      <option value="friendly">Amical</option>
+                      <option value="warm">Chaleureux</option>
+                      <option value="formal">Formel</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500">
+                      Niveau de langue
+                    </label>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button
+                        variant={
+                          form.language_level === "tutoiement"
+                            ? "default"
+                            : "outline"
+                        }
+                        size="sm"
+                        onClick={() =>
+                          setForm((prev) => ({
+                            ...prev,
+                            language_level: "tutoiement"
+                          }))
+                        }
                       >
-                        ×
-                      </button>
-                    </Badge>
-                  ))
-                ) : (
-                  <span className="text-sm text-slate-500">Aucun</span>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+                        Tutoiement
+                      </Button>
+                      <Button
+                        variant={
+                          form.language_level === "vouvoiement"
+                            ? "default"
+                            : "outline"
+                        }
+                        size="sm"
+                        onClick={() =>
+                          setForm((prev) => ({
+                            ...prev,
+                            language_level: "vouvoiement"
+                          }))
+                        }
+                      >
+                        Vouvoiement
+                      </Button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500">
+                      Contexte établissement
+                    </label>
+                    <textarea
+                      className="mt-2 min-h-[120px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                      value={form.context}
+                      onChange={(event) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          context: event.target.value
+                        }))
+                      }
+                      placeholder="Ex: Toujours remercier pour la visite, mentionner notre equipe."
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500">
+                      Emojis
+                    </label>
+                    <label className="mt-2 flex items-center gap-2 text-sm text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={form.use_emojis}
+                        onChange={(event) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            use_emojis: event.target.checked
+                          }))
+                        }
+                      />
+                      Autoriser les emojis
+                    </label>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500">
+                      Mots à éviter
+                    </label>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <input
+                        className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                        value={newWord}
+                        onChange={(event) => setNewWord(event.target.value)}
+                        placeholder="Ajouter un mot"
+                      />
+                      <Button variant="outline" onClick={addWord}>
+                        Ajouter
+                      </Button>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {words.length > 0 ? (
+                        words.map((word) => (
+                          <Badge
+                            key={word}
+                            variant="neutral"
+                            className="flex items-center gap-2"
+                          >
+                            {word}
+                            <button
+                              type="button"
+                              onClick={() => removeWord(word)}
+                              className="text-xs text-slate-500"
+                            >
+                              ×
+                            </button>
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-sm text-slate-500">Aucun</span>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Laboratoire de test</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500">
+                      Situation (avis reçu ou message)
+                    </label>
+                    <textarea
+                      className="mt-2 min-h-[140px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                      value={testInput}
+                      onChange={(event) => setTestInput(event.target.value)}
+                      placeholder="Collez ici un avis client pour tester la réponse."
+                    />
+                  </div>
+                  <Button
+                    onClick={handleTest}
+                    disabled={testLoading || !testInput.trim()}
+                  >
+                    {testLoading ? "Génération..." : "Générer une réponse test"}
+                  </Button>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500">
+                      Réponse de l’IA (simulation)
+                    </label>
+                    <textarea
+                      className="mt-2 min-h-[140px] w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                      value={testOutput}
+                      readOnly
+                      placeholder="La réponse s'affichera ici."
+                    />
+                  </div>
+                  {testError && (
+                    <span className="text-sm text-amber-700">{testError}</span>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
 
           {(error || success) && (
             <Card>

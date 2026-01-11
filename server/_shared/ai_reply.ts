@@ -1,11 +1,15 @@
 import type { Database } from "./database.types.js";
 
 type BrandVoiceRow = Database["public"]["Tables"]["brand_voice"]["Row"];
+type BrandVoiceLike = Pick<
+  BrandVoiceRow,
+  "enabled" | "tone" | "language_level" | "context" | "use_emojis" | "forbidden_words"
+>;
 
 type GenerateAiReplyParams = {
   reviewText: string;
   rating: number | null;
-  brandVoice: BrandVoiceRow | null;
+  brandVoice: BrandVoiceLike | null;
   overrideTone: string | null;
   businessTone?: string | null;
   signature?: string | null;
