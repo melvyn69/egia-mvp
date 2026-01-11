@@ -469,6 +469,29 @@ const Automation = ({
           console.error("review_tags insert error:", error);
         }
       }
+      if (type === "monthly_report") {
+        const reportId = (config.report_id as string) ?? "";
+        if (!reportId) {
+          continue;
+        }
+        try {
+          const res = await fetch("/api/reports/generate", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ report_id: reportId })
+          });
+          if (!res.ok) {
+            const txt = await res.text();
+            throw new Error(txt);
+          }
+        } catch (error) {
+          console.error("report generation error:", error);
+          setTestError("Erreur lors de la generation du rapport.");
+        }
+      }
     }
 
     setTestResult({ review: match, draftText, tags });

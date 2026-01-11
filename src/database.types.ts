@@ -794,6 +794,66 @@ export type Database = {
         }
         Relationships: []
       }
+      reports: {
+        Row: {
+          created_at: string | null
+          from_date: string | null
+          id: string
+          last_generated_at: string | null
+          locations: string[]
+          name: string
+          notes: string | null
+          period_preset: string | null
+          recipients: string[] | null
+          schedule_enabled: boolean
+          schedule_rrule: string | null
+          status: string
+          storage_path: string | null
+          timezone: string
+          to_date: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          from_date?: string | null
+          id?: string
+          last_generated_at?: string | null
+          locations: string[]
+          name: string
+          notes?: string | null
+          period_preset?: string | null
+          recipients?: string[] | null
+          schedule_enabled?: boolean
+          schedule_rrule?: string | null
+          status?: string
+          storage_path?: string | null
+          timezone?: string
+          to_date?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          from_date?: string | null
+          id?: string
+          last_generated_at?: string | null
+          locations?: string[]
+          name?: string
+          notes?: string | null
+          period_preset?: string | null
+          recipients?: string[] | null
+          schedule_enabled?: boolean
+          schedule_rrule?: string | null
+          status?: string
+          storage_path?: string | null
+          timezone?: string
+          to_date?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       review_tags: {
         Row: {
           created_at: string | null

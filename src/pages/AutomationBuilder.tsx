@@ -24,8 +24,8 @@ type ConditionInput = {
 
 type ActionInput = {
   id?: string;
-  type: "ai_draft" | "add_tag" | "autopilot" | "email_alert";
-  config: { tone?: string; tag?: string };
+  type: "ai_draft" | "add_tag" | "monthly_report" | "autopilot" | "email_alert";
+  config: { tone?: string; tag?: string; report_id?: string };
 };
 
 const triggerOptions = [{ id: "new_review", label: "Nouvel avis recu" }];
@@ -47,6 +47,7 @@ const operatorOptions = [
 const actionOptions = [
   { id: "ai_draft", label: "Brouillon IA", disabled: false },
   { id: "add_tag", label: "Ajouter un tag", disabled: false },
+  { id: "monthly_report", label: "Rapport mensuel", disabled: false },
   { id: "autopilot", label: "Autopilot (bientot)", disabled: true },
   { id: "email_alert", label: "Email alert (bientot)", disabled: true }
 ] as const;
@@ -279,7 +280,12 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
 
     if (actions.length > 0) {
       const actionRows = actions
-        .filter((action) => action.type === "ai_draft" || action.type === "add_tag")
+      .filter(
+        (action) =>
+          action.type === "ai_draft" ||
+          action.type === "add_tag" ||
+          action.type === "monthly_report"
+      )
         .map((action) => ({
           workflow_id: savedId,
           user_id: session.user.id,
@@ -519,6 +525,8 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                               ? { tone: "professional" }
                               : event.target.value === "add_tag"
                                 ? { tag: "" }
+                                : event.target.value === "monthly_report"
+                                  ? { report_id: "" }
                                 : {}
                         })
                       }
@@ -577,6 +585,23 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                           })
                         }
                         placeholder="Ex: service"
+                      />
+                    </div>
+                  )}
+                  {action.type === "monthly_report" && (
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-semibold text-slate-500">
+                        Report ID
+                      </label>
+                      <input
+                        className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                        value={action.config.report_id ?? ""}
+                        onChange={(event) =>
+                          updateAction(index, {
+                            config: { report_id: event.target.value }
+                          })
+                        }
+                        placeholder="UUID du rapport"
                       />
                     </div>
                   )}

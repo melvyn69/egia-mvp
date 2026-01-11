@@ -470,6 +470,8 @@ const Dashboard = ({
     }
   }, [kpiLocationId]);
 
+  const customRangeReady = kpiPreset !== "custom" || (kpiFrom && kpiTo);
+
   const kpiQuery = useQuery({
     queryKey: [
       "kpi-summary",
@@ -510,7 +512,7 @@ const Dashboard = ({
       }
       return payload as KpiSummary;
     },
-    enabled: Boolean(session?.access_token),
+    enabled: Boolean(session?.access_token) && customRangeReady,
     placeholderData: (prev) => prev
   });
 

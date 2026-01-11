@@ -13,6 +13,7 @@ import { BrandVoice } from "./pages/BrandVoice";
 import { Automation } from "./pages/Automation";
 import { AutomationBuilder } from "./pages/AutomationBuilder";
 import { TestLab } from "./pages/TestLab";
+import { Reports } from "./pages/Reports";
 import { SyncStatus } from "./pages/SyncStatus";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
@@ -126,6 +127,13 @@ const App = () => {
       return {
         title: "Test Lab",
         subtitle: "Simulation de reponse IA sans ecriture."
+      };
+    }
+
+    if (location.pathname === "/reports") {
+      return {
+        title: "Rapports",
+        subtitle: "PDF et syntheses pour vos etablissements."
       };
     }
 
@@ -626,6 +634,10 @@ const App = () => {
                 <Route
                   path="/settings/test-lab"
                   element={<TestLab session={session} />}
+                />
+                <Route
+                  path="/reports"
+                  element={<Reports session={session} locations={locations} />}
                 />
                 <Route
                   path="/sync-status"

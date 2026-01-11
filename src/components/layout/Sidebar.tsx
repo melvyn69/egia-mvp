@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
   Building2,
+  FileText,
   LayoutDashboard,
   Link2,
   Mailbox,
@@ -112,6 +113,20 @@ const Sidebar = () => {
         >
           <BarChart3 size={18} />
           Analytics
+        </NavLink>
+        <NavLink
+          to="/reports"
+          className={({ isActive }) =>
+            cn(
+              navLinkBase,
+              isActive
+                ? "bg-ink text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            )
+          }
+        >
+          <FileText size={18} />
+          Rapports
         </NavLink>
         <NavLink
           to="/inbox"
