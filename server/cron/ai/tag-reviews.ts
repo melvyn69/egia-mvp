@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "../../../server/_shared_dist/database.types.js";
+import type { Database } from "../../_shared_dist/database.types.js";
 
 type AiTag = {
   name: string;
@@ -674,7 +674,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (timeUp() || reviewsScanned >= MAX_REVIEWS) {
         break;
       }
-      const reviewId = String((review as any)?.id ?? "");
+      const reviewId =
+        typeof review === "object" && review !== null && "id" in review
+          ? String((review as { id?: unknown }).id ?? "")
+          : "";
       const effectiveUpdateTime =
         review.update_time ?? review.create_time ?? null;
       const locationId = review.location_id ?? null;

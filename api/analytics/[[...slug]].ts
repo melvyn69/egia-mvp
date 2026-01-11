@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { requireUser } from "../server/_shared_dist/_auth.js";
-import { resolveDateRange } from "../server/_shared_dist/_date.js";
-import { parseFilters } from "../server/_shared_dist/_filters.js";
+import { requireUser } from "../../server/_shared_dist/_auth.js";
+import { resolveDateRange } from "../../server/_shared_dist/_date.js";
+import { parseFilters } from "../../server/_shared_dist/_filters.js";
 
 type AnalyticsOverview = {
   scope: {
@@ -2033,6 +2033,16 @@ const handleInsights = async (
 };
 
 const handler = async (req: VercelRequest, res: VercelResponse) => {
+  const slugParam = req.query?.slug;
+  const slug = Array.isArray(slugParam)
+    ? slugParam.filter((part) => part)
+    : slugParam
+    ? [slugParam]
+    : [];
+  if (slug.length > 0) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
