@@ -5,15 +5,8 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
-import type {
-  AnalyticsDrilldown,
-  AnalyticsDrivers,
-  AnalyticsCompare,
-  AnalyticsQuality,
-  AnalyticsInsights,
-  AnalyticsOverview,
-  AnalyticsTimeseries
-} from "../types/analytics";
+import type { AnalyticsDrilldown } from "../types/analytics";
+import { analyticsQueryKey, fetchAnalyticsBundle } from "../queries/analytics";
 
 type AnalyticsProps = {
   session: Session | null;
@@ -167,98 +160,32 @@ const Analytics = ({
   }, [preset, from, to]);
 
   const analyticsQuery = useQuery({
-    queryKey: [
-      "analytics",
-      session?.user?.id ?? null,
+    queryKey: analyticsQueryKey({
+      userId: session?.user?.id ?? null,
       locationId,
       presetKey,
-      timeZone,
-      granularity
-    ],
-    queryFn: async () => {
+      tz: timeZone
+    }),
+    queryFn: () => {
       if (!session?.access_token) {
         throw new Error("Missing session");
       }
-      const params = new URLSearchParams();
-      if (locationId !== "all") {
-        params.set("location", locationId);
-      }
-      params.set("period", preset);
-      params.set("tz", timeZone);
-      if (preset === "custom") {
-        if (from) {
-          params.set("from", from);
-        }
-        if (to) {
-          params.set("to", to);
-        }
-      }
-      params.set("granularity", granularity);
-
-      const [
-        overviewRes,
-        seriesRes,
-        compareRes,
-        insightsRes,
-        driversRes,
-        qualityRes
-      ] = await Promise.all([
-        fetch(`/api/analytics?view=overview&${params.toString()}`, {
-          headers: { Authorization: `Bearer ${session.access_token}` }
-        }),
-        fetch(`/api/analytics?view=timeseries&${params.toString()}`, {
-          headers: { Authorization: `Bearer ${session.access_token}` }
-        }),
-        fetch(`/api/analytics?view=compare&${params.toString()}`, {
-          headers: { Authorization: `Bearer ${session.access_token}` }
-        }),
-        fetch(`/api/analytics?view=insights&mode=auto&${params.toString()}`, {
-          headers: { Authorization: `Bearer ${session.access_token}` }
-        }),
-        fetch(`/api/analytics?view=drivers&${params.toString()}`, {
-          headers: { Authorization: `Bearer ${session.access_token}` }
-        }),
-        fetch(`/api/analytics?view=quality&${params.toString()}`, {
-          headers: { Authorization: `Bearer ${session.access_token}` }
-        })
-      ]);
-
-      const overviewPayload = await overviewRes.json().catch(() => null);
-      if (!overviewRes.ok || !overviewPayload) {
-        return {
-          error: "Impossible de charger l'aperçu analytics.",
-          overview: null,
-          timeseries: null,
-          compare: null,
-          insights: null,
-          drivers: null,
-          quality: null
-        };
-      }
-
-      const seriesPayload = await seriesRes.json().catch(() => null);
-      const comparePayload = await compareRes.json().catch(() => null);
-      const insightsPayload = await insightsRes.json().catch(() => null);
-      const driversPayload = await driversRes.json().catch(() => null);
-      const qualityPayload = await qualityRes.json().catch(() => null);
-
-      return {
-        error: !seriesRes.ok || !seriesPayload
-          ? "Impossible de charger les tendances."
-          : null,
-        overview: overviewPayload as AnalyticsOverview,
-        timeseries: seriesRes.ok ? (seriesPayload as AnalyticsTimeseries) : null,
-        compare: compareRes.ok ? (comparePayload as AnalyticsCompare) : null,
-        insights: insightsRes.ok ? (insightsPayload as AnalyticsInsights) : null,
-        drivers: driversRes.ok ? (driversPayload as AnalyticsDrivers) : null,
-        quality: qualityRes.ok ? (qualityPayload as AnalyticsQuality) : null
-      };
+      return fetchAnalyticsBundle({
+        accessToken: session.access_token,
+        locationId,
+        preset,
+        from,
+        to,
+        tz: timeZone,
+        granularity
+      });
     },
     enabled: Boolean(session?.access_token),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    refetchOnMount: false,
     placeholderData: (prev) => prev
   });
 
@@ -270,6 +197,7 @@ const Analytics = ({
   const quality = analyticsQuery.data?.quality ?? null;
   const loading = analyticsQuery.isLoading;
   const isFetching = analyticsQuery.isFetching;
+  const showSkeleton = loading && !analyticsQuery.data;
   const error = analyticsQuery.isError
     ? "Impossible de charger les analytics."
     : analyticsQuery.data?.error ?? null;
@@ -589,7 +517,7 @@ const Analytics = ({
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
-            {loading ? (
+            {showSkeleton ? (
               <Skeleton className="h-40 w-full" />
             ) : chartPoints.length > 0 ? (
               <div className="space-y-3">
@@ -677,7 +605,7 @@ const Analytics = ({
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
-            {loading ? (
+            {showSkeleton ? (
               <Skeleton className="h-36 w-full" />
             ) : compare ? (
               <div className="space-y-3">
@@ -730,7 +658,7 @@ const Analytics = ({
             </p>
           </CardHeader>
           <CardContent className="space-y-3">
-            {loading ? (
+            {showSkeleton ? (
               <Skeleton className="h-36 w-full" />
             ) : insights && insights.insights.length > 0 ? (
               <div className="space-y-3">
@@ -769,7 +697,7 @@ const Analytics = ({
             </p>
           </CardHeader>
           <CardContent className="space-y-3">
-            {loading ? (
+            {showSkeleton ? (
               <Skeleton className="h-32 w-full" />
             ) : drivers && drivers.positives.length > 0 ? (
               drivers.positives.map((item) => (
@@ -813,7 +741,7 @@ const Analytics = ({
             </p>
           </CardHeader>
           <CardContent className="space-y-3">
-            {loading ? (
+            {showSkeleton ? (
               <Skeleton className="h-32 w-full" />
             ) : drivers && drivers.irritants.length > 0 ? (
               drivers.irritants.map((item) => (
@@ -859,7 +787,7 @@ const Analytics = ({
             </p>
           </CardHeader>
           <CardContent className="space-y-3">
-            {loading ? (
+            {showSkeleton ? (
               <Skeleton className="h-24 w-full" />
             ) : quality ? (
               <>
@@ -901,7 +829,7 @@ const Analytics = ({
             </p>
           </CardHeader>
           <CardContent className="space-y-3">
-            {loading ? (
+            {showSkeleton ? (
               <Skeleton className="h-40 w-full" />
             ) : overview ? (
               (["5", "4", "3", "2", "1"] as const).map((rating) => {
@@ -975,7 +903,7 @@ const Analytics = ({
             </p>
           </CardHeader>
           <CardContent className="space-y-3">
-            {loading ? (
+            {showSkeleton ? (
               <Skeleton className="h-24 w-full" />
             ) : overview && overview.topics.strengths.length > 0 ? (
               <div className="space-y-2">
@@ -1005,7 +933,7 @@ const Analytics = ({
             </p>
           </CardHeader>
           <CardContent className="space-y-3">
-            {loading ? (
+            {showSkeleton ? (
               <Skeleton className="h-24 w-full" />
             ) : overview && overview.topics.irritants.length > 0 ? (
               <div className="space-y-2">

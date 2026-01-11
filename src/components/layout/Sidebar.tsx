@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
   Building2,
@@ -10,13 +11,50 @@ import {
   Sparkles
 } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { supabase } from "../../lib/supabase";
+import { analyticsQueryKey, fetchAnalyticsBundle } from "../../queries/analytics";
 
 const navLinkBase =
   "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition";
 
-const Sidebar = () => (
-  <aside className="sticky top-0 hidden h-screen w-64 flex-col justify-between border-r border-slate-200 bg-white/80 px-4 py-6 shadow-soft backdrop-blur-lg lg:flex">
-    <div className="space-y-6">
+const Sidebar = () => {
+  const queryClient = useQueryClient();
+
+  const prefetchAnalytics = async () => {
+    if (!supabase) {
+      return;
+    }
+    const { data } = await supabase.auth.getSession();
+    const session = data.session;
+    if (!session?.user?.id || !session.access_token) {
+      return;
+    }
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
+    const preset = "this_month";
+    const presetKey = preset;
+    const queryKey = analyticsQueryKey({
+      userId: session.user.id,
+      locationId: "all",
+      presetKey,
+      tz
+    });
+    void queryClient.prefetchQuery({
+      queryKey,
+      queryFn: () =>
+        fetchAnalyticsBundle({
+          accessToken: session.access_token,
+          locationId: "all",
+          preset,
+          tz,
+          granularity: "auto"
+        }),
+      staleTime: 5 * 60 * 1000
+    });
+  };
+
+  return (
+    <aside className="sticky top-0 hidden h-screen w-64 flex-col justify-between border-r border-slate-200 bg-white/80 px-4 py-6 shadow-soft backdrop-blur-lg lg:flex">
+      <div className="space-y-6">
       <div className="flex items-center gap-3">
         <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-ink text-white shadow-lg">
           <Building2 size={20} />
@@ -61,6 +99,8 @@ const Sidebar = () => (
         </NavLink>
         <NavLink
           to="/analytics"
+          onMouseEnter={prefetchAnalytics}
+          onFocus={prefetchAnalytics}
           className={({ isActive }) =>
             cn(
               navLinkBase,
@@ -157,7 +197,8 @@ const Sidebar = () => (
         Derniere mise a jour: aujourd'hui
       </p>
     </div>
-  </aside>
-);
+    </aside>
+  );
+};
 
 export { Sidebar };
