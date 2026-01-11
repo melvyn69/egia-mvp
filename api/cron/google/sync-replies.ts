@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import type { Database, Json } from "../../_shared_dist/database.types.js";
-import { syncGoogleLocationsForUser } from "../../../api/google/gbp/sync.js";
-import { syncGoogleReviewsForUser } from "../../../api/google/gbp/reviews/sync.js";
+import type { Database, Json } from "../../../server/_shared_dist/database.types.js";
+import { syncGoogleLocationsForUser } from "../../google/gbp/sync.js";
+import { syncGoogleReviewsForUser } from "../../google/gbp/reviews/sync.js";
 
 type GoogleReview = {
   reviewId?: string;

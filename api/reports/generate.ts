@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { requireUser } from "../_shared_dist/_auth.js";
+import { requireUser } from "../../server/_shared_dist/_auth.js";
 
 type ReportPreset = "last_7_days" | "last_30_days" | "custom" | "this_month" | "last_month";
 
