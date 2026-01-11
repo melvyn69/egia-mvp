@@ -14,12 +14,15 @@ const applyForbiddenWords = (text, forbidden) => {
         return acc.replace(new RegExp(escaped, "gi"), "").trim();
     }, text);
 };
-export const generateAiReply = async ({ reviewText, rating, brandVoice, overrideTone, openaiApiKey, model, requestId }) => {
+export const generateAiReply = async ({ reviewText, rating, brandVoice, overrideTone, businessTone, signature, insights, openaiApiKey, model, requestId }) => {
     if (!openaiApiKey) {
         return DEFAULT_REPLY;
     }
     const enabled = brandVoice?.enabled ?? false;
-    const toneKey = overrideTone ?? (enabled ? brandVoice?.tone : null) ?? "professional";
+    const toneKey = overrideTone ??
+        businessTone ??
+        (enabled ? brandVoice?.tone : null) ??
+        "professional";
     const toneLabel = toneMap[toneKey] ?? toneKey;
     const languageLevel = enabled
         ? brandVoice?.language_level ?? "vouvoiement"
@@ -27,12 +30,28 @@ export const generateAiReply = async ({ reviewText, rating, brandVoice, override
     const context = enabled ? brandVoice?.context?.trim() : null;
     const useEmojis = enabled ? Boolean(brandVoice?.use_emojis) : false;
     const forbiddenWords = enabled ? brandVoice?.forbidden_words ?? [] : [];
+    const signatureText = signature?.trim() ?? "";
+    const insightsSummary = insights && (insights.summary || (insights.tags && insights.tags.length > 0))
+        ? [
+            insights.sentiment ? `Sentiment: ${insights.sentiment}.` : "",
+            typeof insights.score === "number"
+                ? `Score: ${insights.score.toFixed(2)}.`
+                : "",
+            insights.summary ? `Resume: ${insights.summary}` : "",
+            insights.tags && insights.tags.length
+                ? `Tags: ${insights.tags.join(", ")}.`
+                : ""
+        ]
+            .filter(Boolean)
+            .join(" ")
+        : "";
     const system = [
         "Tu es un expert en e-reputation.",
         "Tu rediges une reponse courte a un avis Google.",
         "Ne jamais inventer de details ou de causes.",
         "2 a 4 phrases maximum.",
         "Reponds dans la langue de l'avis, francais par defaut.",
+        "N'evoque jamais l'analyse interne ou le score.",
         useEmojis ? "Les emojis sont autorises." : "N'utilise aucun emoji."
     ].join(" ");
     const user = [
@@ -41,6 +60,8 @@ export const generateAiReply = async ({ reviewText, rating, brandVoice, override
         `Ton souhaite: ${toneLabel}.`,
         `Niveau de langage: ${languageLevel}.`,
         context ? `Contexte a integrer: ${context}` : "",
+        insightsSummary ? `Insights IA: ${insightsSummary}` : "",
+        signatureText ? `Signature souhaitee: ${signatureText}` : "",
         forbiddenWords.length ? `Mots interdits: ${forbiddenWords.join(", ")}.` : ""
     ]
         .filter(Boolean)

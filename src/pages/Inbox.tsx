@@ -28,6 +28,15 @@ const isReviewStatus = (value: string | null | undefined): value is ReviewStatus
   value === "replied" ||
   value === "archived";
 
+const isAiSentiment = (value: unknown): value is AiSentiment =>
+  value === "positive" || value === "neutral" || value === "negative";
+
+const asString = (value: unknown): string =>
+  typeof value === "string" ? value : "";
+
+const asNumber = (value: unknown): number =>
+  typeof value === "number" ? value : 0;
+
 type Review = {
   id: string;
   reviewId?: string;
@@ -464,7 +473,7 @@ const Inbox = () => {
     base: Review[],
     insightsById: Record<string, AiInsight>
   ) =>
-    base.map((review) => {
+    base.map((review: Review) => {
       const insight = insightsById[review.id];
       if (!insight) {
         return review;
@@ -515,7 +524,7 @@ const Inbox = () => {
       const score = insight?.score ?? null;
       const summary = insight?.summary ?? null;
       const tagsWithMeta = getTags(record);
-      const tags = tagsWithMeta.map((tag) => tag.tag);
+      const tags = tagsWithMeta.map((tag: { tag: string }) => tag.tag);
       const hasNegativeTag = tagsWithMeta.some(
         (tag) => tag.category === "negative"
       );
@@ -674,7 +683,8 @@ const Inbox = () => {
       return [];
     }
     const pages = reviewsQuery.data?.pages ?? [];
-    return pages.flatMap((page) => {
+    return pages.flatMap(
+      (page: { rows: ReviewRow[]; insightsById: Record<string, AiInsight> }) => {
       const base = mapReviewRows(page.rows, locationLabels, sessionUserId);
       return mergeAiInsights(base, page.insightsById);
     });
@@ -682,7 +692,7 @@ const Inbox = () => {
 
   const locationReviewCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    reviews.forEach((review) => {
+    reviews.forEach((review: Review) => {
       const key = review.locationId;
       if (!key) {
         return;
@@ -707,7 +717,7 @@ const Inbox = () => {
   }, [locationOptions, locationReviewCounts]);
 
   const filteredReviews = useMemo(() => {
-    const visible = reviews.filter((review) => {
+    const visible = reviews.filter((review: Review) => {
       const matchesStatus =
         statusFilter === "all" ? true : review.status === statusFilter;
       const matchesLocation =
@@ -716,11 +726,13 @@ const Inbox = () => {
           : review.locationId === selectedLocation;
       return matchesStatus && matchesLocation;
     });
-    return visible.sort((a, b) => {
+    return visible.sort((a: Review, b: Review) => {
       if (b.aiPriorityScore !== a.aiPriorityScore) {
         return b.aiPriorityScore - a.aiPriorityScore;
       }
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      const bd = Date.parse(asString(b.createdAt));
+      const ad = Date.parse(asString(a.createdAt));
+      return (Number.isFinite(bd) ? bd : 0) - (Number.isFinite(ad) ? ad : 0);
     });
   }, [reviews, statusFilter, selectedLocation]);
 
@@ -729,14 +741,16 @@ const Inbox = () => {
       setSelectedReviewId("");
       return;
     }
-    const stillVisible = filteredReviews.some((review) => review.id === selectedReviewId);
+    const stillVisible = filteredReviews.some(
+      (review: Review) => review.id === selectedReviewId
+    );
     if (!stillVisible) {
       setSelectedReviewId(filteredReviews[0].id);
     }
   }, [filteredReviews, selectedReviewId]);
 
   const selectedReview = useMemo(() => {
-    return reviews.find((review) => review.id === selectedReviewId) ?? null;
+    return reviews.find((review: Review) => review.id === selectedReviewId) ?? null;
   }, [reviews, selectedReviewId]);
 
   const activeLocationId = useMemo(() => {
@@ -880,7 +894,7 @@ const Inbox = () => {
       } else {
         const rows = (data ?? []) as ReviewReply[];
         setReplyHistory(rows);
-        const latestDraft = rows.find((item) => item.status === "draft");
+        const latestDraft = rows.find((item: ReviewReply) => item.status === "draft");
         setDraftReplyId(latestDraft?.id ?? null);
       }
       setReplyHistoryLoading(false);
@@ -891,7 +905,7 @@ const Inbox = () => {
 
   useEffect(() => {
     const supabaseClient = supabase;
-    const reviewIds = filteredReviews.map((review) => review.id);
+    const reviewIds = filteredReviews.map((review: Review) => review.id);
     if (!supabaseClient || reviewIds.length === 0) {
       setDraftByReview({});
       return;
@@ -1149,7 +1163,9 @@ const Inbox = () => {
     if (!selectedReview) {
       return;
     }
-    const latestDraft = replyHistory.find((item) => item.status === "draft");
+    const latestDraft = replyHistory.find(
+      (item: ReviewReply) => item.status === "draft"
+    );
     if (!latestDraft) {
       setGenerationError("Aucun brouillon disponible pour cet avis.");
       return;
@@ -1353,9 +1369,9 @@ const Inbox = () => {
             }
             return {
               ...old,
-              pages: old.pages.map((page) => ({
+              pages: old.pages.map((page: { rows: ReviewRow[] }) => ({
                 ...page,
-                rows: page.rows.map((row) =>
+                rows: page.rows.map((row: ReviewRow) =>
                   row.id === selectedReview.id
                     ? { ...row, status: "replied" }
                     : row
@@ -1368,7 +1384,7 @@ const Inbox = () => {
         // 4) Auto-sélection du prochain avis "new" dans la liste filtrée
         // (On utilise la version la plus fraîche possible)
         const nextNew = filteredReviews.find(
-          (r) => r.id !== selectedReview.id && r.status === "new"
+          (r: Review) => r.id !== selectedReview.id && r.status === "new"
         );
         if (nextNew) {
           setSelectedReviewId(nextNew.id);
@@ -1394,7 +1410,9 @@ const Inbox = () => {
       setGenerationError("Configuration Supabase manquante.");
       return;
     }
-    const targets = filteredReviews.filter((review) => review.status === "new");
+    const targets = filteredReviews.filter(
+      (review: Review) => review.status === "new"
+    );
     if (targets.length === 0) {
       setBatchError("Aucun avis à traiter.");
       return;
@@ -1687,63 +1705,72 @@ const Inbox = () => {
               </div>
             ) : (
               <>
-                {filteredReviews.map((review) => (
-                  <button
-                    key={review.id}
-                    type="button"
-                    onClick={() => setSelectedReviewId(review.id)}
-                    className={`w-full rounded-2xl border p-4 text-left transition hover:border-slate-300 ${
-                      selectedReviewId === review.id
-                        ? "border-slate-400 bg-slate-50"
-                        : "border-slate-200"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">
-                          {review.authorName}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {review.locationName}
-                        </p>
+                {filteredReviews.map((review: Review) => {
+                  const safeStatus = isReviewStatus(review.status)
+                    ? review.status
+                    : "new";
+                  const safeSentiment = isAiSentiment(review.aiSentiment)
+                    ? review.aiSentiment
+                    : null;
+                  const rating = asNumber(review.rating);
+                  return (
+                    <button
+                      key={review.id}
+                      type="button"
+                      onClick={() => setSelectedReviewId(review.id)}
+                      className={`w-full rounded-2xl border p-4 text-left transition hover:border-slate-300 ${
+                        selectedReviewId === review.id
+                          ? "border-slate-400 bg-slate-50"
+                          : "border-slate-200"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">
+                            {review.authorName}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {review.locationName}
+                          </p>
+                        </div>
+                        <Badge variant={statusVariantMap[safeStatus]}>
+                          {statusLabelMap[safeStatus]}
+                        </Badge>
+                        {draftByReview[review.id] && (
+                          <Badge variant="success">Draft saved</Badge>
+                        )}
+                        {review.aiPriority && (
+                          <Badge variant="warning">À traiter</Badge>
+                        )}
+                        <Badge
+                          variant={
+                            safeSentiment
+                              ? aiSentimentVariantMap[safeSentiment]
+                              : "neutral"
+                          }
+                        >
+                          {review.aiStatus === "ready"
+                            ? safeSentiment
+                              ? aiSentimentLabelMap[safeSentiment]
+                              : "IA"
+                            : "En attente IA"}
+                        </Badge>
                       </div>
-                      <Badge variant={statusVariantMap[review.status]}>
-                        {statusLabelMap[review.status]}
-                      </Badge>
-                      {draftByReview[review.id] && (
-                        <Badge variant="success">Draft saved</Badge>
-                      )}
-                      {review.aiPriority && (
-                        <Badge variant="warning">À traiter</Badge>
-                      )}
-                      <Badge
-                        variant={
-                          review.aiSentiment
-                            ? aiSentimentVariantMap[review.aiSentiment]
-                            : "neutral"
-                        }
-                      >
-                        {review.aiStatus === "ready"
-                          ? review.aiSentiment
-                            ? aiSentimentLabelMap[review.aiSentiment]
-                            : "IA"
-                          : "En attente IA"}
-                      </Badge>
-                    </div>
-                    <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-                      <span>
-                        {"★".repeat(Math.max(0, Math.min(5, review.rating)))}
-                        {"☆".repeat(5 - Math.max(0, Math.min(5, review.rating)))}
-                      </span>
-                      <span>{review.source}</span>
-                      <span>•</span>
-                      <span>{formatDate(review.createdAt)}</span>
-                    </div>
-                    <p className="mt-3 line-clamp-2 text-sm text-slate-600">
-                      {review.text}
-                    </p>
-                  </button>
-                ))}
+                      <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+                        <span>
+                          {"★".repeat(Math.max(0, Math.min(5, rating)))}
+                          {"☆".repeat(5 - Math.max(0, Math.min(5, rating)))}
+                        </span>
+                        <span>{review.source}</span>
+                        <span>•</span>
+                        <span>{formatDate(review.createdAt)}</span>
+                      </div>
+                      <p className="mt-3 line-clamp-2 text-sm text-slate-600">
+                        {review.text}
+                      </p>
+                    </button>
+                  );
+                })}
                 {reviewsHasMore && (
                   <div className="flex justify-center pt-2">
                     <Button
@@ -1833,7 +1860,7 @@ const Inbox = () => {
                             Aucun tag détecté.
                           </span>
                         ) : (
-                          selectedReview.aiTags.map((tag) => (
+                          selectedReview.aiTags.map((tag: string) => (
                             <Badge key={tag} variant="neutral">
                               {tag}
                             </Badge>
@@ -1845,7 +1872,7 @@ const Inbox = () => {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  {selectedReview.tags.map((tag) => (
+                  {selectedReview.tags.map((tag: string) => (
                     <Badge key={tag} variant="neutral">
                       {tag}
                     </Badge>

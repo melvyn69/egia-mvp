@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import {
   AlertTriangle,
@@ -446,12 +447,7 @@ const Dashboard = ({
   const [kpiFrom, setKpiFrom] = useState("");
   const [kpiTo, setKpiTo] = useState("");
   const [kpiLocationId, setKpiLocationId] = useState("");
-  const [kpiData, setKpiData] = useState<KpiSummary | null>(null);
-  const [kpiLoading, setKpiLoading] = useState(false);
-  const [kpiError, setKpiError] = useState<string | null>(null);
-  const [aiKpiData, setAiKpiData] = useState<AiKpiData | null>(null);
-  const [aiKpiLoading, setAiKpiLoading] = useState(false);
-  const [aiKpiError, setAiKpiError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const [selectedActiveIds, setSelectedActiveIds] = useState<string[]>([]);
   const [activeLocationsSaving, setActiveLocationsSaving] = useState(false);
 
@@ -474,16 +470,21 @@ const Dashboard = ({
     }
   }, [kpiLocationId]);
 
-  useEffect(() => {
-    const token = session?.access_token;
-    if (!token) {
-      setKpiData(null);
-      return;
-    }
-    let cancelled = false;
-    const loadKpis = async () => {
-      setKpiLoading(true);
-      setKpiError(null);
+  const kpiQuery = useQuery({
+    queryKey: [
+      "kpi-summary",
+      session?.user?.id ?? null,
+      kpiLocationId,
+      kpiPreset,
+      kpiFrom,
+      kpiTo,
+      timeZone
+    ],
+    queryFn: async () => {
+      const token = session?.access_token;
+      if (!token) {
+        throw new Error("Missing session");
+      }
       const params = new URLSearchParams();
       if (kpiLocationId && kpiLocationId !== "all") {
         params.set("location_id", kpiLocationId);
@@ -498,52 +499,38 @@ const Dashboard = ({
           params.set("to", kpiTo);
         }
       }
-      try {
-        const response = await fetch(`/api/kpi/summary?${params.toString()}`, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-        const payload = await response.json().catch(() => null);
-        if (cancelled) {
-          return;
+      const response = await fetch(`/api/kpi/summary?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`
         }
-        if (!response.ok || !payload) {
-          setKpiError("Impossible de charger les KPIs.");
-          setKpiData(null);
-          return;
-        }
-        setKpiData(payload as KpiSummary);
-      } catch {
-        if (!cancelled) {
-          setKpiError("Impossible de charger les KPIs.");
-          setKpiData(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setKpiLoading(false);
-        }
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload) {
+        throw new Error("Failed to load KPIs");
       }
-    };
-    void loadKpis();
-    return () => {
-      cancelled = true;
-    };
-  }, [kpiLocationId, kpiPreset, kpiFrom, kpiTo, session, timeZone]);
+      return payload as KpiSummary;
+    },
+    enabled: Boolean(session?.access_token),
+    placeholderData: (prev) => prev
+  });
 
-  useEffect(() => {
-    const supabaseClient = supabase;
-    if (!supabaseClient || !session) {
-      setAiKpiData(null);
-      return;
-    }
-    let cancelled = false;
-    const loadAiKpis = async () => {
-      setAiKpiLoading(true);
-      setAiKpiError(null);
+  const aiKpiQuery = useQuery({
+    queryKey: [
+      "ai-kpis",
+      session?.user?.id ?? null,
+      kpiLocationId,
+      kpiPreset,
+      kpiFrom,
+      kpiTo,
+      timeZone
+    ],
+    queryFn: async () => {
+      if (!supabase || !session?.user) {
+        throw new Error("Missing session");
+      }
       const { start, end } = getPresetRange(kpiPreset, kpiFrom, kpiTo);
 
-      let query = supabaseClient
+      let query = supabase
         .from("google_reviews")
         .select(
           "id, create_time, location_id, review_ai_insights(sentiment, sentiment_score), review_ai_tags(ai_tags(tag, category))"
@@ -560,14 +547,8 @@ const Dashboard = ({
       }
 
       const { data, error } = await query;
-      if (cancelled) {
-        return;
-      }
       if (error) {
-        console.error("ai kpis fetch error:", error);
-        setAiKpiError("Impossible de charger l'analyse IA.");
-        setAiKpiData(null);
-        return;
+        throw error;
       }
 
       const rows = (data ?? []) as AiInsightRow[];
@@ -636,9 +617,7 @@ const Dashboard = ({
         negativePct: totalSamples
           ? (sentimentCounts.negative / totalSamples) * 100
           : null,
-        mixedPct: totalSamples
-          ? (sentimentCounts.mixed / totalSamples) * 100
-          : null,
+        mixedPct: totalSamples ? (sentimentCounts.mixed / totalSamples) * 100 : null,
         samples: totalSamples
       };
 
@@ -647,7 +626,7 @@ const Dashboard = ({
       const trendStart = startOfDay(new Date());
       trendStart.setDate(trendStart.getDate() - 29);
       const trendEnd = endOfDay(new Date());
-      let trendQuery = supabaseClient
+      let trendQuery = supabase
         .from("google_reviews")
         .select("id, create_time, location_id, review_ai_insights(sentiment_score)")
         .eq("user_id", session.user.id)
@@ -657,12 +636,8 @@ const Dashboard = ({
         trendQuery = trendQuery.eq("location_id", kpiLocationId);
       }
       const { data: trendData, error: trendError } = await trendQuery;
-      if (cancelled) {
-        return;
-      }
       if (trendError) {
-        console.error("ai trend fetch error:", trendError);
-        setAiKpiError("Impossible de charger l'évolution IA.");
+        throw trendError;
       }
 
       const buckets = new Map<
@@ -712,19 +687,25 @@ const Dashboard = ({
         criticalCount: bucket.criticalCount
       }));
 
-      setAiKpiData({
+      return {
         sentiment,
         avgScore,
         topTags,
         trend,
         priorityCount
-      });
-    };
-    void loadAiKpis();
-    return () => {
-      cancelled = true;
-    };
-  }, [kpiLocationId, kpiPreset, kpiFrom, kpiTo, session]);
+      } satisfies AiKpiData;
+    },
+    enabled: Boolean(supabase) && Boolean(session?.user),
+    placeholderData: (prev) => prev
+  });
+
+  const kpiData = kpiQuery.data ?? null;
+  const kpiLoading = kpiQuery.isLoading;
+  const kpiError = kpiQuery.isError ? "Impossible de charger les KPIs." : null;
+
+  const aiKpiData = aiKpiQuery.data ?? null;
+  const aiKpiLoading = aiKpiQuery.isLoading;
+  const aiKpiError = aiKpiQuery.isError ? "Impossible de charger l'analyse IA." : null;
 
   useEffect(() => {
     const supabaseClient = supabase;
@@ -1031,6 +1012,16 @@ const Dashboard = ({
           {kpiError && (
             <span className="text-xs text-amber-700">{kpiError}</span>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void queryClient.invalidateQueries({ queryKey: ["kpi-summary"] });
+              void queryClient.invalidateQueries({ queryKey: ["ai-kpis"] });
+            }}
+          >
+            Rafraîchir
+          </Button>
         </div>
         <p className="text-xs text-slate-500">
           Période: {getPresetLabel(kpiPreset)}
