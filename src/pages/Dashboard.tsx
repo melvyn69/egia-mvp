@@ -80,11 +80,17 @@ type AiKpiData = {
     positivePct: number | null;
     neutralPct: number | null;
     negativePct: number | null;
+    mixedPct: number | null;
     samples: number;
   };
   avgScore: number | null;
   topTags: Array<{ tag: string; count: number }>;
-  trend: Array<{ date: string; avgScore: number | null; samples: number }>;
+  trend: Array<{
+    date: string;
+    avgScore: number | null;
+    samples: number;
+    criticalCount: number;
+  }>;
   priorityCount: number;
 };
 
@@ -284,6 +290,43 @@ const normalizeSentiment = (value: unknown): "positive" | "neutral" | "negative"
     return value;
   }
   return null;
+};
+
+const asOne = <T,>(value: T | T[] | null | undefined): T | null => {
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+  return value ?? null;
+};
+
+const getInsight = (record: AiInsightRow) => {
+  const insight = asOne(record.review_ai_insights);
+  if (!insight) {
+    return null;
+  }
+  return {
+    sentiment: normalizeSentiment(insight.sentiment),
+    score:
+      typeof insight.sentiment_score === "number"
+        ? insight.sentiment_score
+        : null
+  };
+};
+
+const getTags = (record: AiInsightRow) => {
+  if (!Array.isArray(record.review_ai_tags)) {
+    return [];
+  }
+  return record.review_ai_tags
+    .map((tagRow) => {
+      const tagRecord = tagRow?.ai_tags as AiTagRow | null | undefined;
+      return {
+        tag: typeof tagRecord?.tag === "string" ? tagRecord.tag : null,
+        category:
+          typeof tagRecord?.category === "string" ? tagRecord.category : null
+      };
+    })
+    .filter((tag): tag is { tag: string; category: string | null } => !!tag.tag);
 };
 
 const getSeverityOrder = (severity: NotificationSeverity): number => {
@@ -504,7 +547,8 @@ const Dashboard = ({
         .from("google_reviews")
         .select(
           "id, create_time, location_id, review_ai_insights(sentiment, sentiment_score), review_ai_tags(ai_tags(tag, category))"
-        );
+        )
+        .eq("user_id", session.user.id);
       if (kpiLocationId && kpiLocationId !== "all") {
         query = query.eq("location_id", kpiLocationId);
       }
@@ -527,54 +571,59 @@ const Dashboard = ({
       }
 
       const rows = (data ?? []) as AiInsightRow[];
-      const sentimentCounts = { positive: 0, neutral: 0, negative: 0, total: 0 };
+      const sentimentCounts = {
+        positive: 0,
+        neutral: 0,
+        negative: 0,
+        mixed: 0,
+        total: 0
+      };
       let scoreSum = 0;
       let scoreCount = 0;
-      const tagCounts = new Map<string, number>();
+      const tagCounts = new Map<string, { tag: string; count: number }>();
       let priorityCount = 0;
 
       rows.forEach((row) => {
-        const insightRaw = Array.isArray(row.review_ai_insights)
-          ? row.review_ai_insights[0]
-          : row.review_ai_insights;
-        const sentiment = normalizeSentiment(insightRaw?.sentiment);
-        if (sentiment) {
-          sentimentCounts[sentiment] += 1;
+        const insight = getInsight(row);
+        if (insight) {
+          if (insight.sentiment) {
+            sentimentCounts[insight.sentiment] += 1;
+          } else {
+            sentimentCounts.mixed += 1;
+          }
           sentimentCounts.total += 1;
         }
-        if (typeof insightRaw?.sentiment_score === "number") {
-          scoreSum += insightRaw.sentiment_score;
+        if (typeof insight?.score === "number") {
+          scoreSum += insight.score;
           scoreCount += 1;
         }
         let hasNegativeTag = false;
-        if (Array.isArray(row.review_ai_tags)) {
-          row.review_ai_tags.forEach((tagRow) => {
-            const tag = tagRow?.ai_tags?.tag;
-            if (typeof tag === "string") {
-              tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
-            }
-            if (
-              (tagRow?.ai_tags as AiTagRow | null | undefined)?.category ===
-              "negative"
-            ) {
-              hasNegativeTag = true;
-            }
-          });
-        }
+        const tags = getTags(row);
+        tags.forEach((tag) => {
+          const normalizedTag = tag.tag.toLowerCase();
+          const existing = tagCounts.get(normalizedTag);
+          if (existing) {
+            existing.count += 1;
+          } else {
+            tagCounts.set(normalizedTag, { tag: tag.tag, count: 1 });
+          }
+          if (tag.category === "negative") {
+            hasNegativeTag = true;
+          }
+        });
         if (
-          sentiment === "negative" ||
-          (typeof insightRaw?.sentiment_score === "number" &&
-            insightRaw.sentiment_score < 0.4) ||
+          insight?.sentiment === "negative" ||
+          (typeof insight?.score === "number" && insight.score < 0.4) ||
           hasNegativeTag
         ) {
           priorityCount += 1;
         }
       });
 
-      const topTags = Array.from(tagCounts.entries())
-        .sort((a, b) => b[1] - a[1])
+      const topTags = Array.from(tagCounts.values())
+        .sort((a, b) => b.count - a.count)
         .slice(0, 5)
-        .map(([tag, count]) => ({ tag, count }));
+        .map(({ tag, count }) => ({ tag, count }));
 
       const totalSamples = sentimentCounts.total;
       const sentiment = {
@@ -587,6 +636,9 @@ const Dashboard = ({
         negativePct: totalSamples
           ? (sentimentCounts.negative / totalSamples) * 100
           : null,
+        mixedPct: totalSamples
+          ? (sentimentCounts.mixed / totalSamples) * 100
+          : null,
         samples: totalSamples
       };
 
@@ -598,6 +650,7 @@ const Dashboard = ({
       let trendQuery = supabaseClient
         .from("google_reviews")
         .select("id, create_time, location_id, review_ai_insights(sentiment_score)")
+        .eq("user_id", session.user.id)
         .gte("create_time", trendStart.toISOString())
         .lte("create_time", trendEnd.toISOString());
       if (kpiLocationId && kpiLocationId !== "all") {
@@ -612,12 +665,15 @@ const Dashboard = ({
         setAiKpiError("Impossible de charger l'évolution IA.");
       }
 
-      const buckets = new Map<string, { sum: number; count: number }>();
+      const buckets = new Map<
+        string,
+        { sum: number; analysedCount: number; criticalCount: number }
+      >();
       for (let i = 0; i < 30; i += 1) {
         const day = new Date(trendStart);
         day.setDate(trendStart.getDate() + i);
         const key = day.toISOString().slice(0, 10);
-        buckets.set(key, { sum: 0, count: 0 });
+        buckets.set(key, { sum: 0, analysedCount: 0, criticalCount: 0 });
       }
 
       (trendData ?? []).forEach((row) => {
@@ -630,19 +686,30 @@ const Dashboard = ({
         if (!bucket) {
           return;
         }
-        const insightRaw = Array.isArray(record.review_ai_insights)
-          ? record.review_ai_insights[0]
-          : record.review_ai_insights;
-        if (typeof insightRaw?.sentiment_score === "number") {
-          bucket.sum += insightRaw.sentiment_score;
-          bucket.count += 1;
+        const insight = getInsight(record);
+        if (insight) {
+          bucket.analysedCount += 1;
+          if (typeof insight.score === "number") {
+            bucket.sum += insight.score;
+          }
+        }
+        const hasNegativeTag = getTags(record).some(
+          (tag) => tag.category === "negative"
+        );
+        if (
+          insight?.sentiment === "negative" ||
+          (typeof insight?.score === "number" && insight.score < 0.4) ||
+          hasNegativeTag
+        ) {
+          bucket.criticalCount += 1;
         }
       });
 
       const trend = Array.from(buckets.entries()).map(([date, bucket]) => ({
         date,
-        avgScore: bucket.count ? bucket.sum / bucket.count : null,
-        samples: bucket.count
+        avgScore: bucket.analysedCount ? bucket.sum / bucket.analysedCount : null,
+        samples: bucket.analysedCount,
+        criticalCount: bucket.criticalCount
       }));
 
       setAiKpiData({
@@ -1026,6 +1093,7 @@ const Dashboard = ({
                   <p>Positif: {formatPercent(aiKpiData?.sentiment.positivePct ?? null)}</p>
                   <p>Neutre: {formatPercent(aiKpiData?.sentiment.neutralPct ?? null)}</p>
                   <p>Négatif: {formatPercent(aiKpiData?.sentiment.negativePct ?? null)}</p>
+                  <p>Mixte: {formatPercent(aiKpiData?.sentiment.mixedPct ?? null)}</p>
                 </>
               )}
             </CardContent>
@@ -1122,7 +1190,8 @@ const Dashboard = ({
                     >
                       <span>{point.date}</span>
                       <span className="text-slate-500">
-                        Score {formatScore(point.avgScore)} · {point.samples} avis
+                        Score {formatScore(point.avgScore)} · {point.samples} avis ·{" "}
+                        {point.criticalCount} critiques
                       </span>
                     </div>
                   ))}

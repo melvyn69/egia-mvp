@@ -169,6 +169,59 @@ const normalizeSentiment = (value: unknown): AiSentiment | null => {
   return null;
 };
 
+const asOne = <T,>(value: T | T[] | null | undefined): T | null => {
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+  return value ?? null;
+};
+
+const getInsight = (record: {
+  review_ai_insights?:
+    | {
+        sentiment?: string | null;
+        sentiment_score?: number | null;
+        summary?: string | null;
+      }
+    | Array<{
+        sentiment?: string | null;
+        sentiment_score?: number | null;
+        summary?: string | null;
+      }>
+    | null;
+}) => {
+  const insight = asOne(record.review_ai_insights);
+  if (!insight) {
+    return null;
+  }
+  return {
+    sentiment: normalizeSentiment(insight.sentiment),
+    score:
+      typeof insight.sentiment_score === "number"
+        ? insight.sentiment_score
+        : null,
+    summary: typeof insight.summary === "string" ? insight.summary : null
+  };
+};
+
+const getTags = (record: {
+  review_ai_tags?: Array<{ ai_tags?: AiTagRow | null }> | null;
+}) => {
+  if (!Array.isArray(record.review_ai_tags)) {
+    return [];
+  }
+  return record.review_ai_tags
+    .map((tagRow) => {
+      const tagRecord = tagRow?.ai_tags as AiTagRow | null | undefined;
+      return {
+        tag: typeof tagRecord?.tag === "string" ? tagRecord.tag : null,
+        category:
+          typeof tagRecord?.category === "string" ? tagRecord.category : null
+      };
+    })
+    .filter((tag): tag is { tag: string; category: string | null } => !!tag.tag);
+};
+
 const COOLDOWN_MS = 30000;
 
 const uuidRegex =
@@ -461,28 +514,15 @@ const Inbox = () => {
           ai_tags?: { tag?: string | null } | null;
         }> | null;
       };
-      const insightRaw = Array.isArray(record.review_ai_insights)
-        ? record.review_ai_insights[0]
-        : record.review_ai_insights;
-      const sentiment = normalizeSentiment(insightRaw?.sentiment);
-      const score =
-        typeof insightRaw?.sentiment_score === "number"
-          ? insightRaw.sentiment_score
-          : null;
-      const summary =
-        typeof insightRaw?.summary === "string" ? insightRaw.summary : null;
-      const tags = Array.isArray(record.review_ai_tags)
-        ? record.review_ai_tags
-            .map((tagRow) => tagRow?.ai_tags?.tag)
-            .filter((tag): tag is string => typeof tag === "string")
-        : [];
-      const hasNegativeTag = Array.isArray(record.review_ai_tags)
-        ? record.review_ai_tags.some(
-            (tagRow) =>
-              (tagRow?.ai_tags as AiTagRow | null | undefined)?.category ===
-              "negative"
-          )
-        : false;
+      const insight = getInsight(record);
+      const sentiment = insight?.sentiment ?? null;
+      const score = insight?.score ?? null;
+      const summary = insight?.summary ?? null;
+      const tagsWithMeta = getTags(record);
+      const tags = tagsWithMeta.map((tag) => tag.tag);
+      const hasNegativeTag = tagsWithMeta.some(
+        (tag) => tag.category === "negative"
+      );
       const priorityScore =
         sentiment === "negative" || (typeof score === "number" && score < 0.4)
           ? 2
@@ -492,7 +532,7 @@ const Inbox = () => {
       const priority = priorityScore > 0;
 
       insightsById[record.id] = {
-        status: insightRaw || tags.length > 0 ? "ready" : "pending",
+        status: insight || tags.length > 0 ? "ready" : "pending",
         sentiment,
         score,
         summary,
