@@ -222,6 +222,59 @@ const fetchBrandVoice = async (
   return globalRow ?? null;
 };
 
+const fetchBusinessSettings = async (userId: string) => {
+  const { data: byUser, error: byUserError } = await supabaseAdmin
+    .from("business_settings")
+    .select("default_tone, signature")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (byUserError) {
+    console.error("[reply] business_settings fetch failed", byUserError);
+  }
+  if (byUser) {
+    return byUser;
+  }
+  const { data: byBusiness, error: byBusinessError } = await supabaseAdmin
+    .from("business_settings")
+    .select("default_tone, signature")
+    .eq("business_id", userId)
+    .maybeSingle();
+  if (byBusinessError) {
+    console.error("[reply] business_settings fetch failed", byBusinessError);
+  }
+  return byBusiness ?? null;
+};
+
+const fetchAiInsights = async (reviewPk: string) => {
+  const { data: insight, error: insightError } = await supabaseAdmin
+    .from("review_ai_insights")
+    .select("sentiment, sentiment_score, summary")
+    .eq("review_pk", reviewPk)
+    .maybeSingle();
+  if (insightError) {
+    console.error("[reply] review_ai_insights fetch failed", insightError);
+  }
+  const { data: tags, error: tagsError } = await supabaseAdmin
+    .from("review_ai_tags")
+    .select("ai_tags(tag)")
+    .eq("review_pk", reviewPk);
+  if (tagsError) {
+    console.error("[reply] review_ai_tags fetch failed", tagsError);
+  }
+  const tagList = (tags ?? [])
+    .map((row) => row?.ai_tags?.tag)
+    .filter((tag): tag is string => typeof tag === "string");
+  return {
+    sentiment: insight?.sentiment ?? null,
+    score:
+      typeof insight?.sentiment_score === "number"
+        ? insight.sentiment_score
+        : null,
+    summary: insight?.summary ?? null,
+    tags: tagList
+  };
+};
+
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -381,15 +434,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const reviewText = typeof review.comment === "string" ? review.comment : "";
       try {
-        const brandVoice = await fetchBrandVoice(
-          userId,
-          review.location_id ?? (typeof location_id === "string" ? location_id : null)
-        );
+        const [brandVoice, businessSettings, insights] = await Promise.all([
+          fetchBrandVoice(
+            userId,
+            review.location_id ?? (typeof location_id === "string" ? location_id : null)
+          ),
+          fetchBusinessSettings(userId),
+          fetchAiInsights(review.id)
+        ]);
         const reply = await generateAiReply({
           reviewText: reviewText || "Avis sans commentaire.",
           rating: typeof review.rating === "number" ? review.rating : null,
           brandVoice: brandVoice ?? null,
           overrideTone: tone ?? null,
+          businessTone: businessSettings?.default_tone ?? null,
+          signature: businessSettings?.signature ?? null,
+          insights,
           openaiApiKey,
           model: openaiModel,
           requestId

@@ -75,6 +75,45 @@ type KpiSummary = {
   top_tags?: Array<{ tag: string; count: number }>;
 };
 
+type AiKpiData = {
+  sentiment: {
+    positivePct: number | null;
+    neutralPct: number | null;
+    negativePct: number | null;
+    samples: number;
+  };
+  avgScore: number | null;
+  topTags: Array<{ tag: string; count: number }>;
+  trend: Array<{ date: string; avgScore: number | null; samples: number }>;
+  priorityCount: number;
+};
+
+type AiInsightRow = {
+  id: string;
+  create_time: string | null;
+  location_id: string | null;
+  review_ai_insights?:
+    | {
+        sentiment?: string | null;
+        sentiment_score?: number | null;
+      }
+    | Array<{
+        sentiment?: string | null;
+        sentiment_score?: number | null;
+      }>
+    | null;
+  review_ai_tags?:
+    | Array<{
+        ai_tags?: { tag?: string | null } | null;
+      }>
+    | null;
+};
+
+type AiTagRow = {
+  tag?: string | null;
+  category?: string | null;
+};
+
 const getGreeting = (): string => {
   const hour = new Date().getHours();
   if (hour >= 5 && hour < 12) {
@@ -139,6 +178,9 @@ const formatRating = (value: number | null): string =>
 const formatCount = (value: number | null | undefined): string =>
   value === null || value === undefined ? "—" : String(value);
 
+const formatScore = (value: number | null): string =>
+  value === null ? "—" : value.toFixed(2);
+
 const getKpiReason = (reasons?: string[]): string => {
   if (!reasons || reasons.length === 0) {
     return "Pas assez de données";
@@ -179,6 +221,69 @@ const getPresetLabel = (preset: string): string => {
     default:
       return "—";
   }
+};
+
+const startOfDay = (date: Date) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+const endOfDay = (date: Date) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+
+const getPresetRange = (
+  preset: string,
+  from: string,
+  to: string
+): { start: Date | null; end: Date | null } => {
+  const now = new Date();
+  switch (preset) {
+    case "this_week": {
+      const day = now.getDay();
+      const diff = (day + 6) % 7;
+      const start = startOfDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - diff));
+      return { start, end: endOfDay(now) };
+    }
+    case "this_month": {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { start, end: endOfDay(now) };
+    }
+    case "this_quarter": {
+      const quarter = Math.floor(now.getMonth() / 3);
+      const start = new Date(now.getFullYear(), quarter * 3, 1);
+      return { start, end: endOfDay(now) };
+    }
+    case "last_quarter": {
+      const quarter = Math.floor(now.getMonth() / 3);
+      const lastQuarter = quarter === 0 ? 3 : quarter - 1;
+      const year = quarter === 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const start = new Date(year, lastQuarter * 3, 1);
+      const end = endOfDay(new Date(year, lastQuarter * 3 + 3, 0));
+      return { start, end };
+    }
+    case "this_year": {
+      const start = new Date(now.getFullYear(), 0, 1);
+      return { start, end: endOfDay(now) };
+    }
+    case "last_year": {
+      const start = new Date(now.getFullYear() - 1, 0, 1);
+      const end = endOfDay(new Date(now.getFullYear() - 1, 11, 31));
+      return { start, end };
+    }
+    case "custom": {
+      const start = from ? startOfDay(new Date(from)) : null;
+      const end = to ? endOfDay(new Date(to)) : null;
+      return { start, end };
+    }
+    case "all_time":
+    default:
+      return { start: null, end: null };
+  }
+};
+
+const normalizeSentiment = (value: unknown): "positive" | "neutral" | "negative" | null => {
+  if (value === "positive" || value === "neutral" || value === "negative") {
+    return value;
+  }
+  return null;
 };
 
 const getSeverityOrder = (severity: NotificationSeverity): number => {
@@ -301,6 +406,9 @@ const Dashboard = ({
   const [kpiData, setKpiData] = useState<KpiSummary | null>(null);
   const [kpiLoading, setKpiLoading] = useState(false);
   const [kpiError, setKpiError] = useState<string | null>(null);
+  const [aiKpiData, setAiKpiData] = useState<AiKpiData | null>(null);
+  const [aiKpiLoading, setAiKpiLoading] = useState(false);
+  const [aiKpiError, setAiKpiError] = useState<string | null>(null);
   const [selectedActiveIds, setSelectedActiveIds] = useState<string[]>([]);
   const [activeLocationsSaving, setActiveLocationsSaving] = useState(false);
 
@@ -379,6 +487,177 @@ const Dashboard = ({
       cancelled = true;
     };
   }, [kpiLocationId, kpiPreset, kpiFrom, kpiTo, session, timeZone]);
+
+  useEffect(() => {
+    const supabaseClient = supabase;
+    if (!supabaseClient || !session) {
+      setAiKpiData(null);
+      return;
+    }
+    let cancelled = false;
+    const loadAiKpis = async () => {
+      setAiKpiLoading(true);
+      setAiKpiError(null);
+      const { start, end } = getPresetRange(kpiPreset, kpiFrom, kpiTo);
+
+      let query = supabaseClient
+        .from("google_reviews")
+        .select(
+          "id, create_time, location_id, review_ai_insights(sentiment, sentiment_score), review_ai_tags(ai_tags(tag, category))"
+        );
+      if (kpiLocationId && kpiLocationId !== "all") {
+        query = query.eq("location_id", kpiLocationId);
+      }
+      if (start) {
+        query = query.gte("create_time", start.toISOString());
+      }
+      if (end) {
+        query = query.lte("create_time", end.toISOString());
+      }
+
+      const { data, error } = await query;
+      if (cancelled) {
+        return;
+      }
+      if (error) {
+        console.error("ai kpis fetch error:", error);
+        setAiKpiError("Impossible de charger l'analyse IA.");
+        setAiKpiData(null);
+        return;
+      }
+
+      const rows = (data ?? []) as AiInsightRow[];
+      const sentimentCounts = { positive: 0, neutral: 0, negative: 0, total: 0 };
+      let scoreSum = 0;
+      let scoreCount = 0;
+      const tagCounts = new Map<string, number>();
+      let priorityCount = 0;
+
+      rows.forEach((row) => {
+        const insightRaw = Array.isArray(row.review_ai_insights)
+          ? row.review_ai_insights[0]
+          : row.review_ai_insights;
+        const sentiment = normalizeSentiment(insightRaw?.sentiment);
+        if (sentiment) {
+          sentimentCounts[sentiment] += 1;
+          sentimentCounts.total += 1;
+        }
+        if (typeof insightRaw?.sentiment_score === "number") {
+          scoreSum += insightRaw.sentiment_score;
+          scoreCount += 1;
+        }
+        let hasNegativeTag = false;
+        if (Array.isArray(row.review_ai_tags)) {
+          row.review_ai_tags.forEach((tagRow) => {
+            const tag = tagRow?.ai_tags?.tag;
+            if (typeof tag === "string") {
+              tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+            }
+            if (
+              (tagRow?.ai_tags as AiTagRow | null | undefined)?.category ===
+              "negative"
+            ) {
+              hasNegativeTag = true;
+            }
+          });
+        }
+        if (
+          sentiment === "negative" ||
+          (typeof insightRaw?.sentiment_score === "number" &&
+            insightRaw.sentiment_score < 0.4) ||
+          hasNegativeTag
+        ) {
+          priorityCount += 1;
+        }
+      });
+
+      const topTags = Array.from(tagCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([tag, count]) => ({ tag, count }));
+
+      const totalSamples = sentimentCounts.total;
+      const sentiment = {
+        positivePct: totalSamples
+          ? (sentimentCounts.positive / totalSamples) * 100
+          : null,
+        neutralPct: totalSamples
+          ? (sentimentCounts.neutral / totalSamples) * 100
+          : null,
+        negativePct: totalSamples
+          ? (sentimentCounts.negative / totalSamples) * 100
+          : null,
+        samples: totalSamples
+      };
+
+      const avgScore = scoreCount ? scoreSum / scoreCount : null;
+
+      const trendStart = startOfDay(new Date());
+      trendStart.setDate(trendStart.getDate() - 29);
+      const trendEnd = endOfDay(new Date());
+      let trendQuery = supabaseClient
+        .from("google_reviews")
+        .select("id, create_time, location_id, review_ai_insights(sentiment_score)")
+        .gte("create_time", trendStart.toISOString())
+        .lte("create_time", trendEnd.toISOString());
+      if (kpiLocationId && kpiLocationId !== "all") {
+        trendQuery = trendQuery.eq("location_id", kpiLocationId);
+      }
+      const { data: trendData, error: trendError } = await trendQuery;
+      if (cancelled) {
+        return;
+      }
+      if (trendError) {
+        console.error("ai trend fetch error:", trendError);
+        setAiKpiError("Impossible de charger l'évolution IA.");
+      }
+
+      const buckets = new Map<string, { sum: number; count: number }>();
+      for (let i = 0; i < 30; i += 1) {
+        const day = new Date(trendStart);
+        day.setDate(trendStart.getDate() + i);
+        const key = day.toISOString().slice(0, 10);
+        buckets.set(key, { sum: 0, count: 0 });
+      }
+
+      (trendData ?? []).forEach((row) => {
+        const record = row as AiInsightRow;
+        if (!record.create_time) {
+          return;
+        }
+        const dateKey = new Date(record.create_time).toISOString().slice(0, 10);
+        const bucket = buckets.get(dateKey);
+        if (!bucket) {
+          return;
+        }
+        const insightRaw = Array.isArray(record.review_ai_insights)
+          ? record.review_ai_insights[0]
+          : record.review_ai_insights;
+        if (typeof insightRaw?.sentiment_score === "number") {
+          bucket.sum += insightRaw.sentiment_score;
+          bucket.count += 1;
+        }
+      });
+
+      const trend = Array.from(buckets.entries()).map(([date, bucket]) => ({
+        date,
+        avgScore: bucket.count ? bucket.sum / bucket.count : null,
+        samples: bucket.count
+      }));
+
+      setAiKpiData({
+        sentiment,
+        avgScore,
+        topTags,
+        trend,
+        priorityCount
+      });
+    };
+    void loadAiKpis();
+    return () => {
+      cancelled = true;
+    };
+  }, [kpiLocationId, kpiPreset, kpiFrom, kpiTo, session]);
 
   useEffect(() => {
     const supabaseClient = supabase;
@@ -614,6 +893,9 @@ const Dashboard = ({
     }
   ];
 
+  const aiSamples = aiKpiData?.sentiment.samples ?? 0;
+  const aiTrend = aiKpiData?.trend ?? [];
+
   return (
     <div className="space-y-6">
       <div>
@@ -717,6 +999,137 @@ const Dashboard = ({
                 .map((tag) => `${tag.tag} (${tag.count})`)
                 .join(", ")
             : "—"}
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">Analyse IA</h3>
+          {aiKpiError && (
+            <span className="text-xs text-amber-700">{aiKpiError}</span>
+          )}
+        </div>
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold text-slate-500">
+                Répartition des sentiments
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm text-slate-600">
+              {aiKpiLoading ? (
+                <Skeleton className="h-5 w-24" />
+              ) : aiSamples === 0 ? (
+                <p className="text-xs text-slate-500">Analyse en cours.</p>
+              ) : (
+                <>
+                  <p>Positif: {formatPercent(aiKpiData?.sentiment.positivePct ?? null)}</p>
+                  <p>Neutre: {formatPercent(aiKpiData?.sentiment.neutralPct ?? null)}</p>
+                  <p>Négatif: {formatPercent(aiKpiData?.sentiment.negativePct ?? null)}</p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold text-slate-500">
+                Score moyen
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-semibold text-slate-900">
+                {aiKpiLoading ? "…" : formatScore(aiKpiData?.avgScore ?? null)}
+              </p>
+              <p className="text-xs text-slate-500">
+                {aiSamples === 0 ? "Analyse en cours." : `Sur ${aiSamples} avis`}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold text-slate-500">
+                Avis analysés
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-semibold text-slate-900">
+                {aiKpiLoading ? "…" : formatCount(aiSamples)}
+              </p>
+              <p className="text-xs text-slate-500">
+                {aiSamples === 0 ? "Analyse en cours." : "Sur la période"}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold text-slate-500">
+                Avis critiques
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-semibold text-slate-900">
+                {aiKpiLoading ? "…" : formatCount(aiKpiData?.priorityCount ?? null)}
+              </p>
+              <p className="text-xs text-slate-500">
+                {aiSamples === 0 ? "Analyse en cours." : "À traiter en priorité"}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold text-slate-500">
+                Top 5 tags IA
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm text-slate-600">
+              {aiKpiLoading ? (
+                <Skeleton className="h-5 w-32" />
+              ) : aiKpiData?.topTags.length ? (
+                <ul className="space-y-1">
+                  {aiKpiData.topTags.map((tag) => (
+                    <li key={tag.tag} className="flex items-center justify-between">
+                      <span>{tag.tag}</span>
+                      <span className="text-xs text-slate-500">
+                        {tag.count}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-slate-500">Aucun tag détecté.</p>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold text-slate-500">
+                Évolution 30 jours
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm text-slate-600">
+              {aiKpiLoading ? (
+                <Skeleton className="h-5 w-40" />
+              ) : aiTrend.length === 0 ? (
+                <p className="text-xs text-slate-500">Analyse en cours.</p>
+              ) : (
+                <div className="max-h-56 space-y-2 overflow-auto pr-2 text-xs">
+                  {aiTrend.map((point) => (
+                    <div
+                      key={point.date}
+                      className="flex items-center justify-between"
+                    >
+                      <span>{point.date}</span>
+                      <span className="text-slate-500">
+                        Score {formatScore(point.avgScore)} · {point.samples} avis
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </section>
 

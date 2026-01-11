@@ -7,6 +7,14 @@ type GenerateAiReplyParams = {
   rating: number | null;
   brandVoice: BrandVoiceRow | null;
   overrideTone: string | null;
+  businessTone?: string | null;
+  signature?: string | null;
+  insights?: {
+    sentiment?: string | null;
+    score?: number | null;
+    summary?: string | null;
+    tags?: string[];
+  } | null;
   openaiApiKey: string;
   model: string;
   requestId?: string;
@@ -46,7 +54,11 @@ export const generateAiReply = async ({
   }
 
   const enabled = brandVoice?.enabled ?? false;
-  const toneKey = overrideTone ?? (enabled ? brandVoice?.tone : null) ?? "professional";
+  const toneKey =
+    overrideTone ??
+    businessTone ??
+    (enabled ? brandVoice?.tone : null) ??
+    "professional";
   const toneLabel = toneMap[toneKey] ?? toneKey;
   const languageLevel = enabled
     ? brandVoice?.language_level ?? "vouvoiement"
@@ -54,6 +66,22 @@ export const generateAiReply = async ({
   const context = enabled ? brandVoice?.context?.trim() : null;
   const useEmojis = enabled ? Boolean(brandVoice?.use_emojis) : false;
   const forbiddenWords = enabled ? brandVoice?.forbidden_words ?? [] : [];
+  const signatureText = signature?.trim() ?? "";
+  const insightsSummary =
+    insights && (insights.summary || (insights.tags && insights.tags.length > 0))
+      ? [
+          insights.sentiment ? `Sentiment: ${insights.sentiment}.` : "",
+          typeof insights.score === "number"
+            ? `Score: ${insights.score.toFixed(2)}.`
+            : "",
+          insights.summary ? `Resume: ${insights.summary}` : "",
+          insights.tags && insights.tags.length
+            ? `Tags: ${insights.tags.join(", ")}.`
+            : ""
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : "";
 
   const system = [
     "Tu es un expert en e-reputation.",
@@ -61,6 +89,7 @@ export const generateAiReply = async ({
     "Ne jamais inventer de details ou de causes.",
     "2 a 4 phrases maximum.",
     "Reponds dans la langue de l'avis, francais par defaut.",
+    "N'evoque jamais l'analyse interne ou le score.",
     useEmojis ? "Les emojis sont autorises." : "N'utilise aucun emoji."
   ].join(" ");
 
@@ -70,6 +99,8 @@ export const generateAiReply = async ({
     `Ton souhaite: ${toneLabel}.`,
     `Niveau de langage: ${languageLevel}.`,
     context ? `Contexte a integrer: ${context}` : "",
+    insightsSummary ? `Insights IA: ${insightsSummary}` : "",
+    signatureText ? `Signature souhaitee: ${signatureText}` : "",
     forbiddenWords.length ? `Mots interdits: ${forbiddenWords.join(", ")}.` : ""
   ]
     .filter(Boolean)
