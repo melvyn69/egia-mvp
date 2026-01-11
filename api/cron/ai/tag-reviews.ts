@@ -124,12 +124,17 @@ const releaseLock = async (userId: string, locationId: string) => {
   const key = `lock_ai_tag_v1:${userId}:${locationId}`;
   await supabaseAdmin.from("cron_state").delete().eq("key", key);
 };
-const getAuthSecret = (req: VercelRequest) => {
-  const secretParam = req.query?.secret;
-  if (Array.isArray(secretParam)) {
-    return secretParam[0] ?? "";
-  }
-  return secretParam ?? "";
+const getCronSecrets = (req: VercelRequest) => {
+  const expected = String(cronSecret ?? "").trim();
+  const headerSecret =
+    (req.headers["x-cron-secret"] as string | undefined) ??
+    (req.headers["x-cron-key"] as string | undefined);
+  const auth = (req.headers.authorization as string | undefined) ?? "";
+  const bearer = auth.toLowerCase().startsWith("bearer ")
+    ? auth.slice(7)
+    : "";
+  const provided = String(headerSecret ?? bearer ?? "").trim();
+  return { expected, provided };
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -385,8 +390,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .json({ error: `Missing env: ${missingEnv.join(", ")}` });
   }
 
-  const providedSecret = getAuthSecret(req);
-  if (!providedSecret || providedSecret !== cronSecret) {
+  const { expected, provided } = getCronSecrets(req);
+  if (!expected || !provided || provided !== expected) {
     console.error("[ai]", requestId, "invalid cron secret");
     return res.status(403).json({ error: "Unauthorized" });
   }
