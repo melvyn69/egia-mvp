@@ -1,4 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type InfiniteData,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient
+} from "@tanstack/react-query";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -370,23 +376,13 @@ const Inbox = () => {
   const [batchGenerating, setBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [batchError, setBatchError] = useState<string | null>(null);
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [reviewsLoading, setReviewsLoading] = useState(false);
-  const [reviewsLoadingMore, setReviewsLoadingMore] = useState(false);
-  const [reviewsError, setReviewsError] = useState<string | null>(null);
-  const [reviewsCursor, setReviewsCursor] = useState<string | null>(null);
-  const [reviewsHasMore, setReviewsHasMore] = useState(false);
-  const [lastCronSyncAt, setLastCronSyncAt] = useState<string | null>(null);
-  const [cronErrors, setCronErrors] = useState<number>(0);
-  const [locationOptions, setLocationOptions] = useState<
-    Array<{ id: string; label: string }>
-  >([]);
   const [importStatus, setImportStatus] = useState<ReviewCronStatus>({
     status: "idle"
   });
   const [aiStatus, setAiStatus] = useState<ReviewCronStatus>({
     status: "idle"
   });
+  const queryClient = useQueryClient();
 
   const isSupabaseAvailable = Boolean(supabase);
   const isCooldownActive = cooldownUntil ? cooldownUntil > Date.now() : false;
@@ -545,98 +541,101 @@ const Inbox = () => {
     return insightsById;
   };
 
-  const loadInboxData = async () => {
-    if (!supabase) {
-      setReviews([]);
-      setLastCronSyncAt(null);
-      setCronErrors(0);
-      return;
-    }
-    setReviewsLoading(true);
-    setReviewsError(null);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const userId = sessionData.session?.user?.id ?? null;
-      if (!userId) {
-        setReviews([]);
-        setReviewsError("Session introuvable.");
-        return;
+  const sessionQuery = useQuery({
+    queryKey: ["inbox-session"],
+    queryFn: async () => {
+      if (!supabase) {
+        return null;
       }
+      const { data } = await supabase.auth.getSession();
+      return data.session ?? null;
+    },
+    enabled: Boolean(supabase),
+    staleTime: 5 * 60 * 1000
+  });
 
-      const { data: locationsData, error: locationsError } = await supabase
+  const sessionUserId = sessionQuery.data?.user?.id ?? null;
+
+  const locationsQuery = useQuery({
+    queryKey: ["inbox-locations", sessionUserId],
+    queryFn: async () => {
+      if (!supabase) {
+        return { labels: {}, options: [] as Array<{ id: string; label: string }> };
+      }
+      const { data, error } = await supabase
         .from("google_locations")
         .select("location_resource_name, location_title")
         .order("updated_at", { ascending: false });
-      if (locationsError) {
-        console.error("google_locations fetch error:", locationsError);
+      if (error) {
+        console.error("google_locations fetch error:", error);
       }
-      const nextLocationsMap: Record<string, string> = {};
-      const nextLocationOptions: Array<{ id: string; label: string }> = [];
-      (locationsData ?? []).forEach((location) => {
+      const labels: Record<string, string> = {};
+      const options: Array<{ id: string; label: string }> = [];
+      (data ?? []).forEach((location) => {
         if (location.location_resource_name) {
-          nextLocationsMap[location.location_resource_name] =
+          labels[location.location_resource_name] =
             location.location_title ?? location.location_resource_name;
-          nextLocationOptions.push({
+          options.push({
             id: location.location_resource_name,
             label: location.location_title ?? location.location_resource_name
           });
         }
       });
-      setLocationOptions(nextLocationOptions);
+      return { labels, options };
+    },
+    enabled: Boolean(supabase) && Boolean(sessionUserId),
+    staleTime: 5 * 60 * 1000
+  });
 
-      const token = await getAccessToken(supabase);
-      const params = buildReviewParams(null);
+  const locationLabels = locationsQuery.data?.labels ?? {};
+  const locationOptions = locationsQuery.data?.options ?? [];
 
-      const response = await fetch(`/api/reviews?${params.toString()}`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.rows) {
-        setReviewsError("Impossible de charger les avis.");
-        setReviews([]);
-        return;
+  const cronStateQuery = useQuery({
+    queryKey: ["inbox-cron-state", sessionUserId],
+    queryFn: async () => {
+      if (!supabase) {
+        return { updatedAt: null, errorsCount: 0 };
       }
-
-      const rows = (payload.rows ?? []) as ReviewRow[];
-      const baseReviews = mapReviewRows(rows, nextLocationsMap, userId);
-      const insightsById = await fetchAiInsights(
-        baseReviews.map((review) => review.id)
-      );
-      setReviews(mergeAiInsights(baseReviews, insightsById));
-      setReviewsCursor(payload.nextCursor ?? null);
-      setReviewsHasMore(Boolean(payload.nextCursor));
-
-      const { data: cronState } = await supabase
+      const { data } = await supabase
         .from("cron_state")
         .select("updated_at, value")
         .eq("key", CRON_CURSOR_KEY)
         .maybeSingle();
-      setLastCronSyncAt(cronState?.updated_at ?? null);
-      const errorsCount = (cronState?.value as { errors_count?: number } | null)
+      const errorsCount = (data?.value as { errors_count?: number } | null)
         ?.errors_count;
-      setCronErrors(Number(errorsCount ?? 0));
-    } finally {
-      setReviewsLoading(false);
-    }
-  };
+      return {
+        updatedAt: data?.updated_at ?? null,
+        errorsCount: Number(errorsCount ?? 0)
+      };
+    },
+    enabled: Boolean(supabase) && Boolean(sessionUserId),
+    staleTime: 60 * 1000
+  });
 
-  const loadMoreReviews = async () => {
-    if (!supabase || !reviewsCursor || reviewsLoadingMore) {
-      return;
-    }
-    setReviewsLoadingMore(true);
-    setReviewsError(null);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const userId = sessionData.session?.user?.id ?? null;
-      if (!userId) {
-        setReviewsError("Session introuvable.");
-        return;
+  const lastCronSyncAt = cronStateQuery.data?.updatedAt ?? null;
+  const cronErrors = cronStateQuery.data?.errorsCount ?? 0;
+
+  const reviewsQuery = useInfiniteQuery({
+    queryKey: [
+      "inbox",
+      sessionUserId,
+      selectedLocation,
+      datePreset,
+      dateFrom,
+      dateTo,
+      timeZone,
+      sentimentFilter,
+      statusFilter,
+      ratingMin,
+      ratingMax,
+      tagFilter
+    ],
+    queryFn: async ({ pageParam }) => {
+      if (!supabase) {
+        throw new Error("Supabase unavailable");
       }
       const token = await getAccessToken(supabase);
-      const params = buildReviewParams(reviewsCursor);
+      const params = buildReviewParams(typeof pageParam === "string" ? pageParam : null);
       const response = await fetch(`/api/reviews?${params.toString()}`, {
         headers: {
           Authorization: `Bearer ${token}`
@@ -644,33 +643,42 @@ const Inbox = () => {
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.rows) {
-        setReviewsError("Impossible de charger plus d'avis.");
-        return;
+        throw new Error("Failed to load reviews");
       }
-      const { data: locationsData } = await supabase
-        .from("google_locations")
-        .select("location_resource_name, location_title")
-        .order("updated_at", { ascending: false });
-      const locationLabels: Record<string, string> = {};
-      (locationsData ?? []).forEach((location) => {
-        if (location.location_resource_name) {
-          locationLabels[location.location_resource_name] =
-            location.location_title ?? location.location_resource_name;
-        }
-      });
       const rows = (payload.rows ?? []) as ReviewRow[];
-      const baseReviews = mapReviewRows(rows, locationLabels, userId);
-      const insightsById = await fetchAiInsights(
-        baseReviews.map((review) => review.id)
-      );
-      const mergedReviews = mergeAiInsights(baseReviews, insightsById);
-      setReviews((prev) => [...prev, ...mergedReviews]);
-      setReviewsCursor(payload.nextCursor ?? null);
-      setReviewsHasMore(Boolean(payload.nextCursor));
-    } finally {
-      setReviewsLoadingMore(false);
+      const insightsById = await fetchAiInsights(rows.map((row) => row.id));
+      return {
+        rows,
+        insightsById,
+        nextCursor: payload.nextCursor ?? null
+      };
+    },
+    enabled: Boolean(supabase) && Boolean(sessionUserId),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    placeholderData: (prev) => prev
+  });
+
+  const reviewsLoading = reviewsQuery.isLoading;
+  const reviewsLoadingMore = reviewsQuery.isFetchingNextPage;
+  const reviewsHasMore = Boolean(reviewsQuery.hasNextPage);
+  const reviewsError =
+    sessionQuery.isSuccess && !sessionUserId
+      ? "Session introuvable."
+      : reviewsQuery.isError
+        ? "Impossible de charger les avis."
+        : null;
+
+  const reviews = useMemo(() => {
+    if (!sessionUserId) {
+      return [];
     }
-  };
+    const pages = reviewsQuery.data?.pages ?? [];
+    return pages.flatMap((page) => {
+      const base = mapReviewRows(page.rows, locationLabels, sessionUserId);
+      return mergeAiInsights(base, page.insightsById);
+    });
+  }, [reviewsQuery.data, locationLabels, sessionUserId]);
 
   const locationReviewCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -726,20 +734,6 @@ const Inbox = () => {
       setSelectedReviewId(filteredReviews[0].id);
     }
   }, [filteredReviews, selectedReviewId]);
-
-  useEffect(() => {
-    void loadInboxData();
-  }, [
-    isSupabaseAvailable,
-    selectedLocation,
-    datePreset,
-    dateFrom,
-    dateTo,
-    sentimentFilter,
-    ratingMin,
-    ratingMax,
-    tagFilter
-  ]);
 
   const selectedReview = useMemo(() => {
     return reviews.find((review) => review.id === selectedReviewId) ?? null;
@@ -1328,11 +1322,47 @@ const Inbox = () => {
           console.warn("google_reviews status update failed:", reviewStatusError);
         }
 
-        // 3) Mettre à jour l'UI localement (instant)
-        setReviews((prev) =>
-          prev.map((r) =>
-            r.id === selectedReview.id ? { ...r, status: "replied" } : r
-          )
+        // 3) Mettre à jour le cache (instant)
+        const reviewsKey = [
+          "inbox",
+          sessionUserId,
+          selectedLocation,
+          datePreset,
+          dateFrom,
+          dateTo,
+          timeZone,
+          sentimentFilter,
+          statusFilter,
+          ratingMin,
+          ratingMax,
+          tagFilter
+        ];
+        queryClient.setQueryData(
+          reviewsKey,
+          (
+            old:
+              | InfiniteData<{
+                  rows: ReviewRow[];
+                  insightsById: Record<string, AiInsight>;
+                  nextCursor: string | null;
+                }>
+              | undefined
+          ) => {
+            if (!old) {
+              return old;
+            }
+            return {
+              ...old,
+              pages: old.pages.map((page) => ({
+                ...page,
+                rows: page.rows.map((row) =>
+                  row.id === selectedReview.id
+                    ? { ...row, status: "replied" }
+                    : row
+                )
+              }))
+            };
+          }
         );
 
         // 4) Auto-sélection du prochain avis "new" dans la liste filtrée
@@ -1719,7 +1749,7 @@ const Inbox = () => {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={loadMoreReviews}
+                      onClick={() => reviewsQuery.fetchNextPage()}
                       disabled={reviewsLoadingMore}
                     >
                       {reviewsLoadingMore ? "Chargement..." : "Voir plus"}
