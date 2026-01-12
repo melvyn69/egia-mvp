@@ -1,5 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+import fs from "fs";
+import path from "path";
 import { requireUser } from "../../server/_shared_dist/_auth.js";
 
 type ReportPreset = "last_7_days" | "last_30_days" | "custom" | "this_month" | "last_month";
@@ -98,9 +101,55 @@ const buildPdf = async (params: {
   negatives: Array<{ label: string; date: string; rating: number | null }>;
 }) => {
   const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
   const page = doc.addPage([595.28, 841.89]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const unicodeFontPath = path.join(
+    process.cwd(),
+    "assets",
+    "fonts",
+    "ArialUnicode.ttf"
+  );
+  let unicodeFont: Awaited<ReturnType<typeof doc.embedFont>> | null = null;
+  let unicodeBoldFont: Awaited<ReturnType<typeof doc.embedFont>> | null = null;
+  try {
+    const fontBytes = fs.readFileSync(unicodeFontPath);
+    unicodeFont = await doc.embedFont(fontBytes);
+    unicodeBoldFont = await doc.embedFont(fontBytes);
+  } catch (error) {
+    console.warn("[reports] unicode font unavailable", error);
+  }
+  let warnedFallback = false;
+  const canRenderStars = () => {
+    if (!unicodeFont) return false;
+    try {
+      page.drawText("★★★★★", {
+        x: 0,
+        y: 0,
+        size: 1,
+        font: unicodeFont,
+        color: rgb(0, 0, 0)
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const useUnicode = Boolean(unicodeFont) && canRenderStars();
+  if (unicodeFont && !useUnicode) {
+    console.warn("[reports] unicode font star test failed");
+  }
+  const safeText = (text: string) => {
+    if (!useUnicode) {
+      if (!warnedFallback) {
+        console.warn("[reports] fallback text sanitization active");
+        warnedFallback = true;
+      }
+      return text.replace(/★/g, "*");
+    }
+    return text;
+  };
   let y = 780;
   const margin = 50;
 
@@ -109,39 +158,54 @@ const buildPdf = async (params: {
       x: margin,
       y,
       size,
-      font: bold ? fontBold : font,
+      font: bold
+        ? useUnicode && unicodeBoldFont
+          ? unicodeBoldFont
+          : fontBold
+        : useUnicode && unicodeFont
+        ? unicodeFont
+        : font,
       color: rgb(0.08, 0.1, 0.12)
     });
     y -= size + 6;
   };
 
-  drawText(params.title, 22, true);
-  drawText(params.subtitle, 12);
-  drawText(params.locationsLabel, 11);
+  drawText(safeText(params.title), 22, true);
+  drawText(safeText(params.subtitle), 12);
+  drawText(safeText(params.locationsLabel), 11);
   if (params.notes) {
-    drawText(`Notes: ${params.notes}`, 11);
+    drawText(safeText(`Notes: ${params.notes}`), 11);
   }
   y -= 8;
 
   drawText("KPIs principaux", 14, true);
-  drawText(`Volume avis: ${params.kpis.reviewsTotal}`, 12);
-  drawText(`Note moyenne: ${formatRating(params.kpis.avgRating)}`, 12);
-  drawText(`Taux de réponse: ${formatRatio(params.kpis.responseRate)}`, 12);
+  drawText(safeText(`Volume avis: ${params.kpis.reviewsTotal}`), 12);
   drawText(
-    `Sentiment positif: ${formatPercent(params.kpis.sentimentPositive)}`,
+    safeText(`Note moyenne: ${formatRating(params.kpis.avgRating)}`),
+    12
+  );
+  drawText(
+    safeText(`Taux de réponse: ${formatRatio(params.kpis.responseRate)}`),
+    12
+  );
+  drawText(
+    safeText(`Sentiment positif: ${formatPercent(params.kpis.sentimentPositive)}`),
     12
   );
   y -= 8;
 
   drawText("Analyse IA", 14, true);
-  drawText(`Score moyen IA: ${formatRating(params.ai.avgScore)}`, 12);
-  drawText(`Avis critiques: ${params.ai.criticalCount}`, 12);
   drawText(
-    `Top tags: ${
+    safeText(`Score moyen IA: ${formatRating(params.ai.avgScore)}`),
+    12
+  );
+  drawText(safeText(`Avis critiques: ${params.ai.criticalCount}`), 12);
+  drawText(
+    safeText(`Top tags: ${
       params.ai.topTags.length
         ? params.ai.topTags.map((tag) => `${tag.tag} (${tag.count})`).join(", ")
         : "—"
-    }`,
+    }`),
     11
   );
   y -= 8;
@@ -152,7 +216,7 @@ const buildPdf = async (params: {
   } else {
     params.positives.forEach((item) => {
       drawText(
-        `${item.label} · ${item.date} · ${item.rating ?? "—"}★`,
+        safeText(`${item.label} · ${item.date} · ${item.rating ?? "—"}★`),
         11
       );
     });
@@ -165,19 +229,19 @@ const buildPdf = async (params: {
   } else {
     params.negatives.forEach((item) => {
       drawText(
-        `${item.label} · ${item.date} · ${item.rating ?? "—"}★`,
+        safeText(`${item.label} · ${item.date} · ${item.rating ?? "—"}★`),
         11
       );
     });
   }
 
   page.drawText(
-    `Genere le ${new Date().toISOString().slice(0, 16).replace("T", " ")}`,
+    safeText(`Genere le ${new Date().toISOString().slice(0, 16).replace("T", " ")}`),
     {
       x: margin,
       y: 30,
       size: 9,
-      font,
+      font: useUnicode && unicodeFont ? unicodeFont : font,
       color: rgb(0.4, 0.45, 0.5)
     }
   );
