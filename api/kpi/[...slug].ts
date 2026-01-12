@@ -527,7 +527,7 @@ const handleKpiCompare = async (req: VercelRequest, res: VercelResponse) => {
 const getKpiRouteFromRequest = (req: VercelRequest): string => {
   // 1) Preferred: Vercel catch-all param (should be `slug` for `[...slug].ts`).
   const query = req.query as Record<string, unknown>;
-  const slugParam = query.slug ?? query["...slug"];
+  const slugParam = query.slug ?? query["...slug"] ?? query["slug[]"];
   const parts = Array.isArray(slugParam)
     ? slugParam
     : typeof slugParam === "string" && slugParam.length > 0
