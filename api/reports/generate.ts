@@ -690,7 +690,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 }
 
 // DEV SMOKE TEST (non-exported)
-const _devSmokeTest = async () => {
+const devSmokeTest = async () => {
   const doc = await PDFDocument.create();
   doc.registerFontkit(fontkit);
   const page = doc.addPage([200, 80]);
@@ -702,3 +702,7 @@ const _devSmokeTest = async () => {
   await doc.save();
   return true;
 };
+
+if (process.env.NODE_ENV !== "production") {
+  void devSmokeTest();
+}
