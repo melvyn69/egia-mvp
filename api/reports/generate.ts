@@ -4,6 +4,10 @@ import fontkit from "@pdf-lib/fontkit";
 import fs from "fs";
 import path from "path";
 import { requireUser } from "../../server/_shared_dist/_auth.js";
+import {
+  getRequestId,
+  logRequest
+} from "../../server/_shared_dist/api_utils.js";
 
 type ReportPreset =
   | "last_7_days"
@@ -557,12 +561,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const { supabaseAdmin, userId } = auth;
+  const requestId = getRequestId(req);
   const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
   const reportId = payload?.report_id as string | undefined;
 
   if (!reportId) {
     return res.status(400).json({ error: "Missing report_id" });
   }
+  logRequest("[reports]", { requestId, reportId, renderMode: "classic" });
 
   const { data: report, error: reportError } = await supabaseAdmin
     .from("reports")

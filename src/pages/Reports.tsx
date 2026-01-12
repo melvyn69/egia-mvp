@@ -29,6 +29,8 @@ type Preset =
   | "all_time"
   | "custom";
 
+type RenderMode = "classic" | "premium";
+
 const Reports = ({ session, locations }: ReportsProps) => {
   const supabaseClient = supabase;
   const queryClient = useQueryClient();
@@ -38,6 +40,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
+  const [renderMode, setRenderMode] = useState<RenderMode>("premium");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -76,6 +79,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
     setFrom("");
     setTo("");
     setSelectedLocations([]);
+    setRenderMode("premium");
     setEditingId(null);
   };
 
@@ -87,6 +91,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
     setFrom(report.from_date ? report.from_date.slice(0, 10) : "");
     setTo(report.to_date ? report.to_date.slice(0, 10) : "");
     setSelectedLocations(report.locations ?? []);
+    setRenderMode(
+      report.render_mode === "classic" ? "classic" : "premium"
+    );
   };
 
   const handleSave = async () => {
@@ -113,6 +120,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
       from_date: preset === "custom" && from ? new Date(from).toISOString() : null,
       to_date: preset === "custom" && to ? new Date(to).toISOString() : null,
       status: "draft",
+      render_mode: renderMode,
       notes: notes.trim() || null,
       updated_at: new Date().toISOString()
     };
@@ -136,7 +144,10 @@ const Reports = ({ session, locations }: ReportsProps) => {
       return;
     }
     setError(null);
-    const res = await fetch("/api/reports/generate", {
+    const mode = report.render_mode === "classic" ? "classic" : "premium";
+    const endpoint =
+      mode === "premium" ? "/api/reports/generate_html" : "/api/reports/generate";
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${session.access_token}`,
@@ -274,6 +285,33 @@ const Reports = ({ session, locations }: ReportsProps) => {
               onChange={(event) => setNotes(event.target.value)}
               placeholder="Notes internes à inclure dans le rapport."
             />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-500">
+              Template PDF
+            </label>
+            <div className="mt-2 flex flex-wrap gap-3 text-sm text-slate-600">
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="render_mode"
+                  value="classic"
+                  checked={renderMode === "classic"}
+                  onChange={() => setRenderMode("classic")}
+                />
+                Classique
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="render_mode"
+                  value="premium"
+                  checked={renderMode === "premium"}
+                  onChange={() => setRenderMode("premium")}
+                />
+                Premium
+              </label>
+            </div>
           </div>
           {error && <p className="text-sm text-amber-700">{error}</p>}
           <div className="flex flex-wrap items-center gap-2">

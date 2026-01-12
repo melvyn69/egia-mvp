@@ -805,6 +805,7 @@ export type Database = {
           notes: string | null
           period_preset: string | null
           recipients: string[] | null
+          render_mode: string
           schedule_enabled: boolean
           schedule_rrule: string | null
           status: string
@@ -824,6 +825,7 @@ export type Database = {
           notes?: string | null
           period_preset?: string | null
           recipients?: string[] | null
+          render_mode?: string
           schedule_enabled?: boolean
           schedule_rrule?: string | null
           status?: string
@@ -843,6 +845,7 @@ export type Database = {
           notes?: string | null
           period_preset?: string | null
           recipients?: string[] | null
+          render_mode?: string
           schedule_enabled?: boolean
           schedule_rrule?: string | null
           status?: string

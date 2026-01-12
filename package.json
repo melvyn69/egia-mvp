@@ -12,16 +12,20 @@
     "smoke": "tsx scripts/smoke-api.ts",
     "preview": "vite preview",
     "sync:db-types": "cp src/database.types.ts server/_shared/database.types.ts",
-    "smoke:auth": "node scripts/smoke-auth.mjs"
+    "smoke:auth": "node scripts/smoke-auth.mjs",
+    "pdf:smoke": "tsx scripts/pdf-smoke.ts",
+    "smoke:reports": "tsx scripts/smoke-reports-html.ts"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",
+    "@sparticuz/chromium": "121.0.0",
     "@supabase/supabase-js": "^2.89.0",
     "@tanstack/react-query": "^5.62.7",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.541.0",
     "pdf-lib": "^1.17.1",
+    "puppeteer-core": "22.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^6.30.2",
