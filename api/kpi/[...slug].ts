@@ -391,6 +391,44 @@ type KpiCompareSummary = {
   top_tags?: unknown;
 };
 
+const isValidIsoDate = (value: string) => {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed);
+};
+
+const addDays = (value: Date, days: number) => {
+  const next = new Date(value);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+};
+
+const toStartOfDayUtc = (value: Date) => {
+  const next = new Date(value);
+  next.setUTCHours(0, 0, 0, 0);
+  return next;
+};
+
+const getDefaultSplitDate = (params: {
+  preset: string;
+  from: string;
+  to: string;
+}): string => {
+  const start = new Date(params.from);
+  const end = new Date(params.to);
+  if (params.preset === "last_30_days") {
+    return toStartOfDayUtc(addDays(start, 15)).toISOString();
+  }
+  if (params.preset === "this_month") {
+    const mid = new Date((start.getTime() + end.getTime()) / 2);
+    return toStartOfDayUtc(mid).toISOString();
+  }
+  if (params.preset === "all_time") {
+    return toStartOfDayUtc(addDays(end, -30)).toISOString();
+  }
+  const mid = new Date((start.getTime() + end.getTime()) / 2);
+  return toStartOfDayUtc(mid).toISOString();
+};
+
 const handleKpiCompare = async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -402,6 +440,7 @@ const handleKpiCompare = async (req: VercelRequest, res: VercelResponse) => {
       return;
     }
     const { userId, supabaseAdmin } = auth;
+    const requestId = getRequestId(req);
 
     const locationParam = req.query.location_id;
     const locationId = Array.isArray(locationParam)
@@ -448,6 +487,9 @@ const handleKpiCompare = async (req: VercelRequest, res: VercelResponse) => {
         to: Array.isArray(bToParam) ? bToParam[0] : bToParam
       };
     } else if (splitDate) {
+      if (typeof splitDate !== "string" || !isValidIsoDate(splitDate)) {
+        return res.status(400).json({ error: "Invalid split_date" });
+      }
       const preset = filters.preset;
       const fromParam = filters.from;
       const toParam = filters.to;
@@ -460,8 +502,33 @@ const handleKpiCompare = async (req: VercelRequest, res: VercelResponse) => {
       rangeA = { from: baseRange.from, to: splitDate };
       rangeB = { from: splitDate, to: baseRange.to };
     } else {
-      return res.status(400).json({ error: "Missing compare range" });
+      const preset = filters.preset;
+      const fromParam = filters.from;
+      const toParam = filters.to;
+      const baseRange = resolveDateRange(
+        preset as Parameters<typeof resolveDateRange>[0],
+        fromParam,
+        toParam,
+        timeZone
+      );
+      const defaultSplit = getDefaultSplitDate({
+        preset,
+        from: baseRange.from,
+        to: baseRange.to
+      });
+      rangeA = { from: baseRange.from, to: defaultSplit };
+      rangeB = { from: defaultSplit, to: baseRange.to };
     }
+
+    console.log("[kpi-compare]", {
+      requestId,
+      userId,
+      locationId,
+      preset: filters.preset,
+      from: filters.from ?? null,
+      to: filters.to ?? null,
+      split_date: rangeA.to
+    });
 
     const [summaryA, summaryB] = await Promise.all([
       supabaseAdmin
@@ -585,3 +652,7 @@ const routeKpi = (req: VercelRequest, res: VercelResponse) => {
 };
 
 export default routeKpi;
+
+// Smoke tests:
+// /api/kpi/compare?location_id=locations/XXX&preset=this_month&tz=Europe/Paris
+// /api/kpi/compare?location_id=locations/XXX&preset=last_30_days&tz=Europe/Paris&split_date=2025-01-15T00:00:00.000Z
