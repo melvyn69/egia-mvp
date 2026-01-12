@@ -2,7 +2,6 @@
   "name": "egia-mvp",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
   "scripts": {
     "dev": "vite --port 5173 --strictPort",
     "dev:fixed": "vite --port 5173 --strictPort",
