@@ -1,11 +1,11 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "../../../server/_shared_dist/database.types.js";
+import type { Database } from "../../../database.types.js";
 import {
   getRequestId,
   sendError,
   logRequest
-} from "../../../server/_shared_dist/api_utils.js";
+} from "../../../../_shared_dist/api_utils.js";
 
 type AiTag = {
   name: string;

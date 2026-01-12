@@ -3,11 +3,8 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import fs from "fs";
 import path from "path";
-import { requireUser } from "../../server/_shared_dist/_auth.js";
-import {
-  getRequestId,
-  logRequest
-} from "../../server/_shared_dist/api_utils.js";
+import { requireUser } from "../../../_shared_dist/_auth.js";
+import { getRequestId, logRequest } from "../../../_shared_dist/api_utils.js";
 
 type ReportPreset =
   | "last_7_days"

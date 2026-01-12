@@ -3,14 +3,14 @@ import {
   createSupabaseAdmin,
   getRequiredEnv,
   getUserFromRequest
-} from "../../../../server/_shared_dist/google/_utils.js";
+} from "../../../../../_shared_dist/google/_utils.js";
 import {
   getRequestId,
   sendError,
   parseQuery,
   getParam,
   logRequest
-} from "../../../../server/_shared_dist/api_utils.js";
+} from "../../../../../_shared_dist/api_utils.js";
 
 type GoogleReview = {
   reviewId?: string;

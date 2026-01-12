@@ -1,13 +1,13 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import type { Database, Json } from "../../../server/_shared_dist/database.types.js";
+import type { Database, Json } from "../../../database.types.js";
 import { syncGoogleLocationsForUser } from "../../google/gbp/sync.js";
 import { syncGoogleReviewsForUser } from "../../google/gbp/reviews/sync.js";
 import {
   getRequestId,
   sendError,
   logRequest
-} from "../../../server/_shared_dist/api_utils.js";
+} from "../../../../_shared_dist/api_utils.js";
 
 type GoogleReview = {
   reviewId?: string;
