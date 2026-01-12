@@ -109,7 +109,7 @@ const buildPdf = async (params: {
     process.cwd(),
     "assets",
     "fonts",
-    "ArialUnicode.ttf"
+    "NotoSans-Regular.ttf"
   );
   let unicodeFont: Awaited<ReturnType<typeof doc.embedFont>> | null = null;
   let unicodeBoldFont: Awaited<ReturnType<typeof doc.embedFont>> | null = null;
