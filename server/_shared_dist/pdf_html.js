@@ -1,47 +1,33 @@
-import chromium from "@sparticuz/chromium";
+import chromium from "@sparticuz/chromium-min";
 import puppeteer from "puppeteer-core";
-const renderPdfFromHtml = async ({ html, baseUrl, requestId }) => {
-    const isServerless = Boolean(process.env.VERCEL) || process.platform === "linux";
-    const localExecPath = process.env.CHROME_PATH ?? process.env.PUPPETEER_EXECUTABLE_PATH;
-    if (!isServerless && !localExecPath) {
-        throw new Error("Local PDF smoke requires CHROME_PATH to a local Chrome/Chromium binary. @sparticuz/chromium is linux-only.");
+export async function renderPdfFromHtml(html) {
+    const isServerless = process.platform === "linux";
+    const launchOptions = isServerless
+        ? {
+            args: chromium.args,
+            executablePath: await chromium.executablePath(),
+            headless: "shell"
+        }
+        : {
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+            executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
+            headless: true
+        };
+    if (!isServerless && !launchOptions.executablePath) {
+        throw new Error("Local HTML→PDF: set CHROME_PATH or PUPPETEER_EXECUTABLE_PATH to your Chrome/Chromium binary.");
     }
-    const execPath = isServerless
-        ? await chromium.executablePath()
-        : localExecPath;
-    const args = isServerless ? chromium.args : ["--no-sandbox"];
-    const headless = isServerless ? "shell" : true;
-    const browser = await puppeteer.launch({
-        args,
-        defaultViewport: isServerless ? chromium.defaultViewport : undefined,
-        executablePath: execPath,
-        headless
-    });
+    const browser = await puppeteer.launch(launchOptions);
     try {
         const page = await browser.newPage();
-        if (baseUrl) {
-            await page.setContent(html, { waitUntil: "networkidle0" });
-            await page.goto(baseUrl, { waitUntil: "domcontentloaded" }).catch(() => null);
-        }
-        else {
-            await page.setContent(html, { waitUntil: "networkidle0" });
-        }
-        const buffer = await page.pdf({
+        await page.setContent(html, { waitUntil: "networkidle0" });
+        const pdf = await page.pdf({
             format: "A4",
             printBackground: true,
-            margin: { top: "24px", right: "24px", bottom: "32px", left: "24px" }
+            margin: { top: "18mm", right: "14mm", bottom: "18mm", left: "14mm" }
         });
-        return Buffer.from(buffer);
-    }
-    catch (error) {
-        console.error("[pdf-html] render failed", {
-            requestId,
-            message: error instanceof Error ? error.message : String(error)
-        });
-        throw error;
+        return pdf;
     }
     finally {
         await browser.close();
     }
-};
-export { renderPdfFromHtml };
+}

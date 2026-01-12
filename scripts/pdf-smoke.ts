@@ -28,7 +28,7 @@ const run = async () => {
     process.exit(0);
   }
 
-  const buffer = await renderPdfFromHtml({ html, requestId: "pdf-smoke" });
+  const buffer = await renderPdfFromHtml(html);
   console.log(`PDF bytes: ${buffer.length}`);
 };
 

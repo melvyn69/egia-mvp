@@ -484,7 +484,7 @@ export default async function handler(req, res) {
             res.setHeader("Content-Type", "text/html; charset=utf-8");
             return res.status(200).send(html);
         }
-        const pdfBytes = await renderPdfFromHtml({ html, requestId });
+        const pdfBytes = await renderPdfFromHtml(html);
         const storagePath = `${userId}/${reportId}/${Date.now()}.pdf`;
         const { error: uploadError } = await supabaseAdmin.storage
             .from("reports")
