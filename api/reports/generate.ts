@@ -114,8 +114,8 @@ const normalizeLocationTitle = (value: string) =>
 
 const cleanReviewText = (value: string) =>
   value
-    .replace(/\(Translated by Google\)/gi, "")
-    .replace(/\(Traduit par Google\)/gi, "")
+    .replace(/\(?(Translated by Google)\)?/gi, "")
+    .replace(/\(?(Traduit par Google)\)?/gi, "")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -374,7 +374,8 @@ const buildPdf = async (params: {
       : `★ ${ratingLabel} — ${item.date}`;
     drawText(safeText(line1), 11, true);
     const cleaned = cleanReviewText(item.label);
-    if (!cleaned) {
+    const authorNorm = item.author ? cleanReviewText(item.author) : "";
+    if (!cleaned || (authorNorm && cleaned.toLowerCase() === authorNorm.toLowerCase())) {
       y -= 2;
       return;
     }
@@ -408,7 +409,7 @@ const buildPdf = async (params: {
   });
   page.drawText("Note moyenne", {
     x: rightX,
-    y: cardTitleY,
+    y: cardTitleY - 6,
     size: 12,
     font: activeBoldFont,
     color: rgb(0.1, 0.12, 0.15)
@@ -458,7 +459,7 @@ const buildPdf = async (params: {
     font: activeBoldFont,
     color: rgb(0.08, 0.1, 0.12)
   });
-  const ratingY = cardTitleY - 28;
+  const ratingY = cardTitleY - 30;
   renderStars(rightX, ratingY, params.kpis.avgRating, 12);
   y = cardTop - cardHeight - 12;
   drawDivider();
@@ -718,10 +719,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
       .slice(0, 3)
       .map((review) => ({
-        label:
-          review.comment?.slice(0, 120) ||
-          review.author_name ||
-          "Avis positif",
+        label: review.comment || review.author_name || "Avis positif",
         date: review.create_time ? review.create_time.slice(0, 10) : "—",
         rating: review.rating,
         author: review.author_name ?? null
@@ -731,10 +729,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .filter((review) => typeof review.rating === "number" && review.rating <= 2)
       .slice(0, 3)
       .map((review) => ({
-        label:
-          review.comment?.slice(0, 120) ||
-          review.author_name ||
-          "Avis négatif",
+        label: review.comment || review.author_name || "Avis négatif",
         date: review.create_time ? review.create_time.slice(0, 10) : "—",
         rating: review.rating,
         author: review.author_name ?? null
