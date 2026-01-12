@@ -524,20 +524,62 @@ const handleKpiCompare = async (req: VercelRequest, res: VercelResponse) => {
   }
 };
 
-const routeKpi = (req: VercelRequest, res: VercelResponse) => {
-  const slugParam = req.query?.slug;
+const getKpiRouteFromRequest = (req: VercelRequest): string => {
+  // 1) Preferred: Vercel catch-all param (should be `slug` for `[...slug].ts`).
+  const slugParam = (req.query as any)?.slug;
   const parts = Array.isArray(slugParam)
     ? slugParam
-    : slugParam
+    : typeof slugParam === "string" && slugParam.length > 0
     ? [slugParam]
     : [];
-  const route = parts.join("/");
+  if (parts.length > 0) {
+    return parts.join("/");
+  }
+
+  // 2) Fallback: parse from URL path (more robust when rewrites/proxies alter params).
+  try {
+    const url = new URL(req.url ?? "", "http://localhost");
+    const pathname = url.pathname || "";
+    // Expected: /api/kpi/<route>
+    const prefix = "/api/kpi/";
+    if (pathname.startsWith(prefix)) {
+      const rest = pathname.slice(prefix.length);
+      return rest.replace(/^\/+/, "").replace(/\/+$/, "");
+    }
+    // Also support /api/kpi (no trailing slash)
+    if (pathname === "/api/kpi" || pathname === "/api/kpi/") {
+      return "";
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3) Optional: allow `?route=summary`
+  const routeParam = (req.query as any)?.route;
+  if (typeof routeParam === "string" && routeParam.length > 0) {
+    return routeParam;
+  }
+
+  return "";
+};
+
+const routeKpi = (req: VercelRequest, res: VercelResponse) => {
+  const route = getKpiRouteFromRequest(req);
+
+  // Helpful debug (kept minimal)
+  console.log("[kpi] route", {
+    route,
+    url: req.url,
+    query: req.query
+  });
+
   if (route === "summary") {
     return handleKpiSummary(req, res);
   }
   if (route === "compare") {
     return handleKpiCompare(req, res);
   }
+
   return res.status(404).json({ error: "Not found" });
 };
 
