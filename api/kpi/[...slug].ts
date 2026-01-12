@@ -1,8 +1,14 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { randomUUID } from "crypto";
 import { resolveDateRange } from "../../server/_shared_dist/_date.js";
 import { parseFilters } from "../../server/_shared_dist/_filters.js";
 import { requireUser } from "../../server/_shared_dist/_auth.js";
+import {
+  getRequestId,
+  sendError,
+  parseQuery,
+  getParam,
+  logRequest
+} from "../../server/_shared_dist/api_utils.js";
 
 type KpiSummary = {
   period: { preset: string; from: string | null; to: string | null; tz: string };
@@ -34,17 +40,6 @@ type KpiSummary = {
   top_tags?: Array<{ tag: string; count: number }>;
 };
 
-const getRequestId = (req: VercelRequest) => {
-  const header = req.headers["x-vercel-id"] ?? req.headers["x-request-id"];
-  if (Array.isArray(header)) {
-    return header[0] ?? randomUUID();
-  }
-  if (typeof header === "string" && header.length > 0) {
-    return header;
-  }
-  return randomUUID();
-};
-
 const isMissingEnvError = (err: unknown) =>
   err instanceof Error && err.message === "Missing SUPABASE env vars";
 
@@ -69,7 +64,13 @@ const fetchActiveLocationIds = async (
 
 const handleKpiSummary = async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
+    const requestId = getRequestId(req);
+    return sendError(
+      res,
+      requestId,
+      { code: "BAD_REQUEST", message: "Method not allowed" },
+      405
+    );
   }
 
   const route = "/api/kpi/summary";
@@ -93,11 +94,16 @@ const handleKpiSummary = async (req: VercelRequest, res: VercelResponse) => {
         },
         requestId
       });
-      return res.status(500).json({
-        error: "Internal server error",
+      return sendError(
+        res,
         requestId,
-        reason: missingEnv ? "missing_env" : undefined
-      });
+        {
+          code: "INTERNAL",
+          message: "Internal server error",
+          details: missingEnv ? { reason: "missing_env" } : undefined
+        },
+        500
+      );
     }
     if (!auth) {
       return;
@@ -105,7 +111,8 @@ const handleKpiSummary = async (req: VercelRequest, res: VercelResponse) => {
     userId = auth.userId;
     const { supabaseAdmin } = auth;
 
-    const filters = parseFilters(req.query);
+    const { params } = parseQuery(req);
+    const filters = parseFilters(params);
     if (filters.reject) {
       return res.status(200).json({
         period: { preset: filters.preset, from: null, to: null, tz: filters.tz },
@@ -125,15 +132,22 @@ const handleKpiSummary = async (req: VercelRequest, res: VercelResponse) => {
       } satisfies KpiSummary);
     }
 
-    const locationParam = req.query.location_id;
-    locationId = Array.isArray(locationParam)
-      ? locationParam[0]
-      : locationParam ?? null;
+    const locationParam = getParam(params, "location_id");
+    locationId = locationParam ?? null;
 
     const preset = filters.preset;
     const from = filters.from;
     const to = filters.to;
     const timeZone = filters.tz;
+
+    logRequest("[kpi-summary]", {
+      requestId,
+      userId,
+      locationId,
+      preset,
+      from: from ?? null,
+      to: to ?? null
+    });
 
     const range = resolveDateRange(
       preset as Parameters<typeof resolveDateRange>[0],
@@ -156,10 +170,20 @@ const handleKpiSummary = async (req: VercelRequest, res: VercelResponse) => {
         .eq("location_resource_name", locationId)
         .maybeSingle();
       if (!locationRow) {
-        return res.status(404).json({ error: "Location not found" });
+        return sendError(
+          res,
+          requestId,
+          { code: "NOT_FOUND", message: "Location not found" },
+          404
+        );
       }
       if (activeLocationIds && !activeLocationIds.has(locationRow.id)) {
-        return res.status(404).json({ error: "Location not found" });
+        return sendError(
+          res,
+          requestId,
+          { code: "NOT_FOUND", message: "Location not found" },
+          404
+        );
       }
       locationIds = [locationId];
     } else {
@@ -345,7 +369,8 @@ const handleKpiSummary = async (req: VercelRequest, res: VercelResponse) => {
       top_tags: []
     };
 
-    console.log("[kpi-summary]", {
+    logRequest("[kpi-summary]", {
+      requestId,
       route,
       userId,
       location_id: locationId ?? "all",
@@ -369,11 +394,16 @@ const handleKpiSummary = async (req: VercelRequest, res: VercelResponse) => {
       },
       requestId
     });
-    return res.status(500).json({
-      error: "Internal server error",
+    return sendError(
+      res,
       requestId,
-      reason: missingEnv ? "missing_env" : undefined
-    });
+      {
+        code: "INTERNAL",
+        message: "Internal server error",
+        details: missingEnv ? { reason: "missing_env" } : undefined
+      },
+      500
+    );
   }
 };
 
@@ -431,7 +461,13 @@ const getDefaultSplitDate = (params: {
 
 const handleKpiCompare = async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
+    const requestId = getRequestId(req);
+    return sendError(
+      res,
+      requestId,
+      { code: "BAD_REQUEST", message: "Method not allowed" },
+      405
+    );
   }
 
   try {
@@ -441,13 +477,17 @@ const handleKpiCompare = async (req: VercelRequest, res: VercelResponse) => {
     }
     const { userId, supabaseAdmin } = auth;
     const requestId = getRequestId(req);
+    const { params } = parseQuery(req);
 
-    const locationParam = req.query.location_id;
-    const locationId = Array.isArray(locationParam)
-      ? locationParam[0]
-      : locationParam;
+    const locationParam = getParam(params, "location_id");
+    const locationId = locationParam ?? null;
     if (!locationId) {
-      return res.status(400).json({ error: "Missing location_id" });
+      return sendError(
+        res,
+        requestId,
+        { code: "BAD_REQUEST", message: "Missing location_id" },
+        400
+      );
     }
 
     const { data: locationRow } = await supabaseAdmin
@@ -457,22 +497,27 @@ const handleKpiCompare = async (req: VercelRequest, res: VercelResponse) => {
       .eq("location_resource_name", locationId)
       .maybeSingle();
     if (!locationRow) {
-      return res.status(404).json({ error: "Location not found" });
+      return sendError(
+        res,
+        requestId,
+        { code: "NOT_FOUND", message: "Location not found" },
+        404
+      );
     }
 
-    const filters = parseFilters(req.query);
+    const filters = parseFilters(params);
     if (filters.reject) {
       return res.status(200).json({ a: null, b: null, delta: null });
     }
     const timeZone = filters.tz;
 
-    const splitParam = req.query.split_date;
-    const splitDate = Array.isArray(splitParam) ? splitParam[0] : splitParam;
+    const splitParam = getParam(params, "split_date");
+    const splitDate = splitParam ?? null;
 
-    const aFromParam = req.query.a_from;
-    const aToParam = req.query.a_to;
-    const bFromParam = req.query.b_from;
-    const bToParam = req.query.b_to;
+    const aFromParam = getParam(params, "a_from");
+    const aToParam = getParam(params, "a_to");
+    const bFromParam = getParam(params, "b_from");
+    const bToParam = getParam(params, "b_to");
 
     let rangeA: Range;
     let rangeB: Range;
@@ -488,7 +533,12 @@ const handleKpiCompare = async (req: VercelRequest, res: VercelResponse) => {
       };
     } else if (splitDate) {
       if (typeof splitDate !== "string" || !isValidIsoDate(splitDate)) {
-        return res.status(400).json({ error: "Invalid split_date" });
+        return sendError(
+          res,
+          requestId,
+          { code: "BAD_REQUEST", message: "Invalid split_date" },
+          400
+        );
       }
       const preset = filters.preset;
       const fromParam = filters.from;
@@ -520,7 +570,7 @@ const handleKpiCompare = async (req: VercelRequest, res: VercelResponse) => {
       rangeB = { from: defaultSplit, to: baseRange.to };
     }
 
-    console.log("[kpi-compare]", {
+    logRequest("[kpi-compare]", {
       requestId,
       userId,
       locationId,
@@ -558,7 +608,12 @@ const handleKpiCompare = async (req: VercelRequest, res: VercelResponse) => {
     ]);
 
     if (summaryA.error || summaryB.error) {
-      return res.status(500).json({ error: "Failed to load KPI compare" });
+      return sendError(
+        res,
+        requestId,
+        { code: "INTERNAL", message: "Failed to load KPI compare" },
+        500
+      );
     }
 
     const summaryAData = (summaryA.data ?? null) as KpiCompareSummary | null;
@@ -587,14 +642,20 @@ const handleKpiCompare = async (req: VercelRequest, res: VercelResponse) => {
     });
   } catch (err) {
     console.error("[kpi-compare] failed", err);
-    return res.status(500).json({ error: "Internal server error" });
+    const requestId = getRequestId(req);
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Internal server error" },
+      500
+    );
   }
 };
 
 const getKpiRouteFromRequest = (req: VercelRequest): string => {
+  const { url, params } = parseQuery(req);
   // 1) Preferred: Vercel catch-all param (should be `slug` for `[...slug].ts`).
-  const query = req.query as Record<string, unknown>;
-  const slugParam = query.slug ?? query["...slug"] ?? query["slug[]"];
+  const slugParam = params.slug ?? params["...slug"] ?? params["slug[]"];
   const parts = Array.isArray(slugParam)
     ? slugParam
     : typeof slugParam === "string" && slugParam.length > 0
@@ -605,25 +666,18 @@ const getKpiRouteFromRequest = (req: VercelRequest): string => {
   }
 
   // 2) Fallback: parse from URL path (more robust when rewrites/proxies alter params).
-  try {
-    const url = new URL(req.url ?? "", "http://localhost");
-    const pathname = url.pathname || "";
-    // Expected: /api/kpi/<route>
-    const prefix = "/api/kpi/";
-    if (pathname.startsWith(prefix)) {
-      const rest = pathname.slice(prefix.length);
-      return rest.replace(/^\/+/, "").replace(/\/+$/, "");
-    }
-    // Also support /api/kpi (no trailing slash)
-    if (pathname === "/api/kpi" || pathname === "/api/kpi/") {
-      return "";
-    }
-  } catch {
-    // ignore
+  const pathname = url.pathname || "";
+  const prefix = "/api/kpi/";
+  if (pathname.startsWith(prefix)) {
+    const rest = pathname.slice(prefix.length);
+    return rest.replace(/^\/+/, "").replace(/\/+$/, "");
+  }
+  if (pathname === "/api/kpi" || pathname === "/api/kpi/") {
+    return "";
   }
 
   // 3) Optional: allow `?route=summary`
-  const routeParam = query.route;
+  const routeParam = params.route;
   if (typeof routeParam === "string" && routeParam.length > 0) {
     return routeParam;
   }
@@ -648,7 +702,12 @@ const routeKpi = (req: VercelRequest, res: VercelResponse) => {
     return handleKpiCompare(req, res);
   }
 
-  return res.status(404).json({ error: "Not found" });
+  return sendError(
+    res,
+    getRequestId(req),
+    { code: "NOT_FOUND", message: "Not found" },
+    404
+  );
 };
 
 export default routeKpi;

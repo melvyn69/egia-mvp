@@ -3,6 +3,11 @@ import { createClient } from "@supabase/supabase-js";
 import type { Database, Json } from "../../../server/_shared_dist/database.types.js";
 import { syncGoogleLocationsForUser } from "../../google/gbp/sync.js";
 import { syncGoogleReviewsForUser } from "../../google/gbp/reviews/sync.js";
+import {
+  getRequestId,
+  sendError,
+  logRequest
+} from "../../../server/_shared_dist/api_utils.js";
 
 type GoogleReview = {
   reviewId?: string;
@@ -258,8 +263,7 @@ const processJobQueue = async () => {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const requestId =
-    req.headers["x-request-id"]?.toString() ?? `req_${crypto.randomUUID()}`;
+  const requestId = getRequestId(req);
   const start = Date.now();
   const MAX_MS = Number(process.env.CRON_MAX_MS ?? 24000);
   const MAX_REVIEWS = Number(process.env.CRON_MAX_REVIEWS ?? 80);
@@ -267,23 +271,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const method = req.method ?? "GET";
   res.setHeader("Cache-Control", "no-store");
-  console.log("[cron]", requestId, method, req.url ?? "/api/cron/google/sync-replies");
+  logRequest("[cron]", {
+    requestId,
+    method,
+    route: req.url ?? "/api/cron/google/sync-replies"
+  });
   if (method !== "POST" && method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
+    return sendError(
+      res,
+      requestId,
+      { code: "BAD_REQUEST", message: "Method not allowed" },
+      405
+    );
   }
 
   const missingEnv = getMissingEnv();
   if (missingEnv.length) {
     console.error("[sync]", requestId, "missing env:", missingEnv);
-    return res
-      .status(500)
-      .json({ error: `Missing env: ${missingEnv.join(", ")}` });
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: `Missing env: ${missingEnv.join(", ")}` },
+      500
+    );
   }
 
   const { expected, provided } = getCronSecrets(req);
   if (!expected || !provided || provided !== expected) {
     console.error("[sync]", requestId, "invalid cron secret");
-    return res.status(403).json({ error: "Unauthorized" });
+    return sendError(
+      res,
+      requestId,
+      { code: "FORBIDDEN", message: "Unauthorized" },
+      403
+    );
   }
 
   // GET = healthcheck (évite que cron-job.org ou un navigateur te fasse un sync complet)
@@ -311,7 +332,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (connectionsError) {
       console.error("[sync]", requestId, "connections fetch failed", connectionsError);
-      return res.status(500).json({ error: "Failed to load connections" });
+      return sendError(
+        res,
+        requestId,
+        { code: "INTERNAL", message: "Failed to load connections" },
+        500
+      );
     }
 
     const refreshTokenByUser = new Map<string, string>();
@@ -332,7 +358,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (locationsError) {
       console.error("[sync]", requestId, "locations fetch failed", locationsError);
-      return res.status(500).json({ error: "Failed to load locations" });
+      return sendError(
+        res,
+        requestId,
+        { code: "INTERNAL", message: "Failed to load locations" },
+        500
+      );
     }
 
     const accessTokenByUser = new Map<string, string>();
@@ -604,6 +635,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error("[sync]", requestId, "fatal error", message);
-    return res.status(500).json({ error: message });
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message },
+      500
+    );
   }
 }

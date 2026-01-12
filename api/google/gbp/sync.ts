@@ -6,6 +6,13 @@ import {
 } from "../../../server/_shared_dist/google/_utils.js";
 import type { Json } from "../../../server/_shared_dist/database.types.js";
 import { requireUser } from "../../../server/_shared_dist/_auth.js";
+import {
+  getRequestId,
+  sendError,
+  parseQuery,
+  getParam,
+  logRequest
+} from "../../../server/_shared_dist/api_utils.js";
 
 type GoogleAccount = {
   name: string;
@@ -214,6 +221,7 @@ type LocationRow = {
   id: string;
   location_resource_name: string;
   location_title?: string | null;
+  updated_at?: string | null;
 };
 
 const fetchActiveLocationIds = async (
@@ -232,6 +240,7 @@ const fetchActiveLocationIds = async (
 };
 
 const handler = async (req: VercelRequest, res: VercelResponse) => {
+  const requestId = getRequestId(req);
   if (req.method === "GET") {
     try {
       const auth = await requireUser(req, res);
@@ -239,22 +248,18 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         return;
       }
       const { userId, supabaseAdmin } = auth;
-      const activeOnly =
-        req.query?.active_only === "1" ||
-        (Array.isArray(req.query?.active_only) &&
-          req.query.active_only[0] === "1");
+      const { params } = parseQuery(req);
+      const activeOnly = getParam(params, "active_only") === "1";
 
       let query = supabaseAdmin
         .from("google_locations")
-        .select("id, location_resource_name, location_title")
+        .select("id, location_resource_name, location_title, updated_at")
         .eq("user_id", userId);
 
       if (activeOnly) {
         const activeIds = await fetchActiveLocationIds(supabaseAdmin, userId);
         if (activeIds && activeIds.size > 0) {
           query = query.in("id", Array.from(activeIds));
-        } else {
-          return res.status(200).json({ ok: true, locations: [] });
         }
       }
 
@@ -263,24 +268,46 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       });
       if (error) {
         console.error("google locations list failed:", error);
-        return res.status(500).json({ ok: false, error: "Failed to load." });
+        return sendError(
+          res,
+          requestId,
+          { code: "INTERNAL", message: "Failed to load locations" },
+          500
+        );
       }
 
       const locations = (data ?? []).map((row: LocationRow) => ({
         id: row.id,
         location_resource_name: row.location_resource_name,
-        label: row.location_title ?? null
+        location_title: row.location_title ?? null,
+        updated_at: row.updated_at ?? null
       }));
 
-      return res.status(200).json({ ok: true, locations });
+      logRequest("[gbp/locations]", {
+        requestId,
+        userId,
+        activeOnly,
+        count: locations.length
+      });
+      return res.status(200).json({ ok: true, locations, requestId });
     } catch (error) {
       console.error("google gbp get locations error:", error);
-      return res.status(500).json({ ok: false, error: "Failed to load." });
+      return sendError(
+        res,
+        requestId,
+        { code: "INTERNAL", message: "Failed to load locations" },
+        500
+      );
     }
   }
 
   if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, error: "Method not allowed." });
+    return sendError(
+      res,
+      requestId,
+      { code: "BAD_REQUEST", message: "Method not allowed" },
+      405
+    );
   }
 
   try {
@@ -291,7 +318,12 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     );
 
     if (!userId) {
-      return res.status(401).json({ ok: false, error: "Unauthorized." });
+      return sendError(
+        res,
+        requestId,
+        { code: "UNAUTHORIZED", message: "Unauthorized" },
+        401
+      );
     }
 
     const { data: connection, error: connectionError } = await supabaseAdmin
@@ -301,10 +333,20 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       .eq("provider", "google")
       .maybeSingle();
     if (connectionError || !connection) {
-      return res.status(404).json({ ok: false, error: "Google not connected." });
+      return sendError(
+        res,
+        requestId,
+        { code: "NOT_FOUND", message: "Google not connected" },
+        404
+      );
     }
     if (!connection.refresh_token) {
-      return res.status(401).json({ ok: false, error: "reauth_required" });
+      return sendError(
+        res,
+        requestId,
+        { code: "UNAUTHORIZED", message: "reauth_required" },
+        401
+      );
     }
 
     const { data: existingJob } = await supabaseAdmin
@@ -317,11 +359,18 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       .maybeSingle();
 
     if (existingJob) {
+      logRequest("[gbp/sync]", {
+        requestId,
+        userId,
+        status: "already_queued",
+        jobId: existingJob.id
+      });
       return res.status(200).json({
         ok: true,
         queued: true,
         job_id: existingJob.id,
-        status: existingJob.status
+        status: existingJob.status,
+        requestId
       });
     }
 
@@ -341,18 +390,35 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
     if (jobError || !job) {
       console.error("job_queue insert failed:", jobError);
-      return res.status(500).json({ ok: false, error: "Queue failed." });
+      return sendError(
+        res,
+        requestId,
+        { code: "INTERNAL", message: "Queue failed" },
+        500
+      );
     }
 
+    logRequest("[gbp/sync]", {
+      requestId,
+      userId,
+      status: "queued",
+      jobId: job.id
+    });
     return res.status(200).json({
       ok: true,
       queued: true,
       job_id: job.id,
-      status: job.status
+      status: job.status,
+      requestId
     });
   } catch (error) {
     console.error("google gbp sync error:", error);
-    return res.status(500).json({ ok: false, error: "Sync failed." });
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Sync failed" },
+      500
+    );
   }
 };
 

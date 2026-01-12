@@ -1,6 +1,11 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../../../server/_shared_dist/database.types.js";
+import {
+  getRequestId,
+  sendError,
+  logRequest
+} from "../../../server/_shared_dist/api_utils.js";
 
 type AiTag = {
   name: string;
@@ -368,32 +373,51 @@ const analyzeReview = async (
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const requestId =
-    req.headers["x-request-id"]?.toString() ?? `req_${crypto.randomUUID()}`;
+  const requestId = getRequestId(req);
   const start = Date.now();
   const MAX_MS = Number(process.env.CRON_MAX_MS ?? 24000);
   const MAX_REVIEWS = Number(process.env.CRON_MAX_REVIEWS ?? 40);
   const timeUp = () => Date.now() - start > MAX_MS;
   const method = req.method ?? "GET";
   res.setHeader("Cache-Control", "no-store");
-  console.log("[ai]", requestId, method, req.url ?? "/api/cron/ai/tag-reviews");
+  logRequest("[ai]", {
+    requestId,
+    method,
+    route: req.url ?? "/api/cron/ai/tag-reviews"
+  });
 
   if (method !== "POST" && method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
+    return sendError(
+      res,
+      requestId,
+      { code: "BAD_REQUEST", message: "Method not allowed" },
+      405
+    );
   }
 
   const missingEnv = getMissingEnv();
   if (missingEnv.length) {
     console.error("[ai]", requestId, "missing env:", missingEnv);
-    return res
-      .status(500)
-      .json({ error: `Missing env: ${missingEnv.join(", ")}` });
+    return sendError(
+      res,
+      requestId,
+      {
+        code: "INTERNAL",
+        message: `Missing env: ${missingEnv.join(", ")}`
+      },
+      500
+    );
   }
 
   const { expected, provided } = getCronSecrets(req);
   if (!expected || !provided || provided !== expected) {
     console.error("[ai]", requestId, "invalid cron secret");
-    return res.status(403).json({ error: "Unauthorized" });
+    return sendError(
+      res,
+      requestId,
+      { code: "FORBIDDEN", message: "Unauthorized" },
+      403
+    );
   }
 
   if (method === "GET") {
@@ -467,7 +491,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (candidatesError) {
       console.error("[ai-tag]", requestId, "candidates rpc failed", candidatesError);
-      return res.status(500).json({ error: "Failed to load candidates" });
+      return sendError(
+        res,
+        requestId,
+        { code: "INTERNAL", message: "Failed to load candidates" },
+        500
+      );
     }
 
     const candidateRows = candidates ?? [];
@@ -888,6 +917,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await releaseLock(userId, locationId);
       }
     }
-    return res.status(500).json({ error: message });
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message },
+      500
+    );
   }
 }

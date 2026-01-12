@@ -1,9 +1,16 @@
-import type { IncomingMessage, ServerResponse } from "http";
+import type { VercelRequest, VercelResponse } from "@vercel/node";
 import {
   createSupabaseAdmin,
   getRequiredEnv,
   getUserFromRequest
 } from "../../../../server/_shared_dist/google/_utils.js";
+import {
+  getRequestId,
+  sendError,
+  parseQuery,
+  getParam,
+  logRequest
+} from "../../../../server/_shared_dist/api_utils.js";
 
 type GoogleReview = {
   reviewId?: string;
@@ -489,12 +496,20 @@ export const syncGoogleReviewsForUser = async (
   };
 };
 
-const handler = async (req: IncomingMessage, res: ServerResponse) => {
+const handler = async (req: VercelRequest, res: VercelResponse) => {
+  const requestId = getRequestId(req);
+  logRequest("[gbp/reviews-sync]", {
+    requestId,
+    method: req.method ?? "GET",
+    route: req.url ?? "/api/google/gbp/reviews/sync"
+  });
   if (req.method !== "POST") {
-    res.statusCode = 405;
-    res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ ok: false, error: "Method not allowed." }));
-    return;
+    return sendError(
+      res,
+      requestId,
+      { code: "BAD_REQUEST", message: "Method not allowed" },
+      405
+    );
   }
 
   try {
@@ -505,14 +520,16 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     );
 
     if (!userId) {
-      res.statusCode = 401;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: false, error: "Unauthorized." }));
-      return;
+      return sendError(
+        res,
+        requestId,
+        { code: "UNAUTHORIZED", message: "Unauthorized" },
+        401
+      );
     }
 
-    const requestUrl = new URL(req.url ?? "", "http://localhost");
-    let locationId = requestUrl.searchParams.get("location_id");
+    const { params } = parseQuery(req);
+    let locationId = getParam(params, "location_id");
     if (!locationId) {
       let body = "";
       for await (const chunk of req) {
@@ -534,40 +551,46 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       locationId
     );
 
-    res.statusCode = 200;
-    res.setHeader("Content-Type", "application/json");
-    res.end(
-      JSON.stringify({
-        ok: true,
-        locationsCount: result.locationsCount,
-        reviewsCount: result.reviewsCount,
-        locationsFailed: result.locationsFailed
-      })
-    );
+    return res.status(200).json({
+      ok: true,
+      requestId,
+      locationsCount: result.locationsCount,
+      reviewsCount: result.reviewsCount,
+      locationsFailed: result.locationsFailed
+    });
   } catch (error: unknown) {
     const message = getErrorMessage(error);
     if (message === "reauth_required") {
-      res.statusCode = 401;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: false, error: "reauth_required" }));
-      return;
+      return sendError(
+        res,
+        requestId,
+        { code: "UNAUTHORIZED", message: "reauth_required" },
+        401
+      );
     }
     if (message === "google_not_connected") {
-      res.statusCode = 404;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: false, error: "Google not connected." }));
-      return;
+      return sendError(
+        res,
+        requestId,
+        { code: "NOT_FOUND", message: "Google not connected" },
+        404
+      );
     }
     if (message === "locations_load_failed") {
-      res.statusCode = 500;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: false, error: "Failed to load locations." }));
-      return;
+      return sendError(
+        res,
+        requestId,
+        { code: "INTERNAL", message: "Failed to load locations" },
+        500
+      );
     }
     console.error("google reviews sync error:", error);
-    res.statusCode = 500;
-    res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ ok: false, error: "Sync failed." }));
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Sync failed" },
+      500
+    );
   }
 };
 

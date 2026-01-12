@@ -2,6 +2,12 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { requireUser } from "../server/_shared_dist/_auth.js";
 import { resolveDateRange } from "../server/_shared_dist/_date.js";
 import { parseFilters } from "../server/_shared_dist/_filters.js";
+import {
+  getRequestId,
+  sendError,
+  parseQuery,
+  logRequest
+} from "../server/_shared_dist/api_utils.js";
 
 type AnalyticsOverview = {
   scope: {
@@ -210,7 +216,7 @@ const getWeekStartUtc = (date: Date) => {
 };
 
 const getQueryParam = (
-  query: Record<string, string | string[] | undefined>,
+  query: Record<string, string | string[]>,
   key: string
 ) => {
   const value = query[key];
@@ -218,7 +224,7 @@ const getQueryParam = (
 };
 
 const normalizeAnalyticsQuery = (
-  query: Record<string, string | string[] | undefined>
+  query: Record<string, string | string[]>
 ) => {
   const normalized = { ...query };
   const preset = getQueryParam(query, "preset") ?? getQueryParam(query, "period");
@@ -232,6 +238,11 @@ const normalizeAnalyticsQuery = (
   }
   return normalized;
 };
+
+const getAnalyticsParams = (req: VercelRequest) => parseQuery(req).params;
+
+const getAnalyticsFilters = (req: VercelRequest) =>
+  parseFilters(normalizeAnalyticsQuery(getAnalyticsParams(req)));
 
 const isReplyable = (row: { comment?: string | null }) =>
   typeof row.comment === "string" && row.comment.trim().length > 0;
@@ -1099,7 +1110,8 @@ const handleOverview = async (
       : never
     : never
 ) => {
-  const filters = parseFilters(normalizeAnalyticsQuery(req.query));
+  const requestId = getRequestId(req);
+  const filters = getAnalyticsFilters(req);
   if (filters.reject) {
     return res.status(200).json(
       buildEmptyOverview(
@@ -1140,12 +1152,18 @@ const handleOverview = async (
     locationId
   );
   if (missing) {
-    return res.status(404).json({ error: "Location not found" });
+    return sendError(
+      res,
+      requestId,
+      { code: "NOT_FOUND", message: "Location not found" },
+      404
+    );
   }
   scopeBase.location_ids_count = locationIds.length;
 
   if (locationIds.length === 0) {
-    console.log("[analytics/overview]", {
+    logRequest("[analytics/overview]", {
+      requestId,
       userId,
       preset,
       status: "empty",
@@ -1177,13 +1195,19 @@ const handleOverview = async (
   const { data: reviewRows, error: reviewsError } = await reviewsQuery;
   if (reviewsError) {
     console.error("[analytics/overview] reviews error", reviewsError);
-    return res.status(500).json({ error: "Failed to load reviews" });
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Failed to load reviews" },
+      500
+    );
   }
 
   const reviews = reviewRows ?? [];
   if (reviews.length === 0) {
     const empty = buildEmptyOverview(scopeBase, ["no_reviews_in_range"]);
-    console.log("[analytics/overview]", {
+    logRequest("[analytics/overview]", {
+      requestId,
       userId,
       preset,
       status: "empty",
@@ -1368,7 +1392,8 @@ const handleOverview = async (
     topics: { strengths, irritants }
   };
 
-  console.log("[analytics/overview]", {
+  logRequest("[analytics/overview]", {
+    requestId,
     userId,
     preset,
     locationIdsCount: locationIds.length,
@@ -1388,7 +1413,8 @@ const handleTimeseries = async (
       : never
     : never
 ) => {
-  const filters = parseFilters(normalizeAnalyticsQuery(req.query));
+  const requestId = getRequestId(req);
+  const filters = getAnalyticsFilters(req);
   if (filters.reject) {
     return res.status(200).json({ granularity: "day", points: [] });
   }
@@ -1410,15 +1436,21 @@ const handleTimeseries = async (
     locationId
   );
   if (missing) {
-    return res.status(404).json({ error: "Location not found" });
+    return sendError(
+      res,
+      requestId,
+      { code: "NOT_FOUND", message: "Location not found" },
+      404
+    );
   }
 
-  const rawGranularity = getQueryParam(req.query, "granularity") ?? "auto";
+  const rawGranularity = getQueryParam(getAnalyticsParams(req), "granularity") ?? "auto";
   const resolvedGranularity = resolveGranularity(rawGranularity, range);
 
   if (locationIds.length === 0) {
     const empty: AnalyticsTimeseries = { granularity: resolvedGranularity, points: [] };
-    console.log("[analytics/timeseries]", {
+    logRequest("[analytics/timeseries]", {
+      requestId,
       userId,
       preset,
       locationsCount: 0,
@@ -1432,7 +1464,12 @@ const handleTimeseries = async (
     rows = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, range);
   } catch (error) {
     console.error("[analytics/timeseries] reviews error", error);
-    return res.status(500).json({ error: "Failed to load reviews" });
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Failed to load reviews" },
+      500
+    );
   }
   if (rows.length >= 20000) {
     console.warn("[analytics/timeseries] max rows reached", {
@@ -1449,7 +1486,8 @@ const handleTimeseries = async (
     points
   };
 
-  console.log("[analytics/timeseries]", {
+  logRequest("[analytics/timeseries]", {
+    requestId,
     userId,
     preset,
     locationIdsCount: locationIds.length,
@@ -1470,7 +1508,8 @@ const handleDrivers = async (
       : never
     : never
 ) => {
-  const filters = parseFilters(normalizeAnalyticsQuery(req.query));
+  const requestId = getRequestId(req);
+  const filters = getAnalyticsFilters(req);
   const preset = filters.preset;
   const timeZone = filters.tz;
   const rangeA = resolveDateRange(
@@ -1482,13 +1521,25 @@ const handleDrivers = async (
   const rangeB = buildPreviousRange(rangeA);
   const locationId = filters.location_id ?? null;
 
+  logRequest("[analytics/drivers]", {
+    requestId,
+    userId,
+    preset,
+    locationId
+  });
+
   const { locationIds, missing } = await resolveLocationIds(
     supabaseAdmin,
     userId,
     locationId
   );
   if (missing) {
-    return res.status(404).json({ error: "Location not found" });
+    return sendError(
+      res,
+      requestId,
+      { code: "NOT_FOUND", message: "Location not found" },
+      404
+    );
   }
 
   if (filters.reject || locationIds.length === 0) {
@@ -1513,7 +1564,12 @@ const handleDrivers = async (
     reviewsB = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeB);
   } catch (error) {
     console.error("[analytics/drivers] reviews error", error);
-    return res.status(500).json({ error: "Failed to load reviews" });
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Failed to load reviews" },
+      500
+    );
   }
 
   const reviewIdsA = reviewsA.map((row) => row.id);
@@ -1662,7 +1718,8 @@ const handleQuality = async (
       : never
     : never
 ) => {
-  const filters = parseFilters(normalizeAnalyticsQuery(req.query));
+  const requestId = getRequestId(req);
+  const filters = getAnalyticsFilters(req);
   const preset = filters.preset;
   const timeZone = filters.tz;
   const range = resolveDateRange(
@@ -1679,8 +1736,20 @@ const handleQuality = async (
     locationId
   );
   if (missing) {
-    return res.status(404).json({ error: "Location not found" });
+    return sendError(
+      res,
+      requestId,
+      { code: "NOT_FOUND", message: "Location not found" },
+      404
+    );
   }
+
+  logRequest("[analytics/quality]", {
+    requestId,
+    userId,
+    preset,
+    locationId
+  });
 
   if (filters.reject || locationIds.length === 0) {
     const empty: AnalyticsQuality = {
@@ -1699,7 +1768,12 @@ const handleQuality = async (
     reviews = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, range);
   } catch (error) {
     console.error("[analytics/quality] reviews error", error);
-    return res.status(500).json({ error: "Failed to load reviews" });
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Failed to load reviews" },
+      500
+    );
   }
 
   const replyable = reviews.filter(isReplyable);
@@ -1752,7 +1826,8 @@ const handleDrilldown = async (
       : never
     : never
 ) => {
-  const filters = parseFilters(normalizeAnalyticsQuery(req.query));
+  const requestId = getRequestId(req);
+  const filters = getAnalyticsFilters(req);
   const preset = filters.preset;
   const timeZone = filters.tz;
   const range = resolveDateRange(
@@ -1768,14 +1843,27 @@ const handleDrilldown = async (
     locationId
   );
   if (missing) {
-    return res.status(404).json({ error: "Location not found" });
+    return sendError(
+      res,
+      requestId,
+      { code: "NOT_FOUND", message: "Location not found" },
+      404
+    );
   }
 
-  const tagParam = getQueryParam(req.query, "tag") ?? "";
-  const sourceParam = getQueryParam(req.query, "source") ?? "manual";
-  const tagIdsParam = getQueryParam(req.query, "tag_ids") ?? "";
-  const offsetParam = Number(getQueryParam(req.query, "offset") ?? 0);
-  const limitParam = Number(getQueryParam(req.query, "limit") ?? 10);
+  logRequest("[analytics/drilldown]", {
+    requestId,
+    userId,
+    preset,
+    locationId
+  });
+
+  const params = getAnalyticsParams(req);
+  const tagParam = getQueryParam(params, "tag") ?? "";
+  const sourceParam = getQueryParam(params, "source") ?? "manual";
+  const tagIdsParam = getQueryParam(params, "tag_ids") ?? "";
+  const offsetParam = Number(getQueryParam(params, "offset") ?? 0);
+  const limitParam = Number(getQueryParam(params, "limit") ?? 10);
   const offset = Number.isFinite(offsetParam) ? Math.max(0, offsetParam) : 0;
   const limit = Number.isFinite(limitParam) ? Math.min(50, Math.max(1, limitParam)) : 10;
 
@@ -1794,7 +1882,12 @@ const handleDrilldown = async (
     reviews = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, range);
   } catch (error) {
     console.error("[analytics/drilldown] reviews error", error);
-    return res.status(500).json({ error: "Failed to load reviews" });
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Failed to load reviews" },
+      500
+    );
   }
 
   const reviewIds = reviews.map((row) => row.id);
@@ -1874,7 +1967,8 @@ const handleCompare = async (
       : never
     : never
 ) => {
-  const filters = parseFilters(normalizeAnalyticsQuery(req.query));
+  const requestId = getRequestId(req);
+  const filters = getAnalyticsFilters(req);
   const preset = filters.preset;
   const timeZone = filters.tz;
   const rangeA = resolveDateRange(
@@ -1892,7 +1986,12 @@ const handleCompare = async (
     locationId
   );
   if (missing) {
-    return res.status(404).json({ error: "Location not found" });
+    return sendError(
+      res,
+      requestId,
+      { code: "NOT_FOUND", message: "Location not found" },
+      404
+    );
   }
 
   if (filters.reject || locationIds.length === 0) {
@@ -1908,14 +2007,20 @@ const handleCompare = async (
     rowsB = await fetchReviewsForRange(supabaseAdmin, userId, locationIds, rangeB);
   } catch (error) {
     console.error("[analytics/compare] reviews error", error);
-    return res.status(500).json({ error: "Failed to load reviews" });
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Failed to load reviews" },
+      500
+    );
   }
 
   const metricsA = computeCompareMetrics(rowsA);
   const metricsB = computeCompareMetrics(rowsB);
   const compare = buildCompareResponse(preset, rangeA, rangeB, metricsA, metricsB);
 
-  console.log("[analytics/compare]", {
+  logRequest("[analytics/compare]", {
+    requestId,
     userId,
     preset,
     locationIdsCount: locationIds.length
@@ -1934,7 +2039,8 @@ const handleInsights = async (
       : never
     : never
 ) => {
-  const filters = parseFilters(normalizeAnalyticsQuery(req.query));
+  const requestId = getRequestId(req);
+  const filters = getAnalyticsFilters(req);
   const preset = filters.preset;
   const timeZone = filters.tz;
   const rangeA = resolveDateRange(
@@ -1947,7 +2053,7 @@ const handleInsights = async (
   const rangeEnd = new Date(rangeA.to);
   const rangeB = buildPreviousRange(rangeA);
 
-  const modeParam = getQueryParam(req.query, "mode") ?? "auto";
+  const modeParam = getQueryParam(getAnalyticsParams(req), "mode") ?? "auto";
   const mode =
     modeParam === "ai" || modeParam === "basic" || modeParam === "auto"
       ? modeParam
@@ -1960,7 +2066,12 @@ const handleInsights = async (
     locationId
   );
   if (missing) {
-    return res.status(404).json({ error: "Location not found" });
+    return sendError(
+      res,
+      requestId,
+      { code: "NOT_FOUND", message: "Location not found" },
+      404
+    );
   }
 
   const emptyMetrics = computeCompareMetrics([]);
@@ -1977,7 +2088,12 @@ const handleInsights = async (
       metricsB = computeCompareMetrics(rowsB);
     } catch (error) {
       console.error("[analytics/insights] reviews error", error);
-      return res.status(500).json({ error: "Failed to load reviews" });
+      return sendError(
+        res,
+        requestId,
+        { code: "INTERNAL", message: "Failed to load reviews" },
+        500
+      );
     }
   }
 
@@ -2021,7 +2137,8 @@ const handleInsights = async (
     insights
   };
 
-  console.log("[analytics/insights]", {
+  logRequest("[analytics/insights]", {
+    requestId,
     userId,
     preset,
     locationIdsCount: locationIds.length,
@@ -2034,7 +2151,13 @@ const handleInsights = async (
 
 const handler = async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
+    const requestId = getRequestId(req);
+    return sendError(
+      res,
+      requestId,
+      { code: "BAD_REQUEST", message: "Method not allowed" },
+      405
+    );
   }
 
   const auth = await requireUser(req, res);
@@ -2044,7 +2167,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
   const { userId, supabaseAdmin } = auth;
 
   const viewParam =
-    getQueryParam(req.query, "view") ?? getQueryParam(req.query, "op");
+    getQueryParam(getAnalyticsParams(req), "view") ??
+    getQueryParam(getAnalyticsParams(req), "op");
   if (viewParam === "drivers") {
     return handleDrivers(req, res, userId, supabaseAdmin);
   }
