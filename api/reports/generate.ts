@@ -129,7 +129,8 @@ const buildPdf = async (params: {
         y: 0,
         size: 1,
         font: unicodeFont,
-        color: rgb(0, 0, 0)
+        color: rgb(0, 0, 0),
+        opacity: 0
       });
       return true;
     } catch {
@@ -150,49 +151,216 @@ const buildPdf = async (params: {
     }
     return text;
   };
+  const activeFont = useUnicode && unicodeFont ? unicodeFont : font;
+  const activeBoldFont =
+    useUnicode && unicodeBoldFont ? unicodeBoldFont : fontBold;
   let y = 780;
   const margin = 50;
+  const pageWidth = 595.28;
+  const contentWidth = pageWidth - margin * 2;
+
+  const drawDivider = () => {
+    page.drawLine({
+      start: { x: margin, y },
+      end: { x: pageWidth - margin, y },
+      thickness: 1,
+      color: rgb(0.85, 0.87, 0.9)
+    });
+    y -= 14;
+  };
+
+  const wrapLines = (
+    value: string,
+    maxWidth: number,
+    fontRef: typeof activeFont,
+    size: number,
+    maxLines = 3
+  ) => {
+    const words = value.split(/\s+/);
+    const lines: string[] = [];
+    let current = "";
+    for (const word of words) {
+      const next = current ? `${current} ${word}` : word;
+      if (fontRef.widthOfTextAtSize(next, size) <= maxWidth) {
+        current = next;
+      } else {
+        if (current) {
+          lines.push(current);
+        }
+        current = word;
+      }
+      if (lines.length >= maxLines) {
+        break;
+      }
+    }
+    if (lines.length < maxLines && current) {
+      lines.push(current);
+    }
+    if (lines.length === maxLines) {
+      const last = lines[maxLines - 1];
+      lines[maxLines - 1] = last.endsWith("…") ? last : `${last}…`;
+    }
+    return lines;
+  };
 
   const drawText = (text: string, size = 12, bold = false) => {
     page.drawText(text, {
       x: margin,
       y,
       size,
-      font: bold
-        ? useUnicode && unicodeBoldFont
-          ? unicodeBoldFont
-          : fontBold
-        : useUnicode && unicodeFont
-        ? unicodeFont
-        : font,
+      font: bold ? activeBoldFont : activeFont,
       color: rgb(0.08, 0.1, 0.12)
     });
     y -= size + 6;
   };
 
-  drawText(safeText(params.title), 22, true);
+  const drawWrapped = (
+    value: string,
+    size: number,
+    maxWidth: number,
+    maxLines = 2,
+    bold = false
+  ) => {
+    const fontRef = bold ? activeBoldFont : activeFont;
+    const lines = wrapLines(value, maxWidth, fontRef, size, maxLines);
+    for (const line of lines) {
+      page.drawText(line, {
+        x: margin,
+        y,
+        size,
+        font: fontRef,
+        color: rgb(0.08, 0.1, 0.12)
+      });
+      y -= size + 4;
+    }
+  };
+
+  const STAR_PATH =
+    "M10 1.5L12.9 7.1L19 7.9L14.5 11.8L15.8 17.8L10 14.6L4.2 17.8L5.5 11.8L1 7.9L7.1 7.1L10 1.5Z";
+  const renderStars = (
+    x: number,
+    yBase: number,
+    rating: number | null,
+    size = 10
+  ) => {
+    const safeRating = typeof rating === "number" ? rating : 0;
+    const fullStars = Math.round(safeRating);
+    const gap = 4;
+    for (let i = 0; i < 5; i += 1) {
+      const fill =
+        i < fullStars ? rgb(0.98, 0.77, 0.2) : rgb(0.86, 0.88, 0.9);
+      page.drawSvgPath(STAR_PATH, {
+        x: x + i * (size + gap),
+        y: yBase,
+        color: fill,
+        scale: size / 20
+      });
+    }
+    const ratingLabel =
+      typeof rating === "number" ? rating.toFixed(1) : "—";
+    page.drawText(ratingLabel, {
+      x: x + 5 * (size + gap) + 6,
+      y: yBase + 1,
+      size: 10,
+      font: activeBoldFont,
+      color: rgb(0.2, 0.25, 0.3)
+    });
+  };
+
+  drawText(safeText(params.title), 26, true);
   drawText(safeText(params.subtitle), 12);
   drawText(safeText(params.locationsLabel), 11);
-  if (params.notes) {
-    drawText(safeText(`Notes: ${params.notes}`), 11);
+  if (params.locationsList && params.locationsList.length > 0) {
+    drawWrapped(
+      safeText(params.locationsList.join(" • ")),
+      10,
+      contentWidth,
+      2
+    );
   }
-  y -= 8;
+  if (params.notes) {
+    drawWrapped(safeText(`Notes: ${params.notes}`), 10, contentWidth, 2);
+  }
+  y -= 6;
+  drawDivider();
 
-  drawText("KPIs principaux", 14, true);
-  drawText(safeText(`Volume avis: ${params.kpis.reviewsTotal}`), 12);
-  drawText(
-    safeText(`Note moyenne: ${formatRating(params.kpis.avgRating)}`),
-    12
-  );
-  drawText(
-    safeText(`Taux de réponse: ${formatRatio(params.kpis.responseRate)}`),
-    12
-  );
-  drawText(
-    safeText(`Sentiment positif: ${formatPercent(params.kpis.sentimentPositive)}`),
-    12
-  );
-  y -= 8;
+  const cardHeight = 92;
+  page.drawRectangle({
+    x: margin,
+    y: y - cardHeight + 18,
+    width: contentWidth,
+    height: cardHeight,
+    color: rgb(0.96, 0.97, 0.99),
+    borderColor: rgb(0.9, 0.91, 0.94),
+    borderWidth: 1
+  });
+  const cardTop = y;
+  const leftX = margin + 16;
+  const rightX = margin + contentWidth / 2 + 8;
+  const cardTitleY = cardTop - 8;
+  page.drawText("KPIs principaux", {
+    x: leftX,
+    y: cardTitleY,
+    size: 12,
+    font: activeBoldFont,
+    color: rgb(0.1, 0.12, 0.15)
+  });
+  page.drawText("Note moyenne", {
+    x: rightX,
+    y: cardTitleY,
+    size: 12,
+    font: activeBoldFont,
+    color: rgb(0.1, 0.12, 0.15)
+  });
+  const kpiLineY = cardTitleY - 20;
+  page.drawText("Volume avis", {
+    x: leftX,
+    y: kpiLineY,
+    size: 10,
+    font: activeFont,
+    color: rgb(0.35, 0.4, 0.45)
+  });
+  page.drawText(String(params.kpis.reviewsTotal), {
+    x: leftX,
+    y: kpiLineY - 14,
+    size: 18,
+    font: activeBoldFont,
+    color: rgb(0.08, 0.1, 0.12)
+  });
+  const responseY = kpiLineY - 40;
+  page.drawText("Taux de reponse", {
+    x: leftX,
+    y: responseY,
+    size: 10,
+    font: activeFont,
+    color: rgb(0.35, 0.4, 0.45)
+  });
+  page.drawText(formatRatio(params.kpis.responseRate), {
+    x: leftX,
+    y: responseY - 14,
+    size: 14,
+    font: activeBoldFont,
+    color: rgb(0.08, 0.1, 0.12)
+  });
+  const sentimentY = responseY - 36;
+  page.drawText("Sentiment positif", {
+    x: leftX,
+    y: sentimentY,
+    size: 10,
+    font: activeFont,
+    color: rgb(0.35, 0.4, 0.45)
+  });
+  page.drawText(formatPercent(params.kpis.sentimentPositive), {
+    x: leftX,
+    y: sentimentY - 14,
+    size: 14,
+    font: activeBoldFont,
+    color: rgb(0.08, 0.1, 0.12)
+  });
+  const ratingY = cardTitleY - 26;
+  renderStars(rightX, ratingY, params.kpis.avgRating, 12);
+  y = cardTop - cardHeight - 12;
+  drawDivider();
 
   drawText("Analyse IA", 14, true);
   drawText(
@@ -200,24 +368,48 @@ const buildPdf = async (params: {
     12
   );
   drawText(safeText(`Avis critiques: ${params.ai.criticalCount}`), 12);
-  drawText(
-    safeText(`Top tags: ${
-      params.ai.topTags.length
-        ? params.ai.topTags.map((tag) => `${tag.tag} (${tag.count})`).join(", ")
-        : "—"
-    }`),
-    11
+  const tagsText = params.ai.topTags.length
+    ? params.ai.topTags.map((tag) => `${tag.tag} (${tag.count})`)
+    : ["—"];
+  const half = Math.ceil(tagsText.length / 2);
+  const leftTags = tagsText.slice(0, half);
+  const rightTags = tagsText.slice(half);
+  const tagsY = y;
+  const colGap = 16;
+  const colWidth = (contentWidth - colGap) / 2;
+  const drawTagColumn = (items: string[], startX: number, startY: number) => {
+    let currentY = startY;
+    items.forEach((item) => {
+      page.drawText(safeText(item), {
+        x: startX,
+        y: currentY,
+        size: 11,
+        font: activeFont,
+        color: rgb(0.12, 0.14, 0.18)
+      });
+      currentY -= 14;
+    });
+    return currentY;
+  };
+  const leftEnd = drawTagColumn(leftTags, margin, tagsY);
+  const rightEnd = drawTagColumn(
+    rightTags,
+    margin + colWidth + colGap,
+    tagsY
   );
-  y -= 8;
+  y = Math.min(leftEnd, rightEnd) - 10;
+  drawDivider();
 
   drawText("Top avis positifs", 14, true);
   if (params.positives.length === 0) {
     drawText("—", 11);
   } else {
     params.positives.forEach((item) => {
-      drawText(
+      drawWrapped(
         safeText(`${item.label} · ${item.date} · ${item.rating ?? "—"}★`),
-        11
+        11,
+        contentWidth,
+        2
       );
     });
   }
@@ -225,12 +417,14 @@ const buildPdf = async (params: {
 
   drawText("Top avis negatifs", 14, true);
   if (params.negatives.length === 0) {
-    drawText("—", 11);
+    drawText("Aucun avis negatif sur la periode", 11);
   } else {
     params.negatives.forEach((item) => {
-      drawText(
+      drawWrapped(
         safeText(`${item.label} · ${item.date} · ${item.rating ?? "—"}★`),
-        11
+        11,
+        contentWidth,
+        2
       );
     });
   }
@@ -241,7 +435,7 @@ const buildPdf = async (params: {
       x: margin,
       y: 30,
       size: 9,
-      font: useUnicode && unicodeFont ? unicodeFont : font,
+      font: activeFont,
       color: rgb(0.4, 0.45, 0.5)
     }
   );
@@ -277,6 +471,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .maybeSingle();
   if (reportError || !report) {
     return res.status(404).json({ error: "Report not found" });
+  }
+
+  let locationsLabel = "Etablissements: Tous";
+  let locationsList: string[] = [];
+  if (Array.isArray(report.locations) && report.locations.length > 0) {
+    const { data: locationRows } = await supabaseAdmin
+      .from("google_locations")
+      .select("location_resource_name, location_title")
+      .eq("user_id", userId)
+      .in("location_resource_name", report.locations);
+    const titles = (locationRows ?? [])
+      .map((row) => row.location_title || "Etablissement")
+      .filter(Boolean) as string[];
+    const uniqueTitles = Array.from(new Set(titles));
+    locationsList = uniqueTitles.slice(0, 3);
+    const remaining = uniqueTitles.length - locationsList.length;
+    locationsLabel =
+      uniqueTitles.length === 1
+        ? `Etablissement: ${uniqueTitles[0]}`
+        : `${uniqueTitles.length} etablissements`;
+    if (remaining > 0) {
+      locationsList = [...locationsList, `+${remaining}`];
+    }
   }
 
   await supabaseAdmin
@@ -408,13 +625,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }));
 
     const negatives = reviews
-      .filter((review) => {
-        const insight = asOne(review.review_ai_insights);
-        return (
-          (typeof review.rating === "number" && review.rating <= 2) ||
-          insight?.sentiment === "negative"
-        );
-      })
+      .filter((review) => typeof review.rating === "number" && review.rating <= 2)
       .slice(0, 3)
       .map((review) => ({
         label:
@@ -428,10 +639,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const pdfBytes = await buildPdf({
       title: report.name,
       subtitle: `Periode: ${formatDate(from)} au ${formatDate(to)}`,
-      locationsLabel:
-        report.locations.length > 0
-          ? `Etablissements: ${report.locations.join(", ")}`
-          : "Etablissements: Tous",
+      locationsLabel,
+      locationsList,
       notes: report.notes ?? null,
       kpis: {
         reviewsTotal,
@@ -479,3 +688,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: "Report generation failed" });
   }
 }
+
+// DEV SMOKE TEST (non-exported)
+const _devSmokeTest = async () => {
+  const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
+  const page = doc.addPage([200, 80]);
+  const fontBytes = fs.readFileSync(
+    path.join(process.cwd(), "assets", "fonts", "NotoSans-Regular.ttf")
+  );
+  const font = await doc.embedFont(fontBytes);
+  page.drawText("★★★★★", { x: 10, y: 40, size: 14, font });
+  await doc.save();
+  return true;
+};
