@@ -1,10 +1,11 @@
-import type { IncomingMessage, ServerResponse } from "http";
+import type { VercelRequest, VercelResponse } from "@vercel/node";
 import {
   createSupabaseAdmin,
   getRequiredEnv,
   getUserFromRequest
 } from "../../../server/_shared_dist/google/_utils.js";
 import type { Json } from "../../../server/_shared_dist/database.types.js";
+import { requireUser } from "../../../server/_shared_dist/_auth.js";
 
 type GoogleAccount = {
   name: string;
@@ -209,12 +210,77 @@ export const syncGoogleLocationsForUser = async (
   return { locationsCount };
 };
 
-const handler = async (req: IncomingMessage, res: ServerResponse) => {
+type LocationRow = {
+  id: string;
+  location_resource_name: string;
+  location_title?: string | null;
+};
+
+const fetchActiveLocationIds = async (
+  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
+  userId: string
+) => {
+  const { data } = await supabaseAdmin
+    .from("business_settings")
+    .select("active_location_ids")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const activeIds = Array.isArray(data?.active_location_ids)
+    ? data?.active_location_ids.filter(Boolean)
+    : null;
+  return activeIds && activeIds.length > 0 ? new Set(activeIds) : null;
+};
+
+const handler = async (req: VercelRequest, res: VercelResponse) => {
+  if (req.method === "GET") {
+    try {
+      const auth = await requireUser(req, res);
+      if (!auth) {
+        return;
+      }
+      const { userId, supabaseAdmin } = auth;
+      const activeOnly =
+        req.query?.active_only === "1" ||
+        (Array.isArray(req.query?.active_only) &&
+          req.query.active_only[0] === "1");
+
+      let query = supabaseAdmin
+        .from("google_locations")
+        .select("id, location_resource_name, location_title")
+        .eq("user_id", userId);
+
+      if (activeOnly) {
+        const activeIds = await fetchActiveLocationIds(supabaseAdmin, userId);
+        if (activeIds && activeIds.size > 0) {
+          query = query.in("id", Array.from(activeIds));
+        } else {
+          return res.status(200).json({ ok: true, locations: [] });
+        }
+      }
+
+      const { data, error } = await query.order("location_title", {
+        ascending: true
+      });
+      if (error) {
+        console.error("google locations list failed:", error);
+        return res.status(500).json({ ok: false, error: "Failed to load." });
+      }
+
+      const locations = (data ?? []).map((row: LocationRow) => ({
+        id: row.id,
+        location_resource_name: row.location_resource_name,
+        label: row.location_title ?? null
+      }));
+
+      return res.status(200).json({ ok: true, locations });
+    } catch (error) {
+      console.error("google gbp get locations error:", error);
+      return res.status(500).json({ ok: false, error: "Failed to load." });
+    }
+  }
+
   if (req.method !== "POST") {
-    res.statusCode = 405;
-    res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ ok: false, error: "Method not allowed." }));
-    return;
+    return res.status(405).json({ ok: false, error: "Method not allowed." });
   }
 
   try {
@@ -225,10 +291,7 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
     );
 
     if (!userId) {
-      res.statusCode = 401;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: false, error: "Unauthorized." }));
-      return;
+      return res.status(401).json({ ok: false, error: "Unauthorized." });
     }
 
     const { data: connection, error: connectionError } = await supabaseAdmin
@@ -238,16 +301,10 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       .eq("provider", "google")
       .maybeSingle();
     if (connectionError || !connection) {
-      res.statusCode = 404;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: false, error: "Google not connected." }));
-      return;
+      return res.status(404).json({ ok: false, error: "Google not connected." });
     }
     if (!connection.refresh_token) {
-      res.statusCode = 401;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: false, error: "reauth_required" }));
-      return;
+      return res.status(401).json({ ok: false, error: "reauth_required" });
     }
 
     const { data: existingJob } = await supabaseAdmin
@@ -260,17 +317,12 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
       .maybeSingle();
 
     if (existingJob) {
-      res.statusCode = 200;
-      res.setHeader("Content-Type", "application/json");
-      res.end(
-        JSON.stringify({
-          ok: true,
-          queued: true,
-          job_id: existingJob.id,
-          status: existingJob.status
-        })
-      );
-      return;
+      return res.status(200).json({
+        ok: true,
+        queued: true,
+        job_id: existingJob.id,
+        status: existingJob.status
+      });
     }
 
     const nowIso = new Date().toISOString();
@@ -289,28 +341,23 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
 
     if (jobError || !job) {
       console.error("job_queue insert failed:", jobError);
-      res.statusCode = 500;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: false, error: "Queue failed." }));
-      return;
+      return res.status(500).json({ ok: false, error: "Queue failed." });
     }
 
-    res.statusCode = 200;
-    res.setHeader("Content-Type", "application/json");
-    res.end(
-      JSON.stringify({
-        ok: true,
-        queued: true,
-        job_id: job.id,
-        status: job.status
-      })
-    );
+    return res.status(200).json({
+      ok: true,
+      queued: true,
+      job_id: job.id,
+      status: job.status
+    });
   } catch (error) {
     console.error("google gbp sync error:", error);
-    res.statusCode = 500;
-    res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ ok: false, error: "Sync failed." }));
+    return res.status(500).json({ ok: false, error: "Sync failed." });
   }
 };
 
 export default handler;
+
+// Smoke test:
+// curl -i "https://<app>/api/google/gbp/sync?active_only=1" -H "Authorization: Bearer $JWT"
+// curl -i -X POST "https://<app>/api/google/gbp/sync" -H "Authorization: Bearer $JWT"
