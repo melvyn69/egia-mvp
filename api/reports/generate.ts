@@ -270,14 +270,6 @@ const buildPdf = async (params: {
   drawText(safeText(params.title), 26, true);
   drawText(safeText(params.subtitle), 12);
   drawText(safeText(params.locationsLabel), 11);
-  if (params.locationsList && params.locationsList.length > 0) {
-    drawWrapped(
-      safeText(params.locationsList.join(" • ")),
-      10,
-      contentWidth,
-      2
-    );
-  }
   if (params.notes) {
     drawWrapped(safeText(`Notes: ${params.notes}`), 10, contentWidth, 2);
   }
@@ -474,7 +466,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   let locationsLabel = "Etablissements: Tous";
-  let locationsList: string[] = [];
   if (Array.isArray(report.locations) && report.locations.length > 0) {
     const { data: locationRows } = await supabaseAdmin
       .from("google_locations")
@@ -485,15 +476,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .map((row) => row.location_title || "Etablissement")
       .filter(Boolean) as string[];
     const uniqueTitles = Array.from(new Set(titles));
-    locationsList = uniqueTitles.slice(0, 3);
-    const remaining = uniqueTitles.length - locationsList.length;
     locationsLabel =
       uniqueTitles.length === 1
         ? `Etablissement: ${uniqueTitles[0]}`
         : `${uniqueTitles.length} etablissements`;
-    if (remaining > 0) {
-      locationsList = [...locationsList, `+${remaining}`];
-    }
   }
 
   await supabaseAdmin
@@ -640,7 +626,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       title: report.name,
       subtitle: `Periode: ${formatDate(from)} au ${formatDate(to)}`,
       locationsLabel,
-      locationsList,
       notes: report.notes ?? null,
       kpis: {
         reviewsTotal,
