@@ -1,5 +1,8 @@
-import { createSupabaseAdmin, getRequiredEnv, getUserFromRequest } from "../../../../../_shared_dist/google/_utils.js";
-import { getRequestId, sendError, parseQuery, getParam, logRequest } from "../../../../../_shared_dist/api_utils.js";
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.syncGoogleReviewsForUser = void 0;
+const _utils_js_1 = require("../../../../../_shared_dist/google/_utils.js");
+const api_utils_js_1 = require("../../../../../_shared_dist/api_utils.js");
 const getErrorMessage = (err) => err instanceof Error
     ? err.message
     : typeof err === "string"
@@ -28,8 +31,8 @@ const refreshAccessToken = async (refreshToken) => {
             "Content-Type": "application/x-www-form-urlencoded"
         },
         body: new URLSearchParams({
-            client_id: getRequiredEnv("GOOGLE_CLIENT_ID"),
-            client_secret: getRequiredEnv("GOOGLE_CLIENT_SECRET"),
+            client_id: (0, _utils_js_1.getRequiredEnv)("GOOGLE_CLIENT_ID"),
+            client_secret: (0, _utils_js_1.getRequiredEnv)("GOOGLE_CLIENT_SECRET"),
             grant_type: "refresh_token",
             refresh_token: refreshToken
         })
@@ -116,7 +119,7 @@ const upsertImportStatus = async (supabaseAdmin, userId, locationId, value) => {
         updated_at: new Date().toISOString()
     });
 };
-export const syncGoogleReviewsForUser = async (supabaseAdmin, userId, locationId) => {
+const syncGoogleReviewsForUser = async (supabaseAdmin, userId, locationId) => {
     const { data: connection, error: connectionError } = await supabaseAdmin
         .from("google_connections")
         .select("access_token,refresh_token,expires_at")
@@ -358,24 +361,25 @@ export const syncGoogleReviewsForUser = async (supabaseAdmin, userId, locationId
         locationsFailed
     };
 };
+exports.syncGoogleReviewsForUser = syncGoogleReviewsForUser;
 const handler = async (req, res) => {
-    const requestId = getRequestId(req);
-    logRequest("[gbp/reviews-sync]", {
+    const requestId = (0, api_utils_js_1.getRequestId)(req);
+    (0, api_utils_js_1.logRequest)("[gbp/reviews-sync]", {
         requestId,
         method: req.method ?? "GET",
         route: req.url ?? "/api/google/gbp/reviews/sync"
     });
     if (req.method !== "POST") {
-        return sendError(res, requestId, { code: "BAD_REQUEST", message: "Method not allowed" }, 405);
+        return (0, api_utils_js_1.sendError)(res, requestId, { code: "BAD_REQUEST", message: "Method not allowed" }, 405);
     }
     try {
-        const supabaseAdmin = createSupabaseAdmin();
-        const { userId } = await getUserFromRequest({ headers: req.headers }, supabaseAdmin);
+        const supabaseAdmin = (0, _utils_js_1.createSupabaseAdmin)();
+        const { userId } = await (0, _utils_js_1.getUserFromRequest)({ headers: req.headers }, supabaseAdmin);
         if (!userId) {
-            return sendError(res, requestId, { code: "UNAUTHORIZED", message: "Unauthorized" }, 401);
+            return (0, api_utils_js_1.sendError)(res, requestId, { code: "UNAUTHORIZED", message: "Unauthorized" }, 401);
         }
-        const { params } = parseQuery(req);
-        let locationId = getParam(params, "location_id");
+        const { params } = (0, api_utils_js_1.parseQuery)(req);
+        let locationId = (0, api_utils_js_1.getParam)(params, "location_id");
         if (!locationId) {
             let body = "";
             for await (const chunk of req) {
@@ -391,7 +395,7 @@ const handler = async (req, res) => {
                 }
             }
         }
-        const result = await syncGoogleReviewsForUser(supabaseAdmin, userId, locationId);
+        const result = await (0, exports.syncGoogleReviewsForUser)(supabaseAdmin, userId, locationId);
         return res.status(200).json({
             ok: true,
             requestId,
@@ -403,16 +407,16 @@ const handler = async (req, res) => {
     catch (error) {
         const message = getErrorMessage(error);
         if (message === "reauth_required") {
-            return sendError(res, requestId, { code: "UNAUTHORIZED", message: "reauth_required" }, 401);
+            return (0, api_utils_js_1.sendError)(res, requestId, { code: "UNAUTHORIZED", message: "reauth_required" }, 401);
         }
         if (message === "google_not_connected") {
-            return sendError(res, requestId, { code: "NOT_FOUND", message: "Google not connected" }, 404);
+            return (0, api_utils_js_1.sendError)(res, requestId, { code: "NOT_FOUND", message: "Google not connected" }, 404);
         }
         if (message === "locations_load_failed") {
-            return sendError(res, requestId, { code: "INTERNAL", message: "Failed to load locations" }, 500);
+            return (0, api_utils_js_1.sendError)(res, requestId, { code: "INTERNAL", message: "Failed to load locations" }, 500);
         }
         console.error("google reviews sync error:", error);
-        return sendError(res, requestId, { code: "INTERNAL", message: "Sync failed" }, 500);
+        return (0, api_utils_js_1.sendError)(res, requestId, { code: "INTERNAL", message: "Sync failed" }, 500);
     }
 };
-export default handler;
+exports.default = handler;

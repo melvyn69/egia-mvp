@@ -1,6 +1,9 @@
-import { createSupabaseAdmin, getRequiredEnv, getUserFromRequest } from "../../../../_shared_dist/google/_utils.js";
-import { requireUser } from "../../../../_shared_dist/_auth.js";
-import { getRequestId, sendError, parseQuery, getParam, logRequest } from "../../../../_shared_dist/api_utils.js";
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.syncGoogleLocationsForUser = void 0;
+const _utils_js_1 = require("../../../../_shared_dist/google/_utils.js");
+const _auth_js_1 = require("../../../../_shared_dist/_auth.js");
+const api_utils_js_1 = require("../../../../_shared_dist/api_utils.js");
 const refreshAccessToken = async (refreshToken) => {
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
         method: "POST",
@@ -8,8 +11,8 @@ const refreshAccessToken = async (refreshToken) => {
             "Content-Type": "application/x-www-form-urlencoded"
         },
         body: new URLSearchParams({
-            client_id: getRequiredEnv("GOOGLE_CLIENT_ID"),
-            client_secret: getRequiredEnv("GOOGLE_CLIENT_SECRET"),
+            client_id: (0, _utils_js_1.getRequiredEnv)("GOOGLE_CLIENT_ID"),
+            client_secret: (0, _utils_js_1.getRequiredEnv)("GOOGLE_CLIENT_SECRET"),
             grant_type: "refresh_token",
             refresh_token: refreshToken
         })
@@ -63,7 +66,7 @@ const listLocationsForAccount = async (accessToken, accountName) => {
     } while (pageToken);
     return locations;
 };
-export const syncGoogleLocationsForUser = async (supabaseAdmin, userId) => {
+const syncGoogleLocationsForUser = async (supabaseAdmin, userId) => {
     const { data: connection, error: connectionError } = await supabaseAdmin
         .from("google_connections")
         .select("access_token,refresh_token,expires_at")
@@ -150,6 +153,7 @@ export const syncGoogleLocationsForUser = async (supabaseAdmin, userId) => {
     }
     return { locationsCount };
 };
+exports.syncGoogleLocationsForUser = syncGoogleLocationsForUser;
 const fetchActiveLocationIds = async (supabaseAdmin, userId) => {
     const { data } = await supabaseAdmin
         .from("business_settings")
@@ -162,16 +166,16 @@ const fetchActiveLocationIds = async (supabaseAdmin, userId) => {
     return activeIds && activeIds.length > 0 ? new Set(activeIds) : null;
 };
 const handler = async (req, res) => {
-    const requestId = getRequestId(req);
+    const requestId = (0, api_utils_js_1.getRequestId)(req);
     if (req.method === "GET") {
         try {
-            const auth = await requireUser(req, res);
+            const auth = await (0, _auth_js_1.requireUser)(req, res);
             if (!auth) {
                 return;
             }
             const { userId, supabaseAdmin } = auth;
-            const { params } = parseQuery(req);
-            const activeOnly = getParam(params, "active_only") === "1";
+            const { params } = (0, api_utils_js_1.parseQuery)(req);
+            const activeOnly = (0, api_utils_js_1.getParam)(params, "active_only") === "1";
             let query = supabaseAdmin
                 .from("google_locations")
                 .select("id, location_resource_name, location_title, updated_at")
@@ -187,7 +191,7 @@ const handler = async (req, res) => {
             });
             if (error) {
                 console.error("google locations list failed:", error);
-                return sendError(res, requestId, { code: "INTERNAL", message: "Failed to load locations" }, 500);
+                return (0, api_utils_js_1.sendError)(res, requestId, { code: "INTERNAL", message: "Failed to load locations" }, 500);
             }
             const locations = (data ?? []).map((row) => ({
                 id: row.id,
@@ -195,7 +199,7 @@ const handler = async (req, res) => {
                 location_title: row.location_title ?? null,
                 updated_at: row.updated_at ?? null
             }));
-            logRequest("[gbp/locations]", {
+            (0, api_utils_js_1.logRequest)("[gbp/locations]", {
                 requestId,
                 userId,
                 activeOnly,
@@ -205,17 +209,17 @@ const handler = async (req, res) => {
         }
         catch (error) {
             console.error("google gbp get locations error:", error);
-            return sendError(res, requestId, { code: "INTERNAL", message: "Failed to load locations" }, 500);
+            return (0, api_utils_js_1.sendError)(res, requestId, { code: "INTERNAL", message: "Failed to load locations" }, 500);
         }
     }
     if (req.method !== "POST") {
-        return sendError(res, requestId, { code: "BAD_REQUEST", message: "Method not allowed" }, 405);
+        return (0, api_utils_js_1.sendError)(res, requestId, { code: "BAD_REQUEST", message: "Method not allowed" }, 405);
     }
     try {
-        const supabaseAdmin = createSupabaseAdmin();
-        const { userId } = await getUserFromRequest({ headers: req.headers, url: req.url }, supabaseAdmin);
+        const supabaseAdmin = (0, _utils_js_1.createSupabaseAdmin)();
+        const { userId } = await (0, _utils_js_1.getUserFromRequest)({ headers: req.headers, url: req.url }, supabaseAdmin);
         if (!userId) {
-            return sendError(res, requestId, { code: "UNAUTHORIZED", message: "Unauthorized" }, 401);
+            return (0, api_utils_js_1.sendError)(res, requestId, { code: "UNAUTHORIZED", message: "Unauthorized" }, 401);
         }
         const { data: connection, error: connectionError } = await supabaseAdmin
             .from("google_connections")
@@ -224,10 +228,10 @@ const handler = async (req, res) => {
             .eq("provider", "google")
             .maybeSingle();
         if (connectionError || !connection) {
-            return sendError(res, requestId, { code: "NOT_FOUND", message: "Google not connected" }, 404);
+            return (0, api_utils_js_1.sendError)(res, requestId, { code: "NOT_FOUND", message: "Google not connected" }, 404);
         }
         if (!connection.refresh_token) {
-            return sendError(res, requestId, { code: "UNAUTHORIZED", message: "reauth_required" }, 401);
+            return (0, api_utils_js_1.sendError)(res, requestId, { code: "UNAUTHORIZED", message: "reauth_required" }, 401);
         }
         const { data: existingJob } = await supabaseAdmin
             .from("job_queue")
@@ -238,7 +242,7 @@ const handler = async (req, res) => {
             .order("created_at", { ascending: false })
             .maybeSingle();
         if (existingJob) {
-            logRequest("[gbp/sync]", {
+            (0, api_utils_js_1.logRequest)("[gbp/sync]", {
                 requestId,
                 userId,
                 status: "already_queued",
@@ -267,9 +271,9 @@ const handler = async (req, res) => {
             .single();
         if (jobError || !job) {
             console.error("job_queue insert failed:", jobError);
-            return sendError(res, requestId, { code: "INTERNAL", message: "Queue failed" }, 500);
+            return (0, api_utils_js_1.sendError)(res, requestId, { code: "INTERNAL", message: "Queue failed" }, 500);
         }
-        logRequest("[gbp/sync]", {
+        (0, api_utils_js_1.logRequest)("[gbp/sync]", {
             requestId,
             userId,
             status: "queued",
@@ -285,10 +289,10 @@ const handler = async (req, res) => {
     }
     catch (error) {
         console.error("google gbp sync error:", error);
-        return sendError(res, requestId, { code: "INTERNAL", message: "Sync failed" }, 500);
+        return (0, api_utils_js_1.sendError)(res, requestId, { code: "INTERNAL", message: "Sync failed" }, 500);
     }
 };
-export default handler;
+exports.default = handler;
 // Smoke test:
 // curl -i "https://<app>/api/google/gbp/sync?active_only=1" -H "Authorization: Bearer $JWT"
 // curl -i -X POST "https://<app>/api/google/gbp/sync" -H "Authorization: Bearer $JWT"

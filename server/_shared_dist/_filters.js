@@ -1,3 +1,6 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.parseFilters = void 0;
 const getParam = (value) => {
     if (Array.isArray(value)) {
         return value[0];
@@ -49,4 +52,4 @@ const parseFilters = (query) => {
         reject
     };
 };
-export { parseFilters };
+exports.parseFilters = parseFilters;

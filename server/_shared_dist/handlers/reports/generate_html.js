@@ -1,6 +1,9 @@
-import { requireUser } from "../../../_shared_dist/_auth.js";
-import { getRequestId, logRequest } from "../../../_shared_dist/api_utils.js";
-import { renderPdfFromHtml } from "../../../_shared_dist/pdf_html.js";
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.default = handler;
+const _auth_js_1 = require("../../../_shared_dist/_auth.js");
+const api_utils_js_1 = require("../../../_shared_dist/api_utils.js");
+const pdf_html_js_1 = require("../../../_shared_dist/pdf_html.js");
 const asOne = (value) => Array.isArray(value) ? value[0] ?? null : value ?? null;
 const normalizePreset = (value) => {
     if (value === "last_7_days" ||
@@ -309,22 +312,22 @@ const buildHtml = (params) => {
   </html>
   `;
 };
-export default async function handler(req, res) {
+async function handler(req, res) {
     if (req.method !== "POST") {
         return res.status(405).json({ error: "Method not allowed" });
     }
-    const auth = await requireUser(req, res);
+    const auth = await (0, _auth_js_1.requireUser)(req, res);
     if (!auth) {
         return;
     }
     const { supabaseAdmin, userId } = auth;
-    const requestId = getRequestId(req);
+    const requestId = (0, api_utils_js_1.getRequestId)(req);
     const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
     const reportId = payload?.report_id;
     if (!reportId) {
         return res.status(400).json({ error: "Missing report_id" });
     }
-    logRequest("[reports]", { requestId, reportId, renderMode: "premium" });
+    (0, api_utils_js_1.logRequest)("[reports]", { requestId, reportId, renderMode: "premium" });
     const { data: report, error: reportError } = await supabaseAdmin
         .from("reports")
         .select("id, user_id, name, locations, period_preset, from_date, to_date, notes")
@@ -484,7 +487,7 @@ export default async function handler(req, res) {
             res.setHeader("Content-Type", "text/html; charset=utf-8");
             return res.status(200).send(html);
         }
-        const pdfBytes = await renderPdfFromHtml(html);
+        const pdfBytes = await (0, pdf_html_js_1.renderPdfFromHtml)(html);
         const storagePath = `${userId}/${reportId}/${Date.now()}.pdf`;
         const { error: uploadError } = await supabaseAdmin.storage
             .from("reports")

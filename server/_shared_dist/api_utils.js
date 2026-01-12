@@ -1,17 +1,22 @@
-import { randomUUID } from "crypto";
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.logRequest = exports.getParam = exports.parseQuery = exports.sendError = exports.getRequestId = void 0;
+const crypto_1 = require("crypto");
 const getRequestId = (req) => {
     const header = req.headers["x-vercel-id"] ?? req.headers["x-request-id"];
     if (Array.isArray(header)) {
-        return header[0] ?? randomUUID();
+        return header[0] ?? (0, crypto_1.randomUUID)();
     }
     if (typeof header === "string" && header.length > 0) {
         return header;
     }
-    return randomUUID();
+    return (0, crypto_1.randomUUID)();
 };
+exports.getRequestId = getRequestId;
 const sendError = (res, requestId, error, status = 500) => {
     return res.status(status).json({ ok: false, error, requestId });
 };
+exports.sendError = sendError;
 const parseQuery = (req) => {
     const host = req.headers.host ?? "localhost";
     const base = `https://${host}`;
@@ -33,11 +38,13 @@ const parseQuery = (req) => {
     });
     return { url, params };
 };
+exports.parseQuery = parseQuery;
 const getParam = (params, key) => {
     const value = params[key];
     return Array.isArray(value) ? value[0] : value;
 };
+exports.getParam = getParam;
 const logRequest = (label, payload) => {
     console.log(label, payload);
 };
-export { getRequestId, sendError, parseQuery, getParam, logRequest };
+exports.logRequest = logRequest;

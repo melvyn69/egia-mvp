@@ -1,7 +1,10 @@
-import { createClient } from "@supabase/supabase-js";
-import { syncGoogleLocationsForUser } from "../../google/gbp/sync.js";
-import { syncGoogleReviewsForUser } from "../../google/gbp/reviews/sync.js";
-import { getRequestId, sendError, logRequest } from "../../../../_shared_dist/api_utils.js";
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.default = handler;
+const supabase_js_1 = require("@supabase/supabase-js");
+const sync_js_1 = require("../../google/gbp/sync.js");
+const sync_js_2 = require("../../google/gbp/reviews/sync.js");
+const api_utils_js_1 = require("../../../../_shared_dist/api_utils.js");
 const CURSOR_KEY = "google_sync_replies_cursor_v1";
 const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000;
 const getEnv = (keys) => {
@@ -35,7 +38,7 @@ const getMissingEnv = () => {
         missing.push("CRON_SECRET");
     return missing;
 };
-const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+const supabaseAdmin = (0, supabase_js_1.createClient)(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false }
 });
 const loadCursor = async () => {
@@ -168,8 +171,8 @@ const processJobQueue = async () => {
         inBatchUsers.add(job.user_id);
         try {
             if (job.type === "google_gbp_sync") {
-                await syncGoogleLocationsForUser(supabaseAdmin, job.user_id);
-                await syncGoogleReviewsForUser(supabaseAdmin, job.user_id, null);
+                await (0, sync_js_1.syncGoogleLocationsForUser)(supabaseAdmin, job.user_id);
+                await (0, sync_js_2.syncGoogleReviewsForUser)(supabaseAdmin, job.user_id, null);
                 await updateJob(job.id, {
                     status: "done",
                     attempts,
@@ -200,31 +203,31 @@ const processJobQueue = async () => {
     }
     return { processed, failed, skipped };
 };
-export default async function handler(req, res) {
-    const requestId = getRequestId(req);
+async function handler(req, res) {
+    const requestId = (0, api_utils_js_1.getRequestId)(req);
     const start = Date.now();
     const MAX_MS = Number(process.env.CRON_MAX_MS ?? 24000);
     const MAX_REVIEWS = Number(process.env.CRON_MAX_REVIEWS ?? 80);
     const timeUp = () => Date.now() - start > MAX_MS;
     const method = req.method ?? "GET";
     res.setHeader("Cache-Control", "no-store");
-    logRequest("[cron]", {
+    (0, api_utils_js_1.logRequest)("[cron]", {
         requestId,
         method,
         route: req.url ?? "/api/cron/google/sync-replies"
     });
     if (method !== "POST" && method !== "GET") {
-        return sendError(res, requestId, { code: "BAD_REQUEST", message: "Method not allowed" }, 405);
+        return (0, api_utils_js_1.sendError)(res, requestId, { code: "BAD_REQUEST", message: "Method not allowed" }, 405);
     }
     const missingEnv = getMissingEnv();
     if (missingEnv.length) {
         console.error("[sync]", requestId, "missing env:", missingEnv);
-        return sendError(res, requestId, { code: "INTERNAL", message: `Missing env: ${missingEnv.join(", ")}` }, 500);
+        return (0, api_utils_js_1.sendError)(res, requestId, { code: "INTERNAL", message: `Missing env: ${missingEnv.join(", ")}` }, 500);
     }
     const { expected, provided } = getCronSecrets(req);
     if (!expected || !provided || provided !== expected) {
         console.error("[sync]", requestId, "invalid cron secret");
-        return sendError(res, requestId, { code: "FORBIDDEN", message: "Unauthorized" }, 403);
+        return (0, api_utils_js_1.sendError)(res, requestId, { code: "FORBIDDEN", message: "Unauthorized" }, 403);
     }
     // GET = healthcheck (évite que cron-job.org ou un navigateur te fasse un sync complet)
     if (method === "GET") {
@@ -247,7 +250,7 @@ export default async function handler(req, res) {
             .select("user_id, refresh_token");
         if (connectionsError) {
             console.error("[sync]", requestId, "connections fetch failed", connectionsError);
-            return sendError(res, requestId, { code: "INTERNAL", message: "Failed to load connections" }, 500);
+            return (0, api_utils_js_1.sendError)(res, requestId, { code: "INTERNAL", message: "Failed to load connections" }, 500);
         }
         const refreshTokenByUser = new Map();
         (connections ?? []).forEach((conn) => {
@@ -263,7 +266,7 @@ export default async function handler(req, res) {
             .limit(1000);
         if (locationsError) {
             console.error("[sync]", requestId, "locations fetch failed", locationsError);
-            return sendError(res, requestId, { code: "INTERNAL", message: "Failed to load locations" }, 500);
+            return (0, api_utils_js_1.sendError)(res, requestId, { code: "INTERNAL", message: "Failed to load locations" }, 500);
         }
         const accessTokenByUser = new Map();
         processedUsers = refreshTokenByUser.size;
@@ -498,6 +501,6 @@ export default async function handler(req, res) {
     catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
         console.error("[sync]", requestId, "fatal error", message);
-        return sendError(res, requestId, { code: "INTERNAL", message }, 500);
+        return (0, api_utils_js_1.sendError)(res, requestId, { code: "INTERNAL", message }, 500);
     }
 }

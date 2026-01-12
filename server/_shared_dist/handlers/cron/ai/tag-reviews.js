@@ -1,5 +1,8 @@
-import { createClient } from "@supabase/supabase-js";
-import { getRequestId, sendError, logRequest } from "../../../../_shared_dist/api_utils.js";
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.default = handler;
+const supabase_js_1 = require("@supabase/supabase-js");
+const api_utils_js_1 = require("../../../../_shared_dist/api_utils.js");
 const CURSOR_KEY = "ai_tag_cursor_v2";
 const getEnv = (keys) => {
     for (const key of keys) {
@@ -23,7 +26,7 @@ const getMissingEnv = () => {
         missing.push("CRON_SECRET");
     return missing;
 };
-const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+const supabaseAdmin = (0, supabase_js_1.createClient)(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false }
 });
 const loadCursor = async () => {
@@ -290,26 +293,26 @@ const analyzeReview = async (review, requestId, debugInfo) => {
         throw error;
     }
 };
-export default async function handler(req, res) {
-    const requestId = getRequestId(req);
+async function handler(req, res) {
+    const requestId = (0, api_utils_js_1.getRequestId)(req);
     const start = Date.now();
     const MAX_MS = Number(process.env.CRON_MAX_MS ?? 24000);
     const MAX_REVIEWS = Number(process.env.CRON_MAX_REVIEWS ?? 40);
     const timeUp = () => Date.now() - start > MAX_MS;
     const method = req.method ?? "GET";
     res.setHeader("Cache-Control", "no-store");
-    logRequest("[ai]", {
+    (0, api_utils_js_1.logRequest)("[ai]", {
         requestId,
         method,
         route: req.url ?? "/api/cron/ai/tag-reviews"
     });
     if (method !== "POST" && method !== "GET") {
-        return sendError(res, requestId, { code: "BAD_REQUEST", message: "Method not allowed" }, 405);
+        return (0, api_utils_js_1.sendError)(res, requestId, { code: "BAD_REQUEST", message: "Method not allowed" }, 405);
     }
     const missingEnv = getMissingEnv();
     if (missingEnv.length) {
         console.error("[ai]", requestId, "missing env:", missingEnv);
-        return sendError(res, requestId, {
+        return (0, api_utils_js_1.sendError)(res, requestId, {
             code: "INTERNAL",
             message: `Missing env: ${missingEnv.join(", ")}`
         }, 500);
@@ -317,7 +320,7 @@ export default async function handler(req, res) {
     const { expected, provided } = getCronSecrets(req);
     if (!expected || !provided || provided !== expected) {
         console.error("[ai]", requestId, "invalid cron secret");
-        return sendError(res, requestId, { code: "FORBIDDEN", message: "Unauthorized" }, 403);
+        return (0, api_utils_js_1.sendError)(res, requestId, { code: "FORBIDDEN", message: "Unauthorized" }, 403);
     }
     if (method === "GET") {
         return res.status(200).json({
@@ -376,7 +379,7 @@ export default async function handler(req, res) {
         });
         if (candidatesError) {
             console.error("[ai-tag]", requestId, "candidates rpc failed", candidatesError);
-            return sendError(res, requestId, { code: "INTERNAL", message: "Failed to load candidates" }, 500);
+            return (0, api_utils_js_1.sendError)(res, requestId, { code: "INTERNAL", message: "Failed to load candidates" }, 500);
         }
         const candidateRows = candidates ?? [];
         candidatesFound = candidateRows.length;
@@ -706,6 +709,6 @@ export default async function handler(req, res) {
                 await releaseLock(userId, locationId);
             }
         }
-        return sendError(res, requestId, { code: "INTERNAL", message }, 500);
+        return (0, api_utils_js_1.sendError)(res, requestId, { code: "INTERNAL", message }, 500);
     }
 }

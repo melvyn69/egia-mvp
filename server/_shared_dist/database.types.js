@@ -1,4 +1,7 @@
-export const Constants = {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Constants = void 0;
+exports.Constants = {
     public: {
         Enums: {
             brand_voice_language_level: ["tutoiement", "vouvoiement"],

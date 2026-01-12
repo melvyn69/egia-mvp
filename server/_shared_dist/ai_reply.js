@@ -1,3 +1,6 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.generateAiReply = void 0;
 const DEFAULT_REPLY = "Merci pour votre avis.";
 const toneMap = {
     professional: "professionnel",
@@ -14,7 +17,7 @@ const applyForbiddenWords = (text, forbidden) => {
         return acc.replace(new RegExp(escaped, "gi"), "").trim();
     }, text);
 };
-export const generateAiReply = async ({ reviewText, rating, brandVoice, overrideTone, businessTone, signature, insights, openaiApiKey, model, requestId }) => {
+const generateAiReply = async ({ reviewText, rating, brandVoice, overrideTone, businessTone, signature, insights, openaiApiKey, model, requestId }) => {
     if (!openaiApiKey) {
         return DEFAULT_REPLY;
     }
@@ -100,3 +103,4 @@ export const generateAiReply = async ({ reviewText, rating, brandVoice, override
         clearTimeout(timeout);
     }
 };
+exports.generateAiReply = generateAiReply;

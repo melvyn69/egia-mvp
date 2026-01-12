@@ -1,3 +1,6 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.resolveDateRange = void 0;
 const getTzOffsetMinutes = (date, timeZone) => {
     const formatter = new Intl.DateTimeFormat("en-US", {
         timeZone,
@@ -123,4 +126,4 @@ const resolveDateRange = (preset, from, to, timeZone) => {
     }
     return { from: fromDate.toISOString(), to: toDate.toISOString() };
 };
-export { resolveDateRange };
+exports.resolveDateRange = resolveDateRange;

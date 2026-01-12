@@ -1,9 +1,15 @@
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import fontkit from "@pdf-lib/fontkit";
-import fs from "fs";
-import path from "path";
-import { requireUser } from "../../../_shared_dist/_auth.js";
-import { getRequestId, logRequest } from "../../../_shared_dist/api_utils.js";
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.default = handler;
+const pdf_lib_1 = require("pdf-lib");
+const fontkit_1 = __importDefault(require("@pdf-lib/fontkit"));
+const fs_1 = __importDefault(require("fs"));
+const path_1 = __importDefault(require("path"));
+const _auth_js_1 = require("../../../_shared_dist/_auth.js");
+const api_utils_js_1 = require("../../../_shared_dist/api_utils.js");
 const asOne = (value) => Array.isArray(value) ? value[0] ?? null : value ?? null;
 const normalizePreset = (value) => {
     if (value === "last_7_days" ||
@@ -69,20 +75,20 @@ const cleanReviewText = (value) => value
     .replace(/\s+/g, " ")
     .trim();
 const buildPdf = async (params) => {
-    const doc = await PDFDocument.create();
-    doc.registerFontkit(fontkit);
+    const doc = await pdf_lib_1.PDFDocument.create();
+    doc.registerFontkit(fontkit_1.default);
     let page = doc.addPage([595.28, 841.89]);
-    const font = await doc.embedFont(StandardFonts.Helvetica);
-    const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
-    const unicodeFontPath = path.join(process.cwd(), "assets", "fonts", "NotoSans-Regular.ttf");
-    const unicodeBoldPath = path.join(process.cwd(), "assets", "fonts", "NotoSans-Bold.ttf");
+    const font = await doc.embedFont(pdf_lib_1.StandardFonts.Helvetica);
+    const fontBold = await doc.embedFont(pdf_lib_1.StandardFonts.HelveticaBold);
+    const unicodeFontPath = path_1.default.join(process.cwd(), "assets", "fonts", "NotoSans-Regular.ttf");
+    const unicodeBoldPath = path_1.default.join(process.cwd(), "assets", "fonts", "NotoSans-Bold.ttf");
     let unicodeFont = null;
     let unicodeBoldFont = null;
     try {
-        const fontBytes = fs.readFileSync(unicodeFontPath);
+        const fontBytes = fs_1.default.readFileSync(unicodeFontPath);
         unicodeFont = await doc.embedFont(fontBytes);
         try {
-            const boldBytes = fs.readFileSync(unicodeBoldPath);
+            const boldBytes = fs_1.default.readFileSync(unicodeBoldPath);
             unicodeBoldFont = await doc.embedFont(boldBytes);
         }
         catch {
@@ -130,7 +136,7 @@ const buildPdf = async (params) => {
             start: { x: margin, y },
             end: { x: pageWidth - margin, y },
             thickness: 1,
-            color: rgb(0.85, 0.87, 0.9)
+            color: (0, pdf_lib_1.rgb)(0.85, 0.87, 0.9)
         });
         y -= 14;
     };
@@ -184,7 +190,7 @@ const buildPdf = async (params) => {
             y,
             size,
             font: bold ? activeBoldFont : activeFont,
-            color: rgb(0.08, 0.1, 0.12)
+            color: (0, pdf_lib_1.rgb)(0.08, 0.1, 0.12)
         });
         y -= size + 6;
     };
@@ -197,7 +203,7 @@ const buildPdf = async (params) => {
                 y,
                 size,
                 font: fontRef,
-                color: rgb(0.08, 0.1, 0.12)
+                color: (0, pdf_lib_1.rgb)(0.08, 0.1, 0.12)
             });
             y -= size + 4;
         }
@@ -212,7 +218,7 @@ const buildPdf = async (params) => {
             y,
             size: brandSize,
             font: activeBoldFont,
-            color: rgb(0.2, 0.26, 0.3)
+            color: (0, pdf_lib_1.rgb)(0.2, 0.26, 0.3)
         });
         y -= brandSize + 6;
         drawText(safeText(params.title), titleSize, true);
@@ -240,7 +246,7 @@ const buildPdf = async (params) => {
         const fullStars = Math.round(safeRating);
         const gap = 4;
         for (let i = 0; i < 5; i += 1) {
-            const fill = i < fullStars ? rgb(0.98, 0.77, 0.2) : rgb(0.86, 0.88, 0.9);
+            const fill = i < fullStars ? (0, pdf_lib_1.rgb)(0.98, 0.77, 0.2) : (0, pdf_lib_1.rgb)(0.86, 0.88, 0.9);
             page.drawSvgPath(STAR_PATH, {
                 x: x + i * (size + gap),
                 y: yBase,
@@ -254,7 +260,7 @@ const buildPdf = async (params) => {
             y: yBase + 1,
             size: 10,
             font: activeBoldFont,
-            color: rgb(0.2, 0.25, 0.3)
+            color: (0, pdf_lib_1.rgb)(0.2, 0.25, 0.3)
         });
     };
     const drawReviewItem = (item) => {
@@ -281,8 +287,8 @@ const buildPdf = async (params) => {
         y: y - cardHeight + 18,
         width: contentWidth,
         height: cardHeight,
-        color: rgb(0.96, 0.97, 0.99),
-        borderColor: rgb(0.9, 0.91, 0.94),
+        color: (0, pdf_lib_1.rgb)(0.96, 0.97, 0.99),
+        borderColor: (0, pdf_lib_1.rgb)(0.9, 0.91, 0.94),
         borderWidth: 1
     });
     const cardTop = y;
@@ -294,14 +300,14 @@ const buildPdf = async (params) => {
         y: cardTitleY,
         size: 12,
         font: activeBoldFont,
-        color: rgb(0.1, 0.12, 0.15)
+        color: (0, pdf_lib_1.rgb)(0.1, 0.12, 0.15)
     });
     page.drawText("Note moyenne", {
         x: rightX,
         y: cardTitleY - 6,
         size: 12,
         font: activeBoldFont,
-        color: rgb(0.1, 0.12, 0.15)
+        color: (0, pdf_lib_1.rgb)(0.1, 0.12, 0.15)
     });
     const kpiLineY = cardTitleY - 20;
     page.drawText("Volume avis", {
@@ -309,14 +315,14 @@ const buildPdf = async (params) => {
         y: kpiLineY,
         size: 10,
         font: activeFont,
-        color: rgb(0.35, 0.4, 0.45)
+        color: (0, pdf_lib_1.rgb)(0.35, 0.4, 0.45)
     });
     page.drawText(String(params.kpis.reviewsTotal), {
         x: leftX,
         y: kpiLineY - 14,
         size: 18,
         font: activeBoldFont,
-        color: rgb(0.08, 0.1, 0.12)
+        color: (0, pdf_lib_1.rgb)(0.08, 0.1, 0.12)
     });
     const responseY = kpiLineY - 36;
     page.drawText("Taux de réponse", {
@@ -324,14 +330,14 @@ const buildPdf = async (params) => {
         y: responseY,
         size: 10,
         font: activeFont,
-        color: rgb(0.35, 0.4, 0.45)
+        color: (0, pdf_lib_1.rgb)(0.35, 0.4, 0.45)
     });
     page.drawText(formatRatio(params.kpis.responseRate), {
         x: leftX,
         y: responseY - 14,
         size: 14,
         font: activeBoldFont,
-        color: rgb(0.08, 0.1, 0.12)
+        color: (0, pdf_lib_1.rgb)(0.08, 0.1, 0.12)
     });
     const sentimentY = responseY - 36;
     page.drawText("Sentiment positif", {
@@ -339,14 +345,14 @@ const buildPdf = async (params) => {
         y: sentimentY,
         size: 10,
         font: activeFont,
-        color: rgb(0.35, 0.4, 0.45)
+        color: (0, pdf_lib_1.rgb)(0.35, 0.4, 0.45)
     });
     page.drawText(formatPercent(params.kpis.sentimentPositive), {
         x: leftX,
         y: sentimentY - 14,
         size: 14,
         font: activeBoldFont,
-        color: rgb(0.08, 0.1, 0.12)
+        color: (0, pdf_lib_1.rgb)(0.08, 0.1, 0.12)
     });
     const ratingY = cardTitleY - 30;
     renderStars(rightX, ratingY, params.kpis.avgRating, 12);
@@ -375,7 +381,7 @@ const buildPdf = async (params) => {
                 y: currentY,
                 size: 11,
                 font: activeFont,
-                color: rgb(0.12, 0.14, 0.18)
+                color: (0, pdf_lib_1.rgb)(0.12, 0.14, 0.18)
             });
             currentY -= 14;
         });
@@ -410,34 +416,34 @@ const buildPdf = async (params) => {
             y: 30,
             size: 9,
             font: activeFont,
-            color: rgb(0.4, 0.45, 0.5)
+            color: (0, pdf_lib_1.rgb)(0.4, 0.45, 0.5)
         });
         p.drawText(pageNumber, {
             x: pageWidth - margin - activeFont.widthOfTextAtSize(pageNumber, 9),
             y: 30,
             size: 9,
             font: activeFont,
-            color: rgb(0.4, 0.45, 0.5)
+            color: (0, pdf_lib_1.rgb)(0.4, 0.45, 0.5)
         });
     });
     return doc.save();
 };
-export default async function handler(req, res) {
+async function handler(req, res) {
     if (req.method !== "POST") {
         return res.status(405).json({ error: "Method not allowed" });
     }
-    const auth = await requireUser(req, res);
+    const auth = await (0, _auth_js_1.requireUser)(req, res);
     if (!auth) {
         return;
     }
     const { supabaseAdmin, userId } = auth;
-    const requestId = getRequestId(req);
+    const requestId = (0, api_utils_js_1.getRequestId)(req);
     const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
     const reportId = payload?.report_id;
     if (!reportId) {
         return res.status(400).json({ error: "Missing report_id" });
     }
-    logRequest("[reports]", { requestId, reportId, renderMode: "classic" });
+    (0, api_utils_js_1.logRequest)("[reports]", { requestId, reportId, renderMode: "classic" });
     const { data: report, error: reportError } = await supabaseAdmin
         .from("reports")
         .select("id, user_id, name, locations, period_preset, from_date, to_date, timezone, notes")
@@ -625,10 +631,10 @@ export default async function handler(req, res) {
 }
 // DEV SMOKE TEST (non-exported)
 const devSmokeTest = async () => {
-    const doc = await PDFDocument.create();
-    doc.registerFontkit(fontkit);
+    const doc = await pdf_lib_1.PDFDocument.create();
+    doc.registerFontkit(fontkit_1.default);
     const page = doc.addPage([200, 80]);
-    const fontBytes = fs.readFileSync(path.join(process.cwd(), "assets", "fonts", "NotoSans-Regular.ttf"));
+    const fontBytes = fs_1.default.readFileSync(path_1.default.join(process.cwd(), "assets", "fonts", "NotoSans-Regular.ttf"));
     const font = await doc.embedFont(fontBytes);
     page.drawText("★★★★★", { x: 10, y: 40, size: 14, font });
     await doc.save();
