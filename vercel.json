@@ -1,12 +1,11 @@
 {
   "version": 2,
   "functions": {
-    "api/**/*.ts": {
-      "runtime": "nodejs18.x"
-    }
+    "api/**/*.ts": { "runtime": "@vercel/node@5.3.11" }
   },
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/(.*)", "destination": "/index.html" }
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/api/(.*)", "dest": "/api/$1" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
