@@ -19,9 +19,15 @@ type ReportsProps = {
 
 type ReportRow = Database["public"]["Tables"]["reports"]["Row"];
 
-type Preset = "last_7_days" | "last_30_days" | "this_month" | "last_month" | "custom";
-
-const defaultTimezone = "Europe/Paris";
+type Preset =
+  | "last_7_days"
+  | "last_30_days"
+  | "this_month"
+  | "last_month"
+  | "last_year"
+  | "this_year"
+  | "all_time"
+  | "custom";
 
 const Reports = ({ session, locations }: ReportsProps) => {
   const supabaseClient = supabase;
@@ -31,7 +37,6 @@ const Reports = ({ session, locations }: ReportsProps) => {
   const [preset, setPreset] = useState<Preset>("last_30_days");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [timezone, setTimezone] = useState(defaultTimezone);
   const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +75,6 @@ const Reports = ({ session, locations }: ReportsProps) => {
     setPreset("last_30_days");
     setFrom("");
     setTo("");
-    setTimezone(defaultTimezone);
     setSelectedLocations([]);
     setEditingId(null);
   };
@@ -82,7 +86,6 @@ const Reports = ({ session, locations }: ReportsProps) => {
     setPreset((report.period_preset as Preset) ?? "last_30_days");
     setFrom(report.from_date ? report.from_date.slice(0, 10) : "");
     setTo(report.to_date ? report.to_date.slice(0, 10) : "");
-    setTimezone(report.timezone ?? defaultTimezone);
     setSelectedLocations(report.locations ?? []);
   };
 
@@ -109,7 +112,6 @@ const Reports = ({ session, locations }: ReportsProps) => {
       period_preset: preset,
       from_date: preset === "custom" && from ? new Date(from).toISOString() : null,
       to_date: preset === "custom" && to ? new Date(to).toISOString() : null,
-      timezone,
       status: "draft",
       notes: notes.trim() || null,
       updated_at: new Date().toISOString()
@@ -241,17 +243,11 @@ const Reports = ({ session, locations }: ReportsProps) => {
                 <option value="last_30_days">30 derniers jours</option>
                 <option value="this_month">Ce mois</option>
                 <option value="last_month">Mois précédent</option>
+                <option value="last_year">Année dernière</option>
+                <option value="this_year">Cette année</option>
+                <option value="all_time">Depuis toujours</option>
                 <option value="custom">Personnalisé</option>
               </select>
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">Timezone</label>
-              <input
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                value={timezone}
-                onChange={(event) => setTimezone(event.target.value)}
-                placeholder="Europe/Paris"
-              />
             </div>
           </div>
           {preset === "custom" && (

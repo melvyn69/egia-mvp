@@ -5,7 +5,15 @@ import fs from "fs";
 import path from "path";
 import { requireUser } from "../../server/_shared_dist/_auth.js";
 
-type ReportPreset = "last_7_days" | "last_30_days" | "custom" | "this_month" | "last_month";
+type ReportPreset =
+  | "last_7_days"
+  | "last_30_days"
+  | "custom"
+  | "this_month"
+  | "last_month"
+  | "last_year"
+  | "this_year"
+  | "all_time";
 
 type ReviewRow = {
   id: string;
@@ -34,14 +42,21 @@ const normalizePreset = (value: unknown): ReportPreset => {
     value === "last_30_days" ||
     value === "custom" ||
     value === "this_month" ||
-    value === "last_month"
+    value === "last_month" ||
+    value === "last_year" ||
+    value === "this_year" ||
+    value === "all_time"
   ) {
     return value;
   }
   return "last_30_days";
 };
 
-const getRange = (preset: ReportPreset, from?: string | null, to?: string | null) => {
+const getRange = (
+  preset: ReportPreset,
+  from?: string | null,
+  to?: string | null
+) => {
   const now = new Date();
   if (preset === "custom" && from && to) {
     return { from: new Date(from), to: new Date(to) };
@@ -65,12 +80,25 @@ const getRange = (preset: ReportPreset, from?: string | null, to?: string | null
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
     return { from: start, to: now };
   }
+  if (preset === "last_year") {
+    const start = new Date(now.getFullYear() - 1, 0, 1);
+    const end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+    return { from: start, to: end };
+  }
+  if (preset === "this_year") {
+    const start = new Date(now.getFullYear(), 0, 1);
+    return { from: start, to: now };
+  }
+  if (preset === "all_time") {
+    return { from: null, to: null };
+  }
   const start = new Date(now);
   start.setDate(start.getDate() - 29);
   return { from: start, to: now };
 };
 
-const formatDate = (value: Date) => value.toISOString().slice(0, 10);
+const formatDate = (value: Date | null) =>
+  value ? value.toISOString().slice(0, 10) : "—";
 
 const formatPercent = (value: number | null) =>
   value === null ? "—" : `${Math.round(value)}%`;
@@ -84,10 +112,11 @@ const formatRatio = (value: number | null) =>
 const normalizeLocationTitle = (value: string) =>
   value.replace(/\s*-\s*/g, " - ").replace(/\s{2,}/g, " ").trim();
 
-const stripTranslatedByGoogle = (value: string) =>
+const cleanReviewText = (value: string) =>
   value
-    .replace(/\(Translated by Google\)\s*/gi, "")
-    .replace(/\(Traduit par Google\)\s*/gi, "")
+    .replace(/\(Translated by Google\)/gi, "")
+    .replace(/\(Traduit par Google\)/gi, "")
+    .replace(/\s+/g, " ")
     .trim();
 
 const buildPdf = async (params: {
@@ -201,26 +230,33 @@ const buildPdf = async (params: {
     const words = value.split(/\s+/).filter(Boolean);
     const lines: string[] = [];
     let current = "";
-    let truncated = false;
-    for (let i = 0; i < words.length; i += 1) {
-      const word = words[i];
+    let index = 0;
+    while (index < words.length) {
+      const word = words[index];
       const next = current ? `${current} ${word}` : word;
       if (fontRef.widthOfTextAtSize(next, size) <= maxWidth) {
         current = next;
-      } else {
-        if (current) {
-          lines.push(finalizeLine(current));
-        }
-        current = word;
+        index += 1;
+        continue;
       }
+      if (current) {
+        lines.push(finalizeLine(current));
+        current = "";
+        if (lines.length === maxLines) {
+          break;
+        }
+        continue;
+      }
+      lines.push(finalizeLine(word));
+      index += 1;
       if (lines.length === maxLines) {
-        truncated = i < words.length - 1 || current.length > 0;
         break;
       }
     }
     if (lines.length < maxLines && current) {
       lines.push(finalizeLine(current));
     }
+    const truncated = index < words.length;
     if (truncated && lines.length > 0) {
       const lastIndex = lines.length - 1;
       lines[lastIndex] = `${lines[lastIndex].replace(/…$/, "")}…`;
@@ -261,9 +297,18 @@ const buildPdf = async (params: {
   };
 
   const drawHeader = (compact: boolean) => {
+    const brandSize = compact ? 9 : 10;
     const titleSize = compact ? 16 : 26;
     const subtitleSize = compact ? 10 : 12;
     const locationSize = compact ? 9 : 11;
+    page.drawText("EGIA", {
+      x: margin,
+      y,
+      size: brandSize,
+      font: activeBoldFont,
+      color: rgb(0.2, 0.26, 0.3)
+    });
+    y -= brandSize + 6;
     drawText(safeText(params.title), titleSize, true);
     drawText(safeText(params.subtitle), subtitleSize);
     drawText(safeText(params.locationsLabel), locationSize);
@@ -316,12 +361,23 @@ const buildPdf = async (params: {
     });
   };
 
-  const drawReviewItem = (item: { label: string; date: string; rating: number | null }) => {
+  const drawReviewItem = (item: {
+    label: string;
+    date: string;
+    rating: number | null;
+    author?: string | null;
+  }) => {
     ensureSpace(140);
     const ratingLabel = formatRating(item.rating);
-    const line1 = `★ ${ratingLabel} — ${item.date}`;
+    const line1 = item.author
+      ? `★ ${ratingLabel} — ${item.date} · ${item.author}`
+      : `★ ${ratingLabel} — ${item.date}`;
     drawText(safeText(line1), 11, true);
-    const cleaned = stripTranslatedByGoogle(item.label);
+    const cleaned = cleanReviewText(item.label);
+    if (!cleaned) {
+      y -= 2;
+      return;
+    }
     drawWrapped(safeText(cleaned), 10, contentWidth, 3);
     y -= 4;
   };
@@ -329,7 +385,7 @@ const buildPdf = async (params: {
   drawHeader(false);
 
   ensureSpace(200);
-  const cardHeight = 92;
+  const cardHeight = 108;
   page.drawRectangle({
     x: margin,
     y: y - cardHeight + 18,
@@ -372,7 +428,7 @@ const buildPdf = async (params: {
     font: activeBoldFont,
     color: rgb(0.08, 0.1, 0.12)
   });
-  const responseY = kpiLineY - 40;
+  const responseY = kpiLineY - 36;
   page.drawText("Taux de réponse", {
     x: leftX,
     y: responseY,
@@ -402,7 +458,7 @@ const buildPdf = async (params: {
     font: activeBoldFont,
     color: rgb(0.08, 0.1, 0.12)
   });
-  const ratingY = cardTitleY - 26;
+  const ratingY = cardTitleY - 28;
   renderStars(rightX, ratingY, params.kpis.avgRating, 12);
   y = cardTop - cardHeight - 12;
   drawDivider();
@@ -546,6 +602,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const preset = normalizePreset(report.period_preset ?? "last_30_days");
     const { from, to } = getRange(preset, report.from_date, report.to_date);
+    const periodLabel =
+      preset === "all_time"
+        ? "Période: Depuis toujours"
+        : `Période: ${formatDate(from)} au ${formatDate(to)}`;
 
     let query = supabaseAdmin
       .from("google_reviews")
@@ -663,7 +723,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           review.author_name ||
           "Avis positif",
         date: review.create_time ? review.create_time.slice(0, 10) : "—",
-        rating: review.rating
+        rating: review.rating,
+        author: review.author_name ?? null
       }));
 
     const negatives = reviews
@@ -675,12 +736,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           review.author_name ||
           "Avis négatif",
         date: review.create_time ? review.create_time.slice(0, 10) : "—",
-        rating: review.rating
+        rating: review.rating,
+        author: review.author_name ?? null
       }));
 
     const pdfBytes = await buildPdf({
       title: report.name,
-      subtitle: `Période: ${formatDate(from)} au ${formatDate(to)}`,
+      subtitle: periodLabel,
       locationsLabel,
       notes: report.notes ?? null,
       kpis: {
