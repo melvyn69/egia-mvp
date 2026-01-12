@@ -76,10 +76,19 @@ const formatPercent = (value: number | null) =>
   value === null ? "—" : `${Math.round(value)}%`;
 
 const formatRating = (value: number | null) =>
-  value === null ? "—" : value.toFixed(1);
+  value === null ? "—" : value.toFixed(1).replace(".", ",");
 
 const formatRatio = (value: number | null) =>
   value === null ? "—" : `${Math.round(value * 100)}%`;
+
+const normalizeLocationTitle = (value: string) =>
+  value.replace(/\s*-\s*/g, " - ").replace(/\s{2,}/g, " ").trim();
+
+const stripTranslatedByGoogle = (value: string) =>
+  value
+    .replace(/\(Translated by Google\)\s*/gi, "")
+    .replace(/\(Traduit par Google\)\s*/gi, "")
+    .trim();
 
 const buildPdf = async (params: {
   title: string;
@@ -102,7 +111,7 @@ const buildPdf = async (params: {
 }) => {
   const doc = await PDFDocument.create();
   doc.registerFontkit(fontkit);
-  const page = doc.addPage([595.28, 841.89]);
+  let page = doc.addPage([595.28, 841.89]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
   const unicodeFontPath = path.join(
@@ -111,12 +120,23 @@ const buildPdf = async (params: {
     "fonts",
     "NotoSans-Regular.ttf"
   );
+  const unicodeBoldPath = path.join(
+    process.cwd(),
+    "assets",
+    "fonts",
+    "NotoSans-Bold.ttf"
+  );
   let unicodeFont: Awaited<ReturnType<typeof doc.embedFont>> | null = null;
   let unicodeBoldFont: Awaited<ReturnType<typeof doc.embedFont>> | null = null;
   try {
     const fontBytes = fs.readFileSync(unicodeFontPath);
     unicodeFont = await doc.embedFont(fontBytes);
-    unicodeBoldFont = await doc.embedFont(fontBytes);
+    try {
+      const boldBytes = fs.readFileSync(unicodeBoldPath);
+      unicodeBoldFont = await doc.embedFont(boldBytes);
+    } catch {
+      unicodeBoldFont = unicodeFont;
+    }
   } catch (error) {
     console.warn("[reports] unicode font unavailable", error);
   }
@@ -124,14 +144,7 @@ const buildPdf = async (params: {
   const canRenderStars = () => {
     if (!unicodeFont) return false;
     try {
-      page.drawText("★★★★★", {
-        x: 0,
-        y: 0,
-        size: 1,
-        font: unicodeFont,
-        color: rgb(0, 0, 0),
-        opacity: 0
-      });
+      unicodeFont.widthOfTextAtSize("★★★★★", 10);
       return true;
     } catch {
       return false;
@@ -158,6 +171,7 @@ const buildPdf = async (params: {
   const margin = 50;
   const pageWidth = 595.28;
   const contentWidth = pageWidth - margin * 2;
+  const pages = [page];
 
   const drawDivider = () => {
     page.drawLine({
@@ -169,6 +183,14 @@ const buildPdf = async (params: {
     y -= 14;
   };
 
+  const finalizeLine = (value: string) => {
+    let next = value.trim();
+    while (next.endsWith("·")) {
+      next = next.slice(0, -1).trim();
+    }
+    return next;
+  };
+
   const wrapLines = (
     value: string,
     maxWidth: number,
@@ -176,31 +198,34 @@ const buildPdf = async (params: {
     size: number,
     maxLines = 3
   ) => {
-    const words = value.split(/\s+/);
+    const words = value.split(/\s+/).filter(Boolean);
     const lines: string[] = [];
     let current = "";
-    for (const word of words) {
+    let truncated = false;
+    for (let i = 0; i < words.length; i += 1) {
+      const word = words[i];
       const next = current ? `${current} ${word}` : word;
       if (fontRef.widthOfTextAtSize(next, size) <= maxWidth) {
         current = next;
       } else {
         if (current) {
-          lines.push(current);
+          lines.push(finalizeLine(current));
         }
         current = word;
       }
-      if (lines.length >= maxLines) {
+      if (lines.length === maxLines) {
+        truncated = i < words.length - 1 || current.length > 0;
         break;
       }
     }
     if (lines.length < maxLines && current) {
-      lines.push(current);
+      lines.push(finalizeLine(current));
     }
-    if (lines.length === maxLines) {
-      const last = lines[maxLines - 1];
-      lines[maxLines - 1] = last.endsWith("…") ? last : `${last}…`;
+    if (truncated && lines.length > 0) {
+      const lastIndex = lines.length - 1;
+      lines[lastIndex] = `${lines[lastIndex].replace(/…$/, "")}…`;
     }
-    return lines;
+    return { lines, truncated };
   };
 
   const drawText = (text: string, size = 12, bold = false) => {
@@ -222,7 +247,7 @@ const buildPdf = async (params: {
     bold = false
   ) => {
     const fontRef = bold ? activeBoldFont : activeFont;
-    const lines = wrapLines(value, maxWidth, fontRef, size, maxLines);
+    const { lines } = wrapLines(value, maxWidth, fontRef, size, maxLines);
     for (const line of lines) {
       page.drawText(line, {
         x: margin,
@@ -233,6 +258,31 @@ const buildPdf = async (params: {
       });
       y -= size + 4;
     }
+  };
+
+  const drawHeader = (compact: boolean) => {
+    const titleSize = compact ? 16 : 26;
+    const subtitleSize = compact ? 10 : 12;
+    const locationSize = compact ? 9 : 11;
+    drawText(safeText(params.title), titleSize, true);
+    drawText(safeText(params.subtitle), subtitleSize);
+    drawText(safeText(params.locationsLabel), locationSize);
+    if (!compact && params.notes) {
+      drawWrapped(safeText(`Notes: ${params.notes}`), 10, contentWidth, 2);
+    }
+    y -= 6;
+    drawDivider();
+  };
+
+  const ensureSpace = (minY: number) => {
+    if (y >= minY) {
+      return;
+    }
+    const newPage = doc.addPage([595.28, 841.89]);
+    pages.push(newPage);
+    page = newPage;
+    y = 780;
+    drawHeader(true);
   };
 
   const STAR_PATH =
@@ -256,8 +306,7 @@ const buildPdf = async (params: {
         scale: size / 20
       });
     }
-    const ratingLabel =
-      typeof rating === "number" ? rating.toFixed(1) : "—";
+    const ratingLabel = formatRating(typeof rating === "number" ? rating : null);
     page.drawText(ratingLabel, {
       x: x + 5 * (size + gap) + 6,
       y: yBase + 1,
@@ -267,15 +316,19 @@ const buildPdf = async (params: {
     });
   };
 
-  drawText(safeText(params.title), 26, true);
-  drawText(safeText(params.subtitle), 12);
-  drawText(safeText(params.locationsLabel), 11);
-  if (params.notes) {
-    drawWrapped(safeText(`Notes: ${params.notes}`), 10, contentWidth, 2);
-  }
-  y -= 6;
-  drawDivider();
+  const drawReviewItem = (item: { label: string; date: string; rating: number | null }) => {
+    ensureSpace(140);
+    const ratingLabel = formatRating(item.rating);
+    const line1 = `★ ${ratingLabel} — ${item.date}`;
+    drawText(safeText(line1), 11, true);
+    const cleaned = stripTranslatedByGoogle(item.label);
+    drawWrapped(safeText(cleaned), 10, contentWidth, 3);
+    y -= 4;
+  };
 
+  drawHeader(false);
+
+  ensureSpace(200);
   const cardHeight = 92;
   page.drawRectangle({
     x: margin,
@@ -290,7 +343,7 @@ const buildPdf = async (params: {
   const leftX = margin + 16;
   const rightX = margin + contentWidth / 2 + 8;
   const cardTitleY = cardTop - 8;
-  page.drawText("KPIs principaux", {
+  page.drawText("KPIs clés", {
     x: leftX,
     y: cardTitleY,
     size: 12,
@@ -320,7 +373,7 @@ const buildPdf = async (params: {
     color: rgb(0.08, 0.1, 0.12)
   });
   const responseY = kpiLineY - 40;
-  page.drawText("Taux de reponse", {
+  page.drawText("Taux de réponse", {
     x: leftX,
     y: responseY,
     size: 10,
@@ -354,6 +407,7 @@ const buildPdf = async (params: {
   y = cardTop - cardHeight - 12;
   drawDivider();
 
+  ensureSpace(200);
   drawText("Analyse IA", 14, true);
   drawText(
     safeText(`Score moyen IA: ${formatRating(params.ai.avgScore)}`),
@@ -361,7 +415,9 @@ const buildPdf = async (params: {
   );
   drawText(safeText(`Avis critiques: ${params.ai.criticalCount}`), 12);
   const tagsText = params.ai.topTags.length
-    ? params.ai.topTags.map((tag) => `${tag.tag} (${tag.count})`)
+    ? params.ai.topTags
+        .slice(0, 10)
+        .map((tag) => `• ${tag.tag} (${tag.count})`)
     : ["—"];
   const half = Math.ceil(tagsText.length / 2);
   const leftTags = tagsText.slice(0, half);
@@ -392,45 +448,43 @@ const buildPdf = async (params: {
   y = Math.min(leftEnd, rightEnd) - 10;
   drawDivider();
 
-  drawText("Top avis positifs", 14, true);
+  ensureSpace(160);
+  drawText("Avis positifs", 14, true);
   if (params.positives.length === 0) {
     drawText("—", 11);
   } else {
-    params.positives.forEach((item) => {
-      drawWrapped(
-        safeText(`${item.label} · ${item.date} · ${item.rating ?? "—"}★`),
-        11,
-        contentWidth,
-        2
-      );
-    });
+    params.positives.forEach(drawReviewItem);
   }
   y -= 4;
 
-  drawText("Top avis negatifs", 14, true);
+  ensureSpace(160);
+  drawText("Avis négatifs", 14, true);
   if (params.negatives.length === 0) {
-    drawText("Aucun avis negatif sur la periode", 11);
+    drawText("Aucun avis négatif sur la période", 11);
   } else {
-    params.negatives.forEach((item) => {
-      drawWrapped(
-        safeText(`${item.label} · ${item.date} · ${item.rating ?? "—"}★`),
-        11,
-        contentWidth,
-        2
-      );
-    });
+    params.negatives.forEach(drawReviewItem);
   }
 
-  page.drawText(
-    safeText(`Genere le ${new Date().toISOString().slice(0, 16).replace("T", " ")}`),
-    {
+  const generatedLabel = safeText(
+    `Généré le ${new Date().toISOString().slice(0, 16).replace("T", " ")}`
+  );
+  pages.forEach((p, index) => {
+    const pageNumber = `Page ${index + 1}`;
+    p.drawText(generatedLabel, {
       x: margin,
       y: 30,
       size: 9,
       font: activeFont,
       color: rgb(0.4, 0.45, 0.5)
-    }
-  );
+    });
+    p.drawText(pageNumber, {
+      x: pageWidth - margin - activeFont.widthOfTextAtSize(pageNumber, 9),
+      y: 30,
+      size: 9,
+      font: activeFont,
+      color: rgb(0.4, 0.45, 0.5)
+    });
+  });
 
   return doc.save();
 };
@@ -465,7 +519,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(404).json({ error: "Report not found" });
   }
 
-  let locationsLabel = "Etablissements: Tous";
+  let locationsLabel = "Établissements: Tous";
   if (Array.isArray(report.locations) && report.locations.length > 0) {
     const { data: locationRows } = await supabaseAdmin
       .from("google_locations")
@@ -473,13 +527,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq("user_id", userId)
       .in("location_resource_name", report.locations);
     const titles = (locationRows ?? [])
-      .map((row) => row.location_title || "Etablissement")
+      .map((row) =>
+        normalizeLocationTitle(row.location_title || "Établissement")
+      )
       .filter(Boolean) as string[];
     const uniqueTitles = Array.from(new Set(titles));
     locationsLabel =
       uniqueTitles.length === 1
-        ? `Etablissement: ${uniqueTitles[0]}`
-        : `${uniqueTitles.length} etablissements`;
+        ? `Établissement: ${uniqueTitles[0]}`
+        : `${uniqueTitles.length} établissements`;
   }
 
   await supabaseAdmin
@@ -617,14 +673,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         label:
           review.comment?.slice(0, 120) ||
           review.author_name ||
-          "Avis negatif",
+          "Avis négatif",
         date: review.create_time ? review.create_time.slice(0, 10) : "—",
         rating: review.rating
       }));
 
     const pdfBytes = await buildPdf({
       title: report.name,
-      subtitle: `Periode: ${formatDate(from)} au ${formatDate(to)}`,
+      subtitle: `Période: ${formatDate(from)} au ${formatDate(to)}`,
       locationsLabel,
       notes: report.notes ?? null,
       kpis: {
