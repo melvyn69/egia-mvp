@@ -4,16 +4,20 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.renderPdfFromHtml = renderPdfFromHtml;
-const chromium_min_1 = __importDefault(require("@sparticuz/chromium-min"));
 const puppeteer_core_1 = __importDefault(require("puppeteer-core"));
 async function renderPdfFromHtml(html) {
     const isServerless = process.platform === "linux";
     const launchOptions = isServerless
-        ? {
-            args: chromium_min_1.default.args,
-            executablePath: await chromium_min_1.default.executablePath(),
-            headless: "shell"
-        }
+        ? await (async () => {
+            const mod = await import("@sparticuz/chromium");
+            const chromium = mod.default ?? mod;
+            const chrom = chromium;
+            return {
+                args: chrom.args,
+                executablePath: await chrom.executablePath(),
+                headless: chrom.headless ?? "shell"
+            };
+        })()
         : {
             args: ["--no-sandbox", "--disable-setuid-sandbox"],
             executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,

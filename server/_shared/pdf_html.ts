@@ -1,15 +1,23 @@
-import chromium from "@sparticuz/chromium-min";
 import puppeteer from "puppeteer-core";
 
 export async function renderPdfFromHtml(html: string) {
   const isServerless = process.platform === "linux";
 
   const launchOptions = isServerless
-    ? {
-        args: chromium.args,
-        executablePath: await chromium.executablePath(),
-        headless: "shell" as const
-      }
+    ? await (async () => {
+        const mod: unknown = await import("@sparticuz/chromium");
+        const chromium = (mod as { default?: unknown }).default ?? mod;
+        const chrom = chromium as {
+          args: string[];
+          executablePath: () => Promise<string>;
+          headless?: "shell" | boolean;
+        };
+        return {
+          args: chrom.args,
+          executablePath: await chrom.executablePath(),
+          headless: chrom.headless ?? "shell"
+        } as const;
+      })()
     : {
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
         executablePath:
@@ -23,7 +31,7 @@ export async function renderPdfFromHtml(html: string) {
     );
   }
 
-  const browser = await puppeteer.launch(launchOptions);
+  const browser = await puppeteer.launch(launchOptions as never);
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
