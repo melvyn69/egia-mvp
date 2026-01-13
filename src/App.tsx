@@ -642,7 +642,7 @@ const App = () => {
                 />
                 <Route
                   path="/team"
-                  element={<TeamRanking session={session} locations={locations} />}
+                  element={<TeamRanking session={session} />}
                 />
                 <Route
                   path="/sync-status"
