@@ -1,13 +1,8 @@
 {
   "version": 2,
-  "functions": {
-    "api/**/*.ts": {
-      "includeFiles": "node_modules/@sparticuz/chromium-min/**"
-    }
-  },
   "routes": [
+    { "src": "^/api/(.*)$", "dest": "/api/$1" },
     { "handle": "filesystem" },
-    { "src": "/api/(.*)", "dest": "/api/$1" },
-    { "src": "/(.*)", "dest": "/index.html" }
+    { "src": "^(?!/api/).*$", "dest": "/index.html" }
   ]
 }
