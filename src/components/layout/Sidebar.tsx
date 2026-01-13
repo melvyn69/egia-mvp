@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -21,6 +22,31 @@ const navLinkBase =
 
 const Sidebar = () => {
   const queryClient = useQueryClient();
+  const [hasSession, setHasSession] = useState(false);
+
+  useEffect(() => {
+    const sb = supabase;
+    if (!sb) {
+      return;
+    }
+    let active = true;
+    const loadSession = async () => {
+      const { data } = await sb.auth.getSession();
+      if (active) {
+        setHasSession(Boolean(data.session));
+      }
+    };
+    loadSession();
+    const { data: subscription } = sb.auth.onAuthStateChange(
+      (_event, session) => {
+        setHasSession(Boolean(session));
+      }
+    );
+    return () => {
+      active = false;
+      subscription?.subscription?.unsubscribe();
+    };
+  }, [supabase]);
 
   const prefetchAnalytics = async () => {
     if (!supabase) {
@@ -129,20 +155,22 @@ const Sidebar = () => {
           <FileText size={18} />
           Rapports
         </NavLink>
-        <NavLink
-          to="/team"
-          className={({ isActive }) =>
-            cn(
-              navLinkBase,
-              isActive
-                ? "bg-ink text-white shadow"
-                : "text-slate-600 hover:bg-slate-100"
-            )
-          }
-        >
-          <Users size={18} />
-          Équipe & Classement
-        </NavLink>
+        {hasSession && (
+          <NavLink
+            to="/team"
+            className={({ isActive }) =>
+              cn(
+                navLinkBase,
+                isActive
+                  ? "bg-ink text-white shadow"
+                  : "text-slate-600 hover:bg-slate-100"
+              )
+            }
+          >
+            <Users size={18} />
+            Équipe
+          </NavLink>
+        )}
         <NavLink
           to="/inbox"
           className={({ isActive }) =>
