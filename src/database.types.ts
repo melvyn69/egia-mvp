@@ -857,6 +857,57 @@ export type Database = {
         }
         Relationships: []
       }
+      team_members: {
+        Row: {
+          created_at: string | null
+          first_name: string
+          id: string
+          is_active: boolean
+          role: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          first_name: string
+          id?: string
+          is_active?: boolean
+          role?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          first_name?: string
+          id?: string
+          is_active?: boolean
+          role?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      team_settings: {
+        Row: {
+          created_at: string | null
+          enabled: boolean
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          enabled?: boolean
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          enabled?: boolean
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       review_tags: {
         Row: {
           created_at: string | null

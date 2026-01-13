@@ -101,21 +101,11 @@ const formatDate = (value: Date | null) =>
 const formatRating = (value: number | null) =>
   value === null ? "—" : value.toFixed(1).replace(".", ",");
 
-const formatPercent = (value: number | null) =>
-  value === null ? "—" : `${Math.round(value)}%`;
-
 const formatRatio = (value: number | null) =>
   value === null ? "—" : `${Math.round(value * 100)}%`;
 
 const normalizeLocationTitle = (value: string) =>
   value.replace(/\s*-\s*/g, " - ").replace(/\s{2,}/g, " ").trim();
-
-const cleanReviewText = (value: string) =>
-  value
-    .replace(/\(?(Translated by Google)\)?/gi, "")
-    .replace(/\(?(Traduit par Google)\)?/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
 
 const escapeHtml = (value: string) =>
   value
@@ -144,62 +134,44 @@ const renderStars = (rating: number | null) => {
 const buildAiSummary = (params: {
   avgRating: number | null;
   responseRate: number | null;
-  positiveCount: number;
   negativeCount: number;
   untreatedNegativeCount: number;
-  criticalCount: number;
   reviewsTotal: number;
   topTags: Array<{ tag: string; count: number }>;
+  aiCriticalCount: number;
 }) => {
-  const bullets: string[] = [];
   if (params.reviewsTotal === 0) {
     return ["Aucun avis sur la période."];
   }
+  const sentences: string[] = [];
   if (params.avgRating !== null) {
-    const ratingLabel = formatRating(params.avgRating);
-    if (params.avgRating >= 4.5) {
-      bullets.push(`Note moyenne élevée (${ratingLabel}) : maintenir la qualité perçue.`);
-    } else if (params.avgRating >= 4) {
-      bullets.push(`Note moyenne correcte (${ratingLabel}) : viser 4,5+ avec des actions ciblées.`);
-    } else {
-      bullets.push(`Note moyenne en retrait (${ratingLabel}) : prioriser la qualité du service.`);
-    }
+    sentences.push(`La note moyenne est ${formatRating(params.avgRating)}.`);
   }
   if (params.responseRate !== null) {
-    const rateLabel = formatRatio(params.responseRate);
-    if (params.responseRate >= 0.8) {
-      bullets.push(`Taux de réponse solide (${rateLabel}) : maintenir la cadence.`);
-    } else if (params.responseRate >= 0.6) {
-      bullets.push(`Taux de réponse modéré (${rateLabel}) : viser > 80%.`);
-    } else {
-      bullets.push(`Taux de réponse faible (${rateLabel}) : répondre sous 24–48h.`);
-    }
+    sentences.push(`Le taux de réponse est de ${formatRatio(params.responseRate)}.`);
   }
-  if (params.negativeCount > 0) {
-    bullets.push(
-      `${params.negativeCount} avis négatifs sur la période : traiter en priorité les irritants récurrents.`
-    );
-    if (params.criticalCount > 0) {
-      bullets.push(
-        `${params.criticalCount} avis critiques à traiter en priorité pour limiter l’impact.`
-      );
-    }
-  } else {
-    bullets.push("Aucun avis négatif détecté sur la période.");
-  }
+  sentences.push(
+    `${params.negativeCount} avis négatifs ont été recensés historiquement sur la période.`
+  );
   if (params.untreatedNegativeCount > 0) {
-    bullets.push(
-      `${params.untreatedNegativeCount} avis négatifs non traités : répondre rapidement pour limiter l’impact.`
+    sentences.push(
+      `${params.untreatedNegativeCount} avis négatifs nécessitent une réponse ; priorité à leur traitement.`
+    );
+  } else {
+    sentences.push(
+      "Aucun avis négatif en attente de réponse : la situation est maîtrisée."
     );
   }
   if (params.topTags.length > 0) {
     const tagList = params.topTags.slice(0, 3).map((tag) => tag.tag).join(", ");
-    bullets.push(`Top sujets : ${tagList} → renforcer les points faibles identifiés.`);
+    sentences.push(`Sujets récurrents : ${tagList}.`);
   }
-  if (bullets.length < 3) {
-    bullets.push("Suivre l’évolution hebdomadaire pour détecter les variations tôt.");
+  if (params.aiCriticalCount > 0) {
+    sentences.push(
+      `${params.aiCriticalCount} avis critiques IA surveillés, sans action obligatoire si déjà répondus.`
+    );
   }
-  return bullets.slice(0, 6);
+  return sentences.slice(0, 5);
 };
 
 const buildHtml = (params: {
@@ -211,11 +183,10 @@ const buildHtml = (params: {
     reviewsTotal: number;
     avgRating: number | null;
     responseRate: number | null;
-    positiveCount: number;
     negativeCount: number;
+    untreatedNegativeCount: number;
   };
   ai: {
-    avgScore: number | null;
     criticalCount: number;
     topTags: Array<{ tag: string; count: number }>;
   };
@@ -233,7 +204,8 @@ const buildHtml = (params: {
     avgRating: number | null;
     responseRate: number | null;
     untreatedNegativeCount: number;
-    positiveRate: number | null;
+    positiveCount: number;
+    negativeCount: number;
   }>;
 }) => {
   const tags = params.ai.topTags.slice(0, 10);
@@ -421,16 +393,16 @@ const buildHtml = (params: {
               <div class="kpi-value">${params.kpis.reviewsTotal}</div>
             </div>
             <div>
-              <div class="kpi-label">Avis positifs</div>
-              <div class="kpi-value">${params.kpis.positiveCount}</div>
-            </div>
-            <div>
-              <div class="kpi-label">Avis négatifs</div>
+              <div class="kpi-label">Avis négatifs (historique)</div>
               <div class="kpi-value">${params.kpis.negativeCount}</div>
             </div>
             <div>
               <div class="kpi-label">Taux de réponse</div>
               <div class="kpi-value">${formatRatio(params.kpis.responseRate)}</div>
+            </div>
+            <div>
+              <div class="kpi-label">Avis négatifs non traités</div>
+              <div class="kpi-value">${params.kpis.untreatedNegativeCount}</div>
             </div>
           </div>
           <div class="kpi-note">
@@ -443,11 +415,7 @@ const buildHtml = (params: {
         <div class="card">
           <div class="kpi-grid">
             <div>
-              <div class="kpi-label">Score moyen</div>
-              <div class="kpi-value">${formatRating(params.ai.avgScore)}</div>
-            </div>
-            <div>
-              <div class="kpi-label">Avis critiques</div>
+              <div class="kpi-label">Avis critiques IA</div>
               <div class="kpi-value">${params.ai.criticalCount}</div>
             </div>
           </div>
@@ -514,8 +482,9 @@ const buildHtml = (params: {
                 <th># Avis</th>
                 <th>Note moy.</th>
                 <th>Taux réponse</th>
+                <th>Positifs</th>
+                <th>Négatifs</th>
                 <th>Négatifs non traités</th>
-                <th>% Positif</th>
               </tr>
             </thead>
             <tbody>
@@ -528,8 +497,9 @@ const buildHtml = (params: {
                   <td>${row.reviewsTotal}</td>
                   <td>${formatRating(row.avgRating)}</td>
                   <td>${formatRatio(row.responseRate)}</td>
+                  <td>${row.positiveCount}</td>
+                  <td>${row.negativeCount}</td>
                   <td>${row.untreatedNegativeCount}</td>
-                  <td>${formatPercent(row.positiveRate)}</td>
                 </tr>
               `
                 )
@@ -673,11 +643,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const responseRate =
       replyable.length > 0 ? replied.length / replyable.length : null;
 
-    let aiScoreSum = 0;
-    let aiScoreCount = 0;
     let positiveCount = 0;
     let negativeCount = 0;
     let untreatedNegativeCount = 0;
+    let aiCriticalCount = 0;
     const tagCounts = new Map<string, number>();
     const perLocationStats = new Map<
       string,
@@ -704,10 +673,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     reviews.forEach((review) => {
       const insight = asOne(review.review_ai_insights);
-      if (insight && typeof insight.sentiment_score === "number") {
-        aiScoreSum += insight.sentiment_score;
-        aiScoreCount += 1;
-      }
       const tags = Array.isArray(review.review_ai_tags)
         ? review.review_ai_tags
             .map((tagRow) => tagRow?.ai_tags)
@@ -728,23 +693,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
       const ratingValue =
         typeof review.rating === "number" ? review.rating : null;
-      const isNegative =
-        (ratingValue !== null && ratingValue <= 2) ||
+      const isNegativeByRating = ratingValue !== null && ratingValue <= 2;
+      const isAiCritical =
         insight?.sentiment === "negative" ||
         (typeof insight?.sentiment_score === "number" &&
           insight.sentiment_score < 0.4) ||
         hasNegativeTag;
-      const isStrictNegativeByRating =
-        ratingValue !== null && ratingValue <= 2;
       const isPositive =
-        !isNegative &&
-        ((ratingValue !== null && ratingValue >= 4) ||
-          insight?.sentiment === "positive");
+        (ratingValue !== null && ratingValue >= 4) ||
+        insight?.sentiment === "positive";
       if (isPositive) {
         positiveCount += 1;
       }
-      if (isNegative) {
+      if (isNegativeByRating) {
         negativeCount += 1;
+      }
+      if (isAiCritical) {
+        aiCriticalCount += 1;
       }
 
       const isReplyable =
@@ -753,7 +718,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         (typeof review.reply_text === "string" &&
           review.reply_text.trim() !== "") ||
         typeof review.replied_at === "string";
-      const isUntreated = isStrictNegativeByRating && !isReplied;
+      const isUntreated = isNegativeByRating && !isReplied;
       if (isUntreated) {
         untreatedNegativeCount += 1;
       }
@@ -782,12 +747,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (isReplyable) stats.replyable += 1;
       if (isReplied) stats.replied += 1;
       if (isPositive) stats.positiveCount += 1;
-      if (isNegative) stats.negativeCount += 1;
+      if (isNegativeByRating) stats.negativeCount += 1;
       if (isUntreated) stats.untreatedNegativeCount += 1;
       perLocationStats.set(locationKey, stats);
 
       if (isUntreated) {
-        const commentText = cleanReviewText(review.comment ?? "");
+        const commentText = (review.comment ?? "").trim();
         untreatedNegatives.push({
           comment: commentText || "Avis sans commentaire",
           rating: ratingValue,
@@ -801,12 +766,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     });
 
-    const avgAiScore = aiScoreCount > 0 ? aiScoreSum / aiScoreCount : null;
     const topTags = Array.from(tagCounts.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([tag, count]) => ({ tag, count }));
-    const criticalCount = negativeCount;
+
     const perLocation = Array.from(perLocationStats.values()).map((row) => ({
       name: row.name,
       reviewsTotal: row.reviewsTotal,
@@ -814,10 +778,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       responseRate:
         row.replyable > 0 ? row.replied / row.replyable : null,
       untreatedNegativeCount: row.untreatedNegativeCount,
-      positiveRate:
-        row.reviewsTotal > 0
-          ? (row.positiveCount / row.reviewsTotal) * 100
-          : null
+      positiveCount: row.positiveCount,
+      negativeCount: row.negativeCount
     }));
     perLocation.sort((a, b) => b.reviewsTotal - a.reviewsTotal);
     const untreatedList = untreatedNegatives
@@ -827,12 +789,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const aiSummary = buildAiSummary({
       avgRating,
       responseRate,
-      positiveCount,
       negativeCount,
       untreatedNegativeCount,
-      criticalCount,
       reviewsTotal,
-      topTags
+      topTags,
+      aiCriticalCount
     });
 
     const html = buildHtml({
@@ -844,12 +805,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         reviewsTotal,
         avgRating,
         responseRate,
-        positiveCount,
-        negativeCount
+        negativeCount,
+        untreatedNegativeCount
       },
       ai: {
-        avgScore: avgAiScore,
-        criticalCount,
+        criticalCount: aiCriticalCount,
         topTags
       },
       untreatedNegatives: untreatedList,
