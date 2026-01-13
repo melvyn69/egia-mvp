@@ -734,6 +734,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         (typeof insight?.sentiment_score === "number" &&
           insight.sentiment_score < 0.4) ||
         hasNegativeTag;
+      const isStrictNegativeByRating =
+        ratingValue !== null && ratingValue <= 2;
       const isPositive =
         !isNegative &&
         ((ratingValue !== null && ratingValue >= 4) ||
@@ -751,7 +753,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         (typeof review.reply_text === "string" &&
           review.reply_text.trim() !== "") ||
         typeof review.replied_at === "string";
-      const isUntreated = isNegative && !isReplied;
+      const isUntreated = isStrictNegativeByRating && !isReplied;
       if (isUntreated) {
         untreatedNegativeCount += 1;
       }
