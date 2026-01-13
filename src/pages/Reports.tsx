@@ -159,6 +159,15 @@ const Reports = ({ session, locations }: ReportsProps) => {
       setError("Impossible de générer le PDF.");
       return;
     }
+    if (mode === "premium") {
+      const data = (await res.json().catch(() => null)) as
+        | { ok?: boolean; pdf?: { url?: string | null } }
+        | null;
+      const signedUrl = data?.pdf?.url ?? null;
+      if (signedUrl) {
+        window.open(signedUrl, "_blank", "noopener");
+      }
+    }
     void queryClient.invalidateQueries({ queryKey: ["reports"] });
   };
 

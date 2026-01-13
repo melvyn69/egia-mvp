@@ -141,6 +141,67 @@ const renderStars = (rating: number | null) => {
   return `<div class="stars">${stars.join("")}<span>${formatRating(rating)}</span></div>`;
 };
 
+const buildAiSummary = (params: {
+  avgRating: number | null;
+  responseRate: number | null;
+  positiveCount: number;
+  negativeCount: number;
+  untreatedNegativeCount: number;
+  criticalCount: number;
+  reviewsTotal: number;
+  topTags: Array<{ tag: string; count: number }>;
+}) => {
+  const bullets: string[] = [];
+  if (params.reviewsTotal === 0) {
+    return ["Aucun avis sur la période."];
+  }
+  if (params.avgRating !== null) {
+    const ratingLabel = formatRating(params.avgRating);
+    if (params.avgRating >= 4.5) {
+      bullets.push(`Note moyenne élevée (${ratingLabel}) : maintenir la qualité perçue.`);
+    } else if (params.avgRating >= 4) {
+      bullets.push(`Note moyenne correcte (${ratingLabel}) : viser 4,5+ avec des actions ciblées.`);
+    } else {
+      bullets.push(`Note moyenne en retrait (${ratingLabel}) : prioriser la qualité du service.`);
+    }
+  }
+  if (params.responseRate !== null) {
+    const rateLabel = formatRatio(params.responseRate);
+    if (params.responseRate >= 0.8) {
+      bullets.push(`Taux de réponse solide (${rateLabel}) : maintenir la cadence.`);
+    } else if (params.responseRate >= 0.6) {
+      bullets.push(`Taux de réponse modéré (${rateLabel}) : viser > 80%.`);
+    } else {
+      bullets.push(`Taux de réponse faible (${rateLabel}) : répondre sous 24–48h.`);
+    }
+  }
+  if (params.negativeCount > 0) {
+    bullets.push(
+      `${params.negativeCount} avis négatifs sur la période : traiter en priorité les irritants récurrents.`
+    );
+    if (params.criticalCount > 0) {
+      bullets.push(
+        `${params.criticalCount} avis critiques à traiter en priorité pour limiter l’impact.`
+      );
+    }
+  } else {
+    bullets.push("Aucun avis négatif détecté sur la période.");
+  }
+  if (params.untreatedNegativeCount > 0) {
+    bullets.push(
+      `${params.untreatedNegativeCount} avis négatifs non traités : répondre rapidement pour limiter l’impact.`
+    );
+  }
+  if (params.topTags.length > 0) {
+    const tagList = params.topTags.slice(0, 3).map((tag) => tag.tag).join(", ");
+    bullets.push(`Top sujets : ${tagList} → renforcer les points faibles identifiés.`);
+  }
+  if (bullets.length < 3) {
+    bullets.push("Suivre l’évolution hebdomadaire pour détecter les variations tôt.");
+  }
+  return bullets.slice(0, 6);
+};
+
 const buildHtml = (params: {
   title: string;
   subtitle: string;
@@ -150,46 +211,34 @@ const buildHtml = (params: {
     reviewsTotal: number;
     avgRating: number | null;
     responseRate: number | null;
-    sentimentPositive: number | null;
+    positiveCount: number;
+    negativeCount: number;
   };
   ai: {
     avgScore: number | null;
     criticalCount: number;
     topTags: Array<{ tag: string; count: number }>;
   };
-  positives: Array<{ label: string; date: string; rating: number | null; author: string | null }>;
-  negatives: Array<{ label: string; date: string; rating: number | null; author: string | null }>;
+  untreatedNegatives: Array<{
+    comment: string;
+    rating: number | null;
+    date: string;
+    author: string | null;
+    location: string;
+  }>;
+  aiSummary: string[];
+  perLocation: Array<{
+    name: string;
+    reviewsTotal: number;
+    avgRating: number | null;
+    responseRate: number | null;
+    untreatedNegativeCount: number;
+    positiveRate: number | null;
+  }>;
 }) => {
   const tags = params.ai.topTags.slice(0, 10);
   const tagsLeft = tags.slice(0, Math.ceil(tags.length / 2));
   const tagsRight = tags.slice(Math.ceil(tags.length / 2));
-
-  const renderReview = (review: {
-    label: string;
-    date: string;
-    rating: number | null;
-    author: string | null;
-  }) => {
-    const cleanLabel = cleanReviewText(review.label);
-    const author = review.author ? cleanReviewText(review.author) : "";
-    const showSnippet =
-      cleanLabel &&
-      cleanLabel.toLowerCase() !== author.toLowerCase();
-    return `
-      <div class="review">
-        <div class="review-meta">
-          <span class="review-rating">★ ${formatRating(review.rating)}</span>
-          <span>${escapeHtml(review.date)}</span>
-          ${author ? `<span>· ${escapeHtml(author)}</span>` : ""}
-        </div>
-        ${
-          showSnippet
-            ? `<div class="review-text">${escapeHtml(cleanLabel)}</div>`
-            : ""
-        }
-      </div>
-    `;
-  };
 
   return `
   <!doctype html>
@@ -260,6 +309,11 @@ const buildHtml = (params: {
           gap: 6px;
           margin-top: 4px;
         }
+        .kpi-note {
+          margin-top: 12px;
+          padding-top: 12px;
+          border-top: 1px solid #e5e7eb;
+        }
         .section-title {
           font-size: 16px;
           margin: 18px 0 8px;
@@ -305,6 +359,42 @@ const buildHtml = (params: {
           margin-top: 4px;
           color: #111827;
         }
+        .summary {
+          margin: 8px 0 0;
+          padding-left: 16px;
+          color: #111827;
+        }
+        .summary li {
+          margin-bottom: 6px;
+        }
+        .table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 12px;
+        }
+        .table th,
+        .table td {
+          padding: 6px 8px;
+          border-bottom: 1px solid #eef2f7;
+          text-align: left;
+        }
+        .table th {
+          color: #6b7280;
+          font-weight: 600;
+          text-transform: uppercase;
+          font-size: 10px;
+          letter-spacing: 0.06em;
+        }
+        .untreated-item {
+          border-bottom: 1px solid #eef2f7;
+          padding-bottom: 10px;
+          margin-bottom: 10px;
+        }
+        .untreated-item:last-child {
+          border-bottom: none;
+          margin-bottom: 0;
+          padding-bottom: 0;
+        }
         .footer {
           margin-top: 18px;
           font-size: 10px;
@@ -327,23 +417,25 @@ const buildHtml = (params: {
         <div class="card">
           <div class="kpi-grid">
             <div>
-              <div class="kpi-label">Volume d’avis</div>
+              <div class="kpi-label">Volume d’avis (période)</div>
               <div class="kpi-value">${params.kpis.reviewsTotal}</div>
+            </div>
+            <div>
+              <div class="kpi-label">Avis positifs</div>
+              <div class="kpi-value">${params.kpis.positiveCount}</div>
+            </div>
+            <div>
+              <div class="kpi-label">Avis négatifs</div>
+              <div class="kpi-value">${params.kpis.negativeCount}</div>
             </div>
             <div>
               <div class="kpi-label">Taux de réponse</div>
               <div class="kpi-value">${formatRatio(params.kpis.responseRate)}</div>
             </div>
-            <div>
-              <div class="kpi-label">Sentiment positif</div>
-              <div class="kpi-value">${formatPercent(
-                params.kpis.sentimentPositive
-              )}</div>
-            </div>
-            <div>
-              <div class="kpi-label">Note moyenne</div>
-              ${renderStars(params.kpis.avgRating)}
-            </div>
+          </div>
+          <div class="kpi-note">
+            <div class="kpi-label">Note moyenne</div>
+            ${renderStars(params.kpis.avgRating)}
           </div>
         </div>
 
@@ -380,23 +472,79 @@ const buildHtml = (params: {
           </div>
         </div>
 
-        <h2 class="section-title">Avis positifs</h2>
-        <div class="reviews">
+        <h2 class="section-title">Résumé IA</h2>
+        <div class="card">
+          <ul class="summary">
+            ${params.aiSummary.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        </div>
+
+        <h2 class="section-title">Avis négatifs non traités</h2>
+        <div class="card">
           ${
-            params.positives.length > 0
-              ? params.positives.map(renderReview).join("")
-              : "<div class='review-text'>Aucun avis positif sur la période.</div>"
+            params.untreatedNegatives.length > 0
+              ? params.untreatedNegatives
+                  .map(
+                    (item) => `
+              <div class="untreated-item">
+                <div class="review-meta">
+                  <span class="review-rating">★ ${formatRating(item.rating)}</span>
+                  <span>${escapeHtml(item.date)}</span>
+                  ${item.author ? `<span>· ${escapeHtml(item.author)}</span>` : ""}
+                  <span>· ${escapeHtml(item.location)}</span>
+                </div>
+                <div class="review-text">${escapeHtml(item.comment)}</div>
+              </div>
+            `
+                  )
+                  .join("")
+              : "<div class='review-text'>Aucun avis négatif non traité ✅</div>"
           }
         </div>
 
-        <h2 class="section-title">Avis négatifs</h2>
-        <div class="reviews">
-          ${
-            params.negatives.length > 0
-              ? params.negatives.map(renderReview).join("")
-              : "<div class='review-text'>Aucun avis négatif sur la période ✅</div>"
-          }
+        ${
+          params.perLocation.length > 1
+            ? `
+        <h2 class="section-title">Détail par établissement</h2>
+        <div class="card">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Établissement</th>
+                <th># Avis</th>
+                <th>Note moy.</th>
+                <th>Taux réponse</th>
+                <th>Négatifs non traités</th>
+                <th>% Positif</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${params.perLocation
+                .slice(0, 8)
+                .map(
+                  (row) => `
+                <tr>
+                  <td>${escapeHtml(row.name)}</td>
+                  <td>${row.reviewsTotal}</td>
+                  <td>${formatRating(row.avgRating)}</td>
+                  <td>${formatRatio(row.responseRate)}</td>
+                  <td>${row.untreatedNegativeCount}</td>
+                  <td>${formatPercent(row.positiveRate)}</td>
+                </tr>
+              `
+                )
+                .join("")}
+              ${
+                params.perLocation.length > 8
+                  ? `<tr><td colspan="6">+${params.perLocation.length - 8} autres…</td></tr>`
+                  : ""
+              }
+            </tbody>
+          </table>
         </div>
+        `
+            : ""
+        }
         ${
           params.notes
             ? `<h2 class="section-title">Notes</h2><div class="card">${escapeHtml(
@@ -445,6 +593,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   let locationsLabel = "Établissements: Tous";
+  const locationNameByResource = new Map<string, string>();
   if (Array.isArray(report.locations) && report.locations.length > 0) {
     const { data: locationRows } = await supabaseAdmin
       .from("google_locations")
@@ -452,9 +601,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq("user_id", userId)
       .in("location_resource_name", report.locations);
     const titles = (locationRows ?? [])
-      .map((row) =>
-        normalizeLocationTitle(row.location_title || "Établissement")
-      )
+      .map((row) => {
+        const label = normalizeLocationTitle(
+          row.location_title || "Établissement"
+        );
+        if (row.location_resource_name) {
+          locationNameByResource.set(row.location_resource_name, label);
+        }
+        return label;
+      })
       .filter(Boolean) as string[];
     const uniqueTitles = Array.from(new Set(titles));
     locationsLabel =
@@ -465,7 +620,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   await supabaseAdmin
     .from("reports")
-    .update({ status: "running", updated_at: new Date().toISOString() })
+    .update({ status: "processing", updated_at: new Date().toISOString() })
     .eq("id", reportId);
 
   try {
@@ -518,26 +673,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const responseRate =
       replyable.length > 0 ? replied.length / replyable.length : null;
 
-    let sentimentPositiveCount = 0;
-    let sentimentSamples = 0;
     let aiScoreSum = 0;
     let aiScoreCount = 0;
-    let criticalCount = 0;
+    let positiveCount = 0;
+    let negativeCount = 0;
+    let untreatedNegativeCount = 0;
     const tagCounts = new Map<string, number>();
+    const perLocationStats = new Map<
+      string,
+      {
+        name: string;
+        reviewsTotal: number;
+        ratingSum: number;
+        ratingCount: number;
+        replyable: number;
+        replied: number;
+        positiveCount: number;
+        negativeCount: number;
+        untreatedNegativeCount: number;
+      }
+    >();
+    const untreatedNegatives: Array<{
+      comment: string;
+      rating: number | null;
+      date: string;
+      dateValue: number;
+      author: string | null;
+      location: string;
+    }> = [];
 
     reviews.forEach((review) => {
       const insight = asOne(review.review_ai_insights);
-      if (insight) {
-        if (insight.sentiment === "positive") {
-          sentimentPositiveCount += 1;
-        }
-        if (insight.sentiment) {
-          sentimentSamples += 1;
-        }
-        if (typeof insight.sentiment_score === "number") {
-          aiScoreSum += insight.sentiment_score;
-          aiScoreCount += 1;
-        }
+      if (insight && typeof insight.sentiment_score === "number") {
+        aiScoreSum += insight.sentiment_score;
+        aiScoreCount += 1;
       }
       const tags = Array.isArray(review.review_ai_tags)
         ? review.review_ai_tags
@@ -557,51 +726,112 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           hasNegativeTag = true;
         }
       });
-      if (
+      const ratingValue =
+        typeof review.rating === "number" ? review.rating : null;
+      const isNegative =
+        (ratingValue !== null && ratingValue <= 2) ||
         insight?.sentiment === "negative" ||
         (typeof insight?.sentiment_score === "number" &&
           insight.sentiment_score < 0.4) ||
-        hasNegativeTag
-      ) {
-        criticalCount += 1;
+        hasNegativeTag;
+      const isPositive =
+        !isNegative &&
+        ((ratingValue !== null && ratingValue >= 4) ||
+          insight?.sentiment === "positive");
+      if (isPositive) {
+        positiveCount += 1;
+      }
+      if (isNegative) {
+        negativeCount += 1;
+      }
+
+      const isReplyable =
+        typeof review.comment === "string" && review.comment.trim() !== "";
+      const isReplied =
+        (typeof review.reply_text === "string" &&
+          review.reply_text.trim() !== "") ||
+        typeof review.replied_at === "string";
+      const isUntreated = isNegative && !isReplied;
+      if (isUntreated) {
+        untreatedNegativeCount += 1;
+      }
+
+      const locationKey = review.location_id ?? "unknown";
+      const locationName =
+        locationNameByResource.get(locationKey) ?? "Établissement";
+      const stats =
+        perLocationStats.get(locationKey) ??
+        {
+          name: locationName,
+          reviewsTotal: 0,
+          ratingSum: 0,
+          ratingCount: 0,
+          replyable: 0,
+          replied: 0,
+          positiveCount: 0,
+          negativeCount: 0,
+          untreatedNegativeCount: 0
+        };
+      stats.reviewsTotal += 1;
+      if (ratingValue !== null) {
+        stats.ratingSum += ratingValue;
+        stats.ratingCount += 1;
+      }
+      if (isReplyable) stats.replyable += 1;
+      if (isReplied) stats.replied += 1;
+      if (isPositive) stats.positiveCount += 1;
+      if (isNegative) stats.negativeCount += 1;
+      if (isUntreated) stats.untreatedNegativeCount += 1;
+      perLocationStats.set(locationKey, stats);
+
+      if (isUntreated) {
+        const commentText = cleanReviewText(review.comment ?? "");
+        untreatedNegatives.push({
+          comment: commentText || "Avis sans commentaire",
+          rating: ratingValue,
+          date: review.create_time ? review.create_time.slice(0, 10) : "—",
+          dateValue: review.create_time
+            ? new Date(review.create_time).getTime()
+            : 0,
+          author: review.author_name ?? null,
+          location: locationName
+        });
       }
     });
 
-    const sentimentPositive =
-      sentimentSamples > 0
-        ? (sentimentPositiveCount / sentimentSamples) * 100
-        : null;
     const avgAiScore = aiScoreCount > 0 ? aiScoreSum / aiScoreCount : null;
     const topTags = Array.from(tagCounts.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([tag, count]) => ({ tag, count }));
-
-    const positives = reviews
-      .filter((review) => {
-        const insight = asOne(review.review_ai_insights);
-        return (
-          (typeof review.rating === "number" && review.rating >= 4) ||
-          insight?.sentiment === "positive"
-        );
-      })
-      .slice(0, 3)
-      .map((review) => ({
-        label: review.comment || review.author_name || "Avis positif",
-        date: review.create_time ? review.create_time.slice(0, 10) : "—",
-        rating: review.rating,
-        author: review.author_name ?? null
-      }));
-
-    const negatives = reviews
-      .filter((review) => typeof review.rating === "number" && review.rating <= 2)
-      .slice(0, 3)
-      .map((review) => ({
-        label: review.comment || review.author_name || "Avis négatif",
-        date: review.create_time ? review.create_time.slice(0, 10) : "—",
-        rating: review.rating,
-        author: review.author_name ?? null
-      }));
+    const criticalCount = negativeCount;
+    const perLocation = Array.from(perLocationStats.values()).map((row) => ({
+      name: row.name,
+      reviewsTotal: row.reviewsTotal,
+      avgRating: row.ratingCount > 0 ? row.ratingSum / row.ratingCount : null,
+      responseRate:
+        row.replyable > 0 ? row.replied / row.replyable : null,
+      untreatedNegativeCount: row.untreatedNegativeCount,
+      positiveRate:
+        row.reviewsTotal > 0
+          ? (row.positiveCount / row.reviewsTotal) * 100
+          : null
+    }));
+    perLocation.sort((a, b) => b.reviewsTotal - a.reviewsTotal);
+    const untreatedList = untreatedNegatives
+      .sort((a, b) => b.dateValue - a.dateValue)
+      .slice(0, 8)
+      .map(({ dateValue, ...rest }) => rest);
+    const aiSummary = buildAiSummary({
+      avgRating,
+      responseRate,
+      positiveCount,
+      negativeCount,
+      untreatedNegativeCount,
+      criticalCount,
+      reviewsTotal,
+      topTags
+    });
 
     const html = buildHtml({
       title: report.name,
@@ -612,15 +842,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         reviewsTotal,
         avgRating,
         responseRate,
-        sentimentPositive
+        positiveCount,
+        negativeCount
       },
       ai: {
         avgScore: avgAiScore,
         criticalCount,
         topTags
       },
-      positives,
-      negatives
+      untreatedNegatives: untreatedList,
+      aiSummary,
+      perLocation
     });
 
     if (req.query?.html === "1" && process.env.NODE_ENV !== "production") {
@@ -638,7 +870,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         upsert: true
       });
     if (uploadError) {
+      await supabaseAdmin
+        .from("reports")
+        .update({ status: "failed", updated_at: new Date().toISOString() })
+        .eq("id", reportId);
       throw uploadError;
+    }
+
+    const { data: signed, error: signError } = await supabaseAdmin.storage
+      .from("reports")
+      .createSignedUrl(storagePath, 60 * 60);
+    if (signError) {
+      await supabaseAdmin
+        .from("reports")
+        .update({ status: "failed", updated_at: new Date().toISOString() })
+        .eq("id", reportId);
+      throw signError;
     }
 
     await supabaseAdmin
@@ -651,13 +898,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
       .eq("id", reportId);
 
-    res.setHeader("Content-Type", "application/pdf");
-    return res.status(200).send(pdfBytes);
+    return res.status(200).json({
+      ok: true,
+      reportId,
+      pdf: { path: storagePath, url: signed?.signedUrl ?? null }
+    });
   } catch (error) {
     console.error("[reports] generate_html failed", error);
     await supabaseAdmin
       .from("reports")
-      .update({ status: "error", updated_at: new Date().toISOString() })
+      .update({ status: "failed", updated_at: new Date().toISOString() })
       .eq("id", reportId);
     return res.status(500).json({ error: "Report generation failed" });
   }
