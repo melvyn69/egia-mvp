@@ -10,11 +10,6 @@ import type { Database } from "../database.types";
 
 type TeamRankingProps = {
   session: Session | null;
-  locations: Array<{
-    id: string;
-    location_title: string | null;
-    location_resource_name: string;
-  }>;
 };
 
 type MemberRow = Database["public"]["Tables"]["team_members"]["Row"];
@@ -58,7 +53,7 @@ const getMonthLabel = (value: string) => {
   });
 };
 
-const TeamRanking = ({ session, locations }: TeamRankingProps) => {
+const TeamRanking = ({ session }: TeamRankingProps) => {
   const supabaseClient = supabase;
   const [firstName, setFirstName] = useState("");
   const [role, setRole] = useState("");
@@ -78,15 +73,6 @@ const TeamRanking = ({ session, locations }: TeamRankingProps) => {
     const end = new Date(year, monthValue, 0, 23, 59, 59, 999);
     return { start, end };
   }, [month]);
-
-  const locationsMap = useMemo(() => {
-    return new Map(
-      locations.map((location) => [
-        location.location_resource_name,
-        location.location_title ?? location.location_resource_name
-      ])
-    );
-  }, [locations]);
 
   const teamSettingsQuery = useQuery({
     queryKey: ["team-settings", session?.user?.id ?? null],
