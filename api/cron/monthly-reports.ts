@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
+import { generatePremiumReport } from "../../server/_shared/handlers/reports/generate_html";
 
 const getRequestId = (req: VercelRequest) => {
   const header = req.headers["x-vercel-id"] ?? req.headers["x-request-id"];
@@ -30,6 +31,36 @@ const respondJson = (
   status: number,
   payload: Record<string, unknown>
 ) => res.status(status).json(payload);
+
+const isEmail = (value: string | null | undefined) =>
+  typeof value === "string" && /.+@.+\..+/.test(value);
+
+const sendResendEmail = async (params: {
+  to: string;
+  from: string;
+  subject: string;
+  html: string;
+  apiKey: string;
+}) => {
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: params.from,
+      to: params.to,
+      subject: params.subject,
+      html: params.html
+    })
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Resend error: ${text.slice(0, 200)}`);
+  }
+  return response.json().catch(() => ({}));
+};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId = getRequestId(req);
@@ -83,7 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: enabledRows, error: enabledError } = await supabaseAdmin
       .from("business_settings")
-      .select("user_id")
+      .select("user_id, business_name")
       .eq("monthly_report_enabled", true)
       .not("user_id", "is", null)
       .limit(batchSize);
@@ -95,8 +126,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    const emailByUser = new Map<string, string>();
     const users = (enabledRows ?? [])
-      .map((row) => (row as { user_id?: string | null }).user_id ?? null)
+      .map((row) => {
+        const userId = (row as { user_id?: string | null }).user_id ?? null;
+        const businessName = (row as { business_name?: string | null })
+          .business_name ?? null;
+        if (userId && isEmail(businessName)) {
+          emailByUser.set(userId, businessName as string);
+        }
+        return userId;
+      })
       .filter(Boolean) as string[];
     if (users.length === 0) {
       return respondJson(res, 200, {
@@ -137,10 +177,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       locationsByUser.set(userId, list);
     }
 
+    const resendApiKey = process.env.RESEND_API_KEY ?? "";
+    const emailFrom = process.env.EMAIL_FROM ?? "";
+    const appUrl = process.env.APP_URL ?? "";
+
     const results: Array<{
       userId: string;
       reportId?: string;
       status: "created" | "skipped" | "failed";
+      createdReport?: boolean;
+      rendered?: boolean;
+      emailed?: boolean;
       reason?: string;
       error?: string;
     }> = [];
@@ -149,19 +196,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       try {
         const existing = await supabaseAdmin
           .from("reports")
-          .select("id")
+          .select("id, rendered_at, emailed_at, storage_path")
           .eq("user_id", userId)
           .eq("period_preset", "last_month")
           .eq("from_date", fromIso)
           .eq("to_date", toIso)
           .eq("render_mode", "premium")
           .maybeSingle();
-        if (existing.data?.id) {
+        if (existing.error) {
           results.push({
             userId,
-            reportId: existing.data.id as string,
-            status: "skipped",
-            reason: "already_exists"
+            status: "failed",
+            error: existing.error.message ?? "report_lookup_failed"
           });
           continue;
         }
@@ -176,39 +222,139 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           continue;
         }
 
-        const insertPayload = {
-          user_id: userId,
-          name: `Rapport mensuel ${periodKey}`,
-          locations,
-          period_preset: "last_month",
-          from_date: fromIso,
-          to_date: toIso,
-          timezone: "Europe/Paris",
-          status: "draft",
-          render_mode: "premium",
-          notes: null,
-          updated_at: new Date().toISOString()
-        };
+        let reportId = existing.data?.id as string | undefined;
+        let renderedAt = existing.data?.rendered_at as string | null | undefined;
+        let emailedAt = existing.data?.emailed_at as string | null | undefined;
+        let storagePath = existing.data?.storage_path as string | null | undefined;
+        let createdReport = false;
 
-        const { data: inserted, error: insertError } = await supabaseAdmin
-          .from("reports")
-          .insert(insertPayload)
-          .select("id")
-          .maybeSingle();
-        if (insertError || !inserted?.id) {
-          results.push({
-            userId,
-            status: "failed",
-            reason: "insert_failed",
-            error: insertError?.message ?? "insert_failed"
-          });
-          continue;
+        if (!reportId) {
+          const insertPayload = {
+            user_id: userId,
+            name: `Rapport mensuel ${periodKey}`,
+            locations,
+            period_preset: "last_month",
+            from_date: fromIso,
+            to_date: toIso,
+            timezone: "Europe/Paris",
+            status: "draft",
+            render_mode: "premium",
+            notes: null,
+            updated_at: new Date().toISOString()
+          };
+
+          const { data: inserted, error: insertError } = await supabaseAdmin
+            .from("reports")
+            .insert(insertPayload)
+            .select("id")
+            .maybeSingle();
+          if (insertError || !inserted?.id) {
+            results.push({
+              userId,
+              status: "failed",
+              reason: "insert_failed",
+              error: insertError?.message ?? "insert_failed"
+            });
+            continue;
+          }
+          reportId = inserted.id as string;
+          createdReport = true;
         }
+
+        let rendered = Boolean(renderedAt);
+        let emailed = Boolean(emailedAt);
+        let resultReason: string | undefined;
+        let reportUrl: string | null = null;
+
+        if (!rendered) {
+          const renderResult = await generatePremiumReport({
+            supabaseAdmin,
+            reportId,
+            requestId
+          });
+          if (renderResult?.pdf?.url) {
+            reportUrl = renderResult.pdf.url as string;
+          }
+          rendered = true;
+          renderedAt = new Date().toISOString();
+          await supabaseAdmin
+            .from("reports")
+            .update({ rendered_at: renderedAt, updated_at: renderedAt })
+            .eq("id", reportId);
+        }
+
+        if (!emailed) {
+          const recipient = emailByUser.get(userId) ?? null;
+          if (!recipient) {
+            resultReason = "no_email";
+          } else if (!resendApiKey || !emailFrom) {
+            resultReason = "email_not_configured";
+          } else {
+            if (!reportUrl) {
+              if (!storagePath) {
+                const { data: reportRow } = await supabaseAdmin
+                  .from("reports")
+                  .select("storage_path")
+                  .eq("id", reportId)
+                  .maybeSingle();
+                storagePath = (reportRow as { storage_path?: string | null })
+                  ?.storage_path;
+              }
+              if (storagePath) {
+                const { data: signed, error: signError } = await supabaseAdmin
+                  .storage
+                  .from("reports")
+                  .createSignedUrl(storagePath, 60 * 60);
+                if (signError) {
+                  throw new Error(signError.message ?? "signed_url_failed");
+                }
+                reportUrl = signed?.signedUrl ?? null;
+              }
+            }
+
+            if (!reportUrl) {
+              resultReason = "no_report_url";
+            } else {
+              const subject = `Votre rapport mensuel ${periodKey}`;
+              const linkLabel = appUrl ? "Voir dans l'app" : "Télécharger le PDF";
+              const html = `
+                <p>Votre rapport mensuel est prêt.</p>
+                <p><a href="${reportUrl}">${linkLabel}</a></p>
+              `;
+              await sendResendEmail({
+                to: recipient,
+                from: emailFrom,
+                subject,
+                html,
+                apiKey: resendApiKey
+              });
+              emailed = true;
+              emailedAt = new Date().toISOString();
+              await supabaseAdmin
+                .from("reports")
+                .update({ emailed_at: emailedAt, updated_at: emailedAt })
+                .eq("id", reportId);
+            }
+          }
+        }
+
+        const status =
+          !rendered || !emailed
+            ? createdReport
+              ? "created"
+              : "skipped"
+            : createdReport
+              ? "created"
+              : "skipped";
 
         results.push({
           userId,
-          reportId: inserted.id as string,
-          status: "created"
+          reportId,
+          status,
+          createdReport,
+          rendered,
+          emailed,
+          reason: resultReason
         });
       } catch (error) {
         results.push({
@@ -222,9 +368,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const stats = results.reduce(
       (acc, item) => {
         acc.total += 1;
-        if (item.status === "created") acc.created += 1;
-        if (item.status === "skipped") acc.skipped += 1;
-        if (item.status === "failed") acc.failed += 1;
+        if (item.status === "failed") {
+          acc.failed += 1;
+          return acc;
+        }
+        if (item.createdReport) {
+          acc.created += 1;
+        } else {
+          acc.skipped += 1;
+        }
         return acc;
       },
       { total: 0, created: 0, skipped: 0, failed: 0 }

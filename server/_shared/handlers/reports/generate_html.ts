@@ -3,11 +3,7 @@ import { requireUser } from "../../../_shared_dist/_auth.js";
 import { getRequestId, logRequest } from "../../../_shared_dist/api_utils.js";
 import { renderPdfFromHtml } from "../../../_shared_dist/pdf_html.js";
 
-type SupabaseAdmin = ReturnType<typeof requireUser> extends Promise<infer R>
-  ? R extends { supabaseAdmin: infer C }
-    ? C
-    : never
-  : never;
+type SupabaseAdmin = any;
 
 type ReportPreset =
   | "last_7_days"
@@ -544,20 +540,16 @@ class ReportError extends Error {
 }
 
 type GeneratePremiumReportParams = {
-  supabaseAdmin: SupabaseAdmin;
+  supabaseAdmin: any;
   reportId: string;
   requestId: string;
   userId?: string;
   htmlOnly?: boolean;
 };
 
-type GeneratePremiumReportResult =
-  | { ok: true; reportId: string; pdf?: { path: string; url: string | null } }
-  | { ok: true; reportId: string; html: string };
-
 export const generatePremiumReport = async (
   params: GeneratePremiumReportParams
-): Promise<GeneratePremiumReportResult> => {
+): Promise<any> => {
   const { supabaseAdmin, reportId, requestId, userId, htmlOnly } = params;
 
   logRequest("[reports]", { requestId, reportId, renderMode: "premium" });
