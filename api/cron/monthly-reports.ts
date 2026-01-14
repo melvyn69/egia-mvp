@@ -81,32 +81,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       Number(process.env.CRON_MONTHLY_BATCH ?? 20)
     );
 
-    const { data: locationRows, error: locationsError } = await supabaseAdmin
-      .from("google_locations")
-      .select("user_id, location_resource_name")
+    const { data: enabledRows, error: enabledError } = await supabaseAdmin
+      .from("business_settings")
+      .select("user_id")
+      .eq("monthly_report_enabled", true)
       .not("user_id", "is", null)
-      .limit(batchSize * 50);
-    if (locationsError) {
+      .limit(batchSize);
+    if (enabledError) {
       return respondJson(res, 500, {
         ok: false,
-        error: { message: "Failed to load locations", code: "INTERNAL" },
+        error: { message: "Failed to load enabled users", code: "INTERNAL" },
         requestId
       });
     }
 
-    const locationsByUser = new Map<string, string[]>();
-    for (const row of locationRows ?? []) {
-      const userId = row.user_id as string | null;
-      const locationId = row.location_resource_name as string | null;
-      if (!userId || !locationId) {
-        continue;
-      }
-      const list = locationsByUser.get(userId) ?? [];
-      list.push(locationId);
-      locationsByUser.set(userId, list);
-    }
-
-    const users = Array.from(locationsByUser.keys()).slice(0, batchSize);
+    const users = (enabledRows ?? [])
+      .map((row) => (row as { user_id?: string | null }).user_id ?? null)
+      .filter(Boolean) as string[];
     if (users.length === 0) {
       return respondJson(res, 200, {
         ok: true,
@@ -119,6 +110,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         results: [],
         skipReason: "no_candidates"
       });
+    }
+
+    const { data: locationRows, error: locationsError } = await supabaseAdmin
+      .from("google_locations")
+      .select("user_id, location_resource_name")
+      .in("user_id", users)
+      .not("location_resource_name", "is", null);
+    if (locationsError) {
+      return respondJson(res, 500, {
+        ok: false,
+        error: { message: "Failed to load locations", code: "INTERNAL" },
+        requestId
+      });
+    }
+
+    const locationsByUser = new Map<string, string[]>();
+    for (const row of locationRows ?? []) {
+      const userId = (row as { user_id?: string | null }).user_id ?? null;
+      const locationId =
+        (row as { location_resource_name?: string | null })
+          .location_resource_name ?? null;
+      if (!userId || !locationId) continue;
+      const list = locationsByUser.get(userId) ?? [];
+      list.push(locationId);
+      locationsByUser.set(userId, list);
     }
 
     const results: Array<{
