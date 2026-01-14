@@ -3,6 +3,12 @@ import { requireUser } from "../../../_shared_dist/_auth.js";
 import { getRequestId, logRequest } from "../../../_shared_dist/api_utils.js";
 import { renderPdfFromHtml } from "../../../_shared_dist/pdf_html.js";
 
+type SupabaseAdmin = ReturnType<typeof requireUser> extends Promise<infer R>
+  ? R extends { supabaseAdmin: infer C }
+    ? C
+    : never
+  : never;
+
 type ReportPreset =
   | "last_7_days"
   | "last_30_days"
@@ -529,38 +535,48 @@ const buildHtml = (params: {
   `;
 };
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+class ReportError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
   }
+}
 
-  const auth = await requireUser(req, res);
-  if (!auth) {
-    return;
-  }
+type GeneratePremiumReportParams = {
+  supabaseAdmin: SupabaseAdmin;
+  reportId: string;
+  requestId: string;
+  userId?: string;
+  htmlOnly?: boolean;
+};
 
-  const { supabaseAdmin, userId } = auth;
-  const requestId = getRequestId(req);
-  const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
-  const reportId = payload?.report_id as string | undefined;
+type GeneratePremiumReportResult =
+  | { ok: true; reportId: string; pdf?: { path: string; url: string | null } }
+  | { ok: true; reportId: string; html: string };
 
-  if (!reportId) {
-    return res.status(400).json({ error: "Missing report_id" });
-  }
+export const generatePremiumReport = async (
+  params: GeneratePremiumReportParams
+): Promise<GeneratePremiumReportResult> => {
+  const { supabaseAdmin, reportId, requestId, userId, htmlOnly } = params;
 
   logRequest("[reports]", { requestId, reportId, renderMode: "premium" });
 
-  const { data: report, error: reportError } = await supabaseAdmin
+  let reportQuery = supabaseAdmin
     .from("reports")
     .select(
       "id, user_id, name, locations, period_preset, from_date, to_date, notes"
     )
-    .eq("id", reportId)
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (reportError || !report) {
-    return res.status(404).json({ error: "Report not found" });
+    .eq("id", reportId);
+  if (userId) {
+    reportQuery = reportQuery.eq("user_id", userId);
   }
+  const { data: report, error: reportError } = await reportQuery.maybeSingle();
+  if (reportError || !report) {
+    throw new ReportError("Report not found", 404);
+  }
+
+  const reportUserId = report.user_id;
 
   let locationsLabel = "Établissements: Tous";
   const locationNameByResource = new Map<string, string>();
@@ -568,7 +584,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: locationRows } = await supabaseAdmin
       .from("google_locations")
       .select("location_resource_name, location_title")
-      .eq("user_id", userId)
+      .eq("user_id", reportUserId)
       .in("location_resource_name", report.locations);
     const titles = (locationRows ?? [])
       .map((row) => {
@@ -606,7 +622,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .select(
         "id, rating, comment, create_time, location_id, author_name, reply_text, replied_at, review_ai_insights(sentiment, sentiment_score), review_ai_tags(ai_tags(tag, category))"
       )
-      .eq("user_id", userId);
+      .eq("user_id", reportUserId);
     if (Array.isArray(report.locations) && report.locations.length > 0) {
       query = query.in("location_id", report.locations);
     }
@@ -775,8 +791,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       name: row.name,
       reviewsTotal: row.reviewsTotal,
       avgRating: row.ratingCount > 0 ? row.ratingSum / row.ratingCount : null,
-      responseRate:
-        row.replyable > 0 ? row.replied / row.replyable : null,
+      responseRate: row.replyable > 0 ? row.replied / row.replyable : null,
       untreatedNegativeCount: row.untreatedNegativeCount,
       positiveCount: row.positiveCount,
       negativeCount: row.negativeCount
@@ -817,14 +832,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       perLocation
     });
 
-    if (req.query?.html === "1" && process.env.NODE_ENV !== "production") {
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.status(200).send(html);
+    if (htmlOnly) {
+      return { ok: true, reportId, html };
     }
 
     const pdfBytes = await renderPdfFromHtml(html);
 
-    const storagePath = `${userId}/${reportId}/${Date.now()}.pdf`;
+    const storagePath = `${reportUserId}/${reportId}/${Date.now()}.pdf`;
     const { error: uploadError } = await supabaseAdmin.storage
       .from("reports")
       .upload(storagePath, pdfBytes, {
@@ -860,17 +874,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
       .eq("id", reportId);
 
-    return res.status(200).json({
+    return {
       ok: true,
       reportId,
       pdf: { path: storagePath, url: signed?.signedUrl ?? null }
-    });
+    };
   } catch (error) {
     console.error("[reports] generate_html failed", error);
     await supabaseAdmin
       .from("reports")
       .update({ status: "failed", updated_at: new Date().toISOString() })
       .eq("id", reportId);
-    return res.status(500).json({ error: "Report generation failed" });
+    throw new ReportError("Report generation failed", 500);
+  }
+};
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const auth = await requireUser(req, res);
+  if (!auth) {
+    return;
+  }
+
+  const { supabaseAdmin, userId } = auth;
+  const requestId = getRequestId(req);
+  const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
+  const reportId = payload?.report_id as string | undefined;
+
+  if (!reportId) {
+    return res.status(400).json({ error: "Missing report_id" });
+  }
+
+  const htmlOnly =
+    req.query?.html === "1" && process.env.NODE_ENV !== "production";
+
+  try {
+    const result = await generatePremiumReport({
+      supabaseAdmin,
+      reportId,
+      requestId,
+      userId,
+      htmlOnly
+    });
+    if ("html" in result) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.status(200).send(result.html);
+    }
+    return res.status(200).json(result);
+  } catch (error) {
+    const status = error instanceof ReportError ? error.status : 500;
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return res.status(status).json({ error: message });
   }
 }
