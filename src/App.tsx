@@ -16,6 +16,7 @@ import { TestLab } from "./pages/TestLab";
 import { Reports } from "./pages/Reports";
 import { TeamRanking } from "./pages/TeamRanking";
 import Settings from "./pages/Settings";
+import Invite from "./pages/Invite";
 import { SyncStatus } from "./pages/SyncStatus";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
@@ -638,6 +639,7 @@ const App = () => {
                   element={<TestLab session={session} />}
                 />
                 <Route path="/settings" element={<Settings session={session} />} />
+                <Route path="/invite" element={<Invite session={session} />} />
                 <Route
                   path="/reports"
                   element={<Reports session={session} locations={locations} />}

@@ -21,6 +21,16 @@ type TeamMemberRow = {
   is_active?: boolean | null;
 };
 
+type TeamInvitationRow = {
+  id: string;
+  email: string;
+  first_name?: string | null;
+  role?: string | null;
+  receive_monthly_reports?: boolean | null;
+  status?: string | null;
+  expires_at?: string | null;
+};
+
 type BusinessSettingsRow = {
   business_name?: string | null;
   monthly_report_enabled?: boolean | null;
@@ -105,6 +115,7 @@ const Settings = ({ session }: SettingsProps) => {
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [toggleError, setToggleError] = useState<string | null>(null);
+  const [inviteSending, setInviteSending] = useState(false);
   const [updatingCompany, setUpdatingCompany] = useState(false);
   const [companyError, setCompanyError] = useState<string | null>(null);
 
@@ -146,45 +157,88 @@ const Settings = ({ session }: SettingsProps) => {
   const monthlyEnabled =
     businessSettingsQuery.data?.monthly_report_enabled ?? false;
 
+  const invitationsQuery = useQuery({
+    queryKey: ["team-invitations", userId],
+    queryFn: async () => {
+      if (!supabaseClient || !userId) {
+        return [] as TeamInvitationRow[];
+      }
+      const { data, error } = await sb
+        .from("team_invitations")
+        .select(
+          "id, email, first_name, role, receive_monthly_reports, status, expires_at"
+        )
+        .eq("owner_user_id", userId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as TeamInvitationRow[];
+    },
+    enabled: Boolean(supabaseClient) && Boolean(userId)
+  });
+
   const handleInvite = async () => {
     if (!supabaseClient || !userId) return;
     setInviteError(null);
     setInviteSuccess(null);
+    setInviteSending(true);
 
     const firstName = inviteFirstName.trim();
     const email = inviteEmail.trim().toLowerCase();
     if (!firstName) {
       setInviteError("Le prenom est obligatoire.");
+      setInviteSending(false);
       return;
     }
     if (!email) {
       setInviteError("L'email est obligatoire.");
+      setInviteSending(false);
       return;
     }
 
-    const { data: existing } = await sb
-      .from("team_members")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("email", email)
-      .maybeSingle();
-    if (existing?.id) {
-      setInviteError("Cet email est deja invite.");
+    const accessToken = session?.access_token ?? null;
+    if (!accessToken) {
+      setInviteError("Session invalide. Reconnectez-vous.");
+      setInviteSending(false);
       return;
     }
 
-    const payload = {
-      user_id: userId,
-      first_name: firstName,
-      role: inviteRole,
-      email,
-      is_active: true,
-      receive_monthly_reports: inviteMonthly,
-      updated_at: new Date().toISOString()
-    };
-    const { error } = await sb.from("team_members").insert(payload);
-    if (error) {
-      setInviteError("Impossible d'ajouter ce membre.");
+    let successMessage: string | null = null;
+    try {
+      const response = await fetch("/api/team/invite", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          first_name: firstName,
+          email,
+          role: inviteRole,
+          receive_monthly_reports: inviteMonthly
+        })
+      });
+      const raw = await response.text();
+      let payload: { ok?: boolean; emailSent?: boolean; warning?: string } | null = null;
+      if (raw) {
+        try {
+          payload = JSON.parse(raw);
+        } catch {
+          payload = null;
+        }
+      }
+      if (!response.ok) {
+        setInviteError(raw || "Impossible d'envoyer l'invitation.");
+        setInviteSending(false);
+        return;
+      }
+      if (payload?.emailSent === false) {
+        successMessage =
+          "Invitation creee, mais l'email n'a pas ete envoye. Vous pouvez renvoyer.";
+      }
+    } catch {
+      setInviteError("Impossible d'envoyer l'invitation.");
+      setInviteSending(false);
       return;
     }
 
@@ -192,8 +246,48 @@ const Settings = ({ session }: SettingsProps) => {
     setInviteEmail("");
     setInviteRole("editor");
     setInviteMonthly(false);
-    setInviteSuccess("Invitation ajoutee.");
-    void queryClient.invalidateQueries({ queryKey: ["team-members", userId] });
+    setInviteSuccess(successMessage ?? "Invitation envoyee.");
+    void queryClient.invalidateQueries({ queryKey: ["team-invitations", userId] });
+    setInviteSending(false);
+  };
+
+  const handleResend = async (invitation: TeamInvitationRow) => {
+    if (!supabaseClient || !userId) return;
+    setInviteError(null);
+    setInviteSuccess(null);
+    const accessToken = session?.access_token ?? null;
+    if (!accessToken) {
+      setInviteError("Session invalide. Reconnectez-vous.");
+      return;
+    }
+    try {
+      const response = await fetch("/api/team/invite", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          first_name: invitation.first_name ?? "",
+          email: invitation.email,
+          role: invitation.role ?? "editor",
+          receive_monthly_reports: Boolean(
+            invitation.receive_monthly_reports
+          )
+        })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        setInviteError(text || "Impossible de renvoyer l'invitation.");
+        return;
+      }
+      setInviteSuccess("Invitation renvoyee.");
+      void queryClient.invalidateQueries({
+        queryKey: ["team-invitations", userId]
+      });
+    } catch {
+      setInviteError("Impossible de renvoyer l'invitation.");
+    }
   };
 
   const handleMemberToggle = async (
@@ -337,6 +431,44 @@ const Settings = ({ session }: SettingsProps) => {
 
           <Card>
             <CardHeader>
+              <CardTitle>Invitations en attente</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {invitationsQuery.isLoading ? (
+                <Skeleton className="h-16 w-full" />
+              ) : (invitationsQuery.data ?? []).length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  Aucune invitation en attente.
+                </p>
+              ) : (
+                (invitationsQuery.data ?? []).map((invite) => (
+                  <div
+                    key={invite.id}
+                    className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-3 text-sm"
+                  >
+                    <div>
+                      <p className="font-medium text-slate-900">
+                        {invite.email}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {roleLabel(invite.role ?? "editor")}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleResend(invite)}
+                    >
+                      Renvoyer
+                    </Button>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Inviter un membre</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -392,7 +524,9 @@ const Settings = ({ session }: SettingsProps) => {
                 <p className="text-xs text-emerald-600">{inviteSuccess}</p>
               )}
 
-              <Button onClick={handleInvite}>Envoyer l'invitation</Button>
+              <Button onClick={handleInvite} disabled={inviteSending}>
+                Envoyer l'invitation
+              </Button>
             </CardContent>
           </Card>
         </div>
@@ -458,10 +592,13 @@ const Settings = ({ session }: SettingsProps) => {
     inviteError,
     inviteSuccess,
     toggleError,
+    inviteSending,
     businessSettingsQuery.isLoading,
     monthlyEnabled,
     updatingCompany,
-    companyError
+    companyError,
+    invitationsQuery.isLoading,
+    invitationsQuery.data
   ]);
 
   return (
