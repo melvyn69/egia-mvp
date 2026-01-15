@@ -205,13 +205,14 @@ const Settings = ({ session }: SettingsProps) => {
 
     let successMessage: string | null = null;
     try {
-      const response = await fetch("/api/team/invite", {
+      const response = await fetch("/api/team", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
+          action: "invite",
           first_name: firstName,
           email,
           role: inviteRole,

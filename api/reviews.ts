@@ -27,6 +27,18 @@ type ReviewTagLinkRow = { review_pk: string; tag_id: string };
 
 type AiTagRow = { id: string; tag: string };
 
+type CronStatus = {
+  status: "idle" | "running" | "done" | "error";
+  [key: string]: unknown;
+};
+
+const toStatus = (value: unknown): CronStatus => {
+  if (value && typeof value === "object" && "status" in value) {
+    return value as CronStatus;
+  }
+  return { status: "idle" };
+};
+
 const parseCursor = (cursorParam: string | undefined): Cursor | null => {
   if (!cursorParam) {
     return null;
@@ -89,6 +101,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
   const requestId = getRequestId(req);
   let userId: string | null = null;
   let locationId: string | null = null;
+  const actionParam = req.query.action;
+  const action = Array.isArray(actionParam) ? actionParam[0] : actionParam;
 
   try {
     let auth;
@@ -117,6 +131,53 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     }
     userId = auth.userId;
     const { supabaseAdmin } = auth;
+
+    if (action === "status" || action === "health") {
+      try {
+        let statusLocationId = req.query.location_id;
+        if (Array.isArray(statusLocationId)) {
+          statusLocationId = statusLocationId[0];
+        }
+        if (!statusLocationId) {
+          return res.status(400).json({ error: "Missing location_id" });
+        }
+
+        const { data: locationRow } = await supabaseAdmin
+          .from("google_locations")
+          .select("location_resource_name")
+          .eq("user_id", userId)
+          .eq("location_resource_name", statusLocationId)
+          .maybeSingle();
+        if (!locationRow) {
+          return res.status(404).json({ error: "Location not found" });
+        }
+
+        const importKey = `import_status_v1:${userId}:${statusLocationId}`;
+        const aiKey = `ai_status_v1:${userId}:${statusLocationId}`;
+
+        const { data: importState } = await supabaseAdmin
+          .from("cron_state")
+          .select("value")
+          .eq("key", importKey)
+          .maybeSingle();
+        const { data: aiState } = await supabaseAdmin
+          .from("cron_state")
+          .select("value")
+          .eq("key", aiKey)
+          .maybeSingle();
+
+        const importStatus = toStatus(importState?.value ?? null);
+        const aiStatus = toStatus(aiState?.value ?? null);
+
+        return res.status(200).json({
+          location_id: statusLocationId,
+          import: importStatus,
+          ai: aiStatus
+        });
+      } catch {
+        return res.status(500).json({ error: "Failed to load status" });
+      }
+    }
 
     const filters = parseFilters(req.query);
     locationId = filters.location_id ?? null;

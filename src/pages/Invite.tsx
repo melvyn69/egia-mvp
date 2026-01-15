@@ -49,13 +49,13 @@ const Invite = ({ session }: InviteProps) => {
     setMessage(null);
     setStatus("sending");
     try {
-      const response = await fetch("/api/team/accept", {
+      const response = await fetch("/api/team", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${session.access_token}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ token })
+        body: JSON.stringify({ action: "accept", token })
       });
       if (!response.ok) {
         const text = await response.text();

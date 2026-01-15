@@ -783,7 +783,7 @@ const Inbox = () => {
     try {
       const token = await getAccessToken(supabase);
       const response = await fetch(
-        `/api/status/reviews?location_id=${encodeURIComponent(activeLocationId)}`,
+        `/api/reviews?action=status&location_id=${encodeURIComponent(activeLocationId)}`,
         {
           headers: {
             Authorization: `Bearer ${token}`
