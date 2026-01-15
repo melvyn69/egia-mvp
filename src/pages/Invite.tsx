@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { Button } from "../components/ui/button";
@@ -11,6 +11,7 @@ type InviteProps = {
 
 const Invite = ({ session }: InviteProps) => {
   const [params] = useSearchParams();
+  const navigate = useNavigate();
   const token = params.get("token") ?? "";
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "accepted">("idle");
@@ -65,6 +66,7 @@ const Invite = ({ session }: InviteProps) => {
       }
       setStatus("accepted");
       setMessage("Invitation acceptee. Vous pouvez acceder a l'app.");
+      navigate("/settings?tab=equipe", { replace: true });
     } catch {
       setError("Impossible d'accepter l'invitation.");
       setStatus("idle");

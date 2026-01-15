@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -104,6 +105,7 @@ const initialsFromName = (value: string) => {
 
 const Settings = ({ session }: SettingsProps) => {
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const supabaseClient = supabase;
   const sb = supabaseClient as any;
   const userId = session?.user?.id ?? null;
@@ -118,6 +120,27 @@ const Settings = ({ session }: SettingsProps) => {
   const [inviteSending, setInviteSending] = useState(false);
   const [updatingCompany, setUpdatingCompany] = useState(false);
   const [companyError, setCompanyError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const raw = searchParams.get("tab");
+    if (!raw) return;
+    const normalized = raw.toLowerCase();
+    const map: Record<string, TabId> = {
+      equipe: "team",
+      team: "team",
+      integrations: "integrations",
+      "ai-identity": "ai-identity",
+      locations: "locations",
+      mobile: "mobile",
+      profile: "profile",
+      company: "company",
+      notifications: "notifications"
+    };
+    const next = map[normalized];
+    if (next && next !== activeTab) {
+      setActiveTab(next);
+    }
+  }, [activeTab, searchParams]);
 
   const teamMembersQuery = useQuery({
     queryKey: ["team-members", userId],
@@ -248,7 +271,9 @@ const Settings = ({ session }: SettingsProps) => {
     setInviteRole("editor");
     setInviteMonthly(false);
     setInviteSuccess(successMessage ?? "Invitation envoyee.");
-    void queryClient.invalidateQueries({ queryKey: ["team-invitations", userId] });
+    await queryClient.invalidateQueries({
+      queryKey: ["team-invitations", userId]
+    });
     setInviteSending(false);
   };
 
@@ -262,13 +287,14 @@ const Settings = ({ session }: SettingsProps) => {
       return;
     }
     try {
-      const response = await fetch("/api/team/invite", {
+      const response = await fetch("/api/team", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
+          action: "resend",
           first_name: invitation.first_name ?? "",
           email: invitation.email,
           role: invitation.role ?? "editor",
@@ -277,12 +303,26 @@ const Settings = ({ session }: SettingsProps) => {
           )
         })
       });
+      const raw = await response.text();
+      let payload: { ok?: boolean; emailSent?: boolean; warning?: string } | null = null;
+      if (raw) {
+        try {
+          payload = JSON.parse(raw);
+        } catch {
+          payload = null;
+        }
+      }
       if (!response.ok) {
-        const text = await response.text();
-        setInviteError(text || "Impossible de renvoyer l'invitation.");
+        setInviteError(raw || "Impossible de renvoyer l'invitation.");
         return;
       }
-      setInviteSuccess("Invitation renvoyee.");
+      if (payload?.emailSent === false) {
+        setInviteSuccess(
+          "Invitation renvoyee, mais l'email n'a pas ete envoye."
+        );
+      } else {
+        setInviteSuccess("Invitation renvoyee.");
+      }
       void queryClient.invalidateQueries({
         queryKey: ["team-invitations", userId]
       });
