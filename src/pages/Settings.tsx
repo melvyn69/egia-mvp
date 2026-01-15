@@ -99,12 +99,12 @@ const Settings = ({ session }: SettingsProps) => {
   const userId = session?.user?.id ?? null;
   const [activeTab, setActiveTab] = useState<TabId>("team");
   const [inviteFirstName, setInviteFirstName] = useState("");
-  const [inviteLastName, setInviteLastName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("editor");
   const [inviteMonthly, setInviteMonthly] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [toggleError, setToggleError] = useState<string | null>(null);
   const [updatingCompany, setUpdatingCompany] = useState(false);
   const [companyError, setCompanyError] = useState<string | null>(null);
 
@@ -152,7 +152,6 @@ const Settings = ({ session }: SettingsProps) => {
     setInviteSuccess(null);
 
     const firstName = inviteFirstName.trim();
-    const lastName = inviteLastName.trim();
     const email = inviteEmail.trim().toLowerCase();
     if (!firstName) {
       setInviteError("Le prenom est obligatoire.");
@@ -174,10 +173,9 @@ const Settings = ({ session }: SettingsProps) => {
       return;
     }
 
-    const fullName = `${firstName} ${lastName}`.trim();
     const payload = {
       user_id: userId,
-      first_name: fullName,
+      first_name: firstName,
       role: inviteRole,
       email,
       is_active: true,
@@ -191,12 +189,48 @@ const Settings = ({ session }: SettingsProps) => {
     }
 
     setInviteFirstName("");
-    setInviteLastName("");
     setInviteEmail("");
     setInviteRole("editor");
     setInviteMonthly(false);
     setInviteSuccess("Invitation ajoutee.");
     void queryClient.invalidateQueries({ queryKey: ["team-members", userId] });
+  };
+
+  const handleMemberToggle = async (
+    member: TeamMemberRow,
+    nextValue: boolean
+  ) => {
+    if (!supabaseClient || !userId) return;
+    if (!member.email) return;
+    setToggleError(null);
+    const previous = Boolean(member.receive_monthly_reports);
+    queryClient.setQueryData(["team-members", userId], (old) => {
+      const rows = (old as TeamMemberRow[] | undefined) ?? [];
+      return rows.map((row) =>
+        row.id === member.id
+          ? { ...row, receive_monthly_reports: nextValue }
+          : row
+      );
+    });
+    const { error } = await sb
+      .from("team_members")
+      .update({
+        receive_monthly_reports: nextValue,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", member.id)
+      .eq("user_id", userId);
+    if (error) {
+      queryClient.setQueryData(["team-members", userId], (old) => {
+        const rows = (old as TeamMemberRow[] | undefined) ?? [];
+        return rows.map((row) =>
+          row.id === member.id
+            ? { ...row, receive_monthly_reports: previous }
+            : row
+        );
+      });
+      setToggleError("Impossible de mettre a jour ce membre.");
+    }
   };
 
   const handleMonthlyToggle = async (nextValue: boolean) => {
@@ -236,6 +270,10 @@ const Settings = ({ session }: SettingsProps) => {
               <CardTitle>Collaborateurs actifs</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <p className="text-xs text-slate-500">
+                Le rapport mensuel est envoye automatiquement par email aux
+                membres actifs.
+              </p>
               {teamMembersQuery.isLoading ? (
                 <div className="space-y-3">
                   <Skeleton className="h-20 w-full" />
@@ -248,8 +286,9 @@ const Settings = ({ session }: SettingsProps) => {
               ) : (
                 teamMembers.map((member) => {
                   const name = member.first_name || "Collaborateur";
-                  const email = member.email ?? "—";
+                  const email = member.email ?? "Non renseigne";
                   const role = roleLabel(member.role);
+                  const canToggle = Boolean(member.email);
                   return (
                     <div
                       key={member.id}
@@ -271,10 +310,27 @@ const Settings = ({ session }: SettingsProps) => {
                           <p className="text-xs text-slate-500">{email}</p>
                         </div>
                       </div>
-                      <Badge variant="neutral">{role}</Badge>
+                      <div className="flex items-center gap-4">
+                        <label className="flex items-center gap-2 text-xs text-slate-600">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-ink"
+                            checked={Boolean(member.receive_monthly_reports)}
+                            disabled={!canToggle}
+                            onChange={(event) =>
+                              handleMemberToggle(member, event.target.checked)
+                            }
+                          />
+                          Recevoir le rapport mensuel
+                        </label>
+                        <Badge variant="neutral">{role}</Badge>
+                      </div>
                     </div>
                   );
                 })
+              )}
+              {toggleError && (
+                <p className="text-xs text-rose-600">{toggleError}</p>
               )}
             </CardContent>
           </Card>
@@ -292,15 +348,6 @@ const Settings = ({ session }: SettingsProps) => {
                     value={inviteFirstName}
                     onChange={(event) => setInviteFirstName(event.target.value)}
                     placeholder="Prénom"
-                  />
-                </label>
-                <label className="text-xs font-semibold text-slate-600">
-                  Nom (optionnel)
-                  <input
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
-                    value={inviteLastName}
-                    onChange={(event) => setInviteLastName(event.target.value)}
-                    placeholder="Nom"
                   />
                 </label>
                 <label className="text-xs font-semibold text-slate-600">
@@ -332,6 +379,10 @@ const Settings = ({ session }: SettingsProps) => {
                     className="h-4 w-4 accent-ink"
                   />
                 </label>
+                <p className="text-xs text-slate-500">
+                  Le rapport mensuel est envoye automatiquement par email aux
+                  membres actifs.
+                </p>
               </div>
 
               {inviteError && (
@@ -401,12 +452,12 @@ const Settings = ({ session }: SettingsProps) => {
     teamMembersQuery.isLoading,
     teamMembers,
     inviteFirstName,
-    inviteLastName,
     inviteEmail,
     inviteRole,
     inviteMonthly,
     inviteError,
     inviteSuccess,
+    toggleError,
     businessSettingsQuery.isLoading,
     monthlyEnabled,
     updatingCompany,
@@ -450,10 +501,3 @@ const Settings = ({ session }: SettingsProps) => {
 };
 
 export default Settings;
-
-// Manual test plan:
-// 1) Open /settings, switch tabs, verify no crashes and tab content updates.
-// 2) In "Equipe", create a member and see it appear in the active list.
-// 3) Toggle "Recevoir les rapports mensuels" in invite form and verify stored flag.
-// 4) In "Entreprise", toggle monthly report enabled and refresh to confirm persistence.
-// 5) Validate mobile layout stacks the two columns and form remains usable.
