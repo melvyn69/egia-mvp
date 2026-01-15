@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.generatePremiumReport = void 0;
 exports.default = handler;
 const _auth_js_1 = require("../../../_shared_dist/_auth.js");
 const api_utils_js_1 = require("../../../_shared_dist/api_utils.js");
@@ -408,38 +409,35 @@ const buildHtml = (params) => {
   </html>
   `;
 };
-async function handler(req, res) {
-    if (req.method !== "POST") {
-        return res.status(405).json({ error: "Method not allowed" });
+class ReportError extends Error {
+    status;
+    constructor(message, status) {
+        super(message);
+        this.status = status;
     }
-    const auth = await (0, _auth_js_1.requireUser)(req, res);
-    if (!auth) {
-        return;
-    }
-    const { supabaseAdmin, userId } = auth;
-    const requestId = (0, api_utils_js_1.getRequestId)(req);
-    const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
-    const reportId = payload?.report_id;
-    if (!reportId) {
-        return res.status(400).json({ error: "Missing report_id" });
-    }
+}
+const generatePremiumReport = async (params) => {
+    const { supabaseAdmin, reportId, requestId, userId, htmlOnly } = params;
     (0, api_utils_js_1.logRequest)("[reports]", { requestId, reportId, renderMode: "premium" });
-    const { data: report, error: reportError } = await supabaseAdmin
+    let reportQuery = supabaseAdmin
         .from("reports")
         .select("id, user_id, name, locations, period_preset, from_date, to_date, notes")
-        .eq("id", reportId)
-        .eq("user_id", userId)
-        .maybeSingle();
-    if (reportError || !report) {
-        return res.status(404).json({ error: "Report not found" });
+        .eq("id", reportId);
+    if (userId) {
+        reportQuery = reportQuery.eq("user_id", userId);
     }
+    const { data: report, error: reportError } = await reportQuery.maybeSingle();
+    if (reportError || !report) {
+        throw new ReportError("Report not found", 404);
+    }
+    const reportUserId = report.user_id;
     let locationsLabel = "Établissements: Tous";
     const locationNameByResource = new Map();
     if (Array.isArray(report.locations) && report.locations.length > 0) {
         const { data: locationRows } = await supabaseAdmin
             .from("google_locations")
             .select("location_resource_name, location_title")
-            .eq("user_id", userId)
+            .eq("user_id", reportUserId)
             .in("location_resource_name", report.locations);
         const titles = (locationRows ?? [])
             .map((row) => {
@@ -469,7 +467,7 @@ async function handler(req, res) {
         let query = supabaseAdmin
             .from("google_reviews")
             .select("id, rating, comment, create_time, location_id, author_name, reply_text, replied_at, review_ai_insights(sentiment, sentiment_score), review_ai_tags(ai_tags(tag, category))")
-            .eq("user_id", userId);
+            .eq("user_id", reportUserId);
         if (Array.isArray(report.locations) && report.locations.length > 0) {
             query = query.in("location_id", report.locations);
         }
@@ -635,12 +633,11 @@ async function handler(req, res) {
             aiSummary,
             perLocation
         });
-        if (req.query?.html === "1" && process.env.NODE_ENV !== "production") {
-            res.setHeader("Content-Type", "text/html; charset=utf-8");
-            return res.status(200).send(html);
+        if (htmlOnly) {
+            return { ok: true, reportId, html };
         }
         const pdfBytes = await (0, pdf_html_js_1.renderPdfFromHtml)(html);
-        const storagePath = `${userId}/${reportId}/${Date.now()}.pdf`;
+        const storagePath = `${reportUserId}/${reportId}/${Date.now()}.pdf`;
         const { error: uploadError } = await supabaseAdmin.storage
             .from("reports")
             .upload(storagePath, pdfBytes, {
@@ -673,11 +670,11 @@ async function handler(req, res) {
             updated_at: new Date().toISOString()
         })
             .eq("id", reportId);
-        return res.status(200).json({
+        return {
             ok: true,
             reportId,
             pdf: { path: storagePath, url: signed?.signedUrl ?? null }
-        });
+        };
     }
     catch (error) {
         console.error("[reports] generate_html failed", error);
@@ -685,6 +682,43 @@ async function handler(req, res) {
             .from("reports")
             .update({ status: "failed", updated_at: new Date().toISOString() })
             .eq("id", reportId);
-        return res.status(500).json({ error: "Report generation failed" });
+        throw new ReportError("Report generation failed", 500);
+    }
+};
+exports.generatePremiumReport = generatePremiumReport;
+async function handler(req, res) {
+    if (req.method !== "POST") {
+        return res.status(405).json({ error: "Method not allowed" });
+    }
+    const auth = await (0, _auth_js_1.requireUser)(req, res);
+    if (!auth) {
+        return;
+    }
+    const { supabaseAdmin, userId } = auth;
+    const requestId = (0, api_utils_js_1.getRequestId)(req);
+    const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
+    const reportId = payload?.report_id;
+    if (!reportId) {
+        return res.status(400).json({ error: "Missing report_id" });
+    }
+    const htmlOnly = req.query?.html === "1" && process.env.NODE_ENV !== "production";
+    try {
+        const result = await (0, exports.generatePremiumReport)({
+            supabaseAdmin,
+            reportId,
+            requestId,
+            userId,
+            htmlOnly
+        });
+        if ("html" in result) {
+            res.setHeader("Content-Type", "text/html; charset=utf-8");
+            return res.status(200).send(result.html);
+        }
+        return res.status(200).json(result);
+    }
+    catch (error) {
+        const status = error instanceof ReportError ? error.status : 500;
+        const message = error instanceof Error ? error.message : "Unknown error";
+        return res.status(status).json({ error: message });
     }
 }

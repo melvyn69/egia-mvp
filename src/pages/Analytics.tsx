@@ -339,7 +339,7 @@ const Analytics = ({
     params.set("limit", "10");
     try {
       const response = await fetch(
-        `/api/analytics?view=drilldown&${params.toString()}`,
+        `/api/kpi/analytics?view=drilldown&${params.toString()}`,
         {
           headers: { Authorization: `Bearer ${session.access_token}` }
         }

@@ -75,22 +75,22 @@ export const fetchAnalyticsBundle = async ({
     driversRes,
     qualityRes
   ] = await Promise.all([
-    fetch(`/api/analytics?view=overview&${params.toString()}`, {
+    fetch(`/api/kpi/analytics?view=overview&${params.toString()}`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     }),
-    fetch(`/api/analytics?view=timeseries&${params.toString()}`, {
+    fetch(`/api/kpi/analytics?view=timeseries&${params.toString()}`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     }),
-    fetch(`/api/analytics?view=compare&${params.toString()}`, {
+    fetch(`/api/kpi/analytics?view=compare&${params.toString()}`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     }),
-    fetch(`/api/analytics?view=insights&mode=auto&${params.toString()}`, {
+    fetch(`/api/kpi/analytics?view=insights&mode=auto&${params.toString()}`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     }),
-    fetch(`/api/analytics?view=drivers&${params.toString()}`, {
+    fetch(`/api/kpi/analytics?view=drivers&${params.toString()}`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     }),
-    fetch(`/api/analytics?view=quality&${params.toString()}`, {
+    fetch(`/api/kpi/analytics?view=quality&${params.toString()}`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     })
   ]);

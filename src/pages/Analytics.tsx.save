@@ -178,16 +178,16 @@ const Analytics = ({
       try {
         const [overviewRes, seriesRes, compareRes, insightsRes] =
           await Promise.all([
-          fetch(`/api/analytics?view=overview&${params.toString()}`, {
+          fetch(`/api/kpi/analytics?view=overview&${params.toString()}`, {
             headers: { Authorization: `Bearer ${session.access_token}` }
           }),
-          fetch(`/api/analytics?view=timeseries&${params.toString()}`, {
+          fetch(`/api/kpi/analytics?view=timeseries&${params.toString()}`, {
             headers: { Authorization: `Bearer ${session.access_token}` }
           }),
-          fetch(`/api/analytics?view=compare&${params.toString()}`, {
+          fetch(`/api/kpi/analytics?view=compare&${params.toString()}`, {
             headers: { Authorization: `Bearer ${session.access_token}` }
           }),
-          fetch(`/api/analytics?view=insights&mode=auto&${params.toString()}`, {
+          fetch(`/api/kpi/analytics?view=insights&mode=auto&${params.toString()}`, {
             headers: { Authorization: `Bearer ${session.access_token}` }
           })
         ]);
