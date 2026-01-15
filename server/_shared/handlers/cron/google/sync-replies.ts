@@ -7,7 +7,7 @@ import {
   getRequestId,
   sendError,
   logRequest
-} from "../../../../_shared_dist/api_utils.js";
+} from "../../../api_utils.js";
 
 type GoogleReview = {
   reviewId?: string;

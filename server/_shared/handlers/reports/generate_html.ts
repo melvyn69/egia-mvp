@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { requireUser } from "../../../_shared_dist/_auth.js";
-import { getRequestId, logRequest } from "../../../_shared_dist/api_utils.js";
-import { renderPdfFromHtml } from "../../../_shared_dist/pdf_html.js";
+import { requireUser } from "../../_auth.js";
+import { getRequestId, logRequest } from "../../api_utils.js";
+import { renderPdfFromHtml } from "../../pdf_html.js";
 
 type SupabaseAdmin = any;
 

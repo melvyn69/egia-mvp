@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vite --port 5173 --strictPort",
     "dev:fixed": "vite --port 5173 --strictPort",
-    "build:server": "tsc -p tsconfig.server.json",
+    "build:shared": "tsc -p server/_shared/tsconfig.shared.json",
+    "build:server": "npm run build:shared && tsc -p tsconfig.server.json",
     "build": "tsc -b && npm run build:server && vite build",
     "lint": "eslint .",
     "smoke": "tsx scripts/smoke-api.ts",

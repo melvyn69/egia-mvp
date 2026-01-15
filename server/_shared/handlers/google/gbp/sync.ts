@@ -3,16 +3,16 @@ import {
   createSupabaseAdmin,
   getRequiredEnv,
   getUserFromRequest
-} from "../../../../_shared_dist/google/_utils.js";
-import type { Json } from "../../../../_shared_dist/database.types.js";
-import { requireUser } from "../../../../_shared_dist/_auth.js";
+} from "../../../google/_utils.js";
+import type { Json } from "../../../database.types.js";
+import { requireUser } from "../../../_auth.js";
 import {
   getRequestId,
   sendError,
   parseQuery,
   getParam,
   logRequest
-} from "../../../../_shared_dist/api_utils.js";
+} from "../../../api_utils.js";
 
 type GoogleAccount = {
   name: string;

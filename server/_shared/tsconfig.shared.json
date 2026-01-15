@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../_shared_dist",
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "declaration": false
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["../_shared_dist/**"]
+}

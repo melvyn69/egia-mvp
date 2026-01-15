@@ -3,14 +3,14 @@ import {
   createSupabaseAdmin,
   getRequiredEnv,
   getUserFromRequest
-} from "../../../../../_shared_dist/google/_utils.js";
+} from "../../../../google/_utils.js";
 import {
   getRequestId,
   sendError,
   parseQuery,
   getParam,
   logRequest
-} from "../../../../../_shared_dist/api_utils.js";
+} from "../../../../api_utils.js";
 
 type GoogleReview = {
   reviewId?: string;
@@ -270,6 +270,7 @@ const sendPendingAlerts = async (params: {
   userId: string;
   establishmentId: string;
 }) => {
+  const sb: any = params.supabaseAdmin;
   const resendKey = process.env.RESEND_API_KEY ?? "";
   const emailFrom = process.env.EMAIL_FROM ?? "";
   if (!resendKey || !emailFrom) {
@@ -277,7 +278,7 @@ const sendPendingAlerts = async (params: {
     return;
   }
 
-  const { data: userRow, error: userError } = await params.supabaseAdmin
+  const { data: userRow, error: userError } = await sb
     .from("users")
     .select("email")
     .eq("id", params.userId)
@@ -286,10 +287,7 @@ const sendPendingAlerts = async (params: {
     console.error("[alerts] failed to load user email", userError);
     return;
   }
-  const recipient =
-    userRow && typeof userRow === "object" && "email" in userRow
-      ? (userRow as { email?: string | null }).email
-      : null;
+  const recipient = (userRow as any)?.email ?? null;
   if (!recipient) {
     console.warn("[alerts] missing recipient email", {
       userId: params.userId
@@ -297,7 +295,7 @@ const sendPendingAlerts = async (params: {
     return;
   }
 
-  const { data: alerts, error: alertsError } = await params.supabaseAdmin
+  const { data: alerts, error: alertsError } = await sb
     .from("alerts")
     .select(
       "id, user_id, establishment_id, rule_code, severity, review_id, payload, triggered_at, last_notified_at"
@@ -307,7 +305,7 @@ const sendPendingAlerts = async (params: {
     .is("resolved_at", null)
     .is("last_notified_at", null)
     .order("triggered_at", { ascending: true })
-    .limit(25);
+      .limit(25);
   if (alertsError) {
     console.error("[alerts] load pending failed", alertsError);
     return;
@@ -328,7 +326,7 @@ const sendPendingAlerts = async (params: {
         subject: "EGIA — Alerte intelligente",
         html: buildAlertEmailHtml({ title, summary, ctaUrl })
       });
-      await params.supabaseAdmin
+      await sb
         .from("alerts")
         .update({ last_notified_at: nowIso })
         .eq("id", (alert as PendingAlertRow).id)
@@ -851,9 +849,9 @@ export const syncGoogleReviewsForUser = async (
       }
     }
 
-    const { error: upsertError } = await supabaseAdmin
+    const { error: upsertError } = await (supabaseAdmin as any)
       .from("google_reviews")
-      .upsert(rows, {
+      .upsert(rows as any, {
         onConflict: "user_id,location_id,review_id"
       });
 
@@ -905,7 +903,7 @@ export const syncGoogleReviewsForUser = async (
       );
       insertedAlerts = alertsToInsert.length;
       if (alertsToInsert.length > 0) {
-        const { error: alertError } = await supabaseAdmin
+        const { error: alertError } = await (supabaseAdmin as any)
           .from("alerts")
           .insert(alertsToInsert, {
             onConflict: "rule_code,review_id",
@@ -956,7 +954,7 @@ export const syncGoogleReviewsForUser = async (
           })
         );
         if (backfillAlerts.length > 0) {
-          const { error: backfillInsertError } = await supabaseAdmin
+          const { error: backfillInsertError } = await (supabaseAdmin as any)
             .from("alerts")
             .insert(backfillAlerts, {
               onConflict: "rule_code,review_id",
