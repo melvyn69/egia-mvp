@@ -26,6 +26,17 @@ const getLastMonthRange = () => {
   return { start, end, periodKey };
 };
 
+const formatPeriodLabel = (date: Date) => {
+  try {
+    return new Intl.DateTimeFormat("fr-FR", {
+      month: "long",
+      year: "numeric"
+    }).format(date);
+  } catch {
+    return date.toISOString().slice(0, 7);
+  }
+};
+
 const respondJson = (
   res: VercelResponse,
   status: number,
@@ -35,25 +46,86 @@ const respondJson = (
 const isEmail = (value: string | null | undefined) =>
   typeof value === "string" && /.+@.+\..+/.test(value);
 
+const toBase64 = (buf: ArrayBuffer) => Buffer.from(buf).toString("base64");
+
+const fetchPdfAsBase64 = async (pdfUrl: string) => {
+  const response = await fetch(pdfUrl);
+  if (!response.ok) {
+    throw new Error(`PDF fetch failed: ${response.status}`);
+  }
+  const ab = await response.arrayBuffer();
+  return toBase64(ab);
+};
+
+const buildMonthlyReportEmailHtml = (opts: {
+  firstName?: string | null;
+  periodLabel: string;
+}) => {
+  const name = (opts.firstName ?? "").trim();
+  const hello = name ? `Bonjour ${name},` : "Bonjour,";
+
+  return `
+  <div style="font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f6f7fb;padding:24px;">
+    <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:14px;padding:24px;border:1px solid #e9ebf3;">
+      <h1 style="margin:0 0 12px 0;font-size:20px;line-height:1.3;color:#111827;">
+        Rapport mensuel EGIA – ${opts.periodLabel}
+      </h1>
+      <p style="margin:0 0 14px 0;color:#111827;font-size:14px;line-height:1.6;">
+        ${hello}
+      </p>
+      <p style="margin:0 0 14px 0;color:#111827;font-size:14px;line-height:1.6;">
+        Votre rapport mensuel EGIA pour la période ${opts.periodLabel} est maintenant disponible.
+      </p>
+      <p style="margin:0 0 12px 0;color:#111827;font-size:14px;line-height:1.6;">
+        Vous y trouverez :<br/>
+        • l’analyse de vos avis clients<br/>
+        • les indicateurs clés de performance<br/>
+        • le résumé IA des tendances
+      </p>
+      <p style="margin:0 0 12px 0;color:#111827;font-size:14px;line-height:1.6;">
+        Le rapport est joint à cet email au format PDF.
+      </p>
+      <p style="margin:18px 0 0 0;color:#111827;font-size:14px;line-height:1.6;">
+        Bonne lecture,<br/>
+        L’équipe EGIA
+      </p>
+    </div>
+  </div>`;
+};
+
+const buildMonthlyReportSubject = (periodLabel: string) =>
+  `Votre rapport mensuel EGIA – ${periodLabel}`;
+
 const sendResendEmail = async (params: {
   to: string;
   from: string;
   subject: string;
   html: string;
   apiKey: string;
+  attachment?: { filename: string; content: string } | null;
 }) => {
+  const body: Record<string, unknown> = {
+    from: params.from,
+    to: params.to,
+    subject: params.subject,
+    html: params.html
+  };
+  if (params.attachment) {
+    body.attachments = [
+      {
+        filename: params.attachment.filename,
+        content: params.attachment.content
+      }
+    ];
+  }
+
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${params.apiKey}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({
-      from: params.from,
-      to: params.to,
-      subject: params.subject,
-      html: params.html
-    })
+    body: JSON.stringify(body)
   });
   if (!response.ok) {
     const text = await response.text();
@@ -101,61 +173,85 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     auth: { persistSession: false }
   });
 
-  console.log("[cron][monthly-reports]", { requestId, route: req.url });
+  console.log("[cron][monthly-reports] start", { requestId, route: req.url });
 
   try {
     const { start, end, periodKey } = getLastMonthRange();
     const fromIso = start.toISOString();
     const toIso = end.toISOString();
+    const periodLabel = formatPeriodLabel(start);
+
     const batchSize = Math.max(
       1,
       Number(process.env.CRON_MONTHLY_BATCH ?? 20)
     );
+    const forceParam = req.query?.force;
+    const force =
+      forceParam === "1" ||
+      (Array.isArray(forceParam) && forceParam[0] === "1");
+    const runForUserParam = req.query?.run_for_user;
+    const runForUser = Array.isArray(runForUserParam)
+      ? runForUserParam[0]
+      : runForUserParam;
+    const runForReportParam = req.query?.run_for_report;
+    const runForReport = Array.isArray(runForReportParam)
+      ? runForReportParam[0]
+      : runForReportParam;
 
-    const { data: enabledRows, error: enabledError } = await supabaseAdmin
-      .from("business_settings")
-      .select("user_id, business_name")
-      .eq("monthly_report_enabled", true)
-      .not("user_id", "is", null)
-      .limit(batchSize);
-    if (enabledError) {
-      return respondJson(res, 500, {
-        ok: false,
-        error: { message: "Failed to load enabled users", code: "INTERNAL" },
-        requestId
-      });
-    }
+    const resendApiKey = process.env.RESEND_API_KEY ?? "";
+    const emailFrom = process.env.EMAIL_FROM ?? "";
 
-    const emailByUser = new Map<string, string>();
-    const users = (enabledRows ?? [])
-      .map((row) => {
-        const userId = (row as { user_id?: string | null }).user_id ?? null;
-        const businessName = (row as { business_name?: string | null })
-          .business_name ?? null;
-        if (userId && isEmail(businessName)) {
-          emailByUser.set(userId, businessName as string);
-        }
-        return userId;
-      })
-      .filter(Boolean) as string[];
-    if (users.length === 0) {
-      return respondJson(res, 200, {
-        ok: true,
-        requestId,
-        period: { from: fromIso, to: toIso, key: periodKey },
-        stats: { total: 0, created: 0, skipped: 1, failed: 0 },
-        created: 0,
-        skipped: 1,
-        errors: [],
-        results: [],
-        skipReason: "no_candidates"
-      });
+    let users: string[] = [];
+    const businessNameByUser = new Map<string, string>();
+
+    if (!runForReport) {
+      let settingsQuery = supabaseAdmin
+        .from("business_settings")
+        .select("user_id, business_name")
+        .eq("monthly_report_enabled", true)
+        .not("user_id", "is", null)
+        .limit(batchSize);
+      if (runForUser) {
+        settingsQuery = settingsQuery.eq("user_id", runForUser);
+      }
+      const { data: enabledRows, error: enabledError } = await settingsQuery;
+      if (enabledError) {
+        return respondJson(res, 500, {
+          ok: false,
+          error: { message: "Failed to load enabled users", code: "INTERNAL" },
+          requestId
+        });
+      }
+      users = (enabledRows ?? [])
+        .map((row) => {
+          const userId = (row as { user_id?: string | null }).user_id ?? null;
+          const businessName = (row as { business_name?: string | null })
+            .business_name;
+          if (userId && businessName) {
+            businessNameByUser.set(userId, businessName);
+          }
+          return userId;
+        })
+        .filter(Boolean) as string[];
+      if (users.length === 0) {
+        return respondJson(res, 200, {
+          ok: true,
+          requestId,
+          period: { from: fromIso, to: toIso, key: periodKey },
+          stats: { total: 0, created: 0, skipped: 1, failed: 0 },
+          created: 0,
+          skipped: 1,
+          errors: [],
+          results: [],
+          skipReason: "no_candidates"
+        });
+      }
     }
 
     const { data: locationRows, error: locationsError } = await supabaseAdmin
       .from("google_locations")
       .select("user_id, location_resource_name")
-      .in("user_id", users)
+      .in("user_id", users.length > 0 ? users : ["00000000-0000-0000-0000-000000000000"])
       .not("location_resource_name", "is", null);
     if (locationsError) {
       return respondJson(res, 500, {
@@ -177,10 +273,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       locationsByUser.set(userId, list);
     }
 
-    const resendApiKey = process.env.RESEND_API_KEY ?? "";
-    const emailFrom = process.env.EMAIL_FROM ?? "";
-    const appUrl = process.env.APP_URL ?? "";
-
     const results: Array<{
       userId: string;
       reportId?: string;
@@ -188,180 +280,225 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       createdReport?: boolean;
       rendered?: boolean;
       emailed?: boolean;
+      recipients?: string[];
       reason?: string;
       error?: string;
     }> = [];
 
-    for (const userId of users) {
-      try {
-        const existing = await supabaseAdmin
+    const getRecipients = async (userId: string) => {
+      const recipients: Array<{ email: string; firstName?: string | null }> = [];
+      const { data: teamRows } = await supabaseAdmin
+        .from("team_members")
+        .select("email, first_name, last_name, receive_monthly_reports, is_active")
+        .eq("user_id", userId)
+        .eq("receive_monthly_reports", true)
+        .eq("is_active", true)
+        .not("email", "is", null);
+
+      for (const row of teamRows ?? []) {
+        const email = (row as { email?: string | null }).email ?? null;
+        if (email && isEmail(email)) {
+          const firstName = (row as { first_name?: string | null }).first_name ?? null;
+          recipients.push({ email, firstName });
+        }
+      }
+
+      if (recipients.length === 0) {
+        const businessName = businessNameByUser.get(userId) ?? null;
+        if (isEmail(businessName)) {
+          recipients.push({ email: businessName as string, firstName: null });
+        }
+      }
+
+      return recipients;
+    };
+
+    const processReport = async (userId: string, reportId: string | null) => {
+      let reportRow = null as Record<string, unknown> | null;
+      if (reportId) {
+        const { data } = await supabaseAdmin
           .from("reports")
-          .select("id, rendered_at, emailed_at, storage_path")
+          .select("id, user_id, rendered_at, emailed_at, storage_path")
+          .eq("id", reportId)
+          .maybeSingle();
+        reportRow = data as Record<string, unknown> | null;
+      }
+
+      let report = reportRow;
+      if (!report) {
+        const { data } = await supabaseAdmin
+          .from("reports")
+          .select("id, user_id, rendered_at, emailed_at, storage_path")
           .eq("user_id", userId)
           .eq("period_preset", "last_month")
           .eq("from_date", fromIso)
           .eq("to_date", toIso)
           .eq("render_mode", "premium")
           .maybeSingle();
-        if (existing.error) {
-          results.push({
-            userId,
-            status: "failed",
-            error: existing.error.message ?? "report_lookup_failed"
-          });
-          continue;
-        }
+        report = data as Record<string, unknown> | null;
+      }
 
-        const locations = locationsByUser.get(userId) ?? [];
+      let createdReport = false;
+      let reportIdResolved = (report?.id as string | undefined) ?? undefined;
+      let renderedAt = report?.rendered_at as string | null | undefined;
+      let emailedAt = report?.emailed_at as string | null | undefined;
+      let storagePath = report?.storage_path as string | null | undefined;
+
+      const locations = locationsByUser.get(userId) ?? [];
+      if (!reportIdResolved) {
         if (locations.length === 0) {
           results.push({
             userId,
             status: "skipped",
             reason: "no_locations"
           });
-          continue;
+          return;
         }
 
-        let reportId = existing.data?.id as string | undefined;
-        let renderedAt = existing.data?.rendered_at as string | null | undefined;
-        let emailedAt = existing.data?.emailed_at as string | null | undefined;
-        let storagePath = existing.data?.storage_path as string | null | undefined;
-        let createdReport = false;
+        const insertPayload = {
+          user_id: userId,
+          name: `Rapport mensuel ${periodKey}`,
+          locations,
+          period_preset: "last_month",
+          from_date: fromIso,
+          to_date: toIso,
+          timezone: "Europe/Paris",
+          status: "draft",
+          render_mode: "premium",
+          notes: null,
+          updated_at: new Date().toISOString()
+        };
 
-        if (!reportId) {
-          const insertPayload = {
-            user_id: userId,
-            name: `Rapport mensuel ${periodKey}`,
-            locations,
-            period_preset: "last_month",
-            from_date: fromIso,
-            to_date: toIso,
-            timezone: "Europe/Paris",
-            status: "draft",
-            render_mode: "premium",
-            notes: null,
-            updated_at: new Date().toISOString()
-          };
-
-          const { data: inserted, error: insertError } = await supabaseAdmin
-            .from("reports")
-            .insert(insertPayload)
-            .select("id")
-            .maybeSingle();
-          if (insertError || !inserted?.id) {
-            results.push({
-              userId,
-              status: "failed",
-              reason: "insert_failed",
-              error: insertError?.message ?? "insert_failed"
-            });
-            continue;
-          }
-          reportId = inserted.id as string;
-          createdReport = true;
-        }
-
-        let rendered = Boolean(renderedAt);
-        let emailed = Boolean(emailedAt);
-        let resultReason: string | undefined;
-        let reportUrl: string | null = null;
-
-        if (!rendered) {
-          const renderResult = await generatePremiumReport({
-            supabaseAdmin,
-            reportId,
-            requestId
+        const { data: inserted, error: insertError } = await supabaseAdmin
+          .from("reports")
+          .insert(insertPayload)
+          .select("id")
+          .maybeSingle();
+        if (insertError || !inserted?.id) {
+          results.push({
+            userId,
+            status: "failed",
+            reason: "insert_failed",
+            error: insertError?.message ?? "insert_failed"
           });
-          if (renderResult?.pdf?.url) {
-            reportUrl = renderResult.pdf.url as string;
-          }
-          rendered = true;
-          renderedAt = new Date().toISOString();
-          await supabaseAdmin
-            .from("reports")
-            .update({ rendered_at: renderedAt, updated_at: renderedAt })
-            .eq("id", reportId);
+          return;
         }
+        reportIdResolved = inserted.id as string;
+        createdReport = true;
+      }
 
-        if (!emailed) {
-          const recipient = emailByUser.get(userId) ?? null;
-          if (!recipient) {
-            resultReason = "no_email";
-          } else if (!resendApiKey || !emailFrom) {
-            resultReason = "email_not_configured";
-          } else {
-            if (!reportUrl) {
-              if (!storagePath) {
-                const { data: reportRow } = await supabaseAdmin
-                  .from("reports")
-                  .select("storage_path")
-                  .eq("id", reportId)
-                  .maybeSingle();
-                storagePath = (reportRow as { storage_path?: string | null })
-                  ?.storage_path;
-              }
-              if (storagePath) {
-                const { data: signed, error: signError } = await supabaseAdmin
-                  .storage
-                  .from("reports")
-                  .createSignedUrl(storagePath, 60 * 60);
-                if (signError) {
-                  throw new Error(signError.message ?? "signed_url_failed");
-                }
-                reportUrl = signed?.signedUrl ?? null;
-              }
-            }
+      let rendered = Boolean(renderedAt);
+      let emailed = Boolean(emailedAt);
+      let reportUrl: string | null = null;
+      let reason: string | undefined;
 
-            if (!reportUrl) {
-              resultReason = "no_report_url";
-            } else {
-              const subject = `Votre rapport mensuel ${periodKey}`;
-              const linkLabel = appUrl ? "Voir dans l'app" : "Télécharger le PDF";
-              const html = `
-                <p>Votre rapport mensuel est prêt.</p>
-                <p><a href="${reportUrl}">${linkLabel}</a></p>
-              `;
-              await sendResendEmail({
-                to: recipient,
-                from: emailFrom,
-                subject,
-                html,
-                apiKey: resendApiKey
-              });
-              emailed = true;
-              emailedAt = new Date().toISOString();
-              await supabaseAdmin
+      if (!rendered || force) {
+        const renderResult = await generatePremiumReport({
+          supabaseAdmin,
+          reportId: reportIdResolved,
+          requestId
+        });
+        if (renderResult?.pdf?.url) {
+          reportUrl = renderResult.pdf.url as string;
+        }
+        rendered = true;
+        renderedAt = new Date().toISOString();
+        await supabaseAdmin
+          .from("reports")
+          .update({ rendered_at: renderedAt, updated_at: renderedAt })
+          .eq("id", reportIdResolved);
+      }
+
+      const recipients = await getRecipients(userId);
+      if (recipients.length === 0) {
+        reason = "no_email";
+      } else if (!emailed || force) {
+        if (!resendApiKey || !emailFrom) {
+          reason = "email_not_configured";
+        } else {
+          if (!reportUrl) {
+            if (!storagePath) {
+              const { data: reportRowFresh } = await supabaseAdmin
                 .from("reports")
-                .update({ emailed_at: emailedAt, updated_at: emailedAt })
-                .eq("id", reportId);
+                .select("storage_path")
+                .eq("id", reportIdResolved)
+                .maybeSingle();
+              storagePath = (reportRowFresh as { storage_path?: string | null })
+                ?.storage_path;
+            }
+            if (storagePath) {
+              const { data: signed, error: signError } = await supabaseAdmin
+                .storage
+                .from("reports")
+                .createSignedUrl(storagePath, 60 * 60);
+              if (signError) {
+                throw new Error(signError.message ?? "signed_url_failed");
+              }
+              reportUrl = signed?.signedUrl ?? null;
             }
           }
+
+          if (!reportUrl) {
+            reason = "no_report_url";
+          } else {
+            const attachmentContent = await fetchPdfAsBase64(reportUrl);
+            for (const recipient of recipients) {
+              const html = buildMonthlyReportEmailHtml({
+                firstName: recipient.firstName,
+                periodLabel
+              });
+              await sendResendEmail({
+                to: recipient.email,
+                from: emailFrom,
+                subject: buildMonthlyReportSubject(periodLabel),
+                html,
+                apiKey: resendApiKey,
+                attachment: {
+                  filename: `rapport-mensuel-${periodKey}.pdf`,
+                  content: attachmentContent
+                }
+              });
+            }
+            emailed = true;
+            emailedAt = new Date().toISOString();
+            await supabaseAdmin
+              .from("reports")
+              .update({ emailed_at: emailedAt, updated_at: emailedAt })
+              .eq("id", reportIdResolved);
+          }
         }
+      }
 
-        const status =
-          !rendered || !emailed
-            ? createdReport
-              ? "created"
-              : "skipped"
-            : createdReport
-              ? "created"
-              : "skipped";
+      const status = createdReport ? "created" : "skipped";
+      results.push({
+        userId,
+        reportId: reportIdResolved,
+        status,
+        createdReport,
+        rendered,
+        emailed,
+        recipients: recipients.map((r) => r.email),
+        reason
+      });
+    };
 
-        results.push({
-          userId,
-          reportId,
-          status,
-          createdReport,
-          rendered,
-          emailed,
-          reason: resultReason
+    if (runForReport) {
+      const { data: reportRow, error: reportError } = await supabaseAdmin
+        .from("reports")
+        .select("id, user_id")
+        .eq("id", runForReport)
+        .maybeSingle();
+      if (reportError || !reportRow?.id || !reportRow?.user_id) {
+        return respondJson(res, 404, {
+          ok: false,
+          error: { message: "Report not found", code: "NOT_FOUND" },
+          requestId
         });
-      } catch (error) {
-        results.push({
-          userId,
-          status: "failed",
-          error: error instanceof Error ? error.message : "Unknown error"
-        });
+      }
+      await processReport(reportRow.user_id as string, reportRow.id as string);
+    } else {
+      for (const userId of users) {
+        await processReport(userId, null);
       }
     }
 
