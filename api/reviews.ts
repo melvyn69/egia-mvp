@@ -39,6 +39,9 @@ const toStatus = (value: unknown): CronStatus => {
   return { status: "idle" };
 };
 
+const parseBody = (req: VercelRequest) =>
+  typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
+
 const parseCursor = (cursorParam: string | undefined): Cursor | null => {
   if (!cursorParam) {
     return null;
@@ -93,16 +96,12 @@ const isMissingEnvError = (err: unknown) =>
   err instanceof Error && err.message === "Missing SUPABASE env vars";
 
 const handler = async (req: VercelRequest, res: VercelResponse) => {
-  if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
   const route = "/api/reviews";
   const requestId = getRequestId(req);
   let userId: string | null = null;
   let locationId: string | null = null;
   const actionParam = req.query.action;
-  const action = Array.isArray(actionParam) ? actionParam[0] : actionParam;
+  let action = Array.isArray(actionParam) ? actionParam[0] : actionParam;
 
   try {
     let auth;
@@ -131,6 +130,62 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     }
     userId = auth.userId;
     const { supabaseAdmin } = auth;
+
+    if (!action && req.method === "POST") {
+      const payload = parseBody(req);
+      if (typeof payload?.action === "string") {
+        action = payload.action;
+      }
+    }
+
+    if (action === "alerts_resolve") {
+      if (req.method !== "POST") {
+        return res.status(405).json({ error: "Method not allowed" });
+      }
+      const payload = parseBody(req);
+      const alertId = String(payload?.alert_id ?? "").trim();
+      if (!alertId) {
+        return res.status(400).json({ error: "Missing alert_id" });
+      }
+      const nowIso = new Date().toISOString();
+      const { data, error } = await supabaseAdmin
+        .from("alerts")
+        .update({ resolved_at: nowIso })
+        .eq("id", alertId)
+        .eq("user_id", userId)
+        .is("resolved_at", null)
+        .select("id")
+        .maybeSingle();
+      if (error) {
+        return res.status(500).json({ error: "Failed to resolve alert" });
+      }
+      if (!data) {
+        return res.status(404).json({ error: "Alert not found" });
+      }
+      return res.status(200).json({ ok: true });
+    }
+
+    if (req.method !== "GET") {
+      return res.status(405).json({ error: "Method not allowed" });
+    }
+
+    if (action === "alerts_list") {
+      const limitParam = req.query.limit;
+      const limit = Math.min(Math.max(Number(limitParam) || 50, 1), 100);
+      const { data, error } = await supabaseAdmin
+        .from("alerts")
+        .select(
+          "id, rule_code, severity, review_id, payload, triggered_at, resolved_at"
+        )
+        .eq("user_id", userId)
+        .is("resolved_at", null)
+        .order("triggered_at", { ascending: false })
+        .limit(limit);
+      if (error) {
+        return res.status(500).json({ error: "Failed to load alerts" });
+      }
+      return res.status(200).json({ alerts: data ?? [] });
+    }
 
     if (action === "status" || action === "health") {
       try {

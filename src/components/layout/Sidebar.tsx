@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
+  Bell,
   Building2,
   FileText,
   LayoutDashboard,
@@ -184,6 +185,20 @@ const Sidebar = () => {
         >
           <Mailbox size={18} />
           Boîte de réception
+        </NavLink>
+        <NavLink
+          to="/alerts"
+          className={({ isActive }) =>
+            cn(
+              navLinkBase,
+              isActive
+                ? "bg-ink text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            )
+          }
+        >
+          <Bell size={18} />
+          Alertes
         </NavLink>
         <NavLink
           to="/automation"

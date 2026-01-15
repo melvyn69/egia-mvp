@@ -17,6 +17,7 @@ import { Reports } from "./pages/Reports";
 import { TeamRanking } from "./pages/TeamRanking";
 import Settings from "./pages/Settings";
 import Invite from "./pages/Invite";
+import Alerts from "./pages/Alerts";
 import { SyncStatus } from "./pages/SyncStatus";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
@@ -137,6 +138,13 @@ const App = () => {
       return {
         title: "Rapports",
         subtitle: "PDF et syntheses pour vos etablissements."
+      };
+    }
+
+    if (location.pathname === "/alerts") {
+      return {
+        title: "Alertes intelligentes",
+        subtitle: "Signaux prioritaires et suivi des actions."
       };
     }
 
@@ -640,6 +648,7 @@ const App = () => {
                 />
                 <Route path="/settings" element={<Settings session={session} />} />
                 <Route path="/invite" element={<Invite session={session} />} />
+                <Route path="/alerts" element={<Alerts session={session} />} />
                 <Route
                   path="/reports"
                   element={<Reports session={session} locations={locations} />}

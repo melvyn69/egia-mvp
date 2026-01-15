@@ -28,6 +28,63 @@ type GoogleReview = {
   };
 };
 
+type AlertSettings = {
+  tolerance: "strict" | "standard" | "relaxed";
+  noReplyHours: number;
+  ratingDropThreshold: number;
+  negativeSpikeCount: number;
+  negativeSpikeWindowHours: number;
+  longReviewChars: number;
+};
+
+type AlertInsert = {
+  user_id: string;
+  establishment_id: string;
+  rule_code: string;
+  severity: "low" | "medium" | "high";
+  review_id: string;
+  payload: Record<string, unknown>;
+};
+
+type ReviewRowForAlert = {
+  review_id: string;
+  rating: number | null;
+  comment: string | null;
+  create_time: string | null;
+  update_time: string | null;
+  reply_text: string | null;
+  replied_at: string | null;
+  owner_reply: string | null;
+  author_name: string | null;
+};
+
+type ExistingReviewRow = {
+  review_id: string | null;
+  rating: number | null;
+  comment: string | null;
+  update_time: string | null;
+  reply_text: string | null;
+  replied_at: string | null;
+};
+
+type LocationAlertMetrics = {
+  avg7d: number | null;
+  avg30d: number | null;
+  negativeCount48h: number;
+};
+
+type PendingAlertRow = {
+  id: string;
+  user_id: string;
+  establishment_id: string;
+  rule_code: string;
+  severity: "low" | "medium" | "high";
+  review_id: string;
+  payload: Record<string, unknown> | null;
+  triggered_at: string | null;
+  last_notified_at: string | null;
+};
+
 const getErrorMessage = (err: unknown): string =>
   err instanceof Error
     ? err.message
@@ -50,6 +107,354 @@ const mapRating = (starRating?: string): number | null => {
     default:
       return null;
   }
+};
+
+const defaultAlertSettings = (): AlertSettings => ({
+  tolerance: "standard",
+  noReplyHours: 24,
+  ratingDropThreshold: 0.2,
+  negativeSpikeCount: 4,
+  negativeSpikeWindowHours: 48,
+  longReviewChars: 250
+});
+
+const normalizeTimestamp = (value: string | null | undefined): number | null => {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? null : time;
+};
+
+const pickReviewTime = (review: ReviewRowForAlert): number | null =>
+  normalizeTimestamp(review.create_time) ?? normalizeTimestamp(review.update_time);
+
+const buildSnippet = (comment: string | null) => {
+  if (!comment) return null;
+  const trimmed = comment.trim();
+  if (!trimmed) return null;
+  return trimmed.length > 240 ? `${trimmed.slice(0, 240)}...` : trimmed;
+};
+
+const computeLocationMetrics = async (
+  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
+  userId: string,
+  locationResourceName: string,
+  now: Date
+): Promise<LocationAlertMetrics> => {
+  const since30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const since30Iso = since30d.toISOString();
+  const { data } = await supabaseAdmin
+    .from("google_reviews")
+    .select("rating, create_time")
+    .eq("user_id", userId)
+    .eq("location_id", locationResourceName)
+    .gte("create_time", since30Iso);
+
+  let sum7d = 0;
+  let count7d = 0;
+  let sum30d = 0;
+  let count30d = 0;
+  let negativeCount48h = 0;
+  const since7dMs = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+  const since48hMs = now.getTime() - 48 * 60 * 60 * 1000;
+
+  for (const row of data ?? []) {
+    const rating =
+      row && typeof row === "object" && "rating" in row
+        ? (row as { rating: number | null }).rating
+        : null;
+    const createTime =
+      row && typeof row === "object" && "create_time" in row
+        ? (row as { create_time: string | null }).create_time
+        : null;
+    if (rating === null || typeof rating !== "number") continue;
+    const ts = normalizeTimestamp(createTime);
+    if (!ts) continue;
+    if (ts >= since30d.getTime()) {
+      sum30d += rating;
+      count30d += 1;
+    }
+    if (ts >= since7dMs) {
+      sum7d += rating;
+      count7d += 1;
+    }
+    if (ts >= since48hMs && rating <= 2) {
+      negativeCount48h += 1;
+    }
+  }
+
+  return {
+    avg7d: count7d > 0 ? sum7d / count7d : null,
+    avg30d: count30d > 0 ? sum30d / count30d : null,
+    negativeCount48h
+  };
+};
+
+const sendResendEmail = async (params: {
+  apiKey: string;
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+}) => {
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: params.from,
+      to: params.to,
+      subject: params.subject,
+      html: params.html
+    })
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Resend error: ${text.slice(0, 200)}`);
+  }
+};
+
+const buildAlertEmailHtml = (params: {
+  title: string;
+  summary: string;
+  ctaUrl: string;
+}) => `
+  <div style="font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f6f7fb;padding:24px;">
+    <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:14px;padding:24px;border:1px solid #e9ebf3;">
+      <div style="font-size:12px;letter-spacing:.08em;color:#6b7280;">EGIA</div>
+      <h1 style="margin:8px 0 0 0;font-size:20px;line-height:1.3;color:#111827;">
+        ${params.title}
+      </h1>
+      <p style="margin:16px 0 0 0;color:#111827;font-size:14px;line-height:1.6;">
+        ${params.summary}
+      </p>
+      <a href="${params.ctaUrl}" style="display:inline-block;margin-top:18px;background:#111827;color:#ffffff;text-decoration:none;padding:10px 16px;border-radius:10px;font-size:14px;">
+        Repondre maintenant
+      </a>
+      <p style="margin:18px 0 0 0;color:#6b7280;font-size:12px;line-height:1.6;">
+        Cet email est envoye automatiquement lorsqu'une alerte critique est detectee.
+      </p>
+    </div>
+  </div>
+`;
+
+const buildAlertSummary = (alert: PendingAlertRow) => {
+  const payload = alert.payload ?? {};
+  const rating =
+    typeof payload.rating === "number" ? `${payload.rating}★` : null;
+  const snippet =
+    typeof payload.snippet === "string" ? payload.snippet : null;
+  const hours =
+    typeof payload.hours_since === "number"
+      ? `${payload.hours_since}h sans reponse`
+      : null;
+  const drop =
+    typeof payload.drop === "number" ? `baisse de ${payload.drop}` : null;
+  const spike =
+    typeof payload.negative_count_48h === "number"
+      ? `${payload.negative_count_48h} avis negatifs recents`
+      : null;
+
+  const parts = [rating, hours, drop, spike].filter(Boolean);
+  if (snippet) {
+    parts.push(`"${snippet}"`);
+  }
+  return parts.length > 0
+    ? parts.join(" · ")
+    : "Un signal prioritaire requiert votre attention.";
+};
+
+const sendPendingAlerts = async (params: {
+  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>;
+  userId: string;
+  establishmentId: string;
+}) => {
+  const resendKey = process.env.RESEND_API_KEY ?? "";
+  const emailFrom = process.env.EMAIL_FROM ?? "";
+  if (!resendKey || !emailFrom) {
+    console.error("[alerts] missing email configuration");
+    return;
+  }
+
+  const { data: userRow, error: userError } = await params.supabaseAdmin
+    .from("users")
+    .select("email")
+    .eq("id", params.userId)
+    .maybeSingle();
+  if (userError) {
+    console.error("[alerts] failed to load user email", userError);
+    return;
+  }
+  const recipient =
+    userRow && typeof userRow === "object" && "email" in userRow
+      ? (userRow as { email?: string | null }).email
+      : null;
+  if (!recipient) {
+    console.warn("[alerts] missing recipient email", {
+      userId: params.userId
+    });
+    return;
+  }
+
+  const { data: alerts, error: alertsError } = await params.supabaseAdmin
+    .from("alerts")
+    .select(
+      "id, user_id, establishment_id, rule_code, severity, review_id, payload, triggered_at, last_notified_at"
+    )
+    .eq("user_id", params.userId)
+    .eq("establishment_id", params.establishmentId)
+    .is("resolved_at", null)
+    .is("last_notified_at", null)
+    .order("triggered_at", { ascending: true })
+    .limit(25);
+  if (alertsError) {
+    console.error("[alerts] load pending failed", alertsError);
+    return;
+  }
+
+  const appUrl = process.env.APP_URL?.replace(/\/+$/, "") ?? "";
+  const ctaUrl = appUrl ? `${appUrl}/inbox` : "";
+  const nowIso = new Date().toISOString();
+
+  for (const alert of alerts ?? []) {
+    const summary = buildAlertSummary(alert as PendingAlertRow);
+    const title = "Alerte intelligente EGIA";
+    try {
+      await sendResendEmail({
+        apiKey: resendKey,
+        from: emailFrom,
+        to: recipient,
+        subject: "EGIA — Alerte intelligente",
+        html: buildAlertEmailHtml({ title, summary, ctaUrl })
+      });
+      await params.supabaseAdmin
+        .from("alerts")
+        .update({ last_notified_at: nowIso })
+        .eq("id", (alert as PendingAlertRow).id)
+        .is("last_notified_at", null);
+    } catch (error) {
+      console.error("[alerts] send failed", {
+        alertId: (alert as PendingAlertRow).id,
+        err: String(error)
+      });
+    }
+  }
+};
+
+const hasReviewChanged = (
+  existing: ExistingReviewRow | undefined,
+  next: ReviewRowForAlert
+) => {
+  if (!existing) return true;
+  return (
+    existing.rating !== next.rating ||
+    existing.comment !== next.comment ||
+    existing.update_time !== next.update_time ||
+    existing.reply_text !== next.reply_text ||
+    existing.replied_at !== next.replied_at
+  );
+};
+
+const evaluateRules = (params: {
+  review: ReviewRowForAlert;
+  establishmentId: string;
+  userId: string;
+  settings: AlertSettings;
+  metrics: LocationAlertMetrics;
+  now: Date;
+}): AlertInsert[] => {
+  const { review, establishmentId, userId, settings, metrics, now } = params;
+  const alerts: AlertInsert[] = [];
+  const rating = review.rating;
+  const reviewId = review.review_id;
+  const reviewTime = pickReviewTime(review);
+  const hasReply =
+    Boolean(review.reply_text && review.reply_text.trim()) ||
+    Boolean(review.replied_at) ||
+    Boolean(review.owner_reply && review.owner_reply.trim());
+
+  if (rating !== null && rating <= 2 && !hasReply && reviewTime) {
+    const hoursSince = (now.getTime() - reviewTime) / (1000 * 60 * 60);
+    if (hoursSince >= settings.noReplyHours) {
+      alerts.push({
+        user_id: userId,
+        establishment_id: establishmentId,
+        rule_code: "NEGATIVE_NO_REPLY",
+        severity: settings.tolerance === "strict" ? "high" : "medium",
+        review_id: reviewId,
+        payload: {
+          rating,
+          author: review.author_name ?? null,
+          snippet: buildSnippet(review.comment),
+          hours_since: Math.round(hoursSince),
+          threshold_hours: settings.noReplyHours
+        }
+      });
+    }
+  }
+
+  if (
+    metrics.avg7d !== null &&
+    metrics.avg30d !== null &&
+    metrics.avg30d - metrics.avg7d > settings.ratingDropThreshold
+  ) {
+    const drop = metrics.avg30d - metrics.avg7d;
+    alerts.push({
+      user_id: userId,
+      establishment_id: establishmentId,
+      rule_code: "RATING_DROP",
+      severity: drop >= 0.5 ? "high" : "medium",
+      review_id: reviewId,
+      payload: {
+        avg_7d: Number(metrics.avg7d.toFixed(2)),
+        avg_30d: Number(metrics.avg30d.toFixed(2)),
+        drop: Number(drop.toFixed(2)),
+        threshold: settings.ratingDropThreshold
+      }
+    });
+  }
+
+  if (metrics.negativeCount48h >= settings.negativeSpikeCount) {
+    alerts.push({
+      user_id: userId,
+      establishment_id: establishmentId,
+      rule_code: "NEGATIVE_SPIKE",
+      severity:
+        metrics.negativeCount48h >= settings.negativeSpikeCount + 2
+          ? "high"
+          : "medium",
+      review_id: reviewId,
+      payload: {
+        negative_count_48h: metrics.negativeCount48h,
+        threshold: settings.negativeSpikeCount
+      }
+    });
+  }
+
+  if (
+    rating !== null &&
+    rating <= 3 &&
+    typeof review.comment === "string" &&
+    review.comment.trim().length >= settings.longReviewChars
+  ) {
+    alerts.push({
+      user_id: userId,
+      establishment_id: establishmentId,
+      rule_code: "LONG_NEGATIVE",
+      severity: rating <= 2 ? "high" : "medium",
+      review_id: reviewId,
+      payload: {
+        rating,
+        author: review.author_name ?? null,
+        snippet: buildSnippet(review.comment),
+        length: review.comment.trim().length,
+        min_length: settings.longReviewChars
+      }
+    });
+  }
+
+  return alerts;
 };
 
 const refreshAccessToken = async (refreshToken: string) => {
@@ -252,7 +657,7 @@ export const syncGoogleReviewsForUser = async (
 
   let locationQuery = supabaseAdmin
     .from("google_locations")
-    .select("account_resource_name, location_resource_name, location_title")
+    .select("id, account_resource_name, location_resource_name, location_title")
     .eq("user_id", userId);
 
   if (locationId) {
@@ -266,7 +671,10 @@ export const syncGoogleReviewsForUser = async (
   }
 
   const locationList = (locations ?? []).filter(
-    (location) => location.location_resource_name && location.account_resource_name
+    (location) =>
+      location.location_resource_name &&
+      location.account_resource_name &&
+      location.id
   );
 
   let reviewsUpsertedCount = 0;
@@ -416,9 +824,30 @@ export const syncGoogleReviewsForUser = async (
           replied_at: review.reviewReply?.updateTime ?? null,
           last_synced_at: nowIso,
           raw: review
-        };
+        } as ReviewRowForAlert & { [key: string]: unknown };
       })
       .filter(Boolean);
+
+    const reviewIds = rows
+      .map((row) => row.review_id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+    const existingByReviewId = new Map<string, ExistingReviewRow>();
+    if (reviewIds.length > 0) {
+      const { data: existingRows } = await supabaseAdmin
+        .from("google_reviews")
+        .select("review_id, rating, comment, update_time, reply_text, replied_at")
+        .eq("user_id", userId)
+        .eq("location_id", location.location_resource_name)
+        .in("review_id", reviewIds);
+      for (const row of existingRows ?? []) {
+        if (row && typeof row === "object" && "review_id" in row) {
+          const key = (row as ExistingReviewRow).review_id;
+          if (key) {
+            existingByReviewId.set(key, row as ExistingReviewRow);
+          }
+        }
+      }
+    }
 
     const { error: upsertError } = await supabaseAdmin
       .from("google_reviews")
@@ -447,6 +876,48 @@ export const syncGoogleReviewsForUser = async (
     }
 
     reviewsUpsertedCount += rows.length;
+
+    const changedReviews = (rows as ReviewRowForAlert[]).filter((row) =>
+      hasReviewChanged(existingByReviewId.get(row.review_id), row)
+    );
+    if (changedReviews.length > 0) {
+      const now = new Date();
+      const settings = defaultAlertSettings();
+      const metrics = await computeLocationMetrics(
+        supabaseAdmin,
+        userId,
+        location.location_resource_name,
+        now
+      );
+      const alertsToInsert = changedReviews.flatMap((review) =>
+        evaluateRules({
+          review,
+          establishmentId: location.id,
+          userId,
+          settings,
+          metrics,
+          now
+        })
+      );
+      if (alertsToInsert.length > 0) {
+        const { error: alertError } = await supabaseAdmin
+          .from("alerts")
+          .insert(alertsToInsert, {
+            onConflict: "rule_code,review_id",
+            ignoreDuplicates: true
+          });
+        if (alertError) {
+          console.error("[alerts] insert failed", alertError);
+        }
+      }
+    }
+
+    await sendPendingAlerts({
+      supabaseAdmin,
+      userId,
+      establishmentId: location.id
+    });
+
     await supabaseAdmin
       .from("google_locations")
       .update({ last_synced_at: nowIso })
