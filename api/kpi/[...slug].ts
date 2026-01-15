@@ -10,12 +10,6 @@ import {
   logRequest
 } from "../../server/_shared_dist/api_utils.js";
 
-  getRequestId,
-  sendError,
-  parseQuery,
-  logRequest
-} from "../server/_shared_dist/api_utils.js";
-
 type AnalyticsOverview = {
   scope: {
     preset: string;
