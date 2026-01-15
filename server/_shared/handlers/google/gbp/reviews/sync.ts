@@ -356,6 +356,11 @@ const hasReviewChanged = (
   );
 };
 
+const isReviewReplied = (review: ReviewRowForAlert) =>
+  Boolean(review.reply_text && review.reply_text.trim()) ||
+  Boolean(review.replied_at) ||
+  Boolean(review.owner_reply && review.owner_reply.trim());
+
 const evaluateRules = (params: {
   review: ReviewRowForAlert;
   establishmentId: string;
@@ -369,10 +374,7 @@ const evaluateRules = (params: {
   const rating = review.rating;
   const reviewId = review.review_id;
   const reviewTime = pickReviewTime(review);
-  const hasReply =
-    Boolean(review.reply_text && review.reply_text.trim()) ||
-    Boolean(review.replied_at) ||
-    Boolean(review.owner_reply && review.owner_reply.trim());
+  const hasReply = isReviewReplied(review);
 
   if (rating !== null && rating <= 2 && !hasReply && reviewTime) {
     const hoursSince = (now.getTime() - reviewTime) / (1000 * 60 * 60);
@@ -880,10 +882,12 @@ export const syncGoogleReviewsForUser = async (
     const changedReviews = (rows as ReviewRowForAlert[]).filter((row) =>
       hasReviewChanged(existingByReviewId.get(row.review_id), row)
     );
+    let insertedAlerts = 0;
+    let locationMetrics: LocationAlertMetrics | null = null;
     if (changedReviews.length > 0) {
       const now = new Date();
       const settings = defaultAlertSettings();
-      const metrics = await computeLocationMetrics(
+      locationMetrics = await computeLocationMetrics(
         supabaseAdmin,
         userId,
         location.location_resource_name,
@@ -895,10 +899,11 @@ export const syncGoogleReviewsForUser = async (
           establishmentId: location.id,
           userId,
           settings,
-          metrics,
+          metrics: locationMetrics,
           now
         })
       );
+      insertedAlerts = alertsToInsert.length;
       if (alertsToInsert.length > 0) {
         const { error: alertError } = await supabaseAdmin
           .from("alerts")
@@ -908,6 +913,65 @@ export const syncGoogleReviewsForUser = async (
           });
         if (alertError) {
           console.error("[alerts] insert failed", alertError);
+        }
+      }
+    }
+
+    if (insertedAlerts === 0) {
+      const now = new Date();
+      const settings = defaultAlertSettings();
+      if (!locationMetrics) {
+        locationMetrics = await computeLocationMetrics(
+          supabaseAdmin,
+          userId,
+          location.location_resource_name,
+          now
+        );
+      }
+      const { data: backfillRows, error: backfillError } = await supabaseAdmin
+        .from("google_reviews")
+        .select(
+          "review_id, rating, comment, create_time, update_time, reply_text, replied_at, owner_reply, author_name"
+        )
+        .eq("user_id", userId)
+        .eq("location_id", location.location_resource_name)
+        .lte("rating", 2)
+        .order("create_time", { ascending: false })
+        .limit(20);
+
+      if (backfillError) {
+        console.error("[alerts] backfill load failed", backfillError);
+      } else if (backfillRows && backfillRows.length > 0) {
+        const candidates = (backfillRows as ReviewRowForAlert[]).filter(
+          (review) => !isReviewReplied(review)
+        );
+        const backfillAlerts = candidates.flatMap((review) =>
+          evaluateRules({
+            review,
+            establishmentId: location.id,
+            userId,
+            settings,
+            metrics: locationMetrics as LocationAlertMetrics,
+            now
+          })
+        );
+        if (backfillAlerts.length > 0) {
+          const { error: backfillInsertError } = await supabaseAdmin
+            .from("alerts")
+            .insert(backfillAlerts, {
+              onConflict: "rule_code,review_id",
+              ignoreDuplicates: true
+            });
+          if (backfillInsertError) {
+            console.error("[alerts] backfill insert failed", backfillInsertError);
+          } else {
+            console.log("[alerts] backfill", {
+              userId,
+              location: location.location_resource_name,
+              candidates: candidates.length,
+              alerts: backfillAlerts.length
+            });
+          }
         }
       }
     }
