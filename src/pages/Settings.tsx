@@ -9,6 +9,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
 import SettingsAlertesIntelligentes from "./SettingsAlertesIntelligentes";
+import SettingsEntreprise from "./SettingsEntreprise";
 
 type SettingsProps = {
   session: Session | null;
@@ -578,37 +579,42 @@ const Settings = ({ session }: SettingsProps) => {
 
     if (activeTab === "company") {
       return (
-        <Card>
-          <CardHeader>
-            <CardTitle>Entreprise</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {businessSettingsQuery.isLoading ? (
-              <Skeleton className="h-16 w-full" />
-            ) : (
-              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">
-                    Activer l'envoi du rapport mensuel
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Les collaborateurs opt-in recevront le rapport chaque mois.
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 accent-ink"
-                  checked={monthlyEnabled}
-                  onChange={(event) => handleMonthlyToggle(event.target.checked)}
-                  disabled={updatingCompany}
-                />
-              </label>
-            )}
-            {companyError && (
-              <p className="text-xs text-rose-600">{companyError}</p>
-            )}
-          </CardContent>
-        </Card>
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Entreprise</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {businessSettingsQuery.isLoading ? (
+                <Skeleton className="h-16 w-full" />
+              ) : (
+                <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      Activer l'envoi du rapport mensuel
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Les collaborateurs opt-in recevront le rapport chaque mois.
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-ink"
+                    checked={monthlyEnabled}
+                    onChange={(event) =>
+                      handleMonthlyToggle(event.target.checked)
+                    }
+                    disabled={updatingCompany}
+                  />
+                </label>
+              )}
+              {companyError && (
+                <p className="text-xs text-rose-600">{companyError}</p>
+              )}
+            </CardContent>
+          </Card>
+          <SettingsEntreprise session={session} />
+        </div>
       );
     }
 
