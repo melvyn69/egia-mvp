@@ -917,6 +917,12 @@ export const syncGoogleReviewsForUser = async (
       }
     }
 
+    console.log("[alerts] backfill_debug", {
+      insertedAlerts,
+      changedReviews: changedReviews.length,
+      rows: rows.length
+    });
+
     if (insertedAlerts === 0) {
       const now = new Date();
       const settings = defaultAlertSettings();
@@ -942,9 +948,16 @@ export const syncGoogleReviewsForUser = async (
       if (backfillError) {
         console.error("[alerts] backfill load failed", backfillError);
       } else if (backfillRows && backfillRows.length > 0) {
+        console.log("[alerts] backfill_debug", {
+          backfillRows: backfillRows.length
+        });
         const candidates = (backfillRows as ReviewRowForAlert[]).filter(
           (review) => !isReviewReplied(review)
         );
+        console.log("[alerts] backfill_debug", {
+          candidates: candidates.length,
+          sample_review_id: candidates[0]?.review_id ?? null
+        });
         const backfillAlerts = candidates.flatMap((review) =>
           evaluateRules({
             review,
@@ -955,6 +968,10 @@ export const syncGoogleReviewsForUser = async (
             now
           })
         );
+        console.log("[alerts] backfill_debug", {
+          alerts: backfillAlerts.length,
+          sample_rule: backfillAlerts[0]?.rule_code ?? null
+        });
         if (backfillAlerts.length > 0) {
           const { error: backfillInsertError } = await supabaseAdmin
             .from("alerts")
@@ -963,7 +980,10 @@ export const syncGoogleReviewsForUser = async (
               ignoreDuplicates: true
             });
           if (backfillInsertError) {
-            console.error("[alerts] backfill insert failed", backfillInsertError);
+            console.error("[alerts] backfill_insert_failed", {
+              message: backfillInsertError.message,
+              alerts: backfillAlerts.length
+            });
           } else {
             console.log("[alerts] backfill", {
               userId,
