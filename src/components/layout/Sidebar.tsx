@@ -200,6 +200,20 @@ const Sidebar = () => {
           Automatisations
         </NavLink>
         <NavLink
+          to="/settings"
+          className={({ isActive }) =>
+            cn(
+              navLinkBase,
+              isActive
+                ? "bg-ink text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            )
+          }
+        >
+          <Settings size={18} />
+          Parametres
+        </NavLink>
+        <NavLink
           to="/settings/brand-voice"
           className={({ isActive }) =>
             cn(

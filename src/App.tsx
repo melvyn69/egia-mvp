@@ -15,6 +15,7 @@ import { AutomationBuilder } from "./pages/AutomationBuilder";
 import { TestLab } from "./pages/TestLab";
 import { Reports } from "./pages/Reports";
 import { TeamRanking } from "./pages/TeamRanking";
+import Settings from "./pages/Settings";
 import { SyncStatus } from "./pages/SyncStatus";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
@@ -636,6 +637,7 @@ const App = () => {
                   path="/settings/test-lab"
                   element={<TestLab session={session} />}
                 />
+                <Route path="/settings" element={<Settings session={session} />} />
                 <Route
                   path="/reports"
                   element={<Reports session={session} locations={locations} />}
