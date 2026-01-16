@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Facebook, Globe, Instagram, MapPin, Smartphone } from "lucide-react";
+import { Smartphone } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -161,6 +161,57 @@ const formatRelativeTime = (isoDate: string | null) => {
   const diffDays = Math.floor(diffHours / 24);
   return `il y a ${diffDays} j`;
 };
+
+const GoogleLogo = () => (
+  <svg
+    viewBox="0 0 533.5 544.3"
+    className="h-6 w-6"
+    aria-hidden="true"
+  >
+    <path
+      fill="#4285F4"
+      d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.3h146.9c-6.3 34-25 62.7-53.4 82v68h86.4c50.6-46.6 81.6-115.3 81.6-195z"
+    />
+    <path
+      fill="#34A853"
+      d="M272 544.3c72.6 0 133.6-24.1 178.1-65.4l-86.4-68c-24 16.1-54.6 25.6-91.7 25.6-70.5 0-130.3-47.6-151.6-111.5H31.8v69.9c44.5 88.5 137.6 149.4 240.2 149.4z"
+    />
+    <path
+      fill="#FBBC04"
+      d="M120.4 324.9c-10.8-32.2-10.8-67.1 0-99.3v-69.9H31.8c-36.5 72.9-36.5 159.1 0 232z"
+    />
+    <path
+      fill="#EA4335"
+      d="M272 107.7c39.5-.6 77.5 14.2 106.6 41.1l79.4-79.4C403.5 24.4 339.7-1.5 272 0 169.4 0 76.3 60.9 31.8 149.4l88.6 69.9c21.3-63.9 81.1-111.5 151.6-111.5z"
+    />
+  </svg>
+);
+
+const FacebookLogo = () => (
+  <svg viewBox="0 0 24 24" className="h-6 w-6 text-slate-700" aria-hidden="true">
+    <path
+      fill="currentColor"
+      d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"
+    />
+  </svg>
+);
+
+const InstagramLogo = () => (
+  <svg viewBox="0 0 24 24" className="h-6 w-6 text-slate-700" aria-hidden="true">
+    <rect width="20" height="20" x="2" y="2" rx="5" ry="5" fill="none" stroke="currentColor" strokeWidth="2" />
+    <path
+      d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    />
+    <line x1="17.5" x2="17.51" y1="6.5" y2="6.5" stroke="currentColor" strokeWidth="2" />
+  </svg>
+);
+
+const TripAdvisorLogo = () => (
+  <span className="text-sm font-semibold text-emerald-600">TA</span>
+);
 
 const Settings = ({ session }: SettingsProps) => {
   const queryClient = useQueryClient();
@@ -909,7 +960,7 @@ const Settings = ({ session }: SettingsProps) => {
           status: googleActive ? "active" : "inactive",
           actionLabel: googleActive ? null : "Connecter",
           accent: "bg-emerald-50 border-emerald-200",
-          Icon: Globe
+          Icon: GoogleLogo
         },
         {
           id: "facebook",
@@ -919,7 +970,7 @@ const Settings = ({ session }: SettingsProps) => {
           status: "soon",
           actionLabel: null,
           accent: "bg-slate-50 border-slate-200",
-          Icon: Facebook
+          Icon: FacebookLogo
         },
         {
           id: "instagram",
@@ -929,7 +980,7 @@ const Settings = ({ session }: SettingsProps) => {
           status: "soon",
           actionLabel: null,
           accent: "bg-slate-50 border-slate-200",
-          Icon: Instagram
+          Icon: InstagramLogo
         },
         {
           id: "tripadvisor",
@@ -939,7 +990,7 @@ const Settings = ({ session }: SettingsProps) => {
           status: "soon",
           actionLabel: null,
           accent: "bg-slate-50 border-slate-200",
-          Icon: MapPin
+          Icon: TripAdvisorLogo
         }
       ] as const;
 
@@ -967,7 +1018,7 @@ const Settings = ({ session }: SettingsProps) => {
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white">
-                        <integration.Icon size={22} className="text-slate-700" />
+                        <integration.Icon />
                       </div>
                       <div className="space-y-1">
                         <p className="text-sm font-semibold text-slate-900">
