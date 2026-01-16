@@ -41,6 +41,9 @@ type TeamInvitationRow = {
 type BusinessSettingsRow = {
   business_name?: string | null;
   monthly_report_enabled?: boolean | null;
+  competitive_monitoring_enabled?: boolean | null;
+  competitive_monitoring_keyword?: string | null;
+  competitive_monitoring_radius_km?: number | null;
 };
 
 type LocationRow = {
@@ -237,6 +240,13 @@ const Settings = ({ session }: SettingsProps) => {
   const [syncingLocations, setSyncingLocations] = useState(false);
   const [selectedActiveIds, setSelectedActiveIds] = useState<string[]>([]);
   const [activeLocationsSaving, setActiveLocationsSaving] = useState(false);
+  const [competitiveEnabled, setCompetitiveEnabled] = useState(false);
+  const [competitiveKeyword, setCompetitiveKeyword] = useState("");
+  const [competitiveRadius, setCompetitiveRadius] = useState(5);
+  const [competitiveSaving, setCompetitiveSaving] = useState(false);
+  const [competitiveError, setCompetitiveError] = useState<string | null>(null);
+  const [competitiveSuccess, setCompetitiveSuccess] = useState<string | null>(null);
+  const [competitiveInitDone, setCompetitiveInitDone] = useState(false);
   const deviceHint = useMemo(() => {
     if (typeof navigator === "undefined") return "desktop";
     const ua = navigator.userAgent.toLowerCase();
@@ -306,7 +316,9 @@ const Settings = ({ session }: SettingsProps) => {
       }
       const { data, error } = await sb
         .from("business_settings")
-        .select("business_name, monthly_report_enabled")
+        .select(
+          "business_name, monthly_report_enabled, competitive_monitoring_enabled, competitive_monitoring_keyword, competitive_monitoring_radius_km"
+        )
         .eq("user_id", userId)
         .maybeSingle();
       if (error) throw error;
@@ -317,6 +329,24 @@ const Settings = ({ session }: SettingsProps) => {
 
   const monthlyEnabled =
     businessSettingsQuery.data?.monthly_report_enabled ?? false;
+
+  useEffect(() => {
+    if (competitiveInitDone) {
+      return;
+    }
+    const row = businessSettingsQuery.data;
+    if (!row) {
+      return;
+    }
+    setCompetitiveEnabled(Boolean(row.competitive_monitoring_enabled));
+    setCompetitiveKeyword(row.competitive_monitoring_keyword ?? "");
+    setCompetitiveRadius(
+      typeof row.competitive_monitoring_radius_km === "number"
+        ? row.competitive_monitoring_radius_km
+        : 5
+    );
+    setCompetitiveInitDone(true);
+  }, [businessSettingsQuery.data, competitiveInitDone]);
 
   const invitationsQuery = useQuery({
     queryKey: ["team-invitations", userId],
@@ -726,6 +756,34 @@ const Settings = ({ session }: SettingsProps) => {
       setCompanyError("Impossible de sauvegarder le parametre.");
     }
     setUpdatingCompany(false);
+  };
+
+  const handleSaveCompetitiveSettings = async () => {
+    if (!supabaseClient || !userId) return;
+    setCompetitiveError(null);
+    setCompetitiveSuccess(null);
+    setCompetitiveSaving(true);
+    const payload = {
+      competitive_monitoring_enabled: competitiveEnabled,
+      competitive_monitoring_keyword: competitiveKeyword.trim() || null,
+      competitive_monitoring_radius_km: competitiveRadius,
+      updated_at: new Date().toISOString()
+    };
+    const { error } = await sb
+      .from("business_settings")
+      .update(payload)
+      .eq("user_id", userId);
+    if (error) {
+      setCompetitiveError("Impossible de sauvegarder la veille.");
+      setCompetitiveSaving(false);
+      return;
+    }
+    queryClient.setQueryData(["business-settings", userId], (old) => ({
+      ...(old as BusinessSettingsRow | null),
+      ...payload
+    }));
+    setCompetitiveSuccess("Parametres enregistres.");
+    setCompetitiveSaving(false);
   };
 
   const teamMembers = teamMembersQuery.data ?? [];
@@ -1209,6 +1267,62 @@ const Settings = ({ session }: SettingsProps) => {
 
           <Card>
             <CardHeader>
+              <CardTitle>Veille concurrentielle</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+                Activer la veille concurrentielle
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-ink"
+                  checked={competitiveEnabled}
+                  onChange={(event) => setCompetitiveEnabled(event.target.checked)}
+                />
+              </label>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="text-xs font-semibold text-slate-600">
+                  Secteur d'activite (mot-cle)
+                  <input
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                    value={competitiveKeyword}
+                    onChange={(event) => setCompetitiveKeyword(event.target.value)}
+                    placeholder="Ex: restaurant italien"
+                  />
+                </label>
+                <label className="text-xs font-semibold text-slate-600">
+                  Rayon par defaut
+                  <select
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                    value={competitiveRadius}
+                    onChange={(event) =>
+                      setCompetitiveRadius(Number(event.target.value))
+                    }
+                  >
+                    <option value={1}>1 km</option>
+                    <option value={5}>5 km</option>
+                    <option value={10}>10 km</option>
+                    <option value={20}>20 km</option>
+                  </select>
+                </label>
+              </div>
+              {competitiveError && (
+                <p className="text-xs text-rose-600">{competitiveError}</p>
+              )}
+              {competitiveSuccess && (
+                <p className="text-xs text-emerald-600">{competitiveSuccess}</p>
+              )}
+              <Button
+                variant="outline"
+                onClick={handleSaveCompetitiveSettings}
+                disabled={competitiveSaving}
+              >
+                {competitiveSaving ? "Sauvegarde..." : "Enregistrer"}
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Vos etablissements</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1515,6 +1629,12 @@ const Settings = ({ session }: SettingsProps) => {
     selectedActiveIds,
     activeLocationsSaving,
     syncingLocations,
+    competitiveEnabled,
+    competitiveKeyword,
+    competitiveRadius,
+    competitiveSaving,
+    competitiveError,
+    competitiveSuccess,
     invitationsQuery.isLoading,
     invitationsQuery.data,
     session,
