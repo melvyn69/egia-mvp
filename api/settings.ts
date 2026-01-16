@@ -29,11 +29,22 @@ const readAction = (req: VercelRequest) => {
       body = {};
     }
   }
-  const bAction =
-    body && typeof body === "object" && "action" in body
-      ? (body as { action?: string }).action
+
+  const obj =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+  const direct =
+    obj && typeof obj.action === "string" ? obj.action : undefined;
+  const nested =
+    obj &&
+    obj.payload &&
+    typeof (obj.payload as Record<string, unknown>).action === "string"
+      ? (obj.payload as Record<string, unknown>).action
       : undefined;
-  return qAction ?? bAction ?? null;
+
+  const action = qAction ?? direct ?? nested;
+  return typeof action === "string" && action.trim().length > 0
+    ? action.trim()
+    : null;
 };
 
 const getAuthUser = async (
