@@ -2,9 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Smartphone } from "lucide-react";
-import { FaFacebookF, FaGoogle, FaInstagram } from "react-icons/fa";
-import { SiTripadvisor } from "react-icons/si";
+import { Facebook, Globe, Instagram, MapPin, Smartphone } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -911,7 +909,7 @@ const Settings = ({ session }: SettingsProps) => {
           status: googleActive ? "active" : "inactive",
           actionLabel: googleActive ? null : "Connecter",
           accent: "bg-emerald-50 border-emerald-200",
-          Icon: FaGoogle
+          Icon: Globe
         },
         {
           id: "facebook",
@@ -921,7 +919,7 @@ const Settings = ({ session }: SettingsProps) => {
           status: "soon",
           actionLabel: null,
           accent: "bg-slate-50 border-slate-200",
-          Icon: FaFacebookF
+          Icon: Facebook
         },
         {
           id: "instagram",
@@ -931,7 +929,7 @@ const Settings = ({ session }: SettingsProps) => {
           status: "soon",
           actionLabel: null,
           accent: "bg-slate-50 border-slate-200",
-          Icon: FaInstagram
+          Icon: Instagram
         },
         {
           id: "tripadvisor",
@@ -941,7 +939,7 @@ const Settings = ({ session }: SettingsProps) => {
           status: "soon",
           actionLabel: null,
           accent: "bg-slate-50 border-slate-200",
-          Icon: SiTripadvisor
+          Icon: MapPin
         }
       ] as const;
 
