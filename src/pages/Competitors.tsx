@@ -229,7 +229,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
     },
     onError: (error: unknown) => {
       const message =
-        error instanceof Error ? error.message : "Impossible de scanner.";
+        error instanceof Error
+          ? error.message
+          : "Impossible de scanner.";
       setScanError(message);
       setScanMessage(null);
     }
@@ -655,3 +657,4 @@ export { Competitors };
 // 1) Scanner 5km avec un mot-cle, verifier le radar.
 // 2) Suivre 2 concurrents, verifier Ma Selection.
 // 3) Verifier le podium et l'indicateur Top 10%.
+// 4) Si coords manquantes, message d'action affiche et scan refuse.
