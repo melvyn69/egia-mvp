@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Smartphone } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Skeleton } from "../components/ui/skeleton";
 import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
+import { startGoogleConnection } from "../lib/googleAuth";
 import SettingsAlertesIntelligentes from "./SettingsAlertesIntelligentes";
 import SettingsEntreprise from "./SettingsEntreprise";
 import SettingsProfile from "./SettingsProfile";
@@ -39,6 +40,15 @@ type TeamInvitationRow = {
 type BusinessSettingsRow = {
   business_name?: string | null;
   monthly_report_enabled?: boolean | null;
+};
+
+type LocationRow = {
+  id: string;
+  location_title: string | null;
+  location_resource_name: string;
+  address_json?: unknown | null;
+  phone?: string | null;
+  website_uri?: string | null;
 };
 
 type TabId =
@@ -107,9 +117,38 @@ const initialsFromName = (value: string) => {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 };
 
+const formatAddress = (value: unknown) => {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const formatted =
+    (record.formatted_address as string | undefined) ??
+    (record.formattedAddress as string | undefined);
+  if (formatted) return formatted;
+  const line1 =
+    (record.address_line_1 as string | undefined) ??
+    (record.line1 as string | undefined);
+  const line2 =
+    (record.address_line_2 as string | undefined) ??
+    (record.line2 as string | undefined);
+  const city = (record.city as string | undefined) ?? null;
+  const postal =
+    (record.postal_code as string | undefined) ??
+    (record.zip as string | undefined);
+  const region =
+    (record.region as string | undefined) ??
+    (record.state as string | undefined);
+  const parts = [line1, line2, postal, city, region]
+    .filter(Boolean)
+    .join(" ");
+  return parts || null;
+};
+
 const Settings = ({ session }: SettingsProps) => {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const supabaseClient = supabase;
   const sb = supabaseClient as any;
   const userId = session?.user?.id ?? null;
@@ -124,6 +163,12 @@ const Settings = ({ session }: SettingsProps) => {
   const [inviteSending, setInviteSending] = useState(false);
   const [updatingCompany, setUpdatingCompany] = useState(false);
   const [companyError, setCompanyError] = useState<string | null>(null);
+  const [googleError, setGoogleError] = useState<string | null>(null);
+  const [locationsNotice, setLocationsNotice] = useState<string | null>(null);
+  const [locationsError, setLocationsError] = useState<string | null>(null);
+  const [syncingLocations, setSyncingLocations] = useState(false);
+  const [selectedActiveIds, setSelectedActiveIds] = useState<string[]>([]);
+  const [activeLocationsSaving, setActiveLocationsSaving] = useState(false);
   const deviceHint = useMemo(() => {
     if (typeof navigator === "undefined") return "desktop";
     const ua = navigator.userAgent.toLowerCase();
@@ -224,6 +269,165 @@ const Settings = ({ session }: SettingsProps) => {
     },
     enabled: Boolean(supabaseClient) && Boolean(userId)
   });
+
+  const googleConnectionQuery = useQuery({
+    queryKey: ["google-connection", userId],
+    queryFn: async () => {
+      if (!supabaseClient || !userId) return null;
+      const { data, error } = await supabaseClient
+        .from("google_connections")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("provider", "google")
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: Boolean(supabaseClient) && Boolean(userId)
+  });
+
+  const locationsQuery = useQuery({
+    queryKey: ["google-locations", userId],
+    queryFn: async () => {
+      if (!supabaseClient || !userId) return [];
+      const { data, error } = await supabaseClient
+        .from("google_locations")
+        .select(
+          "id, location_title, location_resource_name, address_json, phone, website_uri"
+        )
+        .eq("user_id", userId)
+        .order("location_title", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as LocationRow[];
+    },
+    enabled: Boolean(supabaseClient) && Boolean(userId)
+  });
+
+  useEffect(() => {
+    if (!supabaseClient || !userId) {
+      setSelectedActiveIds([]);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      const { data, error } = await supabaseClient
+        .from("business_settings")
+        .select("active_location_ids")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) {
+        console.error("business_settings load error:", error);
+        setSelectedActiveIds((locationsQuery.data ?? []).map((loc) => loc.id));
+        return;
+      }
+      const ids = Array.isArray(data?.active_location_ids)
+        ? data.active_location_ids.filter(Boolean)
+        : null;
+      const allIds = (locationsQuery.data ?? []).map((loc) => loc.id);
+      const resolved = ids && ids.length > 0 ? ids : allIds;
+      setSelectedActiveIds(resolved);
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabaseClient, userId, locationsQuery.data]);
+
+  const persistActiveLocations = async (nextActive: string[]) => {
+    if (!supabaseClient || !userId) return;
+    setActiveLocationsSaving(true);
+    const allIds = (locationsQuery.data ?? []).map((loc) => loc.id);
+    const payload = {
+      user_id: userId,
+      business_id: userId,
+      business_name: session?.user?.email ?? "Business",
+      active_location_ids:
+        nextActive.length === 0 || nextActive.length === allIds.length
+          ? null
+          : nextActive,
+      updated_at: new Date().toISOString()
+    };
+    const { error } = await sb
+      .from("business_settings")
+      .upsert(payload, { onConflict: "business_id" });
+    if (error) {
+      console.error("business_settings save error:", error);
+      setLocationsError("Impossible de sauvegarder les etablissements actifs.");
+    } else {
+      setLocationsError(null);
+    }
+    setActiveLocationsSaving(false);
+  };
+
+  const handleLocationToggle = (locationId: string, checked: boolean) => {
+    setSelectedActiveIds((prev) => {
+      const next = checked
+        ? Array.from(new Set([...prev, locationId]))
+        : prev.filter((id) => id !== locationId);
+      void persistActiveLocations(next);
+      return next;
+    });
+  };
+
+  const handleConnectGoogle = async () => {
+    setGoogleError(null);
+    setLocationsNotice(null);
+    if (!supabaseClient) {
+      setGoogleError("Connexion Supabase requise.");
+      return;
+    }
+    try {
+      await startGoogleConnection(supabaseClient);
+    } catch (error) {
+      console.error("google oauth error:", error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Impossible de demarrer la connexion Google.";
+      setGoogleError(message);
+    }
+  };
+
+  const handleSyncLocations = async () => {
+    setLocationsError(null);
+    setLocationsNotice(null);
+    if (!supabaseClient || !session) {
+      setLocationsError("Connexion Supabase requise.");
+      return;
+    }
+    try {
+      setSyncingLocations(true);
+      const { data: sessionData } = await supabaseClient.auth.getSession();
+      const jwt = sessionData.session?.access_token;
+      const response = await fetch("/api/google/gbp/sync", {
+        method: "POST",
+        headers: jwt ? { Authorization: `Bearer ${jwt}` } : {}
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.ok) {
+        if (response.status === 401 && data?.error === "reauth_required") {
+          setLocationsError("Reconnectez Google pour synchroniser.");
+          return;
+        }
+        setLocationsError("Impossible de synchroniser les lieux.");
+        return;
+      }
+      setLocationsNotice(
+        data?.queued
+          ? "Synchronisation planifiee."
+          : "Synchronisation lancee."
+      );
+      await queryClient.invalidateQueries({
+        queryKey: ["google-locations", userId]
+      });
+    } catch (error) {
+      console.error("google gbp sync error:", error);
+      setLocationsError("Impossible de synchroniser les lieux.");
+    } finally {
+      setSyncingLocations(false);
+    }
+  };
 
   const handleInvite = async () => {
     if (!supabaseClient || !userId) return;
@@ -640,6 +844,182 @@ const Settings = ({ session }: SettingsProps) => {
       );
     }
 
+    if (activeTab === "locations") {
+      const connected = Boolean(googleConnectionQuery.data);
+      return (
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Connexion Google Business Profile</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-slate-600">
+                Synchronisez vos avis et mettez a jour vos fiches en temps reel.
+              </p>
+              {googleConnectionQuery.isLoading ? (
+                <Skeleton className="h-10 w-48" />
+              ) : (
+                <div className="flex flex-wrap items-center gap-3">
+                  {connected ? (
+                    <Badge variant="success">Google connecte</Badge>
+                  ) : (
+                    <Badge variant="warning">Connexion requise</Badge>
+                  )}
+                  <Button onClick={handleConnectGoogle}>
+                    {connected ? "Reconnecter Google" : "Lancer la connexion Google"}
+                  </Button>
+                  {connected && (
+                    <Button
+                      variant="outline"
+                      onClick={handleSyncLocations}
+                      disabled={syncingLocations}
+                    >
+                      {syncingLocations
+                        ? "Synchronisation..."
+                        : "Synchroniser mes etablissements & avis"}
+                    </Button>
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-slate-500">
+                Autorisation requise pour acceder aux avis, repondre et publier.
+              </p>
+              {googleError && (
+                <p className="text-xs text-rose-600">{googleError}</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Actions rapides</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-3">
+              <Button
+                onClick={() => {
+                  if (connected) {
+                    void handleSyncLocations();
+                  } else {
+                    void handleConnectGoogle();
+                  }
+                }}
+              >
+                Importer depuis Google
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => navigate("/sync-status")}
+              >
+                Mapper Google
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() =>
+                  setLocationsNotice(
+                    "Ajout manuel indisponible pour l'instant."
+                  )
+                }
+              >
+                Ajouter manuellement
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Vos etablissements</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-slate-600">
+                  Lieux connectes et statut d'activation.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate("/sync-status")}
+                >
+                  Voir le statut de sync
+                </Button>
+              </div>
+              {locationsNotice && (
+                <p className="text-xs text-emerald-600">{locationsNotice}</p>
+              )}
+              {locationsError && (
+                <p className="text-xs text-rose-600">{locationsError}</p>
+              )}
+              {locationsQuery.isLoading ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {Array.from({ length: 2 }).map((_, index) => (
+                    <Card key={`location-skeleton-${index}`}>
+                      <CardContent className="space-y-3 pt-6">
+                        <Skeleton className="h-5 w-2/3" />
+                        <Skeleton className="h-4 w-1/2" />
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : (locationsQuery.data ?? []).length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500">
+                  Aucun etablissement. Cliquez sur “Importer depuis Google” pour
+                  demarrer.
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  {(locationsQuery.data ?? []).map((location) => {
+                    const address = formatAddress(location.address_json);
+                    const isActive = selectedActiveIds.includes(location.id);
+                    return (
+                      <Card key={location.id}>
+                        <CardContent className="space-y-3 pt-6">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">
+                              {location.location_title ??
+                                location.location_resource_name}
+                            </p>
+                            {address && (
+                              <p className="text-xs text-slate-500">{address}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <label className="flex items-center gap-2 text-xs text-slate-600">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 accent-ink"
+                                checked={isActive}
+                                disabled={activeLocationsSaving}
+                                onChange={(event) =>
+                                  handleLocationToggle(
+                                    location.id,
+                                    event.target.checked
+                                  )
+                                }
+                              />
+                              {isActive ? "Actif" : "Inactif"}
+                            </label>
+                            {location.website_uri ? (
+                              <a
+                                href={location.website_uri}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs text-ink/80 hover:underline"
+                              >
+                                Site web
+                              </a>
+                            ) : null}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
+
     if (activeTab === "mobile") {
       const iosHighlight = deviceHint === "ios";
       const androidHighlight = deviceHint === "android";
@@ -775,9 +1155,20 @@ const Settings = ({ session }: SettingsProps) => {
     monthlyEnabled,
     updatingCompany,
     companyError,
+    googleConnectionQuery.data,
+    googleConnectionQuery.isLoading,
+    googleError,
+    locationsError,
+    locationsNotice,
+    locationsQuery.data,
+    locationsQuery.isLoading,
+    selectedActiveIds,
+    activeLocationsSaving,
+    syncingLocations,
     invitationsQuery.isLoading,
     invitationsQuery.data,
-    session
+    session,
+    navigate
   ]);
 
   return (
@@ -817,3 +1208,10 @@ const Settings = ({ session }: SettingsProps) => {
 };
 
 export default Settings;
+
+// Manual test plan:
+// 1) /settings?tab=locations (non connecte): bouton connexion visible.
+// 2) Connecte: badge Google connecte + bouton sync.
+// 3) Import/sync: liste rafraichie apres action.
+// 4) Aucun lieu: bloc vide affiche.
+// 5) npm run build.
