@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { Smartphone } from "lucide-react";
+import { Download, Smartphone } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -114,6 +114,8 @@ const Settings = ({ session }: SettingsProps) => {
   const sb = supabaseClient as any;
   const userId = session?.user?.id ?? null;
   const [activeTab, setActiveTab] = useState<TabId>("team");
+  const [deferredPrompt, setDeferredPrompt] = useState<any | null>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
   const [inviteFirstName, setInviteFirstName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("editor");
@@ -143,6 +145,53 @@ const Settings = ({ session }: SettingsProps) => {
   const handleOpenApp = () => {
     if (!appBaseUrl) return;
     window.open(appBaseUrl, "_blank");
+  };
+
+  const isIosSafari = useMemo(() => {
+    if (typeof navigator === "undefined") return false;
+    const ua = navigator.userAgent.toLowerCase();
+    const isIos = /iphone|ipad|ipod/.test(ua);
+    const isSafari = /safari/.test(ua) && !/crios|fxios|edgios/.test(ua);
+    return isIos && isSafari;
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const checkInstalled = () => {
+      const standalone =
+        window.matchMedia?.("(display-mode: standalone)").matches ||
+        (navigator as any).standalone === true;
+      setIsInstalled(Boolean(standalone));
+    };
+    checkInstalled();
+
+    const handleBeforeInstall = (event: Event) => {
+      event.preventDefault();
+      setDeferredPrompt(event);
+    };
+    const handleInstalled = () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+    };
+    window.addEventListener("beforeinstallprompt", handleBeforeInstall);
+    window.addEventListener("appinstalled", handleInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
+      window.removeEventListener("appinstalled", handleInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      await deferredPrompt.prompt();
+      await deferredPrompt.userChoice;
+      setDeferredPrompt(null);
+      return;
+    }
+    if (isIosSafari) {
+      setActiveTab("mobile");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   };
 
   useEffect(() => {
@@ -812,12 +861,32 @@ const Settings = ({ session }: SettingsProps) => {
       </div>
 
       {tabContent}
+
+      {!isInstalled && (deferredPrompt || isIosSafari) && (
+        <button
+          type="button"
+          onClick={handleInstallClick}
+          className="fixed bottom-4 left-4 z-40 flex items-center gap-3 rounded-2xl bg-ink px-4 py-3 text-left text-white shadow-lg transition hover:bg-ink/90"
+        >
+          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10">
+            <Download size={18} />
+          </span>
+          <span className="flex flex-col leading-tight">
+            <span className="text-sm font-semibold">Installer l’app</span>
+            <span className="text-xs text-white/70">
+              Sur votre mobile / ordinateur
+            </span>
+          </span>
+        </button>
+      )}
     </div>
   );
 };
 
 export default Settings;
 
-// Manual test:
-// 1) Open /settings and switch to "App Mobile".
-// 2) Verify iOS/Android steps render and "Ouvrir l’application" opens a new tab.
+// Manual test plan:
+// 1) Chrome desktop incognito: button visible if installable, prompt appears on click.
+// 2) Android Chrome: same behavior as desktop.
+// 3) iPhone Safari: button opens the "App Mobile" tab with instructions.
+// 4) Installed PWA: button hidden.
