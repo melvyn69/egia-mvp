@@ -15,6 +15,11 @@ type LocationCenter = {
   addressLabel: string | null;
 };
 
+type CenterResult = {
+  center: LocationCenter | null;
+  errorMessage?: string;
+};
+
 const parseBody = (req: VercelRequest) =>
   typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
 
@@ -49,6 +54,9 @@ const extractAddress = (value: unknown) => {
     (record.formatted_address as string | undefined) ??
     (record.formattedAddress as string | undefined);
   if (formatted) return formatted;
+  const addressLines = Array.isArray(record.addressLines)
+    ? (record.addressLines as string[]).filter(Boolean)
+    : [];
   const line1 =
     (record.address_line_1 as string | undefined) ??
     (record.line1 as string | undefined) ??
@@ -56,17 +64,30 @@ const extractAddress = (value: unknown) => {
   const line2 =
     (record.address_line_2 as string | undefined) ??
     (record.line2 as string | undefined);
-  const city = (record.city as string | undefined) ?? null;
+  const city =
+    (record.locality as string | undefined) ??
+    (record.city as string | undefined) ??
+    null;
   const postal =
     (record.postal_code as string | undefined) ??
+    (record.postalCode as string | undefined) ??
     (record.zip as string | undefined);
   const region =
+    (record.administrativeArea as string | undefined) ??
     (record.region as string | undefined) ??
     (record.state as string | undefined);
+  const country =
+    (record.regionCode as string | undefined) ??
+    (record.country as string | undefined);
+  const partsFromLines = addressLines.join(" ");
   const parts = [line1, line2, postal, city, region]
     .filter(Boolean)
     .join(" ");
-  return parts || null;
+  const composed = parts || partsFromLines || null;
+  if (composed && country) {
+    return `${composed} ${country}`;
+  }
+  return composed || (country ? country : null);
 };
 
 const extractLatLng = (value: unknown) => {
@@ -85,7 +106,10 @@ const extractLatLng = (value: unknown) => {
 };
 
 const fetchJson = async (url: string) => {
-  const response = await fetch(url);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  const response = await fetch(url, { signal: controller.signal });
+  clearTimeout(timeout);
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     throw new Error(`Places API error (${response.status})`);
@@ -97,29 +121,46 @@ const getLocationCenter = async (
   supabaseAdmin: any,
   userId: string,
   locationId: string,
-  apiKey: string
-): Promise<LocationCenter | null> => {
+  apiKey: string,
+  requestId: string
+): Promise<CenterResult> => {
   const { data, error } = await supabaseAdmin
     .from("google_locations")
-    .select("address_json, location_title, location_resource_name, latitude, longitude")
+    .select(
+      "address_json, location_title, location_resource_name, latitude, longitude"
+    )
     .eq("user_id", userId)
     .eq("id", locationId)
     .maybeSingle();
   if (error || !data) {
-    return null;
+    return {
+      center: null,
+      errorMessage: "Adresse absente en base pour cet etablissement."
+    };
   }
   const storedLat = typeof data.latitude === "number" ? data.latitude : null;
   const storedLng = typeof data.longitude === "number" ? data.longitude : null;
   if (storedLat !== null && storedLng !== null) {
     return {
-      lat: storedLat,
-      lng: storedLng,
-      addressLabel: extractAddress(data.address_json)
+      center: {
+        lat: storedLat,
+        lng: storedLng,
+        addressLabel: extractAddress(data.address_json)
+      }
     };
   }
   const addressJson = data.address_json;
   const latLng = extractLatLng(addressJson);
-  const addressLabel = extractAddress(addressJson);
+  let addressLabel = extractAddress(addressJson);
+  if (!addressLabel && data.location_title) {
+    addressLabel = data.location_title;
+  }
+  console.info("[competitors] resolve_center", {
+    requestId,
+    locationId,
+    addressLabel,
+    hasLatLngInJson: Boolean(latLng)
+  });
   if (latLng) {
     await supabaseAdmin
       .from("google_locations")
@@ -130,18 +171,99 @@ const getLocationCenter = async (
       })
       .eq("user_id", userId)
       .eq("id", locationId);
-    return { lat: latLng.lat, lng: latLng.lng, addressLabel };
+    return {
+      center: { lat: latLng.lat, lng: latLng.lng, addressLabel }
+    };
   }
   if (!addressLabel) {
-    return null;
+    return {
+      center: null,
+      errorMessage:
+        "Adresse absente en base. Mapper Google ou completer l'adresse."
+    };
   }
-  const encoded = encodeURIComponent(addressLabel);
-  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encoded}&key=${apiKey}`;
-  const payload = await fetchJson(url);
-  const result = payload?.results?.[0];
-  const location = result?.geometry?.location;
+
+  const geocode = async (label: string) => {
+    const encoded = encodeURIComponent(label);
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encoded}&key=${apiKey}`;
+    console.info("[competitors] geocode_request", {
+      requestId,
+      locationId,
+      address: label
+    });
+    const payload = await fetchJson(url);
+    const status = payload?.status ?? "UNKNOWN";
+    const result = payload?.results?.[0];
+    const location = result?.geometry?.location;
+    console.info("[competitors] geocode_response", {
+      requestId,
+      locationId,
+      status,
+      top_address: result?.formatted_address ?? null,
+      lat: location?.lat ?? null,
+      lng: location?.lng ?? null
+    });
+    return { status, location };
+  };
+
+  let geocodeResult = await geocode(addressLabel);
+  if (geocodeResult.status === "ZERO_RESULTS") {
+    const { data: connection } = await supabaseAdmin
+      .from("google_connections")
+      .select("access_token, refresh_token, expires_at")
+      .eq("user_id", userId)
+      .eq("provider", "google")
+      .maybeSingle();
+
+    if (connection?.access_token && data.location_resource_name) {
+      const accessToken = connection.access_token as string;
+      const locationName = data.location_resource_name as string;
+      const url = `https://mybusinessbusinessinformation.googleapis.com/v1/${locationName}?readMask=storefrontAddress,title`;
+      console.info("[competitors] gbp_location_fetch", {
+        requestId,
+        locationId,
+        locationName
+      });
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const payload = await response.json().catch(() => null);
+      if (response.ok && payload?.storefrontAddress) {
+        addressLabel = extractAddress(payload.storefrontAddress);
+        await supabaseAdmin
+          .from("google_locations")
+          .update({
+            address_json: payload.storefrontAddress,
+            updated_at: new Date().toISOString()
+          })
+          .eq("user_id", userId)
+          .eq("id", locationId);
+        if (addressLabel) {
+          geocodeResult = await geocode(addressLabel);
+        }
+      }
+    }
+  }
+
+  if (geocodeResult.status === "ZERO_RESULTS") {
+    return {
+      center: null,
+      errorMessage: `Geocoding ZERO_RESULTS pour l'adresse: ${addressLabel}`
+    };
+  }
+  if (geocodeResult.status !== "OK") {
+    return {
+      center: null,
+      errorMessage: `Geocoding error: ${geocodeResult.status}`
+    };
+  }
+  const location = geocodeResult.location;
   if (!location?.lat || !location?.lng) {
-    return null;
+    return {
+      center: null,
+      errorMessage:
+        "Adresse/coordonnees introuvables pour cet etablissement."
+    };
   }
   await supabaseAdmin
     .from("google_locations")
@@ -153,9 +275,11 @@ const getLocationCenter = async (
     .eq("user_id", userId)
     .eq("id", locationId);
   return {
-    lat: Number(location.lat),
-    lng: Number(location.lng),
-    addressLabel
+    center: {
+      lat: Number(location.lat),
+      lng: Number(location.lng),
+      addressLabel
+    }
   };
 };
 
@@ -228,13 +352,17 @@ const handleCompetitors = async (req: VercelRequest, res: VercelResponse) => {
     }
 
     let center: LocationCenter | null = null;
+    let centerError: string | undefined;
     try {
-      center = await getLocationCenter(
+      const result = await getLocationCenter(
         supabaseAdmin,
         userId,
         locationId,
-        apiKey
+        apiKey,
+        requestId
       );
+      center = result.center;
+      centerError = result.errorMessage;
     } catch (error) {
       return sendError(
         res,
@@ -250,6 +378,7 @@ const handleCompetitors = async (req: VercelRequest, res: VercelResponse) => {
         {
           code: "BAD_REQUEST",
           message:
+            centerError ??
             "Adresse/coordonnees introuvables pour cet etablissement. Synchronisez vos etablissements ou completez l'adresse."
         },
         400
