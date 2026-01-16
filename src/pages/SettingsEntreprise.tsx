@@ -111,9 +111,6 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
     }
   }, [entities, selectedId]);
 
-  const _businessId =
-    selectedEntity?.business_id ?? entities[0]?.business_id ?? null;
-
   const updateField = (key: keyof LegalEntity, value: string | boolean) => {
     setFormState((prev) => ({
       ...prev,
@@ -580,7 +577,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
                   variant="outline"
                   size="sm"
                   onClick={handleLogoRemove}
-                  disabled={!selectedEntity?.logo_url}
+                  disabled={!selectedEntity?.logo_path && !logoPreviewUrl}
                 >
                   Retirer
                 </Button>

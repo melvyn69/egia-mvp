@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { createClient } from "@supabase/supabase-js";
 import {
-  createSupabaseAdmin,
   getUserFromRequest,
   getBearerToken
 } from "../server/_shared_dist/google/_utils.js";
@@ -49,7 +49,7 @@ const readAction = (req: VercelRequest) => {
 };
 
 const getAuthUser = async (
-  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
+  supabaseUser: ReturnType<typeof createClient>,
   req: VercelRequest
 ) => {
   const token = getBearerToken(
@@ -58,7 +58,7 @@ const getAuthUser = async (
   if (!token) {
     return null;
   }
-  const { data, error } = await supabaseAdmin.auth.getUser(token);
+  const { data, error } = await supabaseUser.auth.getUser(token);
   if (error) {
     return null;
   }
@@ -91,12 +91,63 @@ const sendError = (
     requestId
   });
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const requestId = getRequestId(req);
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+const logError = (
+  requestId: string,
+  action: string,
+  error: unknown
+) => {
+  const err =
+    error && typeof error === "object"
+      ? (error as { message?: string; code?: string; details?: string; hint?: string })
+      : null;
+  console.error("[settings]", {
+    requestId,
+    action,
+    message: err?.message ?? String(error),
+    code: err?.code,
+    details: err?.details,
+    hint: err?.hint
+  });
+};
+
+const createSupabaseAdminClient = () => {
+  const supabaseUrl = process.env.SUPABASE_URL ?? "";
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  if (!supabaseUrl) {
+    throw new Error("Missing SUPABASE_URL");
+  }
+  if (!serviceRoleKey) {
     throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
   }
-  const supabaseAdmin = createSupabaseAdmin();
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+    global: { headers: { Authorization: `Bearer ${serviceRoleKey}` } }
+  });
+};
+
+const createSupabaseUserClient = (token: string | null) => {
+  const supabaseUrl = process.env.SUPABASE_URL ?? "";
+  const anonKey =
+    process.env.SUPABASE_ANON_KEY ??
+    process.env.VITE_SUPABASE_ANON_KEY ??
+    process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    "";
+  if (!supabaseUrl || !anonKey) {
+    throw new Error("Missing Supabase anon key");
+  }
+  return createClient(supabaseUrl, anonKey, {
+    auth: { persistSession: false },
+    global: token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+  });
+};
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const requestId = getRequestId(req);
+  const token = getBearerToken(
+    req.headers as Record<string, string | undefined>
+  );
+  const supabaseAdmin = createSupabaseAdminClient();
+  const supabaseUser = createSupabaseUserClient(token);
   const auth = await getUserFromRequest(
     { headers: req.headers as Record<string, string | undefined> },
     supabaseAdmin
@@ -120,7 +171,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== "GET" && req.method !== "POST") {
       return sendError(res, 405, "Method not allowed", requestId, "BAD_REQUEST");
     }
-    const authUser = await getAuthUser(supabaseAdmin, req);
+    const authUser = await getAuthUser(supabaseUser, req);
     const email = authUser?.email ?? null;
     const provider =
       typeof authUser?.app_metadata?.provider === "string"
@@ -131,19 +182,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       supabaseAdmin as any
     )
       .from("team_members")
-      .select("first_name, last_name, role, user_id, auth_user_id")
+      .select("first_name, role, user_id, auth_user_id")
       .or(`auth_user_id.eq.${userId},user_id.eq.${userId}`)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (memberError) {
-      console.error("[settings][profile_get] team_members_failed", {
-        requestId,
-        message: memberError.message,
-        hint: memberError.hint,
-        code: memberError.code,
-        details: memberError.details
-      });
+      logError(requestId, "profile_get", memberError);
       return sendError(
         res,
         500,
@@ -176,16 +221,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const firstName = (memberRow as any)?.first_name ?? "";
-    const lastName = (memberRow as any)?.last_name ?? "";
     const role = (memberRow as any)?.role ?? null;
-    const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+    const fullName = String(firstName ?? "").trim();
 
     return res.status(200).json({
       ok: true,
       data: {
         full_name: fullName,
-        first_name: firstName || null,
-        last_name: lastName || null,
+        first_name: fullName || null,
+        last_name: null,
         email,
         role,
         auth_provider: provider
@@ -200,20 +244,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const payload = parseBody(req);
     const fullName = String(payload.full_name ?? "").trim();
-    const inputFirstName = String(payload.first_name ?? "").trim();
-    const inputLastName = String(payload.last_name ?? "").trim();
-    let firstName = inputFirstName;
-    let lastName = inputLastName;
-    if (!firstName && fullName) {
-      const parts = fullName.split(/\s+/);
-      firstName = parts.shift() ?? "";
-      lastName = parts.join(" ");
-    }
-    if (!firstName) {
+    if (fullName.length < 2) {
       return sendError(
         res,
         400,
-        "first_name is required",
+        "full_name is required",
         requestId,
         "BAD_REQUEST"
       );
@@ -242,12 +277,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { error: updateError } = await (supabaseAdmin as any)
         .from("team_members")
         .update({
-          first_name: firstName,
-          last_name: lastName || null,
+          first_name: fullName,
           updated_at: new Date().toISOString()
         })
         .eq("id", existing.id);
       if (updateError) {
+        logError(requestId, "profile_update", updateError);
         return sendError(
           res,
           500,
@@ -257,14 +292,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
       }
     } else {
-      const authUser = await getAuthUser(supabaseAdmin, req);
+      const authUser = await getAuthUser(supabaseUser, req);
       const { error: insertError } = await (supabaseAdmin as any)
         .from("team_members")
         .insert({
           user_id: userId,
           auth_user_id: userId,
-          first_name: firstName,
-          last_name: lastName || null,
+          first_name: fullName,
           role: "admin",
           is_active: true,
           email: authUser?.email ?? null,
@@ -272,6 +306,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           updated_at: new Date().toISOString()
         });
       if (insertError) {
+        logError(requestId, "profile_update", insertError);
         return sendError(
           res,
           500,
@@ -285,9 +320,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       ok: true,
       data: {
-        full_name: [firstName, lastName].filter(Boolean).join(" ").trim(),
-        first_name: firstName,
-        last_name: lastName || null
+        full_name: fullName,
+        first_name: fullName,
+        last_name: null
       },
       requestId
     });
@@ -304,6 +339,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `auth_user_id.eq.${userId},and(user_id.eq.${userId},auth_user_id.is.null)`
       );
     if (updateError) {
+      logError(requestId, "profile_delete_request", updateError);
       return sendError(
         res,
         500,
@@ -582,6 +618,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("brand-assets")
       .upload(path, buffer, { upsert: true, contentType: contentType || undefined });
     if (uploadResult.error) {
+      logError(requestId, "legal_entities_logo_upload", uploadResult.error);
       return sendError(
         res,
         500,
@@ -597,6 +634,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq("id", entityId)
       .eq("business_id", businessId);
     if (updateError) {
+      logError(requestId, "legal_entities_logo_upload", updateError);
       return sendError(
         res,
         500,
