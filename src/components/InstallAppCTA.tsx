@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { cn } from "../lib/utils";
 
 type InstallAppCTAProps = {
-  onIosFallback: () => void;
+  onFallback: () => void;
   className?: string;
 };
 
@@ -12,18 +12,10 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
 };
 
-const InstallAppCTA = ({ onIosFallback, className }: InstallAppCTAProps) => {
+const InstallAppCTA = ({ onFallback, className }: InstallAppCTAProps) => {
   const [deferredPrompt, setDeferredPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
-
-  const isIosSafari = useMemo(() => {
-    if (typeof navigator === "undefined") return false;
-    const ua = navigator.userAgent.toLowerCase();
-    const isIos = /iphone|ipad|ipod/.test(ua);
-    const isSafari = /safari/.test(ua) && !/crios|fxios|edgios/.test(ua);
-    return isIos && isSafari;
-  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -55,10 +47,6 @@ const InstallAppCTA = ({ onIosFallback, className }: InstallAppCTAProps) => {
     return null;
   }
 
-  if (!deferredPrompt && !isIosSafari) {
-    return null;
-  }
-
   const handleClick = async () => {
     if (deferredPrompt) {
       await deferredPrompt.prompt();
@@ -66,27 +54,26 @@ const InstallAppCTA = ({ onIosFallback, className }: InstallAppCTAProps) => {
       setDeferredPrompt(null);
       return;
     }
-    if (isIosSafari) {
-      onIosFallback();
-    }
+    onFallback();
   };
 
   return (
-    <div className={cn("px-3 pb-4", className)}>
-      <button
-        type="button"
-        onClick={handleClick}
-        className="flex w-full items-center gap-3 rounded-2xl bg-ink px-4 py-3 text-left text-white shadow-lg transition hover:bg-ink/90"
-      >
-        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10">
-          <Download size={18} />
-        </span>
-        <span className="flex flex-col leading-tight">
-          <span className="text-sm font-semibold">Installer l’app</span>
-          <span className="text-xs text-white/70">Sur votre mobile</span>
-        </span>
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={handleClick}
+      className={cn(
+        "flex w-full items-center gap-3 rounded-2xl bg-ink px-4 py-3 text-left text-white shadow-lg transition hover:bg-ink/90",
+        className
+      )}
+    >
+      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10">
+        <Download size={18} />
+      </span>
+      <span className="flex flex-col leading-tight">
+        <span className="text-sm font-semibold">Installer l’app</span>
+        <span className="text-xs text-white/70">Sur votre mobile</span>
+      </span>
+    </button>
   );
 };
 

@@ -276,9 +276,11 @@ const Sidebar = () => {
     </div>
 
     <div className="mt-auto space-y-4">
-      <InstallAppCTA
-        onIosFallback={() => navigate("/settings?tab=mobile")}
-      />
+      <div className="px-3 pb-4">
+        <InstallAppCTA
+          onFallback={() => navigate("/settings?tab=mobile")}
+        />
+      </div>
       <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-[#f7f3ec] via-white to-[#f3efe7] p-4">
         <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
           Status

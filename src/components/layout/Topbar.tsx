@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 import { useQuery } from "@tanstack/react-query";
 import { Bell, Search, Sparkles } from "lucide-react";
@@ -29,7 +28,6 @@ const Topbar = ({
   onDebugSession
 }: TopbarProps) => {
   const [unreadCount, setUnreadCount] = useState(0);
-  const navigate = useNavigate();
   const userId = session?.user?.id ?? null;
   const brandingQuery = useQuery({
     queryKey: ["branding", userId],
@@ -44,10 +42,6 @@ const Topbar = ({
   const logoUrl = brandingQuery.data?.logoUrl ?? null;
   const companyName = brandingQuery.data?.companyName ?? null;
   const logoFallback = pickInitials(companyName ?? "EG");
-  const handleLogoClick = () => {
-    navigate("/settings?tab=company");
-  };
-
   useEffect(() => {
     const updateUnreadCount = () => {
       setUnreadCount(getUnreadNotificationCount());
@@ -92,26 +86,21 @@ const Topbar = ({
           Rechercher un lieu
         </div>
         {userEmail && (
-          <button
-            type="button"
-            onClick={handleLogoClick}
-            className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm"
-            title="Paramètres entreprise"
-          >
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm">
             {brandingQuery.isLoading ? (
               <Skeleton className="h-8 w-8 rounded-lg" />
             ) : logoUrl ? (
               <img
                 src={logoUrl}
                 alt="Logo entreprise"
-                className="h-8 w-8 rounded-lg object-contain"
+                className="pointer-events-none h-8 w-8 select-none rounded-lg object-contain"
               />
             ) : (
               <span className="text-xs font-semibold text-slate-600">
                 {logoFallback}
               </span>
             )}
-          </button>
+          </div>
         )}
         <Button
           variant="ghost"
