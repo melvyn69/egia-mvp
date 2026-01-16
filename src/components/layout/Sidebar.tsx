@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   Link2,
   Mailbox,
+  Radar,
   RefreshCw,
   Settings,
   Sparkles,
@@ -201,6 +202,20 @@ const Sidebar = () => {
         >
           <Bell size={18} />
           Alertes
+        </NavLink>
+        <NavLink
+          to="/competitors"
+          className={({ isActive }) =>
+            cn(
+              navLinkBase,
+              isActive
+                ? "bg-ink text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            )
+          }
+        >
+          <Radar size={18} />
+          Veille concurrentielle
         </NavLink>
         <NavLink
           to="/automation"
