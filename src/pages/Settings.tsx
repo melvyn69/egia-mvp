@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
+import { Smartphone } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -123,6 +124,26 @@ const Settings = ({ session }: SettingsProps) => {
   const [inviteSending, setInviteSending] = useState(false);
   const [updatingCompany, setUpdatingCompany] = useState(false);
   const [companyError, setCompanyError] = useState<string | null>(null);
+  const deviceHint = useMemo(() => {
+    if (typeof navigator === "undefined") return "desktop";
+    const ua = navigator.userAgent.toLowerCase();
+    if (ua.includes("iphone") || ua.includes("ipad") || ua.includes("ipod")) {
+      return "ios";
+    }
+    if (ua.includes("android")) {
+      return "android";
+    }
+    return "desktop";
+  }, []);
+  const appBaseUrl =
+    typeof window === "undefined"
+      ? ""
+      : ((import.meta as any).env?.VITE_APP_BASE_URL ??
+        window.location.origin);
+  const handleOpenApp = () => {
+    if (!appBaseUrl) return;
+    window.open(appBaseUrl, "_blank");
+  };
 
   useEffect(() => {
     const raw = searchParams.get("tab");
@@ -619,6 +640,103 @@ const Settings = ({ session }: SettingsProps) => {
       );
     }
 
+    if (activeTab === "mobile") {
+      const iosHighlight = deviceHint === "ios";
+      const androidHighlight = deviceHint === "android";
+      return (
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-ink/10 text-ink">
+                  <Smartphone size={18} />
+                </span>
+                Installez EGIA sur votre mobile
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-slate-600">
+              Gérez vos avis et recevez des notifications où que vous soyez,
+              sans passer par l’App Store.
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card
+              className={
+                iosHighlight ? "border-2 border-ink/40 shadow-sm" : ""
+              }
+            >
+              <CardHeader>
+                <CardTitle>Sur iPhone (iOS)</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-slate-700">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
+                    1
+                  </span>
+                  <p>Ouvrez EGIA dans Safari.</p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
+                    2
+                  </span>
+                  <p>Appuyez sur “Partager”.</p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
+                    3
+                  </span>
+                  <p>Choisissez “Sur l’écran d’accueil”.</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card
+              className={
+                androidHighlight ? "border-2 border-ink/40 shadow-sm" : ""
+              }
+            >
+              <CardHeader>
+                <CardTitle>Sur Android</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-slate-700">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
+                    1
+                  </span>
+                  <p>Ouvrez EGIA dans Chrome.</p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
+                    2
+                  </span>
+                  <p>Appuyez sur le menu ⋮.</p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
+                    3
+                  </span>
+                  <p>Sélectionnez “Installer l’application”.</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+              <p className="text-sm text-slate-600">
+                Lancez EGIA depuis votre écran d’accueil pour une expérience
+                pleine page.
+              </p>
+              <Button variant="outline" size="sm" onClick={handleOpenApp}>
+                Ouvrir l’application
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
+
     if (activeTab === "alerts") {
       return <SettingsAlertesIntelligentes />;
     }
@@ -651,6 +769,8 @@ const Settings = ({ session }: SettingsProps) => {
     inviteSuccess,
     toggleError,
     inviteSending,
+    deviceHint,
+    appBaseUrl,
     businessSettingsQuery.isLoading,
     monthlyEnabled,
     updatingCompany,
@@ -697,3 +817,7 @@ const Settings = ({ session }: SettingsProps) => {
 };
 
 export default Settings;
+
+// Manual test:
+// 1) Open /settings and switch to "App Mobile".
+// 2) Verify iOS/Android steps render and "Ouvrir l’application" opens a new tab.
