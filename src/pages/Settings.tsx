@@ -3,6 +3,8 @@ import type { Session } from "@supabase/supabase-js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Smartphone } from "lucide-react";
+import { FaFacebookF, FaGoogle, FaInstagram } from "react-icons/fa";
+import { SiTripadvisor } from "react-icons/si";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -908,7 +910,8 @@ const Settings = ({ session }: SettingsProps) => {
           description: "Synchronisation des avis et reponses en temps reel.",
           status: googleActive ? "active" : "inactive",
           actionLabel: googleActive ? null : "Connecter",
-          accent: "bg-emerald-50 border-emerald-200"
+          accent: "bg-emerald-50 border-emerald-200",
+          Icon: FaGoogle
         },
         {
           id: "facebook",
@@ -917,7 +920,8 @@ const Settings = ({ session }: SettingsProps) => {
           description: "Gerez les avis et commentaires de vos pages.",
           status: "soon",
           actionLabel: null,
-          accent: "bg-slate-50 border-slate-200"
+          accent: "bg-slate-50 border-slate-200",
+          Icon: FaFacebookF
         },
         {
           id: "instagram",
@@ -926,7 +930,8 @@ const Settings = ({ session }: SettingsProps) => {
           description: "Publiez vos meilleurs avis en story.",
           status: "soon",
           actionLabel: null,
-          accent: "bg-slate-50 border-slate-200"
+          accent: "bg-slate-50 border-slate-200",
+          Icon: FaInstagram
         },
         {
           id: "tripadvisor",
@@ -935,7 +940,8 @@ const Settings = ({ session }: SettingsProps) => {
           description: "Importation des avis voyageurs.",
           status: "soon",
           actionLabel: null,
-          accent: "bg-slate-50 border-slate-200"
+          accent: "bg-slate-50 border-slate-200",
+          Icon: SiTripadvisor
         }
       ] as const;
 
@@ -961,11 +967,9 @@ const Settings = ({ session }: SettingsProps) => {
                   )}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white shadow-sm">
-                        <span className="text-sm font-semibold text-slate-700">
-                          {integration.name.slice(0, 2)}
-                        </span>
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white">
+                        <integration.Icon size={22} className="text-slate-700" />
                       </div>
                       <div className="space-y-1">
                         <p className="text-sm font-semibold text-slate-900">
