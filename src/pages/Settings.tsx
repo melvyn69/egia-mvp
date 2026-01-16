@@ -10,6 +10,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
 import { startGoogleConnection } from "../lib/googleAuth";
+import { BrandVoice } from "./BrandVoice";
 import SettingsAlertesIntelligentes from "./SettingsAlertesIntelligentes";
 import SettingsEntreprise from "./SettingsEntreprise";
 import SettingsProfile from "./SettingsProfile";
@@ -895,6 +896,10 @@ const Settings = ({ session }: SettingsProps) => {
           <SettingsEntreprise session={session} />
         </div>
       );
+    }
+
+    if (activeTab === "ai-identity") {
+      return <BrandVoice session={session} />;
     }
 
     if (activeTab === "locations") {
