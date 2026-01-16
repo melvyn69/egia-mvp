@@ -67,15 +67,14 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
     queryKey: ["legal-entities", session?.user?.id],
     queryFn: async () => {
       if (!accessToken) return [] as LegalEntity[];
-      const response = await fetch(
-        "/api/settings?action=legal_entities_list",
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json"
-          }
-        }
-      );
+      const response = await fetch("/api/settings", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ action: "legal_entities_list" })
+      });
       if (!response.ok) {
         const text = await response.text();
         throw new Error(text || "Failed to load legal entities");
@@ -144,7 +143,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          action: "legal_entities_upsert",
+          action: "legal_entities_update",
           ...payload
         })
       });

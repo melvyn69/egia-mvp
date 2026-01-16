@@ -95,7 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (action === "profile_get") {
-    if (req.method !== "GET") {
+    if (req.method !== "GET" && req.method !== "POST") {
       return sendError(res, 405, "Method not allowed", requestId, "BAD_REQUEST");
     }
     const authUser = await getAuthUser(supabaseAdmin, req);
@@ -265,7 +265,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (action === "legal_entities_list") {
-    if (req.method !== "GET") {
+    if (req.method !== "GET" && req.method !== "POST") {
       return sendError(res, 405, "Method not allowed", requestId, "BAD_REQUEST");
     }
     const { data, error } = await supabaseAdmin
@@ -294,7 +294,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const payload = parseBody(req);
 
-  if (action === "legal_entities_upsert") {
+  if (action === "legal_entities_upsert" || action === "legal_entities_update") {
     const entityId = payload?.id ? String(payload.id) : null;
     const companyName = String(payload.company_name ?? "").trim();
     if (!companyName) {

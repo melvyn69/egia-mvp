@@ -41,11 +41,13 @@ const SettingsProfile = ({ session }: SettingsProfileProps) => {
     queryKey: ["profile", session?.user?.id],
     queryFn: async () => {
       if (!accessToken) return null as ProfileData | null;
-      const response = await fetch("/api/settings?action=profile_get", {
+      const response = await fetch("/api/settings", {
+        method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json"
-        }
+        },
+        body: JSON.stringify({ action: "profile_get" })
       });
       if (!response.ok) {
         const text = await response.text();
