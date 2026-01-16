@@ -120,3 +120,59 @@ Test local:
 ```bash
 curl -i -X POST "http://localhost:3000/api/cron/google/sync-replies?secret=<CRON_SECRET>"
 ```
+
+Settings Module – Architecture & Features (V1)
+1) Vue d’ensemble de l’architecture
+Frontend : React + TypeScript (pages Settings, sous-pages Entreprise / Mon Profil)
+Backend : Vercel Serverless Functions, un seul endpoint /api/settings
+Supabase : Auth, DB, Storage
+Principe clé : routing par action dans /api/settings (pattern action-based)
+2) Rôle de /api/settings
+Endpoint unique pour toutes les opérations Settings V1
+Chaque action est identifiée via action (query ou body)
+Permet de limiter la surface API et respecter les limites Vercel Hobby
+3) Convention API (obligatoire)
+Action obligatoire sur chaque appel :
+GET /api/settings?action=...
+POST /api/settings avec body { action: "..." }
+Réponse standard :
+{ "ok": true, "data": { ... }, "requestId": "..." }
+Erreur standard :
+{ "ok": false, "error": { "message": "...", "code": "..." }, "requestId": "..." }
+requestId : présent sur toutes les réponses pour corrélation logs
+4) Features implémentées (V1)
+4.1 Mon Profil
+Lecture profil via action=profile_get
+Mise à jour du nom via action=profile_update
+Provider Google : affichage informatif, pas de gestion mot de passe côté EGIA
+Fallback si team_members absent :
+Profil dérivé du JWT (email + full_name si dispo)
+4.2 Entreprise / Entités légales
+Listing : action=legal_entities_list
+Création / mise à jour : action=legal_entities_upsert / alias legal_entities_update
+Définition par défaut : action=legal_entities_set_default
+Suppression : action=legal_entities_delete
+Refus si entité par défaut unique
+4.3 Upload logo
+Upload côté serveur uniquement : action=legal_entities_logo_upload
+Service role obligatoire pour Storage
+Preview via signed URL (durée courte, côté frontend)
+5) Sécurité
+Client Supabase user : utilisé pour lire le contexte auth (email, provider)
+Client Supabase admin : réservé au backend, service-role uniquement
+Storage : upload via backend pour éviter RLS sur Storage côté frontend
+Évitement RLS frontend : aucune écriture directe dans Storage depuis le client
+6) Observabilité & Debug
+requestId systématique dans les réponses
+Logs Vercel : scope + requestId + erreurs Supabase
+Logs Supabase :
+Postgres : erreurs RLS, contraintes
+Storage : erreurs d’upload, droits insuffisants
+7) Versioning
+Tag : settings-v1-stable
+Objectif : stabilité fonctionnelle et surface API minimale
+8) Notes de design importantes
+team_members.first_name stocke le nom complet
+last_name volontairement non utilisé (colonne absente)
+Endpoint unique /api/settings pour limiter les fonctions Vercel et garder un contrat stable
+
