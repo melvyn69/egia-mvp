@@ -10,6 +10,7 @@ import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
 import SettingsAlertesIntelligentes from "./SettingsAlertesIntelligentes";
 import SettingsEntreprise from "./SettingsEntreprise";
+import SettingsProfile from "./SettingsProfile";
 
 type SettingsProps = {
   session: Session | null;
@@ -622,6 +623,10 @@ const Settings = ({ session }: SettingsProps) => {
       return <SettingsAlertesIntelligentes />;
     }
 
+    if (activeTab === "profile") {
+      return <SettingsProfile session={session} />;
+    }
+
     return (
       <Card>
         <CardHeader>
@@ -651,7 +656,8 @@ const Settings = ({ session }: SettingsProps) => {
     updatingCompany,
     companyError,
     invitationsQuery.isLoading,
-    invitationsQuery.data
+    invitationsQuery.data,
+    session
   ]);
 
   return (

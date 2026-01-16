@@ -13,7 +13,7 @@ type SettingsEntrepriseProps = {
 
 type LegalEntity = {
   id?: string;
-  org_id?: string;
+  business_id?: string;
   is_default?: boolean;
   company_name?: string;
   legal_name?: string | null;
@@ -61,13 +61,14 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [logoUploading, setLogoUploading] = useState(false);
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
 
   const entitiesQuery = useQuery({
     queryKey: ["legal-entities", session?.user?.id],
     queryFn: async () => {
       if (!accessToken) return [] as LegalEntity[];
       const response = await fetch(
-        "/api/legal_entities?action=legal_entities_list",
+        "/api/settings?action=legal_entities_list",
         {
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -111,7 +112,8 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
     }
   }, [entities, selectedId]);
 
-  const orgId = selectedEntity?.org_id ?? entities[0]?.org_id ?? null;
+  const businessId =
+    selectedEntity?.business_id ?? entities[0]?.business_id ?? null;
 
   const updateField = (key: keyof LegalEntity, value: string | boolean) => {
     setFormState((prev) => ({
@@ -135,7 +137,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
       return null;
     }
     try {
-      const response = await fetch("/api/legal_entities", {
+      const response = await fetch("/api/settings", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -178,7 +180,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
     setStatusMessage(null);
     setErrorMessage(null);
     try {
-      const response = await fetch("/api/legal_entities", {
+      const response = await fetch("/api/settings", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -211,7 +213,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
     setStatusMessage(null);
     setErrorMessage(null);
     try {
-      const response = await fetch("/api/legal_entities", {
+      const response = await fetch("/api/settings", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -255,14 +257,14 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
       }
       entity = saved;
     }
-    const currentOrgId = entity.org_id ?? orgId;
-    if (!currentOrgId) {
-      setErrorMessage("Impossible de determiner l'organisation.");
+    const currentBusinessId = entity.business_id ?? businessId;
+    if (!currentBusinessId) {
+      setErrorMessage("Impossible de determiner le business.");
       setLogoUploading(false);
       return;
     }
     const ext = file.name.split(".").pop() || "png";
-    const path = `org/${currentOrgId}/legal_entities/${entity.id}/logo.${ext}`;
+    const path = `business/${currentBusinessId}/legal_entities/${entity.id}/logo.${ext}`;
     try {
       const upload = await supabase.storage
         .from("brand-assets")
@@ -270,14 +272,18 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
       if (upload.error) {
         throw upload.error;
       }
-      const { data } = supabase.storage
-        .from("brand-assets")
-        .getPublicUrl(path);
       await saveEntity({
         id: entity.id,
         logo_path: path,
-        logo_url: data.publicUrl
+        logo_url: null
       });
+      const { data: signed, error: signError } = await supabase.storage
+        .from("brand-assets")
+        .createSignedUrl(path, 60 * 60);
+      if (signError) {
+        throw signError;
+      }
+      setLogoPreviewUrl(signed?.signedUrl ?? null);
       setStatusMessage("Logo mis a jour.");
     } catch (error) {
       setErrorMessage(
@@ -295,6 +301,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
         logo_path: null,
         logo_url: null
       }));
+      setLogoPreviewUrl(null);
       return;
     }
     await saveEntity({
@@ -302,7 +309,31 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
       logo_path: null,
       logo_url: null
     });
+    setLogoPreviewUrl(null);
   };
+
+  useEffect(() => {
+    let active = true;
+    const loadPreview = async () => {
+      if (!supabase || !selectedEntity?.logo_path) {
+        setLogoPreviewUrl(null);
+        return;
+      }
+      const { data, error } = await supabase.storage
+        .from("brand-assets")
+        .createSignedUrl(selectedEntity.logo_path, 60 * 60);
+      if (!active) return;
+      if (error) {
+        setLogoPreviewUrl(null);
+        return;
+      }
+      setLogoPreviewUrl(data?.signedUrl ?? null);
+    };
+    void loadPreview();
+    return () => {
+      active = false;
+    };
+  }, [selectedEntity?.logo_path]);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1.1fr_1.6fr]">
@@ -542,10 +573,10 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
                 </Button>
               </div>
             </div>
-            {selectedEntity?.logo_url ? (
+            {logoPreviewUrl ? (
               <div className="mt-4 flex items-center gap-4">
                 <img
-                  src={selectedEntity.logo_url}
+                  src={logoPreviewUrl}
                   alt="Logo"
                   className="h-14 w-14 rounded-lg border border-slate-200 object-contain"
                 />
