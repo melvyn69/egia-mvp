@@ -1086,7 +1086,7 @@ const Settings = ({ session }: SettingsProps) => {
                     const address = formatAddress(location.address_json);
                     const isActive = selectedActiveIds.includes(location.id);
                     const needsReplyCount = reviewsByLocation.get(location.id) ?? 0;
-                    const lastSync = formatRelativeTime(
+                    const lastSyncLabel = formatRelativeTime(
                       location.last_synced_at ?? lastSync
                     );
                     return (
@@ -1109,7 +1109,7 @@ const Settings = ({ session }: SettingsProps) => {
                             )}
                           </div>
                           <div className="flex items-center justify-between text-xs text-slate-500">
-                            <span>Derniere synchro: {lastSync}</span>
+                            <span>Derniere synchro: {lastSyncLabel}</span>
                             {location.website_uri ? (
                               <a
                                 href={location.website_uri}
