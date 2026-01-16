@@ -517,6 +517,7 @@ const App = () => {
             title={pageMeta.title}
             subtitle={pageMeta.subtitle}
             userEmail={session?.user.email}
+            session={session}
             onSignOut={session ? handleSignOut : undefined}
             onDebugSession={session ? handleDebugSession : undefined}
           />
