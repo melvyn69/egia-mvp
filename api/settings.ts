@@ -18,15 +18,22 @@ type Action =
 const parseBody = (req: VercelRequest) =>
   typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
 
-const getAction = (req: VercelRequest) => {
-  const actionParam = req.query.action;
-  if (typeof actionParam === "string") {
-    return actionParam;
+const readAction = (req: VercelRequest) => {
+  const actionParam = req.query?.action;
+  const qAction = Array.isArray(actionParam) ? actionParam[0] : actionParam;
+  let body: unknown = req.body;
+  if (typeof body === "string") {
+    try {
+      body = JSON.parse(body);
+    } catch {
+      body = {};
+    }
   }
-  if (Array.isArray(actionParam)) {
-    return actionParam[0];
-  }
-  return null;
+  const bAction =
+    body && typeof body === "object" && "action" in body
+      ? (body as { action?: string }).action
+      : undefined;
+  return qAction ?? bAction ?? null;
 };
 
 const getAuthUser = async (
@@ -83,7 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return sendError(res, 401, "Unauthorized", requestId, "UNAUTHORIZED");
   }
 
-  const action = getAction(req);
+  const action = readAction(req);
   if (!action) {
     return sendError(res, 400, "Missing action", requestId, "BAD_REQUEST");
   }
