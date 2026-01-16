@@ -49,6 +49,7 @@ type LocationRow = {
   address_json?: unknown | null;
   phone?: string | null;
   website_uri?: string | null;
+  last_synced_at?: string | null;
 };
 
 type TabId =
@@ -143,6 +144,21 @@ const formatAddress = (value: unknown) => {
     .filter(Boolean)
     .join(" ");
   return parts || null;
+};
+
+const formatRelativeTime = (isoDate: string | null) => {
+  if (!isoDate) return "—";
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return isoDate;
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMinutes = Math.floor(diffMs / 60000);
+  if (diffMinutes < 1) return "a l'instant";
+  if (diffMinutes < 60) return `il y a ${diffMinutes} min`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `il y a ${diffHours} h`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `il y a ${diffDays} j`;
 };
 
 const Settings = ({ session }: SettingsProps) => {
@@ -293,7 +309,7 @@ const Settings = ({ session }: SettingsProps) => {
       const { data, error } = await supabaseClient
         .from("google_locations")
         .select(
-          "id, location_title, location_resource_name, address_json, phone, website_uri"
+          "id, location_title, location_resource_name, address_json, phone, website_uri, last_synced_at"
         )
         .eq("user_id", userId)
         .order("location_title", { ascending: true });
@@ -333,6 +349,43 @@ const Settings = ({ session }: SettingsProps) => {
       cancelled = true;
     };
   }, [supabaseClient, userId, locationsQuery.data]);
+
+  const reviewsNeedingReplyQuery = useQuery({
+    queryKey: ["reviews-needing-reply", userId],
+    queryFn: async () => {
+      if (!supabaseClient || !userId) return [];
+      const { data, error } = await sb
+        .from("google_reviews")
+        .select("id, location_id, needs_reply, update_time, create_time")
+        .eq("user_id", userId)
+        .eq("needs_reply", true);
+      if (error) throw error;
+      return (data ?? []) as Array<{
+        id: string;
+        location_id: string | null;
+        needs_reply: boolean | null;
+        update_time?: string | null;
+        create_time?: string | null;
+      }>;
+    },
+    enabled: Boolean(supabaseClient) && Boolean(userId)
+  });
+
+  const lastSyncQuery = useQuery({
+    queryKey: ["google-connection-sync", userId],
+    queryFn: async () => {
+      if (!supabaseClient || !userId) return null;
+      const { data, error } = await supabaseClient
+        .from("google_connections")
+        .select("last_synced_at")
+        .eq("user_id", userId)
+        .eq("provider", "google")
+        .maybeSingle();
+      if (error) throw error;
+      return data?.last_synced_at ?? null;
+    },
+    enabled: Boolean(supabaseClient) && Boolean(userId)
+  });
 
   const persistActiveLocations = async (nextActive: string[]) => {
     if (!supabaseClient || !userId) return;
@@ -846,8 +899,106 @@ const Settings = ({ session }: SettingsProps) => {
 
     if (activeTab === "locations") {
       const connected = Boolean(googleConnectionQuery.data);
+      const locations = locationsQuery.data ?? [];
+      const activeCount =
+        selectedActiveIds.length > 0 ? selectedActiveIds.length : locations.length;
+      const reviewsNeedingReply = reviewsNeedingReplyQuery.data ?? [];
+      const reviewsByLocation = new Map<string, number>();
+      reviewsNeedingReply.forEach((row) => {
+        const key = row.location_id ?? "";
+        if (!key) return;
+        reviewsByLocation.set(key, (reviewsByLocation.get(key) ?? 0) + 1);
+      });
+      const totalNeedsReply = reviewsNeedingReply.length;
+      const latestReviewTime = reviewsNeedingReply.reduce<string | null>(
+        (acc, row) => {
+          const ts = row.update_time ?? row.create_time ?? null;
+          if (!ts) return acc;
+          if (!acc) return ts;
+          return ts > acc ? ts : acc;
+        },
+        null
+      );
+      const latestLocationSync = locations.reduce<string | null>(
+        (acc, location) => {
+          const ts = location.last_synced_at ?? null;
+          if (!ts) return acc;
+          if (!acc) return ts;
+          return ts > acc ? ts : acc;
+        },
+        null
+      );
+      const lastSync =
+        latestLocationSync ?? lastSyncQuery.data ?? latestReviewTime ?? null;
       return (
         <div className="space-y-6">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">
+              Pilotage business
+            </h2>
+            <p className="text-sm text-slate-500">
+              Suivez la sante des lieux connectes et des avis a traiter.
+            </p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card>
+              <CardHeader>
+                <CardTitle>Lieux actifs</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-semibold text-slate-900">
+                  {locationsQuery.isLoading ? "…" : activeCount}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Etablissements suivis dans le dashboard.
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Derniere synchro</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-semibold text-slate-900">
+                  {lastSyncQuery.isLoading ? "…" : formatRelativeTime(lastSync)}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Derniere activite connue cote Google.
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Avis a traiter</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-semibold text-slate-900">
+                  {reviewsNeedingReplyQuery.isLoading ? "…" : totalNeedsReply}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Avis nécessitant une reponse.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {connected ? (
+                <Badge variant="success">Google connecte</Badge>
+              ) : (
+                <Badge variant="warning">Connexion requise</Badge>
+              )}
+              <p className="text-sm text-slate-600">
+                Synchronisez vos avis et mettez a jour vos fiches en temps reel.
+              </p>
+            </div>
+            <Button onClick={handleSyncLocations} disabled={syncingLocations}>
+              {syncingLocations ? "Synchronisation..." : "Synchroniser maintenant"}
+            </Button>
+          </div>
+
           <Card>
             <CardHeader>
               <CardTitle>Connexion Google Business Profile</CardTitle>
@@ -892,41 +1043,6 @@ const Settings = ({ session }: SettingsProps) => {
 
           <Card>
             <CardHeader>
-              <CardTitle>Actions rapides</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-3">
-              <Button
-                onClick={() => {
-                  if (connected) {
-                    void handleSyncLocations();
-                  } else {
-                    void handleConnectGoogle();
-                  }
-                }}
-              >
-                Importer depuis Google
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => navigate("/sync-status")}
-              >
-                Mapper Google
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() =>
-                  setLocationsNotice(
-                    "Ajout manuel indisponible pour l'instant."
-                  )
-                }
-              >
-                Ajouter manuellement
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
               <CardTitle>Vos etablissements</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -959,29 +1075,53 @@ const Settings = ({ session }: SettingsProps) => {
                     </Card>
                   ))}
                 </div>
-              ) : (locationsQuery.data ?? []).length === 0 ? (
+              ) : locations.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500">
                   Aucun etablissement. Cliquez sur “Importer depuis Google” pour
                   demarrer.
                 </div>
               ) : (
                 <div className="grid gap-4 md:grid-cols-2">
-                  {(locationsQuery.data ?? []).map((location) => {
+                  {locations.map((location) => {
                     const address = formatAddress(location.address_json);
                     const isActive = selectedActiveIds.includes(location.id);
+                    const needsReplyCount = reviewsByLocation.get(location.id) ?? 0;
+                    const lastSync = formatRelativeTime(
+                      location.last_synced_at ?? lastSync
+                    );
                     return (
                       <Card key={location.id}>
-                        <CardContent className="space-y-3 pt-6">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-900">
-                              {location.location_title ??
-                                location.location_resource_name}
-                            </p>
+                        <CardContent className="space-y-4 pt-6">
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-semibold text-slate-900">
+                                {location.location_title ??
+                                  location.location_resource_name}
+                              </p>
+                              {needsReplyCount > 0 && (
+                                <Badge variant="warning">
+                                  {needsReplyCount} avis a traiter
+                                </Badge>
+                              )}
+                            </div>
                             {address && (
                               <p className="text-xs text-slate-500">{address}</p>
                             )}
                           </div>
-                          <div className="flex items-center justify-between">
+                          <div className="flex items-center justify-between text-xs text-slate-500">
+                            <span>Derniere synchro: {lastSync}</span>
+                            {location.website_uri ? (
+                              <a
+                                href={location.website_uri}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-ink/80 hover:underline"
+                              >
+                                Site web
+                              </a>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-2">
                             <label className="flex items-center gap-2 text-xs text-slate-600">
                               <input
                                 type="checkbox"
@@ -997,16 +1137,15 @@ const Settings = ({ session }: SettingsProps) => {
                               />
                               {isActive ? "Actif" : "Inactif"}
                             </label>
-                            {location.website_uri ? (
-                              <a
-                                href={location.website_uri}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-xs text-ink/80 hover:underline"
-                              >
-                                Site web
-                              </a>
-                            ) : null}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                navigate(`/inbox?locationId=${location.id}`)
+                              }
+                            >
+                              Ouvrir la boite de reception
+                            </Button>
                           </div>
                         </CardContent>
                       </Card>
@@ -1014,6 +1153,47 @@ const Settings = ({ session }: SettingsProps) => {
                   })}
                 </div>
               )}
+              {locations.length > 0 && activeCount === 0 && (
+                <p className="text-xs text-amber-600">
+                  Aucun lieu actif. Activez au moins un etablissement pour
+                  recevoir les alertes et rapports.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Actions rapides</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-3">
+              <Button
+                onClick={() => {
+                  if (connected) {
+                    void handleSyncLocations();
+                  } else {
+                    void handleConnectGoogle();
+                  }
+                }}
+              >
+                Importer depuis Google
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => navigate("/sync-status")}
+              >
+                Mapper Google
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() =>
+                  setLocationsNotice(
+                    "Ajout manuel indisponible pour l'instant."
+                  )
+                }
+              >
+                Ajouter manuellement
+              </Button>
             </CardContent>
           </Card>
         </div>
@@ -1162,6 +1342,10 @@ const Settings = ({ session }: SettingsProps) => {
     locationsNotice,
     locationsQuery.data,
     locationsQuery.isLoading,
+    reviewsNeedingReplyQuery.data,
+    reviewsNeedingReplyQuery.isLoading,
+    lastSyncQuery.data,
+    lastSyncQuery.isLoading,
     selectedActiveIds,
     activeLocationsSaving,
     syncingLocations,
