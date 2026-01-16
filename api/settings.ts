@@ -49,7 +49,7 @@ const readAction = (req: VercelRequest) => {
 };
 
 const getAuthUser = async (
-  supabaseUser: ReturnType<typeof createClient>,
+  supabaseUser: any,
   req: VercelRequest
 ) => {
   const token = getBearerToken(
@@ -125,7 +125,7 @@ const createSupabaseAdminClient = () => {
   });
 };
 
-const createSupabaseUserClient = (token: string | null) => {
+const createSupabaseUserClient = (token: string | null): any => {
   const supabaseUrl = process.env.SUPABASE_URL ?? "";
   const anonKey =
     process.env.SUPABASE_ANON_KEY ??
