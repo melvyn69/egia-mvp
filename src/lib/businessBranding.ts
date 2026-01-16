@@ -49,7 +49,9 @@ const getActiveLegalEntityLogo = async (userId: string): Promise<BrandingInfo> =
     return { logoUrl: null, companyName: null, logoPath: null, businessId: null };
   }
 
-  const { data: entities, error } = await supabase
+  // NOTE: "legal_entities" not yet in generated Supabase types. Cast to any until types are regenerated.
+  const sb = supabase as unknown as any;
+  const { data: entities, error } = await sb
     .from("legal_entities")
     .select("id, company_name, logo_path, logo_url, is_default, created_at")
     .eq("business_id", businessId)

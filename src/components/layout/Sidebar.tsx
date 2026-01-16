@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
@@ -17,6 +17,7 @@ import {
 import { cn } from "../../lib/utils";
 import { supabase } from "../../lib/supabase";
 import { analyticsQueryKey, fetchAnalyticsBundle } from "../../queries/analytics";
+import { InstallAppCTA } from "../InstallAppCTA";
 
 const navLinkBase =
   "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition";
@@ -24,6 +25,7 @@ const navLinkBase =
 const Sidebar = () => {
   const queryClient = useQueryClient();
   const [hasSession, setHasSession] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const sb = supabase;
@@ -84,17 +86,17 @@ const Sidebar = () => {
   return (
     <aside className="sticky top-0 hidden h-screen w-64 flex-col justify-between border-r border-slate-200 bg-white/80 px-4 py-6 shadow-soft backdrop-blur-lg lg:flex">
       <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-ink text-white shadow-lg">
-          <Building2 size={20} />
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-ink text-white shadow-lg">
+            <Building2 size={20} />
+          </div>
+          <div>
+            <p className="text-sm uppercase tracking-[0.2em] text-slate-400">
+              EGIA
+            </p>
+            <p className="text-lg font-semibold text-slate-900">Business Suite</p>
+          </div>
         </div>
-        <div>
-          <p className="text-sm uppercase tracking-[0.2em] text-slate-400">
-            EGIA
-          </p>
-          <p className="text-lg font-semibold text-slate-900">Business Suite</p>
-        </div>
-      </div>
 
       <nav className="space-y-2">
         <NavLink
@@ -273,16 +275,21 @@ const Sidebar = () => {
       </nav>
     </div>
 
-    <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-[#f7f3ec] via-white to-[#f3efe7] p-4">
-      <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-        Status
-      </p>
-      <p className="mt-2 text-sm font-medium text-slate-700">
-        Suivi des avis et des performances
-      </p>
-      <p className="mt-2 text-xs text-slate-500">
-        Derniere mise a jour: aujourd'hui
-      </p>
+    <div className="mt-auto space-y-4">
+      <InstallAppCTA
+        onIosFallback={() => navigate("/settings?tab=mobile")}
+      />
+      <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-[#f7f3ec] via-white to-[#f3efe7] p-4">
+        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+          Status
+        </p>
+        <p className="mt-2 text-sm font-medium text-slate-700">
+          Suivi des avis et des performances
+        </p>
+        <p className="mt-2 text-xs text-slate-500">
+          Derniere mise a jour: aujourd'hui
+        </p>
+      </div>
     </div>
     </aside>
   );
