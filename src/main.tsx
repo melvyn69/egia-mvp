@@ -6,13 +6,16 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import App from "./App";
 import "./index.css";
 import { queryClient } from "./lib/queryClient";
+import { PWAInstallProvider } from "./components/pwa/PWAInstallProvider";
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <PWAInstallProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </PWAInstallProvider>
       {import.meta.env.DEV ? <ReactQueryDevtools initialIsOpen={false} /> : null}
     </QueryClientProvider>
   </React.StrictMode>

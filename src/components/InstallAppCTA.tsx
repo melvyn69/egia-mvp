@@ -1,61 +1,32 @@
-import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { cn } from "../lib/utils";
+import { usePWAInstall } from "./pwa/PWAInstallProvider";
 
 type InstallAppCTAProps = {
   onFallback: () => void;
   className?: string;
 };
 
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
-};
-
 const InstallAppCTA = ({ onFallback, className }: InstallAppCTAProps) => {
-  const [deferredPrompt, setDeferredPrompt] =
-    useState<BeforeInstallPromptEvent | null>(null);
-  const [isInstalled, setIsInstalled] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const checkInstalled = () => {
-      const standalone =
-        window.matchMedia?.("(display-mode: standalone)").matches ||
-        (navigator as any).standalone === true;
-      setIsInstalled(Boolean(standalone));
-    };
-    checkInstalled();
-
-    const handleBeforeInstall = (event: Event) => {
-      event.preventDefault();
-      setDeferredPrompt(event as BeforeInstallPromptEvent);
-    };
-    const handleInstalled = () => {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-    };
-    window.addEventListener("beforeinstallprompt", handleBeforeInstall);
-    window.addEventListener("appinstalled", handleInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
-      window.removeEventListener("appinstalled", handleInstalled);
-    };
-  }, []);
+  const { isInstalled, install, platform } = usePWAInstall();
 
   if (isInstalled) {
     return null;
   }
 
   const handleClick = async () => {
-    if (deferredPrompt) {
-      await deferredPrompt.prompt();
-      await deferredPrompt.userChoice;
-      setDeferredPrompt(null);
+    if (platform === "ios") {
+      onFallback();
       return;
     }
-    onFallback();
+    const result = await install();
+    if (result === "unavailable") {
+      onFallback();
+    }
   };
+
+  const subtitle =
+    platform === "desktop" ? "Sur votre ordinateur" : "Sur votre mobile";
 
   return (
     <button
@@ -71,7 +42,7 @@ const InstallAppCTA = ({ onFallback, className }: InstallAppCTAProps) => {
       </span>
       <span className="flex flex-col leading-tight">
         <span className="text-sm font-semibold">Installer l’app</span>
-        <span className="text-xs text-white/70">Sur votre mobile</span>
+        <span className="text-xs text-white/70">{subtitle}</span>
       </span>
     </button>
   );
