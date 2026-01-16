@@ -111,7 +111,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
     }
   }, [entities, selectedId]);
 
-  const businessId =
+  const _businessId =
     selectedEntity?.business_id ?? entities[0]?.business_id ?? null;
 
   const updateField = (key: keyof LegalEntity, value: string | boolean) => {
