@@ -101,17 +101,35 @@ const getLocationCenter = async (
 ): Promise<LocationCenter | null> => {
   const { data, error } = await supabaseAdmin
     .from("google_locations")
-    .select("address_json, location_title, location_resource_name")
+    .select("address_json, location_title, location_resource_name, latitude, longitude")
     .eq("user_id", userId)
     .eq("id", locationId)
     .maybeSingle();
   if (error || !data) {
     return null;
   }
+  const storedLat = typeof data.latitude === "number" ? data.latitude : null;
+  const storedLng = typeof data.longitude === "number" ? data.longitude : null;
+  if (storedLat !== null && storedLng !== null) {
+    return {
+      lat: storedLat,
+      lng: storedLng,
+      addressLabel: extractAddress(data.address_json)
+    };
+  }
   const addressJson = data.address_json;
   const latLng = extractLatLng(addressJson);
   const addressLabel = extractAddress(addressJson);
   if (latLng) {
+    await supabaseAdmin
+      .from("google_locations")
+      .update({
+        latitude: latLng.lat,
+        longitude: latLng.lng,
+        updated_at: new Date().toISOString()
+      })
+      .eq("user_id", userId)
+      .eq("id", locationId);
     return { lat: latLng.lat, lng: latLng.lng, addressLabel };
   }
   if (!addressLabel) {
@@ -125,6 +143,15 @@ const getLocationCenter = async (
   if (!location?.lat || !location?.lng) {
     return null;
   }
+  await supabaseAdmin
+    .from("google_locations")
+    .update({
+      latitude: Number(location.lat),
+      longitude: Number(location.lng),
+      updated_at: new Date().toISOString()
+    })
+    .eq("user_id", userId)
+    .eq("id", locationId);
   return {
     lat: Number(location.lat),
     lng: Number(location.lng),
@@ -220,7 +247,11 @@ const handleCompetitors = async (req: VercelRequest, res: VercelResponse) => {
       return sendError(
         res,
         requestId,
-        { code: "BAD_REQUEST", message: "Missing location coordinates" },
+        {
+          code: "BAD_REQUEST",
+          message:
+            "Adresse/coordonnees introuvables pour cet etablissement. Synchronisez vos etablissements ou completez l'adresse."
+        },
         400
       );
     }
@@ -366,6 +397,10 @@ const handleCompetitors = async (req: VercelRequest, res: VercelResponse) => {
     404
   );
 };
+
+// Manual test plan:
+// 1) /competitors -> select location -> scan 1km -> list returns items.
+// 2) If coords missing, error message is actionable and no 500.
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const route = getRouteParts(req).join("/");
