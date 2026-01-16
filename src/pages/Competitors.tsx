@@ -127,12 +127,18 @@ const Competitors = ({ session }: CompetitorsProps) => {
     queryKey: ["competitors-radar", userId, selectedLocationId],
     queryFn: async () => {
       if (!token || !selectedLocationId) return [] as CompetitorRow[];
-      const response = await fetch(
-        `/api/competitors/list?location_id=${selectedLocationId}&mode=radar`,
-        {
-          headers: { Authorization: `Bearer ${token}` }
-        }
-      );
+      const response = await fetch("/api/reports/competitors", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "list",
+          location_id: selectedLocationId,
+          mode: "radar"
+        })
+      });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.items) {
         throw new Error("Failed to load competitors");
@@ -146,12 +152,18 @@ const Competitors = ({ session }: CompetitorsProps) => {
     queryKey: ["competitors-followed", userId, selectedLocationId],
     queryFn: async () => {
       if (!token || !selectedLocationId) return [] as CompetitorRow[];
-      const response = await fetch(
-        `/api/competitors/list?location_id=${selectedLocationId}&mode=followed`,
-        {
-          headers: { Authorization: `Bearer ${token}` }
-        }
-      );
+      const response = await fetch("/api/reports/competitors", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "list",
+          location_id: selectedLocationId,
+          mode: "followed"
+        })
+      });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.items) {
         throw new Error("Failed to load competitors");
@@ -189,13 +201,14 @@ const Competitors = ({ session }: CompetitorsProps) => {
       if (!token || !selectedLocationId) {
         throw new Error("Missing location");
       }
-      const response = await fetch("/api/competitors/scan", {
+      const response = await fetch("/api/reports/competitors", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
+          action: "scan",
           location_id: selectedLocationId,
           radius_km: radiusKm,
           keyword
@@ -227,13 +240,14 @@ const Competitors = ({ session }: CompetitorsProps) => {
       if (!token || !selectedLocationId) {
         throw new Error("Missing location");
       }
-      const response = await fetch("/api/competitors/follow", {
+      const response = await fetch("/api/reports/competitors", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
+          action: payload.isFollowed ? "follow" : "unfollow",
           location_id: selectedLocationId,
           place_id: payload.placeId,
           is_followed: payload.isFollowed
