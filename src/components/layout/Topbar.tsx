@@ -1,15 +1,21 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import type { Session } from "@supabase/supabase-js";
+import { useQuery } from "@tanstack/react-query";
 import { Bell, Search, Sparkles } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   getUnreadNotificationCount,
   NOTIFICATIONS_UPDATED_EVENT
 } from "../../lib/notifications";
+import { getActiveLegalEntityLogo, pickInitials } from "../../lib/businessBranding";
+import { Skeleton } from "../ui/skeleton";
 
 type TopbarProps = {
   title: string;
   subtitle?: string;
   userEmail?: string | null;
+  session?: Session | null;
   onSignOut?: () => void;
   onDebugSession?: () => void;
 };
@@ -18,10 +24,29 @@ const Topbar = ({
   title,
   subtitle,
   userEmail,
+  session,
   onSignOut,
   onDebugSession
 }: TopbarProps) => {
   const [unreadCount, setUnreadCount] = useState(0);
+  const navigate = useNavigate();
+  const userId = session?.user?.id ?? null;
+  const brandingQuery = useQuery({
+    queryKey: ["branding", userId],
+    queryFn: async () => {
+      if (!userId) return null;
+      return getActiveLegalEntityLogo(userId);
+    },
+    enabled: Boolean(userId),
+    staleTime: 60_000
+  });
+
+  const logoUrl = brandingQuery.data?.logoUrl ?? null;
+  const companyName = brandingQuery.data?.companyName ?? null;
+  const logoFallback = pickInitials(companyName ?? "EG");
+  const handleLogoClick = () => {
+    navigate("/settings?tab=company");
+  };
 
   useEffect(() => {
     const updateUnreadCount = () => {
@@ -66,6 +91,28 @@ const Topbar = ({
           <Search size={16} />
           Rechercher un lieu
         </div>
+        {userEmail && (
+          <button
+            type="button"
+            onClick={handleLogoClick}
+            className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm"
+            title="Paramètres entreprise"
+          >
+            {brandingQuery.isLoading ? (
+              <Skeleton className="h-8 w-8 rounded-lg" />
+            ) : logoUrl ? (
+              <img
+                src={logoUrl}
+                alt="Logo entreprise"
+                className="h-8 w-8 rounded-lg object-contain"
+              />
+            ) : (
+              <span className="text-xs font-semibold text-slate-600">
+                {logoFallback}
+              </span>
+            )}
+          </button>
+        )}
         <Button
           variant="ghost"
           size="sm"
