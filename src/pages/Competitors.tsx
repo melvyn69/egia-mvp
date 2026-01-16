@@ -216,7 +216,13 @@ const Competitors = ({ session }: CompetitorsProps) => {
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(payload?.error?.message ?? "Scan failed");
+        const err = new Error(payload?.error?.message ?? "Scan failed") as Error & {
+          details?: { hint?: string };
+        };
+        if (payload?.error?.details?.hint) {
+          err.details = { hint: payload.error.details.hint };
+        }
+        throw err;
       }
       return payload;
     },
@@ -232,7 +238,12 @@ const Competitors = ({ session }: CompetitorsProps) => {
         error instanceof Error
           ? error.message
           : "Impossible de scanner.";
-      setScanError(message);
+      const hint =
+        error instanceof Error &&
+        (error as Error & { details?: { hint?: string } }).details?.hint
+          ? (error as Error & { details?: { hint?: string } }).details?.hint
+          : null;
+      setScanError(hint ? `${message} ${hint}` : message);
       setScanMessage(null);
     }
   });
