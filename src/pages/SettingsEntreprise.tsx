@@ -256,34 +256,48 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
       }
       entity = saved;
     }
-    const currentBusinessId = entity.business_id ?? businessId;
-    if (!currentBusinessId) {
-      setErrorMessage("Impossible de determiner le business.");
-      setLogoUploading(false);
-      return;
-    }
-    const ext = file.name.split(".").pop() || "png";
-    const path = `business/${currentBusinessId}/legal_entities/${entity.id}/logo.${ext}`;
     try {
-      const upload = await supabase.storage
-        .from("brand-assets")
-        .upload(path, file, { upsert: true });
-      if (upload.error) {
-        throw upload.error;
-      }
-      await saveEntity({
-        id: entity.id,
-        logo_path: path,
-        logo_url: null
+      const fileBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.onerror = () => reject(new Error("file_read_failed"));
+        reader.readAsDataURL(file);
       });
-      const { data: signed, error: signError } = await supabase.storage
-        .from("brand-assets")
-        .createSignedUrl(path, 60 * 60);
-      if (signError) {
-        throw signError;
+
+      const response = await fetch("/api/settings", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "legal_entities_logo_upload",
+          legal_entity_id: entity.id,
+          filename: file.name,
+          contentType: file.type,
+          fileBase64
+        })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || "Upload du logo impossible.");
       }
-      setLogoPreviewUrl(signed?.signedUrl ?? null);
+      const payload = (await response.json()) as {
+        data?: { logo_path?: string | null; signed_url?: string | null };
+      };
+      if (payload?.data?.logo_path) {
+        setFormState((prev) => ({
+          ...prev,
+          logo_path: payload.data?.logo_path ?? null
+        }));
+      }
+      if (payload?.data?.signed_url) {
+        setLogoPreviewUrl(payload.data.signed_url);
+      }
       setStatusMessage("Logo mis a jour.");
+      await queryClient.invalidateQueries({
+        queryKey: ["legal-entities", session?.user?.id]
+      });
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "Upload du logo impossible."

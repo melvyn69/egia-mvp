@@ -11,6 +11,7 @@ type Action =
   | "legal_entities_upsert"
   | "legal_entities_set_default"
   | "legal_entities_delete"
+  | "legal_entities_logo_upload"
   | "profile_get"
   | "profile_update"
   | "profile_delete_request";
@@ -92,6 +93,9 @@ const sendError = (
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId = getRequestId(req);
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
+  }
   const supabaseAdmin = createSupabaseAdmin();
   const auth = await getUserFromRequest(
     { headers: req.headers as Record<string, string | undefined> },
@@ -133,6 +137,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .limit(1)
       .maybeSingle();
     if (memberError) {
+      console.error("[settings][profile_get] team_members_failed", {
+        requestId,
+        message: memberError.message,
+        hint: memberError.hint,
+        code: memberError.code,
+        details: memberError.details
+      });
       return sendError(
         res,
         500,
@@ -140,6 +151,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         requestId,
         "INTERNAL"
       );
+    }
+
+    if (!memberRow) {
+      const meta = (authUser?.user_metadata as Record<string, unknown>) ?? {};
+      const metaName =
+        typeof meta.full_name === "string"
+          ? meta.full_name
+          : typeof meta.name === "string"
+          ? meta.name
+          : "";
+      return res.status(200).json({
+        ok: true,
+        data: {
+          full_name: metaName || null,
+          first_name: null,
+          last_name: null,
+          email,
+          role: null,
+          auth_provider: provider
+        },
+        requestId
+      });
     }
 
     const firstName = (memberRow as any)?.first_name ?? "";
@@ -501,6 +534,94 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
     }
     return res.status(200).json({ ok: true, data: { id: entityId }, requestId });
+  }
+
+  if (action === "legal_entities_logo_upload") {
+    if (req.method !== "POST") {
+      return sendError(res, 405, "Method not allowed", requestId, "BAD_REQUEST");
+    }
+    const payload = parseBody(req);
+    const entityId = String(payload?.legal_entity_id ?? "").trim();
+    const filename = String(payload?.filename ?? "").trim();
+    const contentType = String(payload?.contentType ?? "").trim();
+    const fileBase64 = String(payload?.fileBase64 ?? "").trim();
+    if (!entityId || !filename || !fileBase64) {
+      return sendError(res, 400, "Missing payload", requestId, "BAD_REQUEST");
+    }
+
+    const { data: entityRow, error: entityError } = await supabaseAdmin
+      .from("legal_entities")
+      .select("id, business_id")
+      .eq("id", entityId)
+      .eq("business_id", businessId)
+      .maybeSingle();
+    if (entityError || !entityRow) {
+      return sendError(
+        res,
+        404,
+        "Legal entity not found",
+        requestId,
+        "NOT_FOUND"
+      );
+    }
+
+    const cleanBase64 = fileBase64.includes(",")
+      ? fileBase64.split(",").pop() ?? ""
+      : fileBase64;
+    let buffer: Buffer;
+    try {
+      buffer = Buffer.from(cleanBase64, "base64");
+    } catch {
+      return sendError(res, 400, "Invalid file encoding", requestId, "BAD_REQUEST");
+    }
+
+    const ext =
+      filename.includes(".") ? filename.split(".").pop() ?? "png" : "png";
+    const path = `business/${businessId}/legal_entities/${entityId}/logo.${ext}`;
+    const uploadResult = await supabaseAdmin.storage
+      .from("brand-assets")
+      .upload(path, buffer, { upsert: true, contentType: contentType || undefined });
+    if (uploadResult.error) {
+      return sendError(
+        res,
+        500,
+        "Failed to upload logo",
+        requestId,
+        "INTERNAL"
+      );
+    }
+
+    const { error: updateError } = await supabaseAdmin
+      .from("legal_entities")
+      .update({ logo_path: path, updated_at: new Date().toISOString() })
+      .eq("id", entityId)
+      .eq("business_id", businessId);
+    if (updateError) {
+      return sendError(
+        res,
+        500,
+        "Failed to update legal entity",
+        requestId,
+        "INTERNAL"
+      );
+    }
+
+    const { data: signed, error: signedError } = await supabaseAdmin.storage
+      .from("brand-assets")
+      .createSignedUrl(path, 60 * 60);
+    if (signedError) {
+      return res.status(200).json({
+        ok: true,
+        data: { logo_path: path, signed_url: null },
+        requestId
+      });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      data: { logo_path: path, signed_url: signed?.signedUrl ?? null },
+      requestId
+    });
   }
 
   return sendError(res, 400, "Unsupported action", requestId, "BAD_REQUEST");
