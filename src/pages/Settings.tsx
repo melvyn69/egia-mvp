@@ -898,6 +898,114 @@ const Settings = ({ session }: SettingsProps) => {
       );
     }
 
+    if (activeTab === "integrations") {
+      const googleActive = Boolean(googleConnectionQuery.data);
+      const integrations = [
+        {
+          id: "google",
+          name: "Google Business Profile",
+          type: "Source d'avis",
+          description: "Synchronisation des avis et reponses en temps reel.",
+          status: googleActive ? "active" : "inactive",
+          actionLabel: googleActive ? null : "Connecter",
+          accent: "bg-emerald-50 border-emerald-200"
+        },
+        {
+          id: "facebook",
+          name: "Facebook Pages",
+          type: "Source d'avis",
+          description: "Gerez les avis et commentaires de vos pages.",
+          status: "soon",
+          actionLabel: null,
+          accent: "bg-slate-50 border-slate-200"
+        },
+        {
+          id: "instagram",
+          name: "Instagram",
+          type: "Canal social",
+          description: "Publiez vos meilleurs avis en story.",
+          status: "soon",
+          actionLabel: null,
+          accent: "bg-slate-50 border-slate-200"
+        },
+        {
+          id: "tripadvisor",
+          name: "TripAdvisor",
+          type: "Source d'avis",
+          description: "Importation des avis voyageurs.",
+          status: "soon",
+          actionLabel: null,
+          accent: "bg-slate-50 border-slate-200"
+        }
+      ] as const;
+
+      return (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">Connexions</h2>
+            <p className="text-sm text-slate-500">
+              Centralisez vos sources d'avis et canaux sociaux.
+            </p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            {integrations.map((integration) => {
+              const isActive = integration.status === "active";
+              const isSoon = integration.status === "soon";
+              return (
+                <div
+                  key={integration.id}
+                  className={cn(
+                    "rounded-2xl border p-4",
+                    isActive ? integration.accent : "bg-white border-slate-200"
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white shadow-sm">
+                        <span className="text-sm font-semibold text-slate-700">
+                          {integration.name.slice(0, 2)}
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-slate-900">
+                          {integration.name}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {integration.type}
+                        </p>
+                      </div>
+                    </div>
+                    {isActive ? (
+                      <Badge variant="success">ACTIF</Badge>
+                    ) : isSoon ? (
+                      <Badge variant="neutral">BIENTOT</Badge>
+                    ) : (
+                      <Badge variant="warning">INACTIF</Badge>
+                    )}
+                  </div>
+                  <p className="mt-3 text-sm text-slate-600">
+                    {integration.description}
+                  </p>
+                  {integration.actionLabel && (
+                    <div className="mt-4">
+                      <Button
+                        size="sm"
+                        onClick={handleConnectGoogle}
+                        disabled={googleConnectionQuery.isLoading}
+                      >
+                        {integration.actionLabel}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
     if (activeTab === "ai-identity") {
       return <BrandVoice session={session} />;
     }
