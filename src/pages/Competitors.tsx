@@ -3,7 +3,6 @@ import type { Session } from "@supabase/supabase-js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
-  Radar,
   Trophy,
   Eye,
   BookmarkPlus,
@@ -70,6 +69,22 @@ const median = (values: number[]) => {
   return sorted[mid];
 };
 
+const getCompetitorInsights = (row: CompetitorRow) => {
+  const insights: string[] = [];
+  if (typeof row.rating === "number") {
+    if (row.rating >= 4.5) insights.push("Excellente note");
+    if (row.rating <= 3.5) insights.push("Note a ameliorer");
+  }
+  if (typeof row.user_ratings_total === "number") {
+    if (row.user_ratings_total >= 200) insights.push("Volume d'avis eleve");
+    if (row.user_ratings_total <= 20) insights.push("Peu d'avis");
+  }
+  if (typeof row.distance_m === "number" && row.distance_m <= 800) {
+    insights.push("Tres proche");
+  }
+  return insights;
+};
+
 const Competitors = ({ session }: CompetitorsProps) => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -86,10 +101,14 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const [radarFilter, setRadarFilter] = useState<
     "all" | "top3" | "high" | "low"
   >("all");
+  const [radarSearch, setRadarSearch] = useState("");
+  const [radarFollowedOnly, setRadarFollowedOnly] = useState(false);
+  const [radarTopLimit, setRadarTopLimit] = useState<10 | 25 | 50>(25);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [radarPageSize, setRadarPageSize] = useState(6);
   const [pendingPlaceIds, setPendingPlaceIds] = useState<string[]>([]);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [lastScanAt, setLastScanAt] = useState<Date | null>(null);
 
   const token = session?.access_token ?? null;
   const userId = session?.user?.id ?? null;
@@ -271,6 +290,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
       );
       setScanError(null);
       setScanErrorHint(null);
+      setLastScanAt(new Date());
       queryClient.invalidateQueries({
         queryKey: ["competitors-radar", userId, selectedLocationId]
       });
@@ -386,8 +406,14 @@ const Competitors = ({ session }: CompetitorsProps) => {
 
   const radarItems = radarQuery.data ?? [];
   const followedItems = followedQuery.data ?? [];
-  const enabled = Boolean(settingsQuery.data?.competitive_monitoring_enabled);
-  const keywordReady = Boolean(settingsQuery.data?.competitive_monitoring_keyword);
+  const settingsRow = settingsQuery.data;
+  const enabled = Boolean(settingsRow?.competitive_monitoring_enabled);
+  const keywordReady = Boolean(settingsRow?.competitive_monitoring_keyword);
+  const googleConnected = (locationsQuery.data ?? []).length > 0;
+  const statusKeyword = settingsRow?.competitive_monitoring_keyword ?? "";
+  const statusRadius = settingsRow?.competitive_monitoring_radius_km ?? radiusKm;
+  const locationsEmpty =
+    !locationsQuery.isLoading && (locationsQuery.data ?? []).length === 0;
 
   const radarRatings = radarItems
     .map((row) => row.rating)
@@ -405,6 +431,15 @@ const Competitors = ({ session }: CompetitorsProps) => {
 
   const filteredRadar = useMemo(() => {
     let items = radarItems.slice();
+    const search = radarSearch.trim().toLowerCase();
+    if (search) {
+      items = items.filter((row) =>
+        (row.name ?? "").toLowerCase().includes(search)
+      );
+    }
+    if (radarFollowedOnly) {
+      items = items.filter((row) => row.is_followed);
+    }
     if (radarFilter === "top3") {
       items = items.slice(0, 3);
     }
@@ -427,12 +462,23 @@ const Competitors = ({ session }: CompetitorsProps) => {
         return (b.rating ?? 0) - (a.rating ?? 0);
       });
     }
+    if (radarTopLimit) {
+      items = items.slice(0, radarTopLimit);
+    }
     return items;
-  }, [radarItems, radarFilter, radarSort]);
+  }, [radarItems, radarFilter, radarSort, radarSearch, radarFollowedOnly, radarTopLimit]);
 
   useEffect(() => {
     setRadarPageSize(6);
-  }, [radarFilter, radarSort, selectedLocationId, radarItems.length]);
+  }, [
+    radarFilter,
+    radarSort,
+    radarSearch,
+    radarFollowedOnly,
+    radarTopLimit,
+    selectedLocationId,
+    radarItems.length
+  ]);
 
   useEffect(() => {
     if (!toast) return;
@@ -474,11 +520,12 @@ const Competitors = ({ session }: CompetitorsProps) => {
     return { label: "OUTSIDER", variant: "neutral" as const };
   };
 
-  const swotSignals = useMemo(() => {
-    const ratings = radarItems
+  const swotReport = useMemo(() => {
+    const source = sortedFollowed.length > 0 ? sortedFollowed : radarItems;
+    const ratings = source
       .map((row) => row.rating)
       .filter((value): value is number => typeof value === "number");
-    const reviewCounts = radarItems
+    const reviewCounts = source
       .map((row) => row.user_ratings_total)
       .filter((value): value is number => typeof value === "number");
     const avgRating =
@@ -490,9 +537,26 @@ const Competitors = ({ session }: CompetitorsProps) => {
         ? reviewCounts.reduce((acc, value) => acc + value, 0) / reviewCounts.length
         : null;
     const minRating = ratings.length > 0 ? Math.min(...ratings) : null;
-    const maxRatingVal = ratings.length > 0 ? Math.max(...ratings) : null;
-    return { avgRating, avgVolume, minRating, maxRatingVal };
-  }, [radarItems]);
+    const maxRating = ratings.length > 0 ? Math.max(...ratings) : null;
+    const highRatedCount = source.filter((row) => (row.rating ?? 0) >= 4.5).length;
+    const nearbyHighRated = source.filter(
+      (row) => (row.rating ?? 0) >= 4.5 && (row.distance_m ?? 999999) <= 1000
+    ).length;
+    const topCompetitors = source
+      .slice()
+      .sort((a, b) => scoreCompetitor(b) - scoreCompetitor(a));
+    return {
+      source,
+      avgRating,
+      avgVolume,
+      minRating,
+      maxRating,
+      highRatedCount,
+      nearbyHighRated,
+      leader: topCompetitors[0] ?? null,
+      challenger: topCompetitors[1] ?? null
+    };
+  }, [radarItems, sortedFollowed]);
 
   const podium = useMemo(() => {
     const selfAvg = selfStatsQuery.data?.avg ?? null;
@@ -524,78 +588,237 @@ const Competitors = ({ session }: CompetitorsProps) => {
 
   const visibleRadar = filteredRadar.slice(0, radarPageSize);
   const canLoadMore = filteredRadar.length > radarPageSize;
+  const skeletonCards = Array.from({ length: 4 }, (_, index) => (
+    <Skeleton key={`skeleton-${index}`} className="h-40 w-full" />
+  ));
+
+  const buildGoogleLink = (placeId: string) =>
+    `https://www.google.com/maps/place/?q=place_id:${placeId}`;
+  const formatDelta = (delta: number) =>
+    `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`;
+  const selfAvg = selfStatsQuery.data?.avg ?? null;
+  const selfCount = selfStatsQuery.data?.count ?? null;
+  const selfScoreLabel = selfAvg !== null ? selfAvg.toFixed(2) : "—";
+  const selfReviewsLabel = selfCount !== null ? `${selfCount}` : "—";
+
+  const swotBullets = useMemo(() => {
+    const forces: string[] = [];
+    const weaknesses: string[] = [];
+    const opportunities: string[] = [];
+    const threats: string[] = [];
+    const actions: string[] = [];
+
+    if (selfAvg !== null && swotReport.avgRating !== null) {
+      const delta = selfAvg - swotReport.avgRating;
+      if (delta >= 0.2) {
+        forces.push(
+          `Note superieure de ${formatDelta(delta)} vs moyenne (${selfAvg.toFixed(
+            1
+          )} vs ${swotReport.avgRating.toFixed(1)}).`
+        );
+      } else if (delta <= -0.2) {
+        weaknesses.push(
+          `Note inferieure de ${formatDelta(Math.abs(delta))} vs moyenne (${selfAvg.toFixed(
+            1
+          )} vs ${swotReport.avgRating.toFixed(1)}).`
+        );
+      }
+    }
+
+    if (selfCount !== null && swotReport.avgVolume !== null) {
+      const avgVolume = swotReport.avgVolume;
+      if (selfCount >= avgVolume * 1.2) {
+        forces.push(
+          `Volume d'avis superieur a la moyenne (${selfCount} vs ~${Math.round(
+            avgVolume
+          )}).`
+        );
+      } else if (selfCount <= avgVolume * 0.8) {
+        weaknesses.push(
+          `Volume d'avis inferieur a la moyenne (${selfCount} vs ~${Math.round(
+            avgVolume
+          )}).`
+        );
+      }
+    }
+
+    if (
+      selfAvg !== null &&
+      swotReport.maxRating !== null &&
+      selfAvg >= swotReport.maxRating
+    ) {
+      forces.push(`Au niveau du meilleur note (${selfAvg.toFixed(1)}).`);
+    }
+
+    if (swotReport.leader?.rating !== null && selfAvg !== null) {
+      const delta = swotReport.leader.rating - selfAvg;
+      if (delta >= 0.3) {
+        weaknesses.push(`Leader a ${formatDelta(delta)} points d'avance.`);
+      } else if (delta > 0 && delta <= 0.2) {
+        opportunities.push(
+          `Ecart faible avec le leader (${formatDelta(delta)}).`
+        );
+      }
+    }
+
+    if (swotReport.minRating !== null && swotReport.minRating <= 3.5) {
+      opportunities.push("Certains concurrents sont notes sous 3.5.");
+    }
+
+    if (swotReport.avgVolume !== null && swotReport.avgVolume < 30) {
+      opportunities.push(
+        `Marche peu dense (volume moyen ~${Math.round(swotReport.avgVolume)} avis).`
+      );
+    }
+
+    if (
+      swotReport.leader?.rating !== null &&
+      selfAvg !== null &&
+      swotReport.leader.user_ratings_total !== null &&
+      selfCount !== null &&
+      swotReport.leader.rating >= selfAvg + 0.3 &&
+      swotReport.leader.user_ratings_total > selfCount
+    ) {
+      threats.push("Leader mieux note avec plus d'avis.");
+    }
+
+    if (swotReport.highRatedCount >= 3) {
+      threats.push(
+        `${swotReport.highRatedCount} concurrents notes >= 4.5.`
+      );
+    }
+
+    if (swotReport.nearbyHighRated > 0) {
+      threats.push(
+        `${swotReport.nearbyHighRated} concurrent(s) tres bien notes a moins d'1 km.`
+      );
+    }
+
+    if (weaknesses.length > 0 && swotReport.avgRating !== null) {
+      actions.push(
+        `Renforcer la satisfaction client parce que la moyenne marche est a ${swotReport.avgRating.toFixed(
+          1
+        )}.`
+      );
+    }
+    if (selfCount !== null && swotReport.avgVolume !== null && selfCount <= swotReport.avgVolume * 0.8) {
+      actions.push(
+        `Collecter plus d'avis parce que le volume moyen est ~${Math.round(
+          swotReport.avgVolume
+        )}.`
+      );
+    }
+    if (swotReport.nearbyHighRated > 0) {
+      actions.push(
+        `Mettre en avant vos atouts locaux parce que ${swotReport.nearbyHighRated} concurrent(s) tres bien notes sont proches.`
+      );
+    }
+    if (swotReport.leader?.rating !== null && selfAvg !== null) {
+      const delta = swotReport.leader.rating - selfAvg;
+      if (delta > 0 && delta <= 0.2) {
+        actions.push(
+          `Gagner quelques points de note pour depasser le leader (${formatDelta(
+            delta
+          )}).`
+        );
+      }
+    }
+    if (swotReport.minRating !== null && swotReport.minRating <= 3.5) {
+      actions.push(
+        "Cibler les faiblesses des concurrents les moins bien notes."
+      );
+    }
+
+    const trimList = (list: string[]) => list.slice(0, 3);
+    return {
+      forces: trimList(forces),
+      weaknesses: trimList(weaknesses),
+      opportunities: trimList(opportunities),
+      threats: trimList(threats),
+      actions: actions.slice(0, 5)
+    };
+  }, [selfAvg, selfCount, swotReport]);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
           <h1 className="text-2xl font-semibold text-slate-900">
             Veille concurrentielle
           </h1>
           <p className="text-sm text-slate-500">
-            Suivez les acteurs proches et comparez vos performances.
+            Pilotez votre positionnement local et suivez les acteurs proches.
           </p>
+          <div className="flex flex-wrap items-center gap-2 pt-2 text-xs">
+            <Badge variant={googleConnected ? "success" : "neutral"}>
+              {googleConnected ? "Google connecte" : "Google non connecte"}
+            </Badge>
+            <Badge variant={enabled ? "success" : "neutral"}>
+              {enabled ? "Veille activee" : "Veille desactivee"}
+            </Badge>
+            {statusKeyword ? (
+              <Badge variant="neutral">Mot-cle: {statusKeyword}</Badge>
+            ) : (
+              <Badge variant="neutral">Mot-cle manquant</Badge>
+            )}
+            <Badge variant="neutral">Rayon: {statusRadius} km</Badge>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="neutral">MVP</Badge>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {(["selection", "radar", "swot"] as TabId[]).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setActiveTab(tab)}
-            className={`rounded-full border px-4 py-2 text-xs font-semibold transition ${
-              activeTab === tab
-                ? "border-ink bg-ink text-white"
-                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-            }`}
-          >
-            {tab === "selection" && "Ma Selection"}
-            {tab === "radar" && "Radar"}
-            {tab === "swot" && "Analyse SWOT"}
-          </button>
-        ))}
-      </div>
-
-      {(!enabled || !keywordReady) && (
-        <Card>
-          <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-6 text-sm text-slate-600">
-            <div>
-              Activez la veille concurrentielle et renseignez le mot-cle dans
-              Parametres.
-            </div>
-            <Button variant="outline" onClick={() => navigate("/settings?tab=locations")}>
-              Aller aux parametres
-            </Button>
-          </CardContent>
-        </Card>
+      {toast && (
+        <div
+          className={`rounded-xl border px-3 py-2 text-xs ${
+            toast.type === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-rose-200 bg-rose-50 text-rose-600"
+          }`}
+        >
+          {toast.message}
+        </div>
       )}
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Etalonnage</CardTitle>
+        <CardHeader className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-lg">Controles</CardTitle>
+          <div className="text-xs text-slate-500">
+            Dernier scan:{" "}
+            {lastScanAt
+              ? `${lastScanAt.toLocaleDateString("fr-FR", {
+                  day: "2-digit",
+                  month: "short"
+                })} • ${lastScanAt.toLocaleTimeString("fr-FR", {
+                  hour: "2-digit",
+                  minute: "2-digit"
+                })}`
+              : "—"}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
           {(!enabled || !keywordReady) && (
-            <div className="flex items-center gap-2">
-              <Badge variant="warning">Parametres</Badge>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+              <span>
+                Activez la veille concurrentielle et renseignez le mot-cle dans
+                Parametres.
+              </span>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => navigate("/settings?tab=locations")}
               >
-                Ouvrir
+                Ouvrir les parametres
               </Button>
             </div>
           )}
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-[1fr_220px]">
-          {locationsQuery.isLoading ? (
-            <Skeleton className="h-12 w-full" />
-          ) : (locationsQuery.data ?? []).length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500 md:col-span-2">
-              Aucun etablissement selectionne. Choisissez un etablissement pour demarrer.
+          {locationsEmpty ? (
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+              <p className="text-base font-semibold text-slate-800">🏬 Aucun etablissement selectionne</p>
+              <p className="mt-1 text-sm text-slate-500">
+                Choisissez un etablissement pour lancer la veille concurrentielle.
+              </p>
               <Button
                 variant="outline"
                 size="sm"
@@ -606,9 +829,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
               </Button>
             </div>
           ) : (
-            <>
+            <div className="grid gap-3 lg:grid-cols-[2fr_1fr_1fr_1fr_1fr]">
               <label className="text-xs font-semibold text-slate-600">
-                Etablissement suivi
+                Etablissement
                 <select
                   className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
                   value={selectedLocationId ?? ""}
@@ -616,22 +839,57 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     setSelectedLocationId(event.target.value || null)
                   }
                 >
-                  {(locationsQuery.data ?? []).map((location) => (
-                    <option key={location.id} value={location.id}>
-                      {location.location_title || location.location_resource_name}
-                    </option>
-                  ))}
+                  {locationsQuery.isLoading && <option>Chargement...</option>}
+                  {!locationsQuery.isLoading &&
+                    (locationsQuery.data ?? []).map((location) => (
+                      <option key={location.id} value={location.id}>
+                        {location.location_title || location.location_resource_name}
+                      </option>
+                    ))}
                 </select>
               </label>
+              <label className="text-xs font-semibold text-slate-600">
+                Mot-cle
+                <input
+                  className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  value={keyword}
+                  onChange={(event) => setKeyword(event.target.value)}
+                  placeholder="restaurant italien"
+                />
+              </label>
+              <label className="text-xs font-semibold text-slate-600">
+                Rayon
+                <select
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                  value={radiusKm}
+                  onChange={(event) =>
+                    setRadiusKm(Number(event.target.value))
+                  }
+                >
+                  <option value={1}>1 km</option>
+                  <option value={5}>5 km</option>
+                  <option value={10}>10 km</option>
+                  <option value={20}>20 km</option>
+                </select>
+              </label>
+              <div className="flex items-end">
+                <Button
+                  className="w-full"
+                  onClick={() => scanMutation.mutate({})}
+                  disabled={!keyword || scanMutation.isPending || !selectedLocationId}
+                >
+                  {scanMutation.isPending ? "Scan..." : "Scanner"}
+                </Button>
+              </div>
               <div className="flex items-end">
                 <Button
                   variant="outline"
                   className="w-full"
                   onClick={() => {
                     const fallbackKeyword =
-                      keyword || settingsQuery.data?.competitive_monitoring_keyword || "";
+                      keyword || settingsRow?.competitive_monitoring_keyword || "";
                     const fallbackRadius =
-                      radiusKm || settingsQuery.data?.competitive_monitoring_radius_km || 0;
+                      radiusKm || settingsRow?.competitive_monitoring_radius_km || 0;
                     if (!selectedLocationId) return;
                     if (!enabled || !fallbackKeyword || !fallbackRadius) {
                       setScanError(
@@ -652,13 +910,45 @@ const Competitors = ({ session }: CompetitorsProps) => {
                   }}
                   disabled={!selectedLocationId || scanMutation.isPending}
                 >
-                  {scanMutation.isPending ? "Scan..." : "Rafraichir"}
+                  Rafraichir
                 </Button>
               </div>
-            </>
+            </div>
+          )}
+          {scanMessage && (
+            <p className="text-xs text-emerald-600">
+              {scanMessage}
+            </p>
+          )}
+          {scanError && (
+            <div className="text-xs text-rose-600">
+              <p>{scanError}</p>
+              {scanErrorHint && (
+                <p className="text-rose-500">{scanErrorHint}</p>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
+
+      <div className="flex flex-wrap gap-2">
+        {(["selection", "radar", "swot"] as TabId[]).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveTab(tab)}
+            className={`rounded-full border px-4 py-2 text-xs font-semibold transition ${
+              activeTab === tab
+                ? "border-ink bg-ink text-white"
+                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            {tab === "selection" && "Ma Selection"}
+            {tab === "radar" && "Radar"}
+            {tab === "swot" && "Analyse SWOT"}
+          </button>
+        ))}
+      </div>
 
       {activeTab === "selection" && (
         <Card>
@@ -670,10 +960,13 @@ const Competitors = ({ session }: CompetitorsProps) => {
           </CardHeader>
           <CardContent className="space-y-4">
             {followedQuery.isLoading ? (
-              <Skeleton className="h-24 w-full" />
+              <div className="grid gap-4 md:grid-cols-2">{skeletonCards}</div>
             ) : sortedFollowed.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500">
-                <p>Aucun concurrent suivi pour le moment.</p>
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm text-slate-500">
+                <p className="text-base font-semibold text-slate-800">🧭 Aucun concurrent suivi</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  Lancez un scan pour demarrer votre selection.
+                </p>
                 <Button
                   variant="outline"
                   size="sm"
@@ -684,66 +977,94 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 </Button>
               </div>
             ) : (
-              sortedFollowed.map((competitor) => {
-                const tier = getSelectionTier(competitor);
-                return (
-                  <div
-                    key={competitor.id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold text-slate-900">
-                          {competitor.name}
-                        </p>
-                        <Badge variant={tier.variant}>{tier.label}</Badge>
-                      </div>
-                      <p className="text-xs text-slate-500">
-                        {competitor.address ?? "Adresse indisponible"}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-4 text-xs text-slate-500">
-                      <span>Note: {competitor.rating ?? "—"}</span>
-                      <span>Avis: {competitor.user_ratings_total ?? "—"}</span>
-                      <span>Distance: {formatDistance(competitor.distance_m)}</span>
-                      {confirmRemoveId === competitor.id ? (
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              followMutation.mutate({
-                                placeId: competitor.place_id,
-                                isFollowed: false
-                              });
-                              setConfirmRemoveId(null);
-                            }}
-                            disabled={pendingPlaceIds.includes(competitor.place_id)}
-                          >
-                            Confirmer
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setConfirmRemoveId(null)}
-                          >
-                            Annuler
-                          </Button>
+              <div className="grid gap-4 md:grid-cols-2">
+                {sortedFollowed.map((competitor) => {
+                  const tier = getSelectionTier(competitor);
+                  const insights = getCompetitorInsights(competitor);
+                  return (
+                    <Card key={competitor.id} className="h-full">
+                      <CardContent className="flex h-full flex-col gap-3 pt-6">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-semibold text-slate-900">
+                                {competitor.name}
+                              </p>
+                              <Badge variant={tier.variant}>{tier.label}</Badge>
+                              <Badge variant="neutral">Suivi</Badge>
+                            </div>
+                            <p className="text-xs text-slate-500">
+                              {competitor.address ?? "Adresse indisponible"}
+                            </p>
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {formatDistance(competitor.distance_m)}
+                          </div>
                         </div>
-                      ) : (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setConfirmRemoveId(competitor.id)}
-                          disabled={pendingPlaceIds.includes(competitor.place_id)}
-                        >
-                          <BookmarkX size={14} className="mr-1" /> Retirer
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
+                        <div className="flex items-center gap-4 text-xs text-slate-500">
+                          <span>Note: {competitor.rating ?? "—"}</span>
+                          <span>Avis: {competitor.user_ratings_total ?? "—"}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                          {insights.length > 0 ? (
+                            insights.map((insight) => (
+                              <Badge key={insight} variant="neutral">
+                                {insight}
+                              </Badge>
+                            ))
+                          ) : (
+                            <span>Aucun insight disponible</span>
+                          )}
+                        </div>
+                        <div className="mt-auto flex flex-wrap items-center justify-between gap-3">
+                          {confirmRemoveId === competitor.id ? (
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  followMutation.mutate({
+                                    placeId: competitor.place_id,
+                                    isFollowed: false
+                                  });
+                                  setConfirmRemoveId(null);
+                                }}
+                                disabled={pendingPlaceIds.includes(competitor.place_id)}
+                              >
+                                Confirmer
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setConfirmRemoveId(null)}
+                              >
+                                Annuler
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setConfirmRemoveId(competitor.id)}
+                              disabled={pendingPlaceIds.includes(competitor.place_id)}
+                            >
+                              <BookmarkX size={14} className="mr-1" /> Retirer
+                            </Button>
+                          )}
+                          <a
+                            className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+                            href={buildGoogleLink(competitor.place_id)}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Voir sur Google
+                          </a>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -753,79 +1074,65 @@ const Competitors = ({ session }: CompetitorsProps) => {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Radar size={18} />
-                Scanner ma zone
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-                <div className="grid gap-3 md:grid-cols-[1fr_140px_180px]">
-                <label className="text-xs font-semibold text-slate-600">
-                  Mot-cle
-                  <input
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                    value={keyword}
-                    onChange={(event) => setKeyword(event.target.value)}
-                    placeholder="restaurant italien"
-                  />
-                </label>
-                <label className="text-xs font-semibold text-slate-600">
-                  Rayon
-                  <select
-                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                    value={radiusKm}
-                    onChange={(event) =>
-                      setRadiusKm(Number(event.target.value))
-                    }
-                  >
-                    <option value={1}>1 km</option>
-                    <option value={5}>5 km</option>
-                    <option value={10}>10 km</option>
-                    <option value={20}>20 km</option>
-                  </select>
-                </label>
-                <div className="flex items-end">
-                  <Button
-                    className="w-full"
-                    onClick={() => scanMutation.mutate({})}
-                    disabled={!keyword || scanMutation.isPending}
-                  >
-                    {scanMutation.isPending ? "Scan..." : "Scanner"}
-                  </Button>
-                </div>
-              </div>
-              {scanMessage && (
-                <p className="text-xs text-emerald-600">
-                  {scanMessage}
-                </p>
-              )}
-              {scanError && (
-                <div className="text-xs text-rose-600">
-                  <p>{scanError}</p>
-                  {scanErrorHint && (
-                    <p className="text-rose-500">{scanErrorHint}</p>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <CardTitle>Radar</CardTitle>
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <select
-                    className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
-                    value={radarSort}
-                    onChange={(event) =>
-                      setRadarSort(event.target.value as "distance" | "rating" | "reviews")
-                    }
-                  >
-                    <option value="distance">Tri: Distance</option>
-                    <option value="rating">Tri: Note</option>
-                    <option value="reviews">Tri: Avis</option>
-                  </select>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="sticky top-4 z-10 rounded-2xl border border-slate-200 bg-white/95 p-3 backdrop-blur">
+                <div className="grid gap-2 md:grid-cols-[1.5fr_1fr_1fr_1fr]">
+                  <label className="text-xs font-semibold text-slate-600">
+                    Rechercher
+                    <input
+                      className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                      value={radarSearch}
+                      onChange={(event) => setRadarSearch(event.target.value)}
+                      placeholder="Nom du concurrent"
+                    />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-600">
+                    Tri
+                    <select
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                      value={radarSort}
+                      onChange={(event) =>
+                        setRadarSort(
+                          event.target.value as "distance" | "rating" | "reviews"
+                        )
+                      }
+                    >
+                      <option value="distance">Distance</option>
+                      <option value="rating">Note</option>
+                      <option value="reviews">Volume avis</option>
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold text-slate-600">
+                    Top
+                    <select
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                      value={radarTopLimit}
+                      onChange={(event) =>
+                        setRadarTopLimit(
+                          Number(event.target.value) as 10 | 25 | 50
+                        )
+                      }
+                    >
+                      <option value={10}>Top 10</option>
+                      <option value={25}>Top 25</option>
+                      <option value={50}>Top 50</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-slate-300"
+                      checked={radarFollowedOnly}
+                      onChange={(event) => setRadarFollowedOnly(event.target.checked)}
+                    />
+                    Suivis uniquement
+                  </label>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs">
                   {(["all", "top3", "high", "low"] as const).map((filter) => (
                     <button
                       key={filter}
@@ -845,24 +1152,23 @@ const Competitors = ({ session }: CompetitorsProps) => {
                   ))}
                 </div>
               </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {toast && (
-                <div
-                  className={`rounded-xl border px-3 py-2 text-xs ${
-                    toast.type === "success"
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                      : "border-rose-200 bg-rose-50 text-rose-600"
-                  }`}
-                >
-                  {toast.message}
-                </div>
-              )}
               {radarQuery.isLoading ? (
-                <Skeleton className="h-24 w-full" />
+                <div className="grid gap-4 md:grid-cols-2">{skeletonCards}</div>
               ) : radarItems.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500">
-                  Lancez un scan pour afficher les concurrents proches.
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm text-slate-500">
+                  <p className="text-base font-semibold text-slate-800">📡 Aucun resultat</p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Lancez un scan pour afficher les concurrents proches.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => scanMutation.mutate({})}
+                    disabled={scanMutation.isPending || !selectedLocationId}
+                  >
+                    Scanner maintenant
+                  </Button>
                 </div>
               ) : (
                 <div className="grid gap-4 md:grid-cols-2">
@@ -870,14 +1176,30 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     const tier = getRadarTier(competitor);
                     const isPending = pendingPlaceIds.includes(competitor.place_id);
                     const isFollowed = competitor.is_followed;
+                    const insights = getCompetitorInsights(competitor);
+                    const selfAvg = selfStatsQuery.data?.avg ?? null;
+                    const delta =
+                      typeof competitor.rating === "number" && selfAvg !== null
+                        ? competitor.rating - selfAvg
+                        : null;
                     return (
                     <Card key={competitor.id}>
-                      <CardContent className="space-y-3 pt-6">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-900">
-                              {competitor.name}
-                            </p>
+                      <CardContent className="flex h-full flex-col gap-3 pt-6">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-semibold text-slate-900">
+                                {competitor.name}
+                              </p>
+                              <Badge variant={tier.variant}>{tier.label}</Badge>
+                              {isFollowed && <Badge variant="neutral">Suivi</Badge>}
+                              {delta !== null && (
+                                <Badge variant="neutral">
+                                  {delta >= 0 ? "+" : ""}
+                                  {delta.toFixed(1)} vs vous
+                                </Badge>
+                              )}
+                            </div>
                             <p className="text-xs text-slate-500">
                               {competitor.address ?? "Adresse indisponible"}
                             </p>
@@ -886,39 +1208,70 @@ const Competitors = ({ session }: CompetitorsProps) => {
                             {formatDistance(competitor.distance_m)}
                           </Badge>
                         </div>
-                        <div className="flex items-center justify-between text-xs text-slate-500">
+                        <div className="flex items-center gap-4 text-xs text-slate-500">
                           <span>Note: {competitor.rating ?? "—"}</span>
                           <span>Avis: {competitor.user_ratings_total ?? "—"}</span>
                         </div>
-                        <Badge variant={tier.variant}>{tier.label}</Badge>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            followMutation.mutate({
-                              placeId: competitor.place_id,
-                              isFollowed: true
-                            })
-                          }
-                          disabled={isPending || isFollowed}
-                        >
-                          <BookmarkPlus size={14} className="mr-1" />
-                          {isFollowed ? "Suivi" : "Suivre ce concurrent"}
-                        </Button>
+                        <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                          {insights.length > 0 ? (
+                            insights.map((insight) => (
+                              <Badge key={insight} variant="neutral">
+                                {insight}
+                              </Badge>
+                            ))
+                          ) : (
+                            <span>Aucun insight disponible</span>
+                          )}
+                        </div>
+                        <div className="mt-auto flex flex-wrap items-center justify-between gap-3">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              followMutation.mutate({
+                                placeId: competitor.place_id,
+                                isFollowed: true
+                              })
+                            }
+                            disabled={isPending || isFollowed}
+                          >
+                            <BookmarkPlus size={14} className="mr-1" />
+                            {isFollowed ? "Suivi" : "Suivre ce concurrent"}
+                          </Button>
+                          <a
+                            className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+                            href={buildGoogleLink(competitor.place_id)}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Voir sur Google
+                          </a>
+                        </div>
                       </CardContent>
                     </Card>
                   );
                   })}
                 </div>
               )}
-              {canLoadMore && (
-                <div className="flex justify-center">
-                  <Button
-                    variant="outline"
-                    onClick={() => setRadarPageSize((prev) => prev + 6)}
-                  >
-                    Charger plus
-                  </Button>
+              {radarItems.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+                  <span>
+                    {visibleRadar.length} affiches / {filteredRadar.length} total
+                  </span>
+                  {canLoadMore && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        const currentScroll = window.scrollY;
+                        setRadarPageSize((prev) => prev + 6);
+                        requestAnimationFrame(() => {
+                          window.scrollTo({ top: currentScroll });
+                        });
+                      }}
+                    >
+                      Charger plus
+                    </Button>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -938,36 +1291,59 @@ const Competitors = ({ session }: CompetitorsProps) => {
             <CardContent className="grid gap-4 md:grid-cols-2">
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
                 <p className="text-xs font-semibold text-slate-500">Forces</p>
-                <p className="mt-2 text-sm text-slate-700">
-                  Les concurrents les mieux notes affichent une moyenne de{" "}
-                  {swotSignals.avgRating
-                    ? swotSignals.avgRating.toFixed(2)
-                    : "—"}.
-                </p>
+                {swotBullets.forces.length === 0 ? (
+                  <p className="mt-2 text-sm text-slate-500">
+                    Donnees insuffisantes.
+                  </p>
+                ) : (
+                  <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
+                    {swotBullets.forces.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
                 <p className="text-xs font-semibold text-slate-500">Faiblesses</p>
-                <p className="mt-2 text-sm text-slate-700">
-                  Volume moyen d'avis:{" "}
-                  {swotSignals.avgVolume
-                    ? Math.round(swotSignals.avgVolume)
-                    : "—"}.
-                </p>
+                {swotBullets.weaknesses.length === 0 ? (
+                  <p className="mt-2 text-sm text-slate-500">
+                    Donnees insuffisantes.
+                  </p>
+                ) : (
+                  <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
+                    {swotBullets.weaknesses.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
                 <p className="text-xs font-semibold text-slate-500">Opportunites</p>
-                <p className="mt-2 text-sm text-slate-700">
-                  Dispersion des notes:{" "}
-                  {swotSignals.minRating && swotSignals.maxRatingVal
-                    ? `${swotSignals.minRating.toFixed(1)} → ${swotSignals.maxRatingVal.toFixed(1)}`
-                    : "—"}.
-                </p>
+                {swotBullets.opportunities.length === 0 ? (
+                  <p className="mt-2 text-sm text-slate-500">
+                    Donnees insuffisantes.
+                  </p>
+                ) : (
+                  <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
+                    {swotBullets.opportunities.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
                 <p className="text-xs font-semibold text-slate-500">Menaces</p>
-                <p className="mt-2 text-sm text-slate-700">
-                  Les concurrents avec gros volumes fixent le niveau d'exigence.
-                </p>
+                {swotBullets.threats.length === 0 ? (
+                  <p className="mt-2 text-sm text-slate-500">
+                    Donnees insuffisantes.
+                  </p>
+                ) : (
+                  <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
+                    {swotBullets.threats.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -976,24 +1352,104 @@ const Competitors = ({ session }: CompetitorsProps) => {
             <CardHeader>
               <CardTitle>Podium</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm text-slate-600">
-              <div className="flex items-center justify-between">
-                <span>Votre etablissement</span>
-                <span>
-                  {podium.self.avg ? podium.self.avg.toFixed(2) : "—"} /{" "}
-                  {podium.self.count} avis
-                </span>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-3">
+                <Card className="h-full">
+                  <CardContent className="space-y-2 pt-6 text-sm text-slate-600">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-900">Vous</p>
+                      <Badge variant="neutral">Vous</Badge>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Note: {selfScoreLabel} / Avis: {selfReviewsLabel}
+                    </div>
+                    <div className="text-xs text-slate-500">Distance: —</div>
+                  </CardContent>
+                </Card>
+                <Card className="h-full">
+                  <CardContent className="space-y-2 pt-6 text-sm text-slate-600">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-900">
+                        {swotReport.leader?.name ?? "Leader"}
+                      </p>
+                      <Badge variant="success">Leader</Badge>
+                    </div>
+                    {swotReport.leader ? (
+                      <>
+                        <div className="text-xs text-slate-500">
+                          Note: {swotReport.leader.rating ?? "—"} / Avis:{" "}
+                          {swotReport.leader.user_ratings_total ?? "—"}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          Delta:{" "}
+                          {selfAvg !== null && swotReport.leader.rating !== null
+                            ? `${formatDelta(swotReport.leader.rating - selfAvg)}`
+                            : "—"}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          Distance: {formatDistance(swotReport.leader.distance_m)}
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-xs text-slate-500">
+                        Donnees insuffisantes.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+                <Card className="h-full">
+                  <CardContent className="space-y-2 pt-6 text-sm text-slate-600">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-900">
+                        {swotReport.challenger?.name ?? "Challenger"}
+                      </p>
+                      <Badge variant="warning">Challenger</Badge>
+                    </div>
+                    {swotReport.challenger ? (
+                      <>
+                        <div className="text-xs text-slate-500">
+                          Note: {swotReport.challenger.rating ?? "—"} / Avis:{" "}
+                          {swotReport.challenger.user_ratings_total ?? "—"}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          Delta:{" "}
+                          {selfAvg !== null && swotReport.challenger.rating !== null
+                            ? `${formatDelta(swotReport.challenger.rating - selfAvg)}`
+                            : "—"}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          Distance: {formatDistance(swotReport.challenger.distance_m)}
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-xs text-slate-500">
+                        Donnees insuffisantes.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
               </div>
-              {podium.competitors.map((row) => (
-                <div key={row.id} className="flex items-center justify-between">
-                  <span>{row.name}</span>
-                  <span>
-                    {row.rating ?? "—"} / {row.user_ratings_total ?? "—"} avis
-                  </span>
-                </div>
-              ))}
               {isTop10 && (
                 <Badge variant="success">Top 10% du radar</Badge>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Actions recommandees</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {swotBullets.actions.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  Donnees insuffisantes.
+                </p>
+              ) : (
+                <ul className="list-disc space-y-2 pl-4 text-sm text-slate-700">
+                  {swotBullets.actions.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
               )}
             </CardContent>
           </Card>
