@@ -289,7 +289,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
           ? (error as Error & { details?: { hint?: string } }).details?.hint
           : null;
       setScanError(message);
-      setScanErrorHint(hint);
+      setScanErrorHint(hint ?? null);
       setScanMessage(null);
     }
   });
@@ -684,7 +684,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 </Button>
               </div>
             ) : (
-              sortedFollowed.map((competitor, index) => {
+              sortedFollowed.map((competitor) => {
                 const tier = getSelectionTier(competitor);
                 return (
                   <div
@@ -787,7 +787,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 <div className="flex items-end">
                   <Button
                     className="w-full"
-                    onClick={() => scanMutation.mutate()}
+                    onClick={() => scanMutation.mutate({})}
                     disabled={!keyword || scanMutation.isPending}
                   >
                     {scanMutation.isPending ? "Scan..." : "Scanner"}

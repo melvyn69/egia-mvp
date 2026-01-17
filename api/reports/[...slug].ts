@@ -118,6 +118,9 @@ const fetchJson = async (url: string) => {
   return payload as any;
 };
 
+const formatScanCacheKey = (keyword: string, radiusKm: number) =>
+  `${keyword.toLowerCase()}|${radiusKm}`;
+
 const refreshGoogleAccessToken = async (refreshToken: string) => {
   const clientId = process.env.GOOGLE_CLIENT_ID ?? "";
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET ?? "";
@@ -395,29 +398,56 @@ const handleCompetitors = async (req: VercelRequest, res: VercelResponse) => {
       );
     }
 
-    const { data: lastRow } = await supabaseAdmin
+    const cacheKey = formatScanCacheKey(keyword, radiusKm);
+    const cacheWindowMs = 10 * 60 * 1000;
+    const { data: cachedRow } = await supabaseAdmin
       .from("competitors")
-      .select("last_fetched_at")
+      .select("last_scanned_at, last_scan_keyword, last_scan_radius_km")
       .eq("user_id", userId)
       .eq("location_id", locationId)
-      .order("last_fetched_at", { ascending: false })
+      .order("last_scanned_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (lastRow?.last_fetched_at) {
-      const last = new Date(lastRow.last_fetched_at).getTime();
-      if (Date.now() - last < 30_000) {
-        return sendError(
-          res,
-          requestId,
-          { code: "BAD_REQUEST", message: "Scan too frequent" },
-          429
+    if (
+      cachedRow?.last_scanned_at &&
+      cachedRow.last_scan_keyword &&
+      cachedRow.last_scan_radius_km !== null
+    ) {
+      const last = new Date(cachedRow.last_scanned_at).getTime();
+      if (Date.now() - last < cacheWindowMs) {
+        const cachedKey = formatScanCacheKey(
+          String(cachedRow.last_scan_keyword),
+          Number(cachedRow.last_scan_radius_km)
         );
+        if (cachedKey === cacheKey) {
+          const { data: cachedItems } = await supabaseAdmin
+            .from("competitors")
+            .select(
+              "name,address,rating,user_ratings_total,distance_m,place_id,lat,lng,is_followed"
+            )
+            .eq("user_id", userId)
+            .eq("location_id", locationId)
+            .order("distance_m", { ascending: true })
+            .limit(20);
+          return res.status(200).json({
+            ok: true,
+            scanned: cachedItems?.length ?? 0,
+            insertedOrUpdated: cachedItems?.length ?? 0,
+            items: cachedItems ?? [],
+            cached: true,
+            keyword,
+            radius_km: radiusKm,
+            duration_ms: 0,
+            requestId
+          });
+        }
       }
     }
 
     let center: LocationCenter | null = null;
     let centerError: string | undefined;
     let centerHint: string | undefined;
+    const scanStart = Date.now();
     try {
       const result = await getLocationCenter(
         supabaseAdmin,
@@ -458,9 +488,11 @@ const handleCompetitors = async (req: VercelRequest, res: VercelResponse) => {
     )}&key=${apiKey}`;
 
     let places: any[] = [];
+    let nextPageToken: string | null = null;
     try {
       const payload = await fetchJson(nearbyUrl);
       places = Array.isArray(payload?.results) ? payload.results : [];
+      nextPageToken = typeof payload?.next_page_token === "string" ? payload.next_page_token : null;
     } catch (error) {
       return sendError(
         res,
@@ -495,25 +527,34 @@ const handleCompetitors = async (req: VercelRequest, res: VercelResponse) => {
               : null,
           category: typeof types[0] === "string" ? types[0] : null,
           last_fetched_at: nowIso,
+          last_scanned_at: nowIso,
+          last_scan_keyword: keyword,
+          last_scan_radius_km: radiusKm,
           updated_at: nowIso
         };
       });
 
-    if (items.length > 0) {
+    const limitedItems = items.slice(0, 20);
+    if (limitedItems.length > 0) {
       await supabaseAdmin
         .from("competitors")
-        .upsert(items, { onConflict: "user_id,location_id,place_id" });
+        .upsert(limitedItems, { onConflict: "user_id,location_id,place_id" });
     }
 
-    const sorted = items
+    const sorted = limitedItems
       .slice()
       .sort((a, b) => (a.distance_m ?? 0) - (b.distance_m ?? 0));
 
     return res.status(200).json({
       ok: true,
       scanned: places.length,
-      insertedOrUpdated: items.length,
+      insertedOrUpdated: limitedItems.length,
       items: sorted,
+      cached: false,
+      keyword,
+      radius_km: radiusKm,
+      duration_ms: Date.now() - scanStart,
+      next_page_token: nextPageToken,
       requestId
     });
   }
