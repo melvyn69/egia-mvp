@@ -857,6 +857,39 @@ export type Database = {
         }
         Relationships: []
       }
+      generated_reports: {
+        Row: {
+          created_at: string
+          id: string
+          location_id: string | null
+          payload: Json
+          report_type: string
+          summary: string | null
+          title: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          location_id?: string | null
+          payload?: Json
+          report_type: string
+          summary?: string | null
+          title?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          location_id?: string | null
+          payload?: Json
+          report_type?: string
+          summary?: string | null
+          title?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       team_members: {
         Row: {
           created_at: string | null

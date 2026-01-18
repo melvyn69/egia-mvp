@@ -48,6 +48,150 @@ const haversine = (lat1: number, lng1: number, lat2: number, lng2: number) => {
   return Math.round(r * c);
 };
 
+type CompetitorRow = {
+  name: string;
+  rating: number | null;
+  user_ratings_total: number | null;
+  distance_m: number | null;
+  place_id: string;
+  is_followed: boolean | null;
+};
+
+const median = (values: number[]) => {
+  if (values.length === 0) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+  return sorted[mid];
+};
+
+const scoreCompetitor = (row: CompetitorRow) => {
+  const rating = typeof row.rating === "number" ? row.rating : 0;
+  const reviews =
+    typeof row.user_ratings_total === "number" ? row.user_ratings_total : 0;
+  return rating * Math.log10(1 + reviews);
+};
+
+const buildCompetitorsBenchmark = (
+  competitors: CompetitorRow[],
+  radiusKm: number | null
+) => {
+  const ratings = competitors
+    .map((item) => item.rating)
+    .filter((value): value is number => typeof value === "number");
+  const reviews = competitors
+    .map((item) => item.user_ratings_total)
+    .filter((value): value is number => typeof value === "number");
+  const distances = competitors
+    .map((item) => item.distance_m)
+    .filter((value): value is number => typeof value === "number");
+
+  const medianRating = ratings.length > 0 ? median(ratings) : null;
+  const medianReviews = reviews.length > 0 ? median(reviews) : null;
+  const medianDistance = distances.length > 0 ? median(distances) : null;
+  const bestRating = ratings.length > 0 ? Math.max(...ratings) : null;
+  const closest = distances.length > 0 ? Math.min(...distances) : null;
+
+  const riskyCount = competitors.filter((row) => {
+    if (typeof row.rating !== "number" || typeof row.distance_m !== "number") {
+      return false;
+    }
+    const dangerRadius =
+      typeof radiusKm === "number" ? radiusKm * 1000 * 0.5 : 1000;
+    return row.rating >= 4.8 && row.distance_m <= dangerRadius;
+  }).length;
+
+  const ranked = competitors
+    .slice()
+    .sort((a, b) => scoreCompetitor(b) - scoreCompetitor(a))
+    .slice(0, 5)
+    .map((item) => ({
+      name: item.name,
+      rating: item.rating,
+      reviews: item.user_ratings_total,
+      distance_m: item.distance_m,
+      place_id: item.place_id
+    }));
+
+  const strengths: string[] = [];
+  const weaknesses: string[] = [];
+  const opportunities: string[] = [];
+  const threats: string[] = [];
+
+  if (medianRating !== null) {
+    if (medianRating >= 4.3) {
+      strengths.push(
+        `Marché bien noté (médiane ${medianRating.toFixed(1)}/5).`
+      );
+    } else {
+      weaknesses.push(
+        `Note moyenne en retrait (médiane ${medianRating.toFixed(1)}/5).`
+      );
+    }
+  }
+  if (medianReviews !== null) {
+    if (medianReviews >= 60) {
+      strengths.push(`Volume d'avis solide (médiane ${Math.round(medianReviews)}).`);
+    } else {
+      weaknesses.push(
+        `Volume d'avis limité (médiane ${Math.round(medianReviews)}).`
+      );
+    }
+  }
+  if (bestRating !== null && bestRating >= 4.7) {
+    threats.push(`Un leader local dépasse ${bestRating.toFixed(1)}/5.`);
+  }
+  if (closest !== null && closest <= 800) {
+    threats.push("Concurrence très proche sur le terrain.");
+  }
+  if (riskyCount > 0) {
+    threats.push(`${riskyCount} concurrent(s) à fort impact local.`);
+  }
+  if (ratings.filter((value) => value <= 3.8).length >= 3) {
+    opportunities.push("Plusieurs concurrents sous 3.8 : différenciation possible.");
+  }
+  if (closest !== null && closest > 2000) {
+    opportunities.push("Faible densité concurrentielle à proximité immédiate.");
+  }
+
+  const plan14Days: string[] = [
+    "Semaine 1 : sécuriser 5 nouveaux avis pour dépasser la médiane locale.",
+    "Semaine 1 : répondre aux avis récents pour renforcer la confiance.",
+    "Semaine 2 : mettre en avant un avantage clair face aux concurrents proches.",
+    "Semaine 2 : suivre de près les 2 leaders les mieux notés."
+  ];
+
+  const summaryParts = [
+    `Total: ${competitors.length}`,
+    medianRating !== null ? `Médiane note: ${medianRating.toFixed(1)}` : null,
+    medianReviews !== null ? `Médiane avis: ${Math.round(medianReviews)}` : null,
+    bestRating !== null ? `Meilleure note: ${bestRating.toFixed(1)}` : null
+  ].filter(Boolean);
+
+  return {
+    stats: {
+      total: competitors.length,
+      median_rating: medianRating,
+      median_reviews: medianReviews,
+      median_distance_m: medianDistance,
+      best_rating: bestRating,
+      closest_m: closest,
+      high_risk_count: riskyCount
+    },
+    top_competitors: ranked,
+    swot: {
+      forces: strengths.slice(0, 3),
+      weaknesses: weaknesses.slice(0, 3),
+      opportunities: opportunities.slice(0, 3),
+      threats: threats.slice(0, 3)
+    },
+    plan_14_days: plan14Days,
+    summary: summaryParts.join(" · ")
+  };
+};
+
 const extractAddress = (value: unknown) => {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
@@ -459,7 +603,7 @@ const handleCompetitors = async (req: VercelRequest, res: VercelResponse) => {
       center = result.center;
       centerError = result.errorMessage;
       centerHint = result.errorHint;
-    } catch (error) {
+    } catch {
       return sendError(
         res,
         requestId,
@@ -493,7 +637,7 @@ const handleCompetitors = async (req: VercelRequest, res: VercelResponse) => {
       const payload = await fetchJson(nearbyUrl);
       places = Array.isArray(payload?.results) ? payload.results : [];
       nextPageToken = typeof payload?.next_page_token === "string" ? payload.next_page_token : null;
-    } catch (error) {
+    } catch {
       return sendError(
         res,
         requestId,
@@ -635,6 +779,124 @@ const handleCompetitors = async (req: VercelRequest, res: VercelResponse) => {
   );
 };
 
+const handleCompetitorsBenchmark = async (
+  req: VercelRequest,
+  res: VercelResponse
+) => {
+  const requestId = getRequestId(req);
+  const auth = await requireUser(req, res);
+  if (!auth) return;
+  const { userId, supabaseAdmin } = auth;
+
+  if (req.method !== "POST") {
+    return sendError(
+      res,
+      requestId,
+      { code: "BAD_REQUEST", message: "Method not allowed" },
+      405
+    );
+  }
+  const payload = parseBody(req);
+  const action = String(payload?.action ?? "").trim().toLowerCase();
+  if (action !== "generate") {
+    return sendError(
+      res,
+      requestId,
+      { code: "BAD_REQUEST", message: "Unknown action" },
+      400
+    );
+  }
+
+  const locationId = String(payload?.location_id ?? "").trim();
+  if (!locationId) {
+    return sendError(
+      res,
+      requestId,
+      { code: "BAD_REQUEST", message: "Missing location_id" },
+      400
+    );
+  }
+
+  const { data: settingsRow } = await supabaseAdmin
+    .from("business_settings")
+    .select(
+      "competitive_monitoring_keyword, competitive_monitoring_radius_km"
+    )
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  const keyword = String(
+    payload?.keyword ?? settingsRow?.competitive_monitoring_keyword ?? ""
+  ).trim();
+  const radiusKmRaw =
+    payload?.radius_km ?? settingsRow?.competitive_monitoring_radius_km ?? null;
+  const radiusKm =
+    typeof radiusKmRaw === "number"
+      ? radiusKmRaw
+      : radiusKmRaw
+        ? Number(radiusKmRaw)
+        : null;
+
+  const { data: followed } = await supabaseAdmin
+    .from("competitors")
+    .select(
+      "name,rating,user_ratings_total,distance_m,place_id,is_followed"
+    )
+    .eq("user_id", userId)
+    .eq("location_id", locationId)
+    .eq("is_followed", true);
+
+  let source = followed ?? [];
+  if (source.length === 0) {
+    const { data: radar } = await supabaseAdmin
+      .from("competitors")
+      .select(
+        "name,rating,user_ratings_total,distance_m,place_id,is_followed"
+      )
+      .eq("user_id", userId)
+      .eq("location_id", locationId);
+    source = radar ?? [];
+  }
+
+  const benchmark = buildCompetitorsBenchmark(
+    (source ?? []) as CompetitorRow[],
+    typeof radiusKm === "number" ? radiusKm : null
+  );
+
+  const today = new Date().toISOString().slice(0, 10);
+  const title = `Benchmark concurrents — ${today}`;
+  const reportPayload = {
+    location_id: locationId,
+    keyword: keyword || null,
+    radius_km: radiusKm,
+    ...benchmark
+  };
+
+  const { data: report, error } = await supabaseAdmin
+    .from("generated_reports")
+    .insert({
+      user_id: userId,
+      report_type: "competitors_benchmark",
+      location_id: locationId,
+      title,
+      summary: benchmark.summary || null,
+      payload: reportPayload
+    })
+    .select("*")
+    .maybeSingle();
+
+  if (error || !report) {
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Failed to store report" },
+      500
+    );
+  }
+
+  return res.status(200).json({ ok: true, report, requestId });
+};
+
 // Manual test plan:
 // 1) /competitors -> select location -> scan 1km -> list returns items.
 // 2) If coords missing, error message is actionable and no 500.
@@ -649,6 +911,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   if (route === "competitors") {
     return handleCompetitors(req, res);
+  }
+  if (route === "competitors-benchmark") {
+    return handleCompetitorsBenchmark(req, res);
   }
   return res.status(404).json({ error: "Not found" });
 }

@@ -49,8 +49,24 @@ const getActiveLegalEntityLogo = async (userId: string): Promise<BrandingInfo> =
     return { logoUrl: null, companyName: null, logoPath: null, businessId: null };
   }
 
-  // NOTE: "legal_entities" not yet in generated Supabase types. Cast to any until types are regenerated.
-  const sb = supabase as unknown as any;
+  // NOTE: "legal_entities" not yet in generated Supabase types. Cast to a loose client until types are regenerated.
+  const sb = supabase as unknown as {
+    from: (table: string) => {
+      select: (columns: string) => {
+        eq: (column: string, value: string) => {
+          order: (
+            column: string,
+            options?: { ascending?: boolean }
+          ) => {
+            order: (
+              column: string,
+              options?: { ascending?: boolean }
+            ) => Promise<{ data: unknown; error: unknown }>;
+          };
+        };
+      };
+    };
+  };
   const { data: entities, error } = await sb
     .from("legal_entities")
     .select("id, company_name, logo_path, logo_url, is_default, created_at")
@@ -62,7 +78,8 @@ const getActiveLegalEntityLogo = async (userId: string): Promise<BrandingInfo> =
     return { logoUrl: null, companyName: null, logoPath: null, businessId };
   }
 
-  const entity = (entities ?? [])[0] as
+  const entitiesArr = Array.isArray(entities) ? entities : [];
+  const entity = entitiesArr[0] as
     | {
         company_name?: string | null;
         logo_path?: string | null;

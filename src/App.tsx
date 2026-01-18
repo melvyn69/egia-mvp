@@ -70,6 +70,7 @@ const App = () => {
       return Number.isFinite(parsed) ? parsed : null;
     }
   );
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const envMissing = !supabaseUrl || !supabaseAnonKey;
   const isCallbackPath =
     location.pathname === "/google_oauth_callback" ||
@@ -180,6 +181,10 @@ const App = () => {
       authListener.subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!supabase || !session) {
@@ -521,9 +526,11 @@ const App = () => {
             session={session}
             onSignOut={session ? handleSignOut : undefined}
             onDebugSession={session ? handleDebugSession : undefined}
+            onToggleMenu={() => setMobileMenuOpen((prev) => !prev)}
+            isMenuOpen={mobileMenuOpen}
           />
 
-          <main className="flex-1 space-y-6 bg-gradient-to-br from-sand via-white to-clay px-6 py-8">
+          <main className="flex-1 space-y-6 bg-gradient-to-br from-sand via-white to-clay px-4 py-6 md:px-6 md:py-8">
             {envMissing && (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
                 Variables d&apos;env Supabase manquantes. Ajoutez
@@ -677,6 +684,23 @@ const App = () => {
           </main>
         </div>
       </div>
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-900/40"
+            onClick={() => setMobileMenuOpen(false)}
+            aria-label="Fermer le menu"
+          />
+          <div className="absolute left-0 top-0 h-full">
+            <Sidebar
+              variant="mobile"
+              className="h-full"
+              onNavigate={() => setMobileMenuOpen(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

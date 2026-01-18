@@ -18,6 +18,7 @@ type ReportsProps = {
 };
 
 type ReportRow = Database["public"]["Tables"]["reports"]["Row"];
+type GeneratedReportRow = Database["public"]["Tables"]["generated_reports"]["Row"];
 
 type Preset =
   | "last_7_days"
@@ -44,6 +45,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedBenchmarkId, setSelectedBenchmarkId] = useState<string | null>(null);
 
   const reportsQuery = useQuery({
     queryKey: ["reports", session?.user?.id ?? null],
@@ -59,6 +61,25 @@ const Reports = ({ session, locations }: ReportsProps) => {
         throw queryError;
       }
       return (data ?? []) as ReportRow[];
+    },
+    enabled: Boolean(supabaseClient) && Boolean(session?.user?.id)
+  });
+
+  const benchmarkQuery = useQuery({
+    queryKey: ["generated-reports", session?.user?.id ?? null],
+    queryFn: async () => {
+      if (!supabaseClient || !session?.user?.id) {
+        return [] as GeneratedReportRow[];
+      }
+      const { data, error: queryError } = await supabaseClient
+        .from("generated_reports")
+        .select("*")
+        .eq("report_type", "competitors_benchmark")
+        .order("created_at", { ascending: false });
+      if (queryError) {
+        throw queryError;
+      }
+      return (data ?? []) as GeneratedReportRow[];
     },
     enabled: Boolean(supabaseClient) && Boolean(session?.user?.id)
   });
@@ -340,7 +361,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
         <CardHeader>
           <CardTitle>Rapports existants</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-3 overflow-x-auto">
           {reportsQuery.isLoading ? (
             <Skeleton className="h-24 w-full" />
           ) : reportsQuery.data && reportsQuery.data.length > 0 ? (
@@ -388,6 +409,150 @@ const Reports = ({ session, locations }: ReportsProps) => {
             ))
           ) : (
             <p className="text-sm text-slate-500">Aucun rapport pour le moment.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Benchmark concurrents</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 overflow-x-auto">
+          {benchmarkQuery.isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : benchmarkQuery.data && benchmarkQuery.data.length > 0 ? (
+            benchmarkQuery.data.map((report) => {
+              const payload = report.payload as
+                | {
+                    stats?: Record<string, number | null>;
+                    swot?: Record<string, string[]>;
+                    plan_14_days?: string[];
+                    top_competitors?: Array<{
+                      name?: string;
+                      rating?: number | null;
+                      reviews?: number | null;
+                      distance_m?: number | null;
+                    }>;
+                  }
+                | null;
+              const isOpen = selectedBenchmarkId === report.id;
+              return (
+                <div
+                  key={report.id}
+                  className="rounded-xl border border-slate-100 bg-white px-3 py-3 text-sm"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="font-semibold text-slate-900">
+                        {report.title ?? "Benchmark concurrents"}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Genere le {report.created_at.slice(0, 10)}
+                      </p>
+                      {report.summary && (
+                        <p className="text-xs text-slate-500">{report.summary}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="neutral">Snapshot</Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setSelectedBenchmarkId(isOpen ? null : report.id)
+                        }
+                      >
+                        {isOpen ? "Fermer" : "Voir"}
+                      </Button>
+                    </div>
+                  </div>
+                  {isOpen && (
+                    <div className="mt-4 space-y-4">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-600">
+                          <div className="font-semibold text-slate-700">
+                            Indicateurs
+                          </div>
+                          <div className="mt-2 space-y-1">
+                            <div>Total: {payload?.stats?.total ?? "—"}</div>
+                            <div>
+                              Mediane note: {payload?.stats?.median_rating ?? "—"}
+                            </div>
+                            <div>
+                              Mediane avis: {payload?.stats?.median_reviews ?? "—"}
+                            </div>
+                            <div>
+                              Plus proche: {payload?.stats?.closest_m ?? "—"} m
+                            </div>
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-600">
+                          <div className="font-semibold text-slate-700">
+                            Top concurrents
+                          </div>
+                          <ul className="mt-2 list-disc space-y-1 pl-4">
+                            {payload?.top_competitors?.length ? (
+                              payload.top_competitors.map((item, index) => (
+                                <li key={`${item.name ?? "conc"}-${index}`}>
+                                  {item.name ?? "Concurrent"} · {item.rating ?? "—"}/5 ·{" "}
+                                  {item.reviews ?? "—"} avis
+                                </li>
+                              ))
+                            ) : (
+                              <li>Aucun concurrent disponible.</li>
+                            )}
+                          </ul>
+                        </div>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {(["forces", "weaknesses", "opportunities", "threats"] as const).map(
+                          (key) => (
+                            <div
+                              key={key}
+                              className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-600"
+                            >
+                              <div className="font-semibold text-slate-700">
+                                {key === "forces" && "Forces"}
+                                {key === "weaknesses" && "Faiblesses"}
+                                {key === "opportunities" && "Opportunites"}
+                                {key === "threats" && "Menaces"}
+                              </div>
+                              <ul className="mt-2 list-disc space-y-1 pl-4">
+                                {payload?.swot?.[key]?.length ? (
+                                  payload.swot[key].map((item) => (
+                                    <li key={item}>{item}</li>
+                                  ))
+                                ) : (
+                                  <li>Données insuffisantes.</li>
+                                )}
+                              </ul>
+                            </div>
+                          )
+                        )}
+                      </div>
+                      <div className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-600">
+                        <div className="font-semibold text-slate-700">
+                          Plan 14 jours
+                        </div>
+                        <ul className="mt-2 list-disc space-y-1 pl-4">
+                          {payload?.plan_14_days?.length ? (
+                            payload.plan_14_days.map((item) => (
+                              <li key={item}>{item}</li>
+                            ))
+                          ) : (
+                            <li>Données insuffisantes.</li>
+                          )}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          ) : (
+            <p className="text-sm text-slate-500">
+              Aucun benchmark concurrentiel pour le moment.
+            </p>
           )}
         </CardContent>
       </Card>

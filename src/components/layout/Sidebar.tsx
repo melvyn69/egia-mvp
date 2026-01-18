@@ -23,7 +23,17 @@ import { InstallAppCTA } from "../InstallAppCTA";
 const navLinkBase =
   "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition";
 
-const Sidebar = () => {
+type SidebarProps = {
+  variant?: "desktop" | "mobile";
+  className?: string;
+  onNavigate?: () => void;
+};
+
+const Sidebar = ({
+  variant = "desktop",
+  className,
+  onNavigate
+}: SidebarProps) => {
   const queryClient = useQueryClient();
   const [hasSession, setHasSession] = useState(false);
   const navigate = useNavigate();
@@ -84,8 +94,13 @@ const Sidebar = () => {
     });
   };
 
+  const baseClasses =
+    variant === "mobile"
+      ? "flex h-full w-72 flex-col justify-between border-r border-slate-200 bg-white/90 px-4 py-6 shadow-soft backdrop-blur-lg"
+      : "sticky top-0 hidden h-screen w-64 flex-col justify-between border-r border-slate-200 bg-white/80 px-4 py-6 shadow-soft backdrop-blur-lg lg:flex";
+
   return (
-    <aside className="sticky top-0 hidden h-screen w-64 flex-col justify-between border-r border-slate-200 bg-white/80 px-4 py-6 shadow-soft backdrop-blur-lg lg:flex">
+    <aside className={cn(baseClasses, className)}>
       <div className="space-y-6">
         <div className="flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-ink text-white shadow-lg">
@@ -99,7 +114,7 @@ const Sidebar = () => {
           </div>
         </div>
 
-      <nav className="space-y-2">
+      <nav className="space-y-2" onClick={() => onNavigate?.()}>
         <NavLink
           to="/"
           end

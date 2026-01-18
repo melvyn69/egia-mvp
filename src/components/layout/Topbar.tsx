@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Search, Sparkles } from "lucide-react";
+import { Bell, Menu, Search, Sparkles } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   getUnreadNotificationCount,
@@ -17,6 +17,8 @@ type TopbarProps = {
   session?: Session | null;
   onSignOut?: () => void;
   onDebugSession?: () => void;
+  onToggleMenu?: () => void;
+  isMenuOpen?: boolean;
 };
 
 const Topbar = ({
@@ -25,7 +27,9 @@ const Topbar = ({
   userEmail,
   session,
   onSignOut,
-  onDebugSession
+  onDebugSession,
+  onToggleMenu,
+  isMenuOpen
 }: TopbarProps) => {
   const [unreadCount, setUnreadCount] = useState(0);
   const userId = session?.user?.id ?? null;
@@ -70,14 +74,29 @@ const Topbar = ({
   };
 
   return (
-    <div className="flex flex-col gap-4 border-b border-slate-200 bg-white/70 px-6 py-5 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
-      <div>
-        <p className="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-slate-400">
-          <Sparkles size={14} />
-          EGIA LIVE
-        </p>
-        <h1 className="text-3xl font-semibold text-slate-900">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
+    <div className="flex flex-col gap-4 border-b border-slate-200 bg-white/70 px-4 py-4 backdrop-blur md:px-6 md:py-5 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex items-start gap-3">
+        {onToggleMenu && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mt-1 rounded-xl lg:hidden"
+            onClick={onToggleMenu}
+            aria-label={isMenuOpen ? "Fermer le menu" : "Ouvrir le menu"}
+          >
+            <Menu size={18} />
+          </Button>
+        )}
+        <div>
+          <p className="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-slate-400">
+            <Sparkles size={14} />
+            EGIA LIVE
+          </p>
+          <h1 className="text-2xl font-semibold text-slate-900 md:text-3xl">
+            {title}
+          </h1>
+          {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

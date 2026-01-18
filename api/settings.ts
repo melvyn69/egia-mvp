@@ -6,16 +6,6 @@ import {
 } from "../server/_shared_dist/google/_utils.js";
 import { getRequestId } from "../server/_shared_dist/api_utils.js";
 
-type Action =
-  | "legal_entities_list"
-  | "legal_entities_upsert"
-  | "legal_entities_set_default"
-  | "legal_entities_delete"
-  | "legal_entities_logo_upload"
-  | "profile_get"
-  | "profile_update"
-  | "profile_delete_request";
-
 const parseBody = (req: VercelRequest) =>
   typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
 
