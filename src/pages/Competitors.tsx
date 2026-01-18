@@ -1023,7 +1023,7 @@ const normalizeName = (value: string) =>
         </div>
       )}
 
-      <Card className="relative z-10">
+      <Card className="relative z-30">
         <CardHeader className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-lg">Contrôles</CardTitle>
           <div className="text-[11px] text-slate-400">
@@ -1104,7 +1104,7 @@ const normalizeName = (value: string) =>
               <label className="text-xs font-semibold text-slate-600">
                 Rayon
                 <select
-                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
+                  className="relative z-40 mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
                   value={radiusKm}
                   onChange={(event) =>
                     setRadiusKm(Number(event.target.value))
@@ -1620,7 +1620,7 @@ const normalizeName = (value: string) =>
                     }
                   `}</style>
                   {isScanning && (
-                    <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50/60">
+                    <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center rounded-2xl border border-emerald-200 bg-slate-900/10">
                       <div className="relative flex h-40 w-40 items-center justify-center">
                         <div className="absolute inset-0 rounded-full border border-emerald-300/40" />
                         <div
@@ -1637,6 +1637,9 @@ const normalizeName = (value: string) =>
                         />
                         <div className="relative z-10 text-xs font-semibold text-emerald-700">
                           Analyse en cours…
+                          <div className="mt-1 text-[11px] text-emerald-600">
+                            Scan radar
+                          </div>
                         </div>
                       </div>
                     </div>
