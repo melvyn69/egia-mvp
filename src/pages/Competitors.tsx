@@ -101,29 +101,29 @@ const getWatchlistRationale = (row: CompetitorRow, selfAvg: number | null) => {
   if (selfAvg !== null && rating !== null) {
     const delta = rating - selfAvg;
     if (delta >= 0.2 && isVeryClose) {
-      return "Higher rating and very close to your location";
+      return "Note superieure et concurrent tres proche.";
     }
     if (delta >= 0.2 && hasStrongVolume) {
-      return "Higher rating with strong review volume";
+      return "Note superieure avec un volume d’avis eleve.";
     }
     if (delta <= -0.2 && hasStrongVolume) {
-      return "Strong review volume but lower rating than you";
+      return "Volume d’avis eleve mais note inferieure a la votre.";
     }
     if (delta >= 0.2 && isClose) {
-      return "Higher rating within your immediate area";
+      return "Note superieure dans votre zone immediate.";
     }
   }
 
   if (isVeryClose && hasStrongVolume) {
-    return "Very close competitor with strong review volume";
+    return "Concurrent tres proche avec un volume d’avis eleve.";
   }
   if (isVeryClose) {
-    return "Very close to your location";
+    return "Concurrent tres proche de votre emplacement.";
   }
   if (hasStrongVolume) {
-    return "Strong review volume in your area";
+    return "Volume d’avis eleve dans votre zone.";
   }
-  return "Comparable competitor in your market";
+  return "Concurrent comparable dans votre zone.";
 };
 
 const Competitors = ({ session }: CompetitorsProps) => {
@@ -799,15 +799,15 @@ const Competitors = ({ session }: CompetitorsProps) => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold text-slate-900">
+      <div className="flex flex-wrap items-baseline justify-between gap-4">
+        <div className="space-y-2">
+          <h1 className="text-3xl font-semibold text-slate-900">
             Veille concurrentielle
           </h1>
           <p className="text-sm text-slate-500">
-            Pilotez votre positionnement local et suivez les acteurs proches.
+            Pilotez votre positionnement local avec une lecture claire du marché.
           </p>
-          <div className="flex flex-wrap items-center gap-2 pt-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             <Badge variant={googleConnected ? "success" : "neutral"}>
               {googleConnected ? "Google connecte" : "Google non connecte"}
             </Badge>
@@ -822,27 +822,37 @@ const Competitors = ({ session }: CompetitorsProps) => {
             <Badge variant="neutral">Rayon: {statusRadius} km</Badge>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 text-xs text-slate-400">
           <Badge variant="neutral">MVP</Badge>
         </div>
       </div>
 
       {toast && (
-        <div
-          className={`rounded-xl border px-3 py-2 text-xs ${
-            toast.type === "success"
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-rose-200 bg-rose-50 text-rose-600"
-          }`}
-        >
-          {toast.message}
+        <div className="sticky top-4 z-20 flex justify-end">
+          <div
+            className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-xs shadow-sm ${
+              toast.type === "success"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-rose-200 bg-rose-50 text-rose-600"
+            }`}
+          >
+            <span>{toast.message}</span>
+            <button
+              type="button"
+              aria-label="Fermer"
+              className="text-[11px] font-semibold text-slate-500 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
+              onClick={() => setToast(null)}
+            >
+              ×
+            </button>
+          </div>
         </div>
       )}
 
       <Card>
         <CardHeader className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-lg">Controles</CardTitle>
-          <div className="text-xs text-slate-500">
+          <div className="text-[11px] text-slate-400">
             Dernier scan:{" "}
             {lastScanAt
               ? `${lastScanAt.toLocaleDateString("fr-FR", {
@@ -873,7 +883,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
           )}
           {locationsEmpty ? (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
-              <p className="text-base font-semibold text-slate-800">🏬 Aucun etablissement selectionne</p>
+              <p className="text-base font-semibold text-slate-800">
+                🏬 Aucun etablissement selectionne
+              </p>
               <p className="mt-1 text-sm text-slate-500">
                 Aucun etablissement n’est associe a ce compte. Selectionnez un lieu pour lancer la veille.
               </p>
@@ -887,11 +899,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
               </Button>
             </div>
           ) : (
-            <div className="grid gap-3 lg:grid-cols-[2fr_1fr_1fr_1fr_1fr]">
+            <div className="grid gap-3 lg:grid-cols-[2.2fr_1fr_1fr_1fr_1fr]">
               <label className="text-xs font-semibold text-slate-600">
                 Etablissement
                 <select
-                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
                   value={selectedLocationId ?? ""}
                   onChange={(event) =>
                     setSelectedLocationId(event.target.value || null)
@@ -909,7 +921,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
               <label className="text-xs font-semibold text-slate-600">
                 Mot-cle
                 <input
-                  className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
                   value={keyword}
                   onChange={(event) => setKeyword(event.target.value)}
                   placeholder="restaurant italien"
@@ -918,7 +930,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
               <label className="text-xs font-semibold text-slate-600">
                 Rayon
                 <select
-                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
                   value={radiusKm}
                   onChange={(event) =>
                     setRadiusKm(Number(event.target.value))
@@ -936,7 +948,12 @@ const Competitors = ({ session }: CompetitorsProps) => {
                   onClick={() => scanMutation.mutate({})}
                   disabled={!keyword || scanMutation.isPending || !selectedLocationId}
                 >
-                  {scanMutation.isPending ? "Analyse..." : "Lancer l’analyse"}
+                  <span className="flex items-center justify-center gap-2">
+                    {scanMutation.isPending && (
+                      <span className="h-3 w-3 animate-spin rounded-full border border-white/70 border-t-white" />
+                    )}
+                    {scanMutation.isPending ? "Analyse..." : "Lancer l’analyse"}
+                  </span>
                 </Button>
               </div>
               <div className="flex items-end">
@@ -968,10 +985,13 @@ const Competitors = ({ session }: CompetitorsProps) => {
                   }}
                   disabled={!selectedLocationId || scanMutation.isPending}
                 >
-                  Relancer l’analyse
+                  Relancer
                 </Button>
               </div>
             </div>
+          )}
+          {scanMutation.isPending && (
+            <p className="text-xs text-slate-500">Analyse en cours…</p>
           )}
           {scanMessage && (
             <p className="text-xs text-emerald-600">
@@ -995,9 +1015,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
             key={tab}
             type="button"
             onClick={() => setActiveTab(tab)}
-            className={`rounded-full border px-4 py-2 text-xs font-semibold transition ${
+            className={`rounded-full border px-4 py-2 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30 ${
               activeTab === tab
-                ? "border-ink bg-ink text-white"
+                ? "border-ink bg-ink text-white shadow-sm"
                 : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
             }`}
           >
@@ -1021,9 +1041,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
               <div className="grid gap-4 md:grid-cols-2">{skeletonCards}</div>
             ) : sortedFollowed.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm text-slate-500">
-                <p className="text-base font-semibold text-slate-800">🧭 Aucun concurrent suivi</p>
+                <p className="text-base font-semibold text-slate-800">🧭 Aucune veille active</p>
                 <p className="mt-1 text-sm text-slate-500">
-                  Vous n’avez encore suivi aucun concurrent. Lancez une analyse dans le Radar puis ajoutez vos cibles.
+                  Votre watchlist est vide. Lancez une analyse puis ajoutez les concurrents a suivre.
                 </p>
                 <Button
                   variant="outline"
@@ -1073,13 +1093,13 @@ const Competitors = ({ session }: CompetitorsProps) => {
                             ))
                           ) : (
                             <span>
-                              Pas assez de donnees. Elargissez le rayon ou suivez plus de concurrents.
+                              Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
                             </span>
                           )}
                         </div>
                         <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
                           <div className="font-semibold text-slate-700">
-                            Why this competitor matters
+                            Pourquoi ce concurrent compte
                           </div>
                           <div className="mt-1">{rationale}</div>
                         </div>
@@ -1098,7 +1118,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                                 }}
                                 disabled={pendingPlaceIds.includes(competitor.place_id)}
                               >
-                                Confirmer
+                                {pendingPlaceIds.includes(competitor.place_id) ? "..." : "Confirmer"}
                               </Button>
                               <Button
                                 variant="ghost"
@@ -1115,11 +1135,18 @@ const Competitors = ({ session }: CompetitorsProps) => {
                               onClick={() => setConfirmRemoveId(competitor.id)}
                               disabled={pendingPlaceIds.includes(competitor.place_id)}
                             >
-                              <BookmarkX size={14} className="mr-1" /> Retirer
+                              <span className="flex items-center gap-2">
+                                {pendingPlaceIds.includes(competitor.place_id) ? (
+                                  <span className="h-3 w-3 animate-spin rounded-full border border-slate-400 border-t-slate-600" />
+                                ) : (
+                                  <BookmarkX size={14} />
+                                )}
+                                Retirer
+                              </span>
                             </Button>
                           )}
                           <a
-                            className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+                            className="text-xs font-semibold text-slate-500 hover:text-slate-800 underline-offset-2 hover:underline"
                             href={buildGoogleLink(competitor.place_id)}
                             target="_blank"
                             rel="noreferrer"
@@ -1227,10 +1254,15 @@ const Competitors = ({ session }: CompetitorsProps) => {
                   <p className="mt-1 text-sm text-slate-500">
                     Aucun concurrent n’a été trouvé pour cette zone. Essayez un rayon plus large ou un mot‑clé différent.
                   </p>
+                  <ul className="mt-4 list-disc space-y-1 pl-5 text-xs text-slate-500">
+                    <li>Choisir un etablissement</li>
+                    <li>Verifier mot-cle et rayon</li>
+                    <li>Lancer l’analyse</li>
+                  </ul>
                   <Button
                     variant="outline"
                     size="sm"
-                    className="mt-3"
+                    className="mt-4"
                     onClick={() => scanMutation.mutate({})}
                     disabled={scanMutation.isPending || !selectedLocationId}
                   >
@@ -1243,9 +1275,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-3">
                         <span className="font-semibold text-slate-700">
-                          Radar Summary
+                          Resume radar —
                         </span>
-                        <span>Total: {radarSummary.total}</span>
+                        <span>{radarSummary.total} etablissements</span>
                         <span>
                           Plus notes que vous:{" "}
                           {radarSummary.higherThanSelf !== null
@@ -1256,6 +1288,12 @@ const Competitors = ({ session }: CompetitorsProps) => {
                           Plus proche:{" "}
                           {radarSummary.closestDistance !== null
                             ? formatDistance(radarSummary.closestDistance)
+                            : "—"}
+                        </span>
+                        <span>
+                          Meilleure note:{" "}
+                          {radarRatings.length > 0
+                            ? Math.max(...radarRatings).toFixed(1)
                             : "—"}
                         </span>
                       </div>
@@ -1331,7 +1369,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                             ))
                           ) : (
                             <span>
-                              Pas assez de donnees. Elargissez le rayon ou suivez plus de concurrents.
+                              Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
                             </span>
                           )}
                         </div>
@@ -1347,11 +1385,17 @@ const Competitors = ({ session }: CompetitorsProps) => {
                             }
                             disabled={isPending || isFollowed}
                           >
-                            <BookmarkPlus size={14} className="mr-1" />
-                            {isFollowed ? "Suivi" : "Suivre ce concurrent"}
+                            <span className="flex items-center gap-2">
+                              {isPending ? (
+                                <span className="h-3 w-3 animate-spin rounded-full border border-slate-400 border-t-slate-600" />
+                              ) : (
+                                <BookmarkPlus size={14} />
+                              )}
+                              {isFollowed ? "Suivi" : "Suivre"}
+                            </span>
                           </Button>
                           <a
-                            className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+                            className="text-xs font-semibold text-slate-500 hover:text-slate-800 underline-offset-2 hover:underline"
                             href={buildGoogleLink(competitor.place_id)}
                             target="_blank"
                             rel="noreferrer"
@@ -1409,7 +1453,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 </div>
                 {swotBullets.forces.length === 0 ? (
                   <p className="mt-2 text-sm text-slate-500">
-                    Elargissez le rayon ou suivez plus de concurrents pour obtenir des insights.
+                    Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
                   </p>
                 ) : (
                   <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
@@ -1419,7 +1463,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                   </ul>
                 )}
                 <p className="mt-3 text-xs text-slate-500">
-                  What to do next: reinforce what already outperforms the market.
+                  Prochaine action : renforcer ce qui surperforme deja le marche.
                 </p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -1429,7 +1473,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 </div>
                 {swotBullets.weaknesses.length === 0 ? (
                   <p className="mt-2 text-sm text-slate-500">
-                    Elargissez le rayon ou suivez plus de concurrents pour obtenir des insights.
+                    Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
                   </p>
                 ) : (
                   <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
@@ -1439,7 +1483,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                   </ul>
                 )}
                 <p className="mt-3 text-xs text-slate-500">
-                  What to do next: fix the weakest signal with the biggest impact.
+                  Prochaine action : corriger le signal le plus faible.
                 </p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -1449,7 +1493,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 </div>
                 {swotBullets.opportunities.length === 0 ? (
                   <p className="mt-2 text-sm text-slate-500">
-                    Elargissez le rayon ou suivez plus de concurrents pour obtenir des insights.
+                    Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
                   </p>
                 ) : (
                   <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
@@ -1459,7 +1503,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                   </ul>
                 )}
                 <p className="mt-3 text-xs text-slate-500">
-                  What to do next: target quick wins where competitors underperform.
+                  Prochaine action : viser les gains rapides sur les points faibles.
                 </p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -1469,7 +1513,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 </div>
                 {swotBullets.threats.length === 0 ? (
                   <p className="mt-2 text-sm text-slate-500">
-                    Elargissez le rayon ou suivez plus de concurrents pour obtenir des insights.
+                    Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
                   </p>
                 ) : (
                   <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
@@ -1479,7 +1523,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                   </ul>
                 )}
                 <p className="mt-3 text-xs text-slate-500">
-                  What to do next: monitor these rivals weekly and adjust your plan.
+                  Prochaine action : surveiller ces rivaux chaque semaine.
                 </p>
               </div>
             </CardContent>
@@ -1529,7 +1573,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       </>
                     ) : (
                       <p className="text-xs text-slate-500">
-                        Elargissez le rayon ou suivez plus de concurrents pour obtenir des insights.
+                        Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
                       </p>
                     )}
                   </CardContent>
@@ -1560,7 +1604,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       </>
                     ) : (
                       <p className="text-xs text-slate-500">
-                        Elargissez le rayon ou suivez plus de concurrents pour obtenir des insights.
+                        Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
                       </p>
                     )}
                   </CardContent>
@@ -1579,7 +1623,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
             <CardContent>
               {swotBullets.actions.length === 0 ? (
                 <p className="text-sm text-slate-500">
-                  Elargissez le rayon ou suivez plus de concurrents pour obtenir des insights.
+                  Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
                 </p>
               ) : (
                 <ul className="list-disc space-y-2 pl-4 text-sm text-slate-700">
