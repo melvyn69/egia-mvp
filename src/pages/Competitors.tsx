@@ -1301,7 +1301,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                               <Badge variant={tier.variant}>{tier.label}</Badge>
                               {isFollowed && <Badge variant="neutral">Suivi</Badge>}
                               {isDangerous && (
-                                <Badge variant="destructive">Impact fort</Badge>
+                                <Badge variant="warning">Impact fort</Badge>
                               )}
                               {delta !== null && (
                                 <Badge variant="neutral">
