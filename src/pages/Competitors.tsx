@@ -9,6 +9,7 @@ import {
   TrendingDown,
   TrendingUp,
   ShieldAlert,
+  Download,
   BookmarkPlus,
   BookmarkX
 } from "lucide-react";
@@ -78,14 +79,14 @@ const getCompetitorInsights = (row: CompetitorRow) => {
   const insights: string[] = [];
   if (typeof row.rating === "number") {
     if (row.rating >= 4.5) insights.push("Excellente note");
-    if (row.rating <= 3.5) insights.push("Note a ameliorer");
+    if (row.rating <= 3.5) insights.push("Note à améliorer");
   }
   if (typeof row.user_ratings_total === "number") {
-    if (row.user_ratings_total >= 200) insights.push("Volume d'avis eleve");
+    if (row.user_ratings_total >= 200) insights.push("Volume d'avis élevé");
     if (row.user_ratings_total <= 20) insights.push("Peu d'avis");
   }
   if (typeof row.distance_m === "number" && row.distance_m <= 800) {
-    insights.push("Tres proche");
+    insights.push("Très proche");
   }
   return insights;
 };
@@ -107,8 +108,8 @@ const getStrategicTags = (
     if (!tags.includes(value)) tags.push(value);
   };
 
-  if (extremeDistance) addTag("Tres proche");
-  if (delta !== null && delta >= 0.2) addTag("Note superieure");
+  if (extremeDistance) addTag("Très proche");
+  if (delta !== null && delta >= 0.2) addTag("Note supérieure");
   if (reviews !== null && reviews >= 200) addTag("Fort volume");
   if (
     distance !== null &&
@@ -136,10 +137,10 @@ const getOpportunitiesToCheck = (row: CompetitorRow) => {
     addBullet("Accélérer l’acquisition d’avis pour rattraper le volume.");
   }
   if (rating !== null && rating < 4.0 && reviews !== null && reviews >= 150) {
-    addBullet("Travailler la qualite d’experience pour réduire l’écart.");
+    addBullet("Travailler la qualité d’expérience pour réduire l’écart.");
   }
   if (distance !== null && distance <= 800) {
-    addBullet("Renforcer la différenciation locale a proximite.");
+    addBullet("Renforcer la différenciation locale à proximité.");
   }
   if (bullets.length === 0) {
     addBullet("Analyser les axes perçus comme prioritaires.");
@@ -159,29 +160,58 @@ const getWatchlistRationale = (row: CompetitorRow, selfAvg: number | null) => {
   if (selfAvg !== null && rating !== null) {
     const delta = rating - selfAvg;
     if (delta >= 0.2 && isVeryClose) {
-      return "Note superieure et concurrent tres proche.";
+      return "Note supérieure et concurrent très proche.";
     }
     if (delta >= 0.2 && hasStrongVolume) {
-      return "Note superieure avec un volume d’avis eleve.";
+      return "Note supérieure avec un volume d’avis élevé.";
     }
     if (delta <= -0.2 && hasStrongVolume) {
-      return "Volume d’avis eleve mais note inferieure a la votre.";
+      return "Volume d’avis élevé mais note inférieure à la vôtre.";
     }
     if (delta >= 0.2 && isClose) {
-      return "Note superieure dans votre zone immediate.";
+      return "Note supérieure dans votre zone immédiate.";
     }
   }
 
   if (isVeryClose && hasStrongVolume) {
-    return "Concurrent tres proche avec un volume d’avis eleve.";
+    return "Concurrent très proche avec un volume d’avis élevé.";
   }
   if (isVeryClose) {
-    return "Concurrent tres proche de votre emplacement.";
+    return "Concurrent très proche de votre emplacement.";
   }
   if (hasStrongVolume) {
-    return "Volume d’avis eleve dans votre zone.";
+    return "Volume d’avis élevé dans votre zone.";
   }
   return "Concurrent comparable dans votre zone.";
+};
+
+const getCompetitorStatus = (row: CompetitorRow, selfAvg: number | null) => {
+  const rating = typeof row.rating === "number" ? row.rating : null;
+  const distance = typeof row.distance_m === "number" ? row.distance_m : null;
+  const delta = selfAvg !== null && rating !== null ? rating - selfAvg : null;
+
+  if (delta !== null && delta >= 0.4) {
+    return { label: "RISQUE", variant: "warning" as const };
+  }
+  if (delta !== null && delta <= -0.3) {
+    return { label: "OPPORTUNITÉ", variant: "neutral" as const };
+  }
+  if (distance !== null && distance <= 800) {
+    return { label: "PROCHE", variant: "neutral" as const };
+  }
+  return { label: "STABLE", variant: "neutral" as const };
+};
+
+const getMajorWeakPoint = (row: CompetitorRow, radiusKm: number) => {
+  const rating = typeof row.rating === "number" ? row.rating : null;
+  const reviews =
+    typeof row.user_ratings_total === "number" ? row.user_ratings_total : null;
+  const distance = typeof row.distance_m === "number" ? row.distance_m : null;
+
+  if (rating !== null && rating < 4.0) return "Qualité";
+  if (reviews !== null && reviews < 40) return "Visibilité";
+  if (distance !== null && distance > radiusKm * 1000 * 0.7) return "Proximité";
+  return "Expérience";
 };
 
 const Competitors = ({ session }: CompetitorsProps) => {
@@ -210,6 +240,16 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const [lastScanAt, setLastScanAt] = useState<Date | null>(null);
   const [benchmarkLoading, setBenchmarkLoading] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
+  const [zoneInput, setZoneInput] = useState("");
+  const [scanHistory, setScanHistory] = useState<
+    Array<{
+      keyword: string;
+      radiusKm: number;
+      locationLabel: string;
+      zoneLabel: string | null;
+      createdAt: string;
+    }>
+  >([]);
 
   const token = session?.access_token ?? null;
   const userId = session?.user?.id ?? null;
@@ -263,6 +303,25 @@ const Competitors = ({ session }: CompetitorsProps) => {
       setRadiusKm(row.competitive_monitoring_radius_km);
     }
   }, [settingsQuery.data, keyword, radiusKm]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("competitors_zone_label");
+    if (stored) {
+      setZoneInput(stored);
+    }
+    const history = window.localStorage.getItem("competitors_scan_history");
+    if (history) {
+      try {
+        const parsed = JSON.parse(history) as typeof scanHistory;
+        if (Array.isArray(parsed)) {
+          setScanHistory(parsed);
+        }
+      } catch {
+        setScanHistory([]);
+      }
+    }
+  }, []);
 
   const radarQuery = useQuery({
     queryKey: ["competitors-radar", userId, selectedLocationId],
@@ -397,12 +456,33 @@ const Competitors = ({ session }: CompetitorsProps) => {
       ].filter(Boolean);
       setScanMessage(
         labelParts.length > 0
-          ? `Scan termine: ${labelParts.join(" • ")}.`
-          : "Scan termine."
+          ? `Scan terminé: ${labelParts.join(" • ")}.`
+          : "Scan terminé."
       );
       setScanError(null);
       setScanErrorHint(null);
       setLastScanAt(new Date());
+      if (typeof window !== "undefined") {
+        const locationLabel =
+          selectedLocation?.location_title ??
+          selectedLocation?.location_resource_name ??
+          "Établissement";
+        const entry = {
+          keyword: payload?.keyword ?? keyword,
+          radiusKm: payload?.radius_km ?? radiusKm,
+          locationLabel,
+          zoneLabel: zoneInput.trim() || null,
+          createdAt: new Date().toISOString()
+        };
+        setScanHistory((prev) => {
+          const nextHistory = [entry, ...prev].slice(0, 6);
+          window.localStorage.setItem(
+            "competitors_scan_history",
+            JSON.stringify(nextHistory)
+          );
+          return nextHistory;
+        });
+      }
       queryClient.invalidateQueries({
         queryKey: ["competitors-radar", userId, selectedLocationId]
       });
@@ -428,11 +508,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
 
   const handleGenerateBenchmark = async () => {
     if (!token) {
-      setToast({ type: "error", message: "Connectez-vous pour generer." });
+      setToast({ type: "error", message: "Connectez-vous pour générer." });
       return;
     }
     if (!selectedLocationId) {
-      setToast({ type: "error", message: "Selectionnez un etablissement." });
+      setToast({ type: "error", message: "Sélectionnez un établissement." });
       return;
     }
     setBenchmarkLoading(true);
@@ -454,15 +534,15 @@ const Competitors = ({ session }: CompetitorsProps) => {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.report) {
-        throw new Error(data?.error?.message ?? "Echec de generation.");
+        throw new Error(data?.error?.message ?? "Échec de génération.");
       }
       setToast({
         type: "success",
-        message: "Rapport concurrentiel genere."
+        message: "Rapport concurrentiel généré."
       });
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Echec de generation.";
+        error instanceof Error ? error.message : "Échec de génération.";
       setToast({ type: "error", message });
     } finally {
       setBenchmarkLoading(false);
@@ -563,7 +643,6 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const followedItems = followedQuery.data ?? [];
   const settingsRow = settingsQuery.data;
   const enabled = Boolean(settingsRow?.competitive_monitoring_enabled);
-  const keywordReady = Boolean(settingsRow?.competitive_monitoring_keyword);
   const googleConnected = (locationsQuery.data ?? []).length > 0;
   const statusKeyword = settingsRow?.competitive_monitoring_keyword ?? "";
   const statusRadius = settingsRow?.competitive_monitoring_radius_km ?? radiusKm;
@@ -758,6 +837,9 @@ const normalizeName = (value: string) =>
   const selectedLocation = (locationsQuery.data ?? []).find(
     (location) => location.id === selectedLocationId
   );
+  const zoneLabel = zoneInput.trim()
+    ? zoneInput.trim()
+    : selectedLocation?.location_title || "—";
   const locationRating =
     typeof (selectedLocation as { rating?: number | null })?.rating === "number"
       ? (selectedLocation as { rating?: number | null }).rating
@@ -844,13 +926,13 @@ const normalizeName = (value: string) =>
       const delta = selfAvg - swotReport.avgRating;
       if (delta >= 0.2) {
         forces.push(
-          `Note superieure de ${formatDelta(delta)} vs moyenne (${selfAvg.toFixed(
+          `Note supérieure de ${formatDelta(delta)} vs moyenne (${selfAvg.toFixed(
             1
           )} vs ${swotReport.avgRating.toFixed(1)}).`
         );
       } else if (delta <= -0.2) {
         weaknesses.push(
-          `Note inferieure de ${formatDelta(Math.abs(delta))} vs moyenne (${selfAvg.toFixed(
+          `Note inférieure de ${formatDelta(Math.abs(delta))} vs moyenne (${selfAvg.toFixed(
             1
           )} vs ${swotReport.avgRating.toFixed(1)}).`
         );
@@ -861,13 +943,13 @@ const normalizeName = (value: string) =>
       const avgVolume = swotReport.avgVolume;
       if (selfCount >= avgVolume * 1.2) {
         forces.push(
-          `Volume d'avis superieur a la moyenne (${selfCount} vs ~${Math.round(
+          `Volume d'avis supérieur à la moyenne (${selfCount} vs ~${Math.round(
             avgVolume
           )}).`
         );
       } else if (selfCount <= avgVolume * 0.8) {
         weaknesses.push(
-          `Volume d'avis inferieur a la moyenne (${selfCount} vs ~${Math.round(
+          `Volume d'avis inférieur à la moyenne (${selfCount} vs ~${Math.round(
             avgVolume
           )}).`
         );
@@ -879,22 +961,22 @@ const normalizeName = (value: string) =>
       swotReport.maxRating !== null &&
       selfAvg >= swotReport.maxRating
     ) {
-      forces.push(`Au niveau du meilleur note (${selfAvg.toFixed(1)}).`);
+      forces.push(`Au niveau de la meilleure note (${selfAvg.toFixed(1)}).`);
     }
 
     if (swotReport.leader?.rating !== null && selfAvg !== null) {
       const delta = swotReport.leader.rating - selfAvg;
       if (delta >= 0.3) {
-        weaknesses.push(`Leader a ${formatDelta(delta)} points d'avance.`);
+        weaknesses.push(`Leader à ${formatDelta(delta)} points d'avance.`);
       } else if (delta > 0 && delta <= 0.2) {
         opportunities.push(
-          `Ecart faible avec le leader (${formatDelta(delta)}).`
+          `Écart faible avec le leader (${formatDelta(delta)}).`
         );
       }
     }
 
     if (swotReport.minRating !== null && swotReport.minRating <= 3.5) {
-      opportunities.push("Certains concurrents sont notes sous 3.5.");
+      opportunities.push("Certains concurrents sont notés sous 3.5.");
     }
 
     if (swotReport.avgVolume !== null && swotReport.avgVolume < 30) {
@@ -911,24 +993,24 @@ const normalizeName = (value: string) =>
       swotReport.leader.rating >= selfAvg + 0.3 &&
       swotReport.leader.user_ratings_total > selfCount
     ) {
-      threats.push("Leader mieux note avec plus d'avis.");
+      threats.push("Leader mieux noté avec plus d'avis.");
     }
 
     if (swotReport.highRatedCount >= 3) {
       threats.push(
-        `${swotReport.highRatedCount} concurrents notes >= 4.5.`
+        `${swotReport.highRatedCount} concurrents notés >= 4.5.`
       );
     }
 
     if (swotReport.nearbyHighRated > 0) {
       threats.push(
-        `${swotReport.nearbyHighRated} concurrent(s) tres bien notes a moins d'1 km.`
+        `${swotReport.nearbyHighRated} concurrent(s) très bien notés à moins d'1 km.`
       );
     }
 
     if (weaknesses.length > 0 && swotReport.avgRating !== null) {
       actions.push(
-        `Renforcer la satisfaction client parce que la moyenne marche est a ${swotReport.avgRating.toFixed(
+        `Renforcer la satisfaction client parce que la moyenne marché est à ${swotReport.avgRating.toFixed(
           1
         )}.`
       );
@@ -942,14 +1024,14 @@ const normalizeName = (value: string) =>
     }
     if (swotReport.nearbyHighRated > 0) {
       actions.push(
-        `Mettre en avant vos atouts locaux parce que ${swotReport.nearbyHighRated} concurrent(s) tres bien notes sont proches.`
+        `Mettre en avant vos atouts locaux parce que ${swotReport.nearbyHighRated} concurrent(s) très bien notés sont proches.`
       );
     }
     if (swotReport.leader?.rating !== null && selfAvg !== null) {
       const delta = swotReport.leader.rating - selfAvg;
       if (delta > 0 && delta <= 0.2) {
         actions.push(
-          `Gagner quelques points de note pour depasser le leader (${formatDelta(
+          `Gagner quelques points de note pour dépasser le leader (${formatDelta(
             delta
           )}).`
         );
@@ -957,7 +1039,7 @@ const normalizeName = (value: string) =>
     }
     if (swotReport.minRating !== null && swotReport.minRating <= 3.5) {
       actions.push(
-        "Cibler les faiblesses des concurrents les moins bien notes."
+        "Cibler les faiblesses des concurrents les moins bien notés."
       );
     }
 
@@ -973,33 +1055,89 @@ const normalizeName = (value: string) =>
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-baseline justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-2">
-          <h1 className="text-3xl font-semibold text-slate-900">
-            Veille concurrentielle
-          </h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-3xl font-semibold text-slate-900">
+              Veille concurrentielle
+            </h1>
+            <Badge variant="neutral">GROWTH</Badge>
+          </div>
           <p className="text-sm text-slate-500">
-            Pilotez votre positionnement local avec une lecture claire du marché.
+            Surveillez votre marché et anticipez les mouvements adverses.
           </p>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             <Badge variant={googleConnected ? "success" : "neutral"}>
-              {googleConnected ? "Google connecte" : "Google non connecte"}
+              {googleConnected ? "Google connecté" : "Google non connecté"}
             </Badge>
             <Badge variant={enabled ? "success" : "neutral"}>
-              {enabled ? "Veille activee" : "Veille desactivee"}
+              {enabled ? "Veille activée" : "Veille désactivée"}
             </Badge>
             {statusKeyword ? (
-              <Badge variant="neutral">Mot-cle: {statusKeyword}</Badge>
+              <Badge variant="neutral">Mot-clé: {statusKeyword}</Badge>
             ) : (
-              <Badge variant="neutral">Mot-cle manquant</Badge>
+              <Badge variant="neutral">Mot-clé manquant</Badge>
             )}
             <Badge variant="neutral">Rayon: {statusRadius} km</Badge>
           </div>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <Badge variant="neutral">MVP</Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          {(["selection", "radar", "swot"] as TabId[]).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={`rounded-full border px-4 py-2 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30 ${
+                activeTab === tab
+                  ? "border-ink bg-ink text-white shadow-sm"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {tab === "selection" && "Ma Selection"}
+              {tab === "radar" && "Radar"}
+              {tab === "swot" && "Analyse SWOT"}
+            </button>
+          ))}
         </div>
       </div>
+
+      <style>{`
+        @keyframes radar-pulse {
+          0% { transform: scale(0.4); opacity: 0.4; }
+          70% { transform: scale(1.2); opacity: 0; }
+          100% { opacity: 0; }
+        }
+        @keyframes radar-sweep {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
+
+      {isScanning && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
+          <div className="relative flex h-56 w-56 items-center justify-center">
+            <div className="absolute inset-0 rounded-full border border-emerald-300/40" />
+            <div
+              className="absolute inset-0 rounded-full border border-emerald-300/60"
+              style={{ animation: "radar-pulse 2.6s ease-out infinite" }}
+            />
+            <div
+              className="absolute inset-0 rounded-full"
+              style={{
+                background:
+                  "conic-gradient(rgba(16,185,129,0.25), rgba(16,185,129,0.0) 60%)",
+                animation: "radar-sweep 2.2s linear infinite"
+              }}
+            />
+            <div className="relative z-10 text-center text-sm font-semibold text-emerald-200">
+              Géolocalisation du secteur…
+              <div className="mt-2 text-xs font-normal text-emerald-100">
+                Analyse du marché en temps réel…
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className="sticky top-4 z-20 flex justify-end pointer-events-none">
@@ -1023,296 +1161,331 @@ const normalizeName = (value: string) =>
         </div>
       )}
 
-      <Card className="relative z-30">
-        <CardHeader className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle className="text-lg">Contrôles</CardTitle>
-          <div className="text-[11px] text-slate-400">
-            Dernier scan:{" "}
+      <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+        <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
+          <Card className="relative z-30 overflow-visible">
+            <CardHeader>
+              <CardTitle className="text-base text-slate-600">NOUVELLE ANALYSE</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {locationsEmpty ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                  <p className="text-sm font-semibold text-slate-800">
+                    Aucun établissement sélectionné
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Ajoutez un lieu pour lancer la veille concurrentielle.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => navigate("/settings?tab=locations")}
+                  >
+                    Choisir un établissement
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <label className="text-xs font-semibold text-slate-600">
+                    Établissement
+                    <select
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
+                      value={selectedLocationId ?? ""}
+                      onChange={(event) =>
+                        setSelectedLocationId(event.target.value || null)
+                      }
+                    >
+                      {locationsQuery.isLoading && <option>Chargement...</option>}
+                      {!locationsQuery.isLoading &&
+                        (locationsQuery.data ?? []).map((location) => (
+                          <option key={location.id} value={location.id}>
+                            {location.location_title || location.location_resource_name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold text-slate-600">
+                    Secteur d’activité
+                    <input
+                      className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
+                      value={keyword}
+                      onChange={(event) => setKeyword(event.target.value)}
+                      placeholder="ex: Restaurant Italien"
+                    />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-600">
+                    Zone géographique
+                    <input
+                      className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
+                      value={zoneInput}
+                      onChange={(event) => {
+                        setZoneInput(event.target.value);
+                        if (typeof window !== "undefined") {
+                          window.localStorage.setItem(
+                            "competitors_zone_label",
+                            event.target.value
+                          );
+                        }
+                      }}
+                      placeholder="ex: Paris 11e"
+                    />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-600">
+                    Zone géographique / Rayon
+                    <select
+                      className="relative z-40 mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
+                      value={radiusKm}
+                      onChange={(event) =>
+                        setRadiusKm(Number(event.target.value))
+                      }
+                    >
+                      <option value={1}>1 km</option>
+                      <option value={5}>5 km</option>
+                      <option value={10}>10 km</option>
+                      <option value={20}>20 km</option>
+                    </select>
+                  </label>
+                  <Button
+                    className="w-full bg-ink text-white hover:bg-ink/90"
+                    onClick={() => scanMutation.mutate({})}
+                    disabled={!keyword || scanMutation.isPending || !selectedLocationId}
+                  >
+                    <span className="flex items-center justify-center gap-2">
+                      {scanMutation.isPending && (
+                        <span className="h-3 w-3 animate-spin rounded-full border border-white/70 border-t-white" />
+                      )}
+                      {scanMutation.isPending ? "Analyse..." : "▶ Lancer l'IA"}
+                    </span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      const fallbackKeyword =
+                        keyword || settingsRow?.competitive_monitoring_keyword || "";
+                      const fallbackRadius =
+                        radiusKm || settingsRow?.competitive_monitoring_radius_km || 0;
+                      if (!selectedLocationId) return;
+                      if (!enabled || !fallbackKeyword || !fallbackRadius) {
+                        setScanError(
+                          "Configurez le mot-clé et le rayon avant de lancer un scan."
+                        );
+                        setScanErrorHint(
+                          "Renseignez les paramètres dans Paramètres > Établissements."
+                        );
+                        setScanMessage(null);
+                        return;
+                      }
+                      setKeyword(fallbackKeyword);
+                      setRadiusKm(fallbackRadius);
+                      scanMutation.mutate({
+                        keyword: fallbackKeyword,
+                        radiusKm: fallbackRadius
+                      });
+                    }}
+                    disabled={!selectedLocationId || scanMutation.isPending}
+                  >
+                    Relancer
+                  </Button>
+                </>
+              )}
+              {scanMutation.isPending && (
+                <p className="text-xs text-slate-500">Analyse en cours…</p>
+              )}
+              {scanMessage && (
+                <p className="text-xs text-emerald-600">
+                  {scanMessage}
+                </p>
+              )}
+              {scanError && (
+                <div className="text-xs text-rose-600">
+                  <p>{scanError}</p>
+                  {scanErrorHint && (
+                    <p className="text-rose-500">{scanErrorHint}</p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base text-slate-600">HISTORIQUE</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-xs text-slate-500">
+              {scanHistory.length === 0 ? (
+                <p>Aucune analyse récente.</p>
+              ) : (
+                scanHistory.map((item) => (
+                  <button
+                    key={`${item.keyword}-${item.createdAt}`}
+                    type="button"
+                    onClick={() => {
+                      setKeyword(item.keyword);
+                      setRadiusKm(item.radiusKm);
+                      setZoneInput(item.zoneLabel ?? "");
+                    }}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-700">
+                        {item.keyword} • {item.radiusKm} km
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        {new Date(item.createdAt).toLocaleDateString("fr-FR")}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      {item.zoneLabel ?? item.locationLabel}
+                    </div>
+                  </button>
+                ))
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-6">
+          <div className="text-xs text-slate-500">
+            Rapport généré le{" "}
             {lastScanAt
-              ? `${lastScanAt.toLocaleDateString("fr-FR", {
+              ? lastScanAt.toLocaleDateString("fr-FR", {
                   day: "2-digit",
-                  month: "short"
-                })} • ${lastScanAt.toLocaleTimeString("fr-FR", {
-                  hour: "2-digit",
-                  minute: "2-digit"
-                })}`
+                  month: "short",
+                  year: "numeric"
+                })
               : "—"}
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {(!enabled || !keywordReady) && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
-              <span>
-                Activez la veille concurrentielle et renseignez le mot-cle dans
-                Parametres.
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-2xl font-semibold text-slate-900">
+              Analyse: {keyword || "—"} - {zoneLabel}
+            </h2>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleGenerateBenchmark}
+              disabled={benchmarkLoading || !selectedLocationId}
+              title="Bientôt disponible"
+            >
+              <span className="flex items-center gap-2">
+                <Download size={14} />
+                PDF
               </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate("/settings?tab=locations")}
-              >
-                Ouvrir les parametres
-              </Button>
-            </div>
-          )}
-          {locationsEmpty ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
-              <p className="text-base font-semibold text-slate-800">
-                🏬 Aucun etablissement selectionne
-              </p>
-              <p className="mt-1 text-sm text-slate-500">
-                Aucun etablissement n’est associe a ce compte. Selectionnez un lieu pour lancer la veille.
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-3"
-                onClick={() => navigate("/settings?tab=locations")}
-              >
-                Choisir un etablissement
-              </Button>
-            </div>
-          ) : (
-            <div className="grid gap-3 lg:grid-cols-[2.2fr_1fr_1fr_1fr_1fr]">
-              <label className="text-xs font-semibold text-slate-600">
-                Etablissement
-                <select
-                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
-                  value={selectedLocationId ?? ""}
-                  onChange={(event) =>
-                    setSelectedLocationId(event.target.value || null)
-                  }
-                >
-                  {locationsQuery.isLoading && <option>Chargement...</option>}
-                  {!locationsQuery.isLoading &&
-                    (locationsQuery.data ?? []).map((location) => (
-                      <option key={location.id} value={location.id}>
-                        {location.location_title || location.location_resource_name}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <label className="text-xs font-semibold text-slate-600">
-                Mot-cle
-                <input
-                  className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
-                  value={keyword}
-                  onChange={(event) => setKeyword(event.target.value)}
-                  placeholder="restaurant italien"
-                />
-              </label>
-              <label className="text-xs font-semibold text-slate-600">
-                Rayon
-                <select
-                  className="relative z-40 mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
-                  value={radiusKm}
-                  onChange={(event) =>
-                    setRadiusKm(Number(event.target.value))
-                  }
-                >
-                  <option value={1}>1 km</option>
-                  <option value={5}>5 km</option>
-                  <option value={10}>10 km</option>
-                  <option value={20}>20 km</option>
-                </select>
-              </label>
-              <div className="flex items-end">
-                <Button
-                  className="w-full"
-                  onClick={() => scanMutation.mutate({})}
-                  disabled={!keyword || scanMutation.isPending || !selectedLocationId}
-                >
-                  <span className="flex items-center justify-center gap-2">
-                    {scanMutation.isPending && (
-                      <span className="h-3 w-3 animate-spin rounded-full border border-white/70 border-t-white" />
-                    )}
-                    {scanMutation.isPending ? "Analyse..." : "Lancer l’analyse"}
-                  </span>
-                </Button>
-              </div>
-              <div className="flex items-end">
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => {
-                    const fallbackKeyword =
-                      keyword || settingsRow?.competitive_monitoring_keyword || "";
-                    const fallbackRadius =
-                      radiusKm || settingsRow?.competitive_monitoring_radius_km || 0;
-                    if (!selectedLocationId) return;
-                    if (!enabled || !fallbackKeyword || !fallbackRadius) {
-                      setScanError(
-                        "Configurez le mot-cle et le rayon avant de lancer un scan."
-                      );
-                      setScanErrorHint(
-                        "Renseignez les parametres dans Parametres > Etablissements."
-                      );
-                      setScanMessage(null);
-                      return;
-                    }
-                    setKeyword(fallbackKeyword);
-                    setRadiusKm(fallbackRadius);
-                    scanMutation.mutate({
-                      keyword: fallbackKeyword,
-                      radiusKm: fallbackRadius
-                    });
-                  }}
-                  disabled={!selectedLocationId || scanMutation.isPending}
-                >
-                  Relancer
-                </Button>
-              </div>
-            </div>
-          )}
-          {scanMutation.isPending && (
-            <p className="text-xs text-slate-500">Analyse en cours…</p>
-          )}
-          {scanMessage && (
-            <p className="text-xs text-emerald-600">
-              {scanMessage}
-            </p>
-          )}
-          {scanError && (
-            <div className="text-xs text-rose-600">
-              <p>{scanError}</p>
-              {scanErrorHint && (
-                <p className="text-rose-500">{scanErrorHint}</p>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-          <CardTitle className="text-lg">Aperçu</CardTitle>
-            <p className="text-xs text-slate-500">
-              Comparaison rapide avec les acteurs les plus impactants.
-            </p>
+            </Button>
           </div>
-          {isTop10 && <Badge variant="success">Top 10% du radar</Badge>}
-        </CardHeader>
-        <CardContent>
-          {selfAvg === null && selfCount === null ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
-              <p className="text-base font-semibold text-slate-800">À configurer</p>
-              <p className="mt-1 text-sm text-slate-500">
-                Synchronise tes avis Google pour afficher ta note et tes comparaisons.
-              </p>
-            </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-3">
-              <Card className="h-full">
-                <CardContent className="space-y-2 pt-6 text-sm text-slate-600">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-slate-900">Vous</p>
-                    <Badge variant="neutral">Vous</Badge>
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    Note: {selfScoreLabel} / Avis: {selfReviewsLabel}
-                  </div>
-                  <div className="text-xs text-slate-500">Distance: —</div>
-                </CardContent>
-              </Card>
-              <Card className="h-full">
-                <CardContent className="space-y-2 pt-6 text-sm text-slate-600">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-slate-900">
-                      {swotReport.leader?.name ?? "Leader"}
-                    </p>
-                    <Badge variant="success">Leader</Badge>
-                  </div>
-                  {swotReport.leader ? (
-                    <>
-                      <div className="text-xs text-slate-500">
-                        Note: {swotReport.leader.rating ?? "—"} / Avis:{" "}
-                        {swotReport.leader.user_ratings_total ?? "—"}
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        Delta:{" "}
-                        {displaySelfAvg !== null && swotReport.leader.rating !== null
-                          ? `${formatDelta(
-                              swotReport.leader.rating - displaySelfAvg
-                            )}`
-                          : "—"}
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        Distance: {formatDistance(swotReport.leader.distance_m)}
-                      </div>
-                    </>
-                  ) : (
-                    <p className="text-xs text-slate-500">
-                      Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-              <Card className="h-full">
-                <CardContent className="space-y-2 pt-6 text-sm text-slate-600">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-slate-900">
-                      {swotReport.challenger?.name ?? "Challenger"}
-                    </p>
-                    <Badge variant="warning">Challenger</Badge>
-                  </div>
-                  {swotReport.challenger ? (
-                    <>
-                      <div className="text-xs text-slate-500">
-                        Note: {swotReport.challenger.rating ?? "—"} / Avis:{" "}
-                        {swotReport.challenger.user_ratings_total ?? "—"}
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        Delta:{" "}
-                        {displaySelfAvg !== null && swotReport.challenger.rating !== null
-                          ? `${formatDelta(
-                              swotReport.challenger.rating - displaySelfAvg
-                            )}`
-                          : "—"}
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        Distance: {formatDistance(swotReport.challenger.distance_m)}
-                      </div>
-                    </>
-                  ) : (
-                    <p className="text-xs text-slate-500">
-                      Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
-      <div className="flex flex-wrap gap-2">
-        {(["selection", "radar", "swot"] as TabId[]).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setActiveTab(tab)}
-            className={`rounded-full border px-4 py-2 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30 ${
-              activeTab === tab
-                ? "border-ink bg-ink text-white shadow-sm"
-                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-            }`}
-          >
-            {tab === "selection" && "Ma Selection"}
-            {tab === "radar" && "Radar"}
-            {tab === "swot" && "Analyse SWOT"}
-          </button>
-        ))}
-      </div>
+          <Card>
+            <CardHeader className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <CardTitle className="text-lg">Podium</CardTitle>
+                <p className="text-xs text-slate-500">
+                  Comparaison rapide avec les acteurs les plus impactants.
+                </p>
+              </div>
+              {isTop10 && <Badge variant="success">Top 10% du radar</Badge>}
+            </CardHeader>
+            <CardContent>
+              {selfAvg === null && selfCount === null ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+                  <p className="text-base font-semibold text-slate-800">À configurer</p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Synchronise tes avis Google pour afficher ta note et tes comparaisons.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Card className="h-full">
+                    <CardContent className="space-y-2 pt-6 text-sm text-slate-600">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-slate-900">Vous</p>
+                        <Badge variant="neutral">Vous</Badge>
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        Note: {selfScoreLabel} / Avis: {selfReviewsLabel}
+                      </div>
+                      <div className="text-xs text-slate-500">Distance: —</div>
+                    </CardContent>
+                  </Card>
+                  <Card className="h-full">
+                    <CardContent className="space-y-2 pt-6 text-sm text-slate-600">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-slate-900">
+                          {swotReport.leader?.name ?? "Leader"}
+                        </p>
+                        <Badge variant="success">Leader</Badge>
+                      </div>
+                      {swotReport.leader ? (
+                        <>
+                          <div className="text-xs text-slate-500">
+                            Note: {swotReport.leader.rating ?? "—"} / Avis:{" "}
+                            {swotReport.leader.user_ratings_total ?? "—"}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            Delta:{" "}
+                            {displaySelfAvg !== null && swotReport.leader.rating !== null
+                              ? `${formatDelta(
+                                  swotReport.leader.rating - displaySelfAvg
+                                )}`
+                              : "—"}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            Distance: {formatDistance(swotReport.leader.distance_m)}
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-xs text-slate-500">
+                          Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir l’analyse.
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                  <Card className="h-full">
+                    <CardContent className="space-y-2 pt-6 text-sm text-slate-600">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-slate-900">
+                          {swotReport.challenger?.name ?? "Challenger"}
+                        </p>
+                        <Badge variant="warning">Challenger</Badge>
+                      </div>
+                      {swotReport.challenger ? (
+                        <>
+                          <div className="text-xs text-slate-500">
+                            Note: {swotReport.challenger.rating ?? "—"} / Avis:{" "}
+                            {swotReport.challenger.user_ratings_total ?? "—"}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            Delta:{" "}
+                            {displaySelfAvg !== null && swotReport.challenger.rating !== null
+                              ? `${formatDelta(
+                                  swotReport.challenger.rating - displaySelfAvg
+                                )}`
+                              : "—"}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            Distance: {formatDistance(swotReport.challenger.distance_m)}
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-xs text-slate-500">
+                          Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir l’analyse.
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
       {activeTab === "selection" && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Trophy size={18} />
-              Ma Selection
-            </CardTitle>
-          </CardHeader>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Trophy size={18} />
+                Ma sélection
+              </CardTitle>
+            </CardHeader>
           <CardContent className="space-y-4">
             {followedQuery.isLoading ? (
               <div className="grid gap-4 md:grid-cols-2">{skeletonCards}</div>
@@ -1320,7 +1493,7 @@ const normalizeName = (value: string) =>
               <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm text-slate-500">
                 <p className="text-base font-semibold text-slate-800">🧭 Aucune veille active</p>
                 <p className="mt-1 text-sm text-slate-500">
-                  Votre liste de veille est vide. Lancez une analyse puis ajoutez les concurrents a suivre.
+                  Votre liste de veille est vide. Lancez une analyse puis ajoutez les concurrents à suivre.
                 </p>
                 <Button
                   variant="outline"
@@ -1387,7 +1560,7 @@ const normalizeName = (value: string) =>
                             ))
                           ) : (
                             <span>
-                              Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
+                              Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir l’analyse.
                             </span>
                           )}
                         </div>
@@ -1592,8 +1765,8 @@ const normalizeName = (value: string) =>
                     Aucun concurrent n’a été trouvé pour cette zone. Essayez un rayon plus large ou un mot‑clé différent.
                   </p>
                   <ul className="mt-4 list-disc space-y-1 pl-5 text-xs text-slate-500">
-                    <li>Choisir un etablissement</li>
-                    <li>Verifier mot-cle et rayon</li>
+                    <li>Choisir un établissement</li>
+                    <li>Vérifier mot-clé et rayon</li>
                     <li>Lancer l’analyse</li>
                   </ul>
                   <Button
@@ -1608,81 +1781,29 @@ const normalizeName = (value: string) =>
                 </div>
               ) : (
                 <div className="relative space-y-4">
-                  <style>{`
-                    @keyframes radar-pulse {
-                      0% { transform: scale(0.4); opacity: 0.4; }
-                      70% { transform: scale(1.2); opacity: 0; }
-                      100% { opacity: 0; }
-                    }
-                    @keyframes radar-sweep {
-                      0% { transform: rotate(0deg); }
-                      100% { transform: rotate(360deg); }
-                    }
-                  `}</style>
-                  {isScanning && (
-                    <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center rounded-2xl border border-emerald-200 bg-slate-900/10">
-                      <div className="relative flex h-40 w-40 items-center justify-center">
-                        <div className="absolute inset-0 rounded-full border border-emerald-300/40" />
-                        <div
-                          className="absolute inset-0 rounded-full border border-emerald-300/50"
-                          style={{ animation: "radar-pulse 2.6s ease-out infinite" }}
-                        />
-                        <div
-                          className="absolute inset-0 rounded-full"
-                          style={{
-                            background:
-                              "conic-gradient(rgba(16,185,129,0.15), rgba(16,185,129,0.0) 60%)",
-                            animation: "radar-sweep 2.2s linear infinite"
-                          }}
-                        />
-                        <div className="relative z-10 text-xs font-semibold text-emerald-700">
-                          Analyse en cours…
-                          <div className="mt-1 text-[11px] text-emerald-600">
-                            Scan radar
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                         <span className="font-semibold text-slate-700">
                           Résumé radar —
                         </span>
-                        <span>• {radarSummary.total} établissements</span>
                         <span>
-                          • Plus notés que vous:{" "}
-                          {radarSummary.higherThanSelf !== null
-                            ? radarSummary.higherThanSelf
-                            : "—"}
-                        </span>
-                        <span>
-                          • Plus proche:{" "}
-                          {radarSummary.closestDistance !== null
-                            ? formatDistance(radarSummary.closestDistance)
-                            : "—"}
-                        </span>
-                        <span>
-                          • Note médiane:{" "}
-                          {radarSummary.medianRating !== null
-                            ? radarSummary.medianRating.toFixed(1)
-                            : "—"}
-                        </span>
-                        <span>
-                          • Avis médian:{" "}
-                          {radarSummary.medianReviews !== null
-                            ? Math.round(radarSummary.medianReviews)
-                            : "—"}
-                        </span>
-                        <span>
-                          • Meilleure note:{" "}
-                          {radarSummary.bestRating !== null
-                            ? radarSummary.bestRating.toFixed(1)
-                            : "—"}
-                        </span>
-                        <span>
-                          • Risque élevé: {radarSummary.riskyCount}
+                          {[
+                            `${radarSummary.total} établissements`,
+                            radarSummary.higherThanSelf !== null
+                              ? `${radarSummary.higherThanSelf} mieux notés que vous`
+                              : null,
+                            radarSummary.closestDistance !== null
+                              ? `Plus proche: ${formatDistance(
+                                  radarSummary.closestDistance
+                                )}`
+                              : null,
+                            radarSummary.bestRating !== null
+                              ? `Meilleure note: ${radarSummary.bestRating.toFixed(1)}`
+                              : null
+                          ]
+                            .filter(Boolean)
+                            .join(" • ")}
                         </span>
                       </div>
                       <span
@@ -1693,7 +1814,16 @@ const normalizeName = (value: string) =>
                       </span>
                     </div>
                   </div>
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <div className="mb-3 flex items-center justify-between text-xs text-slate-500">
+                      <span className="font-semibold text-slate-700">
+                        Détail par concurrent
+                      </span>
+                      <span>
+                        {visibleRadar.length} affichés / {filteredRadar.length} total
+                      </span>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {visibleRadar.map((competitor) => {
                     const tier = getRadarTier(competitor);
                     const isPending = pendingPlaceIds.includes(competitor.place_id);
@@ -1729,12 +1859,23 @@ const normalizeName = (value: string) =>
                       competitor.rating >= 4.8 &&
                       dangerRadius !== null &&
                       competitor.distance_m <= dangerRadius;
+                    const status = getCompetitorStatus(competitor, selfAvg);
+                    const weakPoint = getMajorWeakPoint(competitor, radiusKm);
+                    const growthProxy =
+                      radarSummary.medianRating !== null &&
+                      competitor.rating !== null
+                        ? Math.round(
+                            (competitor.rating - radarSummary.medianRating) * 10
+                          )
+                        : null;
+                    const growthLabel =
+                      growthProxy === null ? "—" : `${growthProxy >= 0 ? "+" : ""}${growthProxy}%`;
                     return (
                     <Card
                       key={competitor.id}
                       className={isDangerous ? "border-rose-200 bg-rose-50" : undefined}
                     >
-                      <CardContent className="flex h-full flex-col gap-3 pt-6">
+                      <CardContent className="flex h-full flex-col gap-4 pt-6">
                         <div className="flex items-start justify-between gap-3">
                           <div className="space-y-1">
                             <div className="flex flex-wrap items-center gap-2">
@@ -1742,10 +1883,9 @@ const normalizeName = (value: string) =>
                                 {competitor.name}
                               </p>
                               <Badge variant={tier.variant}>{tier.label}</Badge>
+                              <Badge variant={status.variant}>{status.label}</Badge>
                               {isFollowed && <Badge variant="neutral">Suivi</Badge>}
-                              {isDangerous && (
-                                <Badge variant="warning">Impact fort</Badge>
-                              )}
+                              {isDangerous && <Badge variant="warning">Impact fort</Badge>}
                               {delta !== null && (
                                 <Badge variant="neutral">
                                   {delta >= 0 ? "+" : ""}
@@ -1761,9 +1901,18 @@ const normalizeName = (value: string) =>
                             {formatDistance(competitor.distance_m)}
                           </Badge>
                         </div>
-                        <div className="flex items-center gap-4 text-xs text-slate-500">
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
                           <span>Note: {competitor.rating ?? "—"}</span>
                           <span>Avis: {competitor.user_ratings_total ?? "—"}</span>
+                          <span>Croissance: {growthLabel}</span>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                          <div className="text-[10px] font-semibold tracking-[0.2em] text-slate-500">
+                            POINT FAIBLE MAJEUR
+                          </div>
+                          <div className="text-sm font-semibold text-slate-700">
+                            {weakPoint}
+                          </div>
                         </div>
                         <div className="flex flex-wrap gap-2 text-xs text-slate-500">
                           {insights.length > 0 ? (
@@ -1774,7 +1923,7 @@ const normalizeName = (value: string) =>
                             ))
                           ) : (
                             <span>
-                              Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
+                              Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir l’analyse.
                             </span>
                           )}
                         </div>
@@ -1856,12 +2005,13 @@ const normalizeName = (value: string) =>
                   );
                   })}
                   </div>
+                  </div>
                 </div>
               )}
               {radarItems.length > 0 && (
                 <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
                   <span>
-                    {visibleRadar.length} affiches / {filteredRadar.length} total
+                    {visibleRadar.length} affichés / {filteredRadar.length} total
                   </span>
                   {canLoadMore && (
                     <Button
@@ -1886,113 +2036,163 @@ const normalizeName = (value: string) =>
 
       {activeTab === "swot" && (
         <div className="space-y-6">
-          <Card>
-            <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-              <CardTitle className="flex items-center gap-2">
-                <Eye size={18} />
-                Analyse SWOT
-              </CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleGenerateBenchmark}
-                disabled={benchmarkLoading || !selectedLocationId}
-              >
-                {benchmarkLoading ? "Generation..." : "Generer un rapport"}
-              </Button>
-            </CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
-                  <Sparkles size={14} />
-                  Forces
-                </div>
-                {swotBullets.forces.length === 0 ? (
-                  <p className="mt-2 text-sm text-slate-500">
-                    Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
-                  </p>
-                ) : (
-                  <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
-                    {swotBullets.forces.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                )}
-                <p className="mt-3 text-xs text-slate-500">
-                  Prochaine action : renforcer ce qui surperforme deja le marche.
-                </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <Eye size={18} />
+              Analyse SWOT
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleGenerateBenchmark}
+              disabled={benchmarkLoading || !selectedLocationId}
+            >
+              {benchmarkLoading ? "Génération..." : "Générer un rapport"}
+            </Button>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+            <div className="rounded-3xl bg-slate-900 p-6 text-white shadow-sm">
+              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
+                Synthèse du marché
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
-                  <TrendingDown size={14} />
-                  Faiblesses
-                </div>
-                {swotBullets.weaknesses.length === 0 ? (
-                  <p className="mt-2 text-sm text-slate-500">
-                    Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
-                  </p>
+              <p className="mt-3 text-sm text-emerald-100">
+                {radarSummary.total > 0
+                  ? "Les signaux ci-dessous résument l’état du marché local."
+                  : "Analyse en attente de données exploitables."}
+              </p>
+              <ul className="mt-4 space-y-2 text-sm text-emerald-100">
+                {radarSummary.total > 0 ? (
+                  <>
+                    <li>
+                      {radarSummary.total} établissements observés sur {radiusKm} km.
+                    </li>
+                    <li>
+                      Plus proche:{" "}
+                      {radarSummary.closestDistance !== null
+                        ? formatDistance(radarSummary.closestDistance)
+                        : "—"}
+                    </li>
+                    <li>
+                      Meilleure note:{" "}
+                      {radarSummary.bestRating !== null
+                        ? radarSummary.bestRating.toFixed(1)
+                        : "—"}
+                    </li>
+                  </>
                 ) : (
-                  <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
-                    {swotBullets.weaknesses.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
+                  <li>Ajoutez des concurrents ou relancez l’analyse.</li>
                 )}
-                <p className="mt-3 text-xs text-slate-500">
-                  Prochaine action : corriger le signal le plus faible.
-                </p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+              </ul>
+            </div>
+            <div className="grid gap-4">
+              <Card className="border-emerald-200 bg-emerald-50/40">
+                <CardContent className="space-y-2 pt-6 text-sm text-slate-700">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
+                    <Sparkles size={14} />
+                    Forces du marché
+                  </div>
+                  {swotBullets.forces.length === 0 ? (
+                    <p className="text-sm text-emerald-700/70">
+                      Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir
+                      l’analyse.
+                    </p>
+                  ) : (
+                    <ul className="list-disc space-y-1 pl-4 text-sm">
+                      {swotBullets.forces.slice(0, 2).map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="text-xs text-emerald-700/70">
+                    Prochaine action : renforcer ce qui surperforme déjà le marché.
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="border-rose-200 bg-rose-50/40">
+                <CardContent className="space-y-2 pt-6 text-sm text-slate-700">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-rose-700">
+                    <TrendingDown size={14} />
+                    Faiblesses
+                  </div>
+                  {swotBullets.weaknesses.length === 0 ? (
+                    <p className="text-sm text-rose-700/70">
+                      Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir
+                      l’analyse.
+                    </p>
+                  ) : (
+                    <ul className="list-disc space-y-1 pl-4 text-sm">
+                      {swotBullets.weaknesses.slice(0, 2).map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="text-xs text-rose-700/70">
+                    Prochaine action : corriger le signal le plus faible.
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card className="border-sky-200 bg-sky-50/40">
+              <CardContent className="space-y-2 pt-6 text-sm text-slate-700">
+                <div className="flex items-center gap-2 text-xs font-semibold text-sky-700">
                   <TrendingUp size={14} />
                   Opportunités
                 </div>
                 {swotBullets.opportunities.length === 0 ? (
-                  <p className="mt-2 text-sm text-slate-500">
-                    Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
+                  <p className="text-sm text-sky-700/70">
+                    Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir
+                    l’analyse.
                   </p>
                 ) : (
-                  <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
-                    {swotBullets.opportunities.map((item) => (
+                  <ul className="list-disc space-y-1 pl-4 text-sm">
+                    {swotBullets.opportunities.slice(0, 3).map((item) => (
                       <li key={item}>{item}</li>
                     ))}
                   </ul>
                 )}
-                <p className="mt-3 text-xs text-slate-500">
+                <p className="text-xs text-sky-700/70">
                   Prochaine action : viser les gains rapides sur les points faibles.
                 </p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+              </CardContent>
+            </Card>
+            <Card className="border-slate-200 bg-slate-50/50">
+              <CardContent className="space-y-2 pt-6 text-sm text-slate-700">
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                   <ShieldAlert size={14} />
                   Menaces
                 </div>
                 {swotBullets.threats.length === 0 ? (
-                  <p className="mt-2 text-sm text-slate-500">
-                    Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
+                  <p className="text-sm text-slate-500">
+                    Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir
+                    l’analyse.
                   </p>
                 ) : (
-                  <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
-                    {swotBullets.threats.map((item) => (
+                  <ul className="list-disc space-y-1 pl-4 text-sm">
+                    {swotBullets.threats.slice(0, 3).map((item) => (
                       <li key={item}>{item}</li>
                     ))}
                   </ul>
                 )}
-                <p className="mt-3 text-xs text-slate-500">
+                <p className="text-xs text-slate-500">
                   Prochaine action : surveiller ces rivaux chaque semaine.
                 </p>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
 
           <Card>
             <CardHeader>
-              <CardTitle>Actions recommandees</CardTitle>
+              <CardTitle>Actions recommandées</CardTitle>
             </CardHeader>
             <CardContent>
               {swotBullets.actions.length === 0 ? (
                 <p className="text-sm text-slate-500">
-                  Ajoute des concurrents suivis ou elargis le rayon pour enrichir l’analyse.
+                  Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir
+                  l’analyse.
                 </p>
               ) : (
                 <ul className="list-disc space-y-2 pl-4 text-sm text-slate-700">
@@ -2005,6 +2205,8 @@ const normalizeName = (value: string) =>
           </Card>
         </div>
       )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -2012,21 +2214,14 @@ const normalizeName = (value: string) =>
 export { Competitors };
 
 // Manual test plan:
-// 1) Etalonnage sans etablissement -> etat vide + CTA Parametres.
-// 2) Controles: select 5 km cliquable + mise a jour rayon.
-// 3) Radar: scan 5km -> animation radar + message "Scan termine" + resume.
-// 4) Radar: tri/filtres/top + pagination "Charger plus".
-// 5) Suivre/retirer un concurrent -> toast + MAJ optimistic + boutons desactives.
-// 6) Ma Selection: comparaison + tags strategiques + opportunites a verifier.
-// 7) SWOT: actions + textes FR sans anglais.
-// 8) Erreur coords -> message + hint affiches proprement.
-
-// Data audit (non disponible dans le payload actuel) :
-// - Annee d'ouverture / anciennete officielle
-// - Statut d'activite (open/closed)
-// - Gamme de prix / price_level
-// - Services, attributs, options (ex: terrasse, livraison)
-// - Horaires d'ouverture
-// - Photos et medias
-// - Categories detaillees
-// - Site web officiel / telephone (si non remonte)
+// 1) Header + onglets visibles, panneau "Nouvelle analyse" sticky en desktop.
+// 2) Rayon 5 km cliquable et met à jour le select.
+// 3) Lancer l'analyse -> overlay sonar visible puis disparition + message "Scan terminé".
+// 4) Historique: un scan ajoute une entrée, clic restaure mot-clé/rayon/zone.
+// 5) Radar: cartes "Détail par concurrent", suivre/unfollow OK, pagination client.
+// 6) SWOT: synthèse sombre + 4 cartes SWOT + actions recommandées.
+// 7) Mobile/tablette: colonnes empilées, pas d'overflow.
+//
+// Data audit (non disponible dans le payload actuel):
+// - opening_date, business_status, price_level, services/attributes, horaires,
+//   site web, telephone, categories, photos, statut d'ouverture.

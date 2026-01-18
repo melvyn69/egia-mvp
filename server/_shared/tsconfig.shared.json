@@ -7,8 +7,13 @@
     "moduleResolution": "Bundler",
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "types": ["node"],
     "declaration": false
   },
   "include": ["**/*.ts"],
-  "exclude": ["../_shared_dist/**"]
+  "exclude": [
+    "../_shared_dist/**",
+    "../node_modules/@types/ws 2/**",
+    "../node_modules/@types/yauzl 2/**"
+  ]
 }
