@@ -5,6 +5,10 @@ import { useNavigate } from "react-router-dom";
 import {
   Trophy,
   Eye,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+  ShieldAlert,
   BookmarkPlus,
   BookmarkX
 } from "lucide-react";
@@ -83,6 +87,43 @@ const getCompetitorInsights = (row: CompetitorRow) => {
     insights.push("Tres proche");
   }
   return insights;
+};
+
+const getWatchlistRationale = (row: CompetitorRow, selfAvg: number | null) => {
+  const rating = typeof row.rating === "number" ? row.rating : null;
+  const distance = typeof row.distance_m === "number" ? row.distance_m : null;
+  const reviews =
+    typeof row.user_ratings_total === "number" ? row.user_ratings_total : null;
+  const isVeryClose = distance !== null && distance <= 1000;
+  const isClose = distance !== null && distance <= 3000;
+  const hasStrongVolume = reviews !== null && reviews >= 150;
+
+  if (selfAvg !== null && rating !== null) {
+    const delta = rating - selfAvg;
+    if (delta >= 0.2 && isVeryClose) {
+      return "Higher rating and very close to your location";
+    }
+    if (delta >= 0.2 && hasStrongVolume) {
+      return "Higher rating with strong review volume";
+    }
+    if (delta <= -0.2 && hasStrongVolume) {
+      return "Strong review volume but lower rating than you";
+    }
+    if (delta >= 0.2 && isClose) {
+      return "Higher rating within your immediate area";
+    }
+  }
+
+  if (isVeryClose && hasStrongVolume) {
+    return "Very close competitor with strong review volume";
+  }
+  if (isVeryClose) {
+    return "Very close to your location";
+  }
+  if (hasStrongVolume) {
+    return "Strong review volume in your area";
+  }
+  return "Comparable competitor in your market";
 };
 
 const Competitors = ({ session }: CompetitorsProps) => {
@@ -601,6 +642,23 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const selfScoreLabel = selfAvg !== null ? selfAvg.toFixed(2) : "—";
   const selfReviewsLabel = selfCount !== null ? `${selfCount}` : "—";
 
+  const radarSummary = useMemo(() => {
+    const total = radarItems.length;
+    const higherThanSelf =
+      selfAvg !== null
+        ? radarItems.filter((row) => (row.rating ?? 0) > selfAvg).length
+        : null;
+    const closestDistance =
+      radarItems.length > 0
+        ? Math.min(...radarItems.map((row) => row.distance_m ?? Number.MAX_SAFE_INTEGER))
+        : null;
+    const safeDistance =
+      closestDistance !== null && closestDistance !== Number.MAX_SAFE_INTEGER
+        ? closestDistance
+        : null;
+    return { total, higherThanSelf, closestDistance: safeDistance };
+  }, [radarItems, selfAvg]);
+
   const swotBullets = useMemo(() => {
     const forces: string[] = [];
     const weaknesses: string[] = [];
@@ -817,7 +875,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
             <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
               <p className="text-base font-semibold text-slate-800">🏬 Aucun etablissement selectionne</p>
               <p className="mt-1 text-sm text-slate-500">
-                Choisissez un etablissement pour lancer la veille concurrentielle.
+                Aucun etablissement n’est associe a ce compte. Selectionnez un lieu pour lancer la veille.
               </p>
               <Button
                 variant="outline"
@@ -878,7 +936,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                   onClick={() => scanMutation.mutate({})}
                   disabled={!keyword || scanMutation.isPending || !selectedLocationId}
                 >
-                  {scanMutation.isPending ? "Scan..." : "Scanner"}
+                  {scanMutation.isPending ? "Analyse..." : "Lancer l’analyse"}
                 </Button>
               </div>
               <div className="flex items-end">
@@ -910,7 +968,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                   }}
                   disabled={!selectedLocationId || scanMutation.isPending}
                 >
-                  Rafraichir
+                  Relancer l’analyse
                 </Button>
               </div>
             </div>
@@ -965,7 +1023,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
               <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm text-slate-500">
                 <p className="text-base font-semibold text-slate-800">🧭 Aucun concurrent suivi</p>
                 <p className="mt-1 text-sm text-slate-500">
-                  Lancez un scan pour demarrer votre selection.
+                  Vous n’avez encore suivi aucun concurrent. Lancez une analyse dans le Radar puis ajoutez vos cibles.
                 </p>
                 <Button
                   variant="outline"
@@ -981,6 +1039,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 {sortedFollowed.map((competitor) => {
                   const tier = getSelectionTier(competitor);
                   const insights = getCompetitorInsights(competitor);
+                  const rationale = getWatchlistRationale(competitor, selfAvg);
                   return (
                     <Card key={competitor.id} className="h-full">
                       <CardContent className="flex h-full flex-col gap-3 pt-6">
@@ -1013,8 +1072,16 @@ const Competitors = ({ session }: CompetitorsProps) => {
                               </Badge>
                             ))
                           ) : (
-                            <span>Aucun insight disponible</span>
+                            <span>
+                              Pas assez de donnees. Elargissez le rayon ou suivez plus de concurrents.
+                            </span>
                           )}
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                          <div className="font-semibold text-slate-700">
+                            Why this competitor matters
+                          </div>
+                          <div className="mt-1">{rationale}</div>
                         </div>
                         <div className="mt-auto flex flex-wrap items-center justify-between gap-3">
                           {confirmRemoveId === competitor.id ? (
@@ -1158,7 +1225,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm text-slate-500">
                   <p className="text-base font-semibold text-slate-800">📡 Aucun resultat</p>
                   <p className="mt-1 text-sm text-slate-500">
-                    Lancez un scan pour afficher les concurrents proches.
+                    Aucun concurrent n’a été trouvé pour cette zone. Essayez un rayon plus large ou un mot‑clé différent.
                   </p>
                   <Button
                     variant="outline"
@@ -1167,11 +1234,40 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     onClick={() => scanMutation.mutate({})}
                     disabled={scanMutation.isPending || !selectedLocationId}
                   >
-                    Scanner maintenant
+                    Lancer l’analyse
                   </Button>
                 </div>
               ) : (
-                <div className="grid gap-4 md:grid-cols-2">
+                <>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="font-semibold text-slate-700">
+                          Radar Summary
+                        </span>
+                        <span>Total: {radarSummary.total}</span>
+                        <span>
+                          Plus notes que vous:{" "}
+                          {radarSummary.higherThanSelf !== null
+                            ? radarSummary.higherThanSelf
+                            : "—"}
+                        </span>
+                        <span>
+                          Plus proche:{" "}
+                          {radarSummary.closestDistance !== null
+                            ? formatDistance(radarSummary.closestDistance)
+                            : "—"}
+                        </span>
+                      </div>
+                      <span
+                        className="cursor-help rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-500"
+                        title="These competitors have the highest impact on your local visibility."
+                      >
+                        i
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
                   {visibleRadar.map((competitor) => {
                     const tier = getRadarTier(competitor);
                     const isPending = pendingPlaceIds.includes(competitor.place_id);
@@ -1182,8 +1278,19 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       typeof competitor.rating === "number" && selfAvg !== null
                         ? competitor.rating - selfAvg
                         : null;
+                    const dangerRadius =
+                      typeof radiusKm === "number" ? radiusKm * 1000 * 0.5 : null;
+                    const isDangerous =
+                      typeof competitor.rating === "number" &&
+                      typeof competitor.distance_m === "number" &&
+                      competitor.rating >= 4.8 &&
+                      dangerRadius !== null &&
+                      competitor.distance_m <= dangerRadius;
                     return (
-                    <Card key={competitor.id}>
+                    <Card
+                      key={competitor.id}
+                      className={isDangerous ? "border-rose-200 bg-rose-50" : undefined}
+                    >
                       <CardContent className="flex h-full flex-col gap-3 pt-6">
                         <div className="flex items-start justify-between gap-3">
                           <div className="space-y-1">
@@ -1193,6 +1300,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
                               </p>
                               <Badge variant={tier.variant}>{tier.label}</Badge>
                               {isFollowed && <Badge variant="neutral">Suivi</Badge>}
+                              {isDangerous && (
+                                <Badge variant="destructive">Impact fort</Badge>
+                              )}
                               {delta !== null && (
                                 <Badge variant="neutral">
                                   {delta >= 0 ? "+" : ""}
@@ -1220,7 +1330,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
                               </Badge>
                             ))
                           ) : (
-                            <span>Aucun insight disponible</span>
+                            <span>
+                              Pas assez de donnees. Elargissez le rayon ou suivez plus de concurrents.
+                            </span>
                           )}
                         </div>
                         <div className="mt-auto flex flex-wrap items-center justify-between gap-3">
@@ -1251,7 +1363,8 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     </Card>
                   );
                   })}
-                </div>
+                  </div>
+                </>
               )}
               {radarItems.length > 0 && (
                 <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
@@ -1290,10 +1403,13 @@ const Competitors = ({ session }: CompetitorsProps) => {
             </CardHeader>
             <CardContent className="grid gap-4 md:grid-cols-2">
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="text-xs font-semibold text-slate-500">Forces</p>
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                  <Sparkles size={14} />
+                  Forces
+                </div>
                 {swotBullets.forces.length === 0 ? (
                   <p className="mt-2 text-sm text-slate-500">
-                    Donnees insuffisantes.
+                    Elargissez le rayon ou suivez plus de concurrents pour obtenir des insights.
                   </p>
                 ) : (
                   <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
@@ -1302,12 +1418,18 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     ))}
                   </ul>
                 )}
+                <p className="mt-3 text-xs text-slate-500">
+                  What to do next: reinforce what already outperforms the market.
+                </p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="text-xs font-semibold text-slate-500">Faiblesses</p>
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                  <TrendingDown size={14} />
+                  Faiblesses
+                </div>
                 {swotBullets.weaknesses.length === 0 ? (
                   <p className="mt-2 text-sm text-slate-500">
-                    Donnees insuffisantes.
+                    Elargissez le rayon ou suivez plus de concurrents pour obtenir des insights.
                   </p>
                 ) : (
                   <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
@@ -1316,12 +1438,18 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     ))}
                   </ul>
                 )}
+                <p className="mt-3 text-xs text-slate-500">
+                  What to do next: fix the weakest signal with the biggest impact.
+                </p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="text-xs font-semibold text-slate-500">Opportunites</p>
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                  <TrendingUp size={14} />
+                  Opportunites
+                </div>
                 {swotBullets.opportunities.length === 0 ? (
                   <p className="mt-2 text-sm text-slate-500">
-                    Donnees insuffisantes.
+                    Elargissez le rayon ou suivez plus de concurrents pour obtenir des insights.
                   </p>
                 ) : (
                   <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
@@ -1330,12 +1458,18 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     ))}
                   </ul>
                 )}
+                <p className="mt-3 text-xs text-slate-500">
+                  What to do next: target quick wins where competitors underperform.
+                </p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="text-xs font-semibold text-slate-500">Menaces</p>
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                  <ShieldAlert size={14} />
+                  Menaces
+                </div>
                 {swotBullets.threats.length === 0 ? (
                   <p className="mt-2 text-sm text-slate-500">
-                    Donnees insuffisantes.
+                    Elargissez le rayon ou suivez plus de concurrents pour obtenir des insights.
                   </p>
                 ) : (
                   <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
@@ -1344,6 +1478,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     ))}
                   </ul>
                 )}
+                <p className="mt-3 text-xs text-slate-500">
+                  What to do next: monitor these rivals weekly and adjust your plan.
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -1392,7 +1529,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       </>
                     ) : (
                       <p className="text-xs text-slate-500">
-                        Donnees insuffisantes.
+                        Elargissez le rayon ou suivez plus de concurrents pour obtenir des insights.
                       </p>
                     )}
                   </CardContent>
@@ -1423,7 +1560,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       </>
                     ) : (
                       <p className="text-xs text-slate-500">
-                        Donnees insuffisantes.
+                        Elargissez le rayon ou suivez plus de concurrents pour obtenir des insights.
                       </p>
                     )}
                   </CardContent>
@@ -1442,7 +1579,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
             <CardContent>
               {swotBullets.actions.length === 0 ? (
                 <p className="text-sm text-slate-500">
-                  Donnees insuffisantes.
+                  Elargissez le rayon ou suivez plus de concurrents pour obtenir des insights.
                 </p>
               ) : (
                 <ul className="list-disc space-y-2 pl-4 text-sm text-slate-700">
