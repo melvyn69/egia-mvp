@@ -221,6 +221,7 @@ const Settings = ({ session }: SettingsProps) => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const supabaseClient = supabase;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb = supabaseClient as any;
   const userId = session?.user?.id ?? null;
   const [activeTab, setActiveTab] = useState<TabId>("team");
@@ -261,7 +262,9 @@ const Settings = ({ session }: SettingsProps) => {
   const appBaseUrl =
     typeof window === "undefined"
       ? ""
-      : ((import.meta as any).env?.VITE_APP_BASE_URL ??
+      : (
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (import.meta as any).env?.VITE_APP_BASE_URL ??
         window.location.origin);
   const handleOpenApp = () => {
     if (!appBaseUrl) return;

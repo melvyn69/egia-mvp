@@ -1,6 +1,6 @@
 import { Download } from "lucide-react";
 import { cn } from "../lib/utils";
-import { usePWAInstall } from "./pwa/PWAInstallProvider";
+import { usePWAInstall } from "./pwa/pwaInstall.context";
 
 type InstallAppCTAProps = {
   onFallback: () => void;

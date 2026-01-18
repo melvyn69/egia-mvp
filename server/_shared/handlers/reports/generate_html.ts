@@ -3,8 +3,6 @@ import { requireUser } from "../../_auth.js";
 import { getRequestId, logRequest } from "../../api_utils.js";
 import { renderPdfFromHtml } from "../../pdf_html.js";
 
-type SupabaseAdmin = any;
-
 type ReportPreset =
   | "last_7_days"
   | "last_30_days"
@@ -540,6 +538,7 @@ class ReportError extends Error {
 }
 
 type GeneratePremiumReportParams = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabaseAdmin: any;
   reportId: string;
   requestId: string;
@@ -549,6 +548,7 @@ type GeneratePremiumReportParams = {
 
 export const generatePremiumReport = async (
   params: GeneratePremiumReportParams
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> => {
   const { supabaseAdmin, reportId, requestId, userId, htmlOnly } = params;
 
@@ -652,6 +652,7 @@ export const generatePremiumReport = async (
       replyable.length > 0 ? replied.length / replyable.length : null;
 
     let positiveCount = 0;
+    void positiveCount;
     let negativeCount = 0;
     let untreatedNegativeCount = 0;
     let aiCriticalCount = 0;
@@ -792,7 +793,10 @@ export const generatePremiumReport = async (
     const untreatedList = untreatedNegatives
       .sort((a, b) => b.dateValue - a.dateValue)
       .slice(0, 8)
-      .map(({ dateValue, ...rest }) => rest);
+      .map(({ dateValue, ...rest }) => {
+        void dateValue;
+        return rest;
+      });
     const aiSummary = buildAiSummary({
       avgRating,
       responseRate,

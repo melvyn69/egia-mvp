@@ -270,6 +270,7 @@ const sendPendingAlerts = async (params: {
   userId: string;
   establishmentId: string;
 }) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb: any = params.supabaseAdmin;
   const resendKey = process.env.RESEND_API_KEY ?? "";
   const emailFrom = process.env.EMAIL_FROM ?? "";
@@ -287,6 +288,7 @@ const sendPendingAlerts = async (params: {
     console.error("[alerts] failed to load user email", userError);
     return;
   }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recipient = (userRow as any)?.email ?? null;
   if (!recipient) {
     console.warn("[alerts] missing recipient email", {
@@ -849,8 +851,10 @@ export const syncGoogleReviewsForUser = async (
       }
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error: upsertError } = await (supabaseAdmin as any)
       .from("google_reviews")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .upsert(rows as any, {
         onConflict: "user_id,location_id,review_id"
       });
@@ -903,6 +907,7 @@ export const syncGoogleReviewsForUser = async (
       );
       insertedAlerts = alertsToInsert.length;
       if (alertsToInsert.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: alertError } = await (supabaseAdmin as any)
           .from("alerts")
           .insert(alertsToInsert, {
@@ -954,6 +959,7 @@ export const syncGoogleReviewsForUser = async (
           })
         );
         if (backfillAlerts.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const { error: backfillInsertError } = await (supabaseAdmin as any)
             .from("alerts")
             .insert(backfillAlerts, {

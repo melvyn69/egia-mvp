@@ -1,30 +1,10 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
-
-type InstallResult = "prompted" | "unavailable" | "installed";
-
-type PlatformType = "ios" | "android" | "desktop";
-
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
-};
-
-type PWAInstallContextValue = {
-  isInstalled: boolean;
-  isInstallable: boolean;
-  platform: PlatformType;
-  install: () => Promise<InstallResult>;
-};
-
-const PWAInstallContext = createContext<PWAInstallContextValue | null>(null);
-
-const detectPlatform = (): PlatformType => {
-  if (typeof navigator === "undefined") return "desktop";
-  const ua = navigator.userAgent.toLowerCase();
-  if (/iphone|ipad|ipod/.test(ua)) return "ios";
-  if (/android/.test(ua)) return "android";
-  return "desktop";
-};
+import { useEffect, useMemo, useState } from "react";
+import { detectPlatform } from "./pwaInstall.utils";
+import {
+  type BeforeInstallPromptEvent,
+  type PWAInstallContextValue,
+  PWAInstallContext
+} from "./pwaInstall.context";
 
 const PWAInstallProvider = ({ children }: { children: React.ReactNode }) => {
   const [deferredPrompt, setDeferredPrompt] =
@@ -38,7 +18,7 @@ const PWAInstallProvider = ({ children }: { children: React.ReactNode }) => {
     const checkInstalled = () => {
       const standalone =
         window.matchMedia?.("(display-mode: standalone)").matches ||
-        (navigator as any).standalone === true;
+        (navigator as { standalone?: boolean }).standalone === true;
       setIsInstalled(Boolean(standalone));
     };
     checkInstalled();
@@ -62,7 +42,7 @@ const PWAInstallProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
-  const install = async (): Promise<InstallResult> => {
+  const install = async () => {
     if (isInstalled) return "installed";
     if (import.meta.env.DEV) {
       console.info("[pwa] install() called", { hasPrompt: Boolean(deferredPrompt) });
@@ -90,12 +70,4 @@ const PWAInstallProvider = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
-const usePWAInstall = () => {
-  const ctx = useContext(PWAInstallContext);
-  if (!ctx) {
-    throw new Error("usePWAInstall must be used within PWAInstallProvider");
-  }
-  return ctx;
-};
-
-export { PWAInstallProvider, usePWAInstall };
+export { PWAInstallProvider };
