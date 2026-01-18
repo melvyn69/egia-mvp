@@ -340,6 +340,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const scanMutation = useMutation({
     mutationFn: async (input?: { keyword?: string; radiusKm?: number }) => {
       setIsScanning(true);
+      const t0 = Date.now();
       try {
         if (!token || !selectedLocationId) {
           throw new Error("Missing location");
@@ -374,6 +375,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
         }
         return payload;
       } finally {
+        const elapsed = Date.now() - t0;
+        const minMs = 700;
+        if (elapsed < minMs) {
+          await new Promise((resolve) => setTimeout(resolve, minMs - elapsed));
+        }
         setIsScanning(false);
       }
     },
