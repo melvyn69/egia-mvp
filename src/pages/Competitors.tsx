@@ -92,43 +92,59 @@ const getCompetitorInsights = (row: CompetitorRow) => {
 
 const getStrategicTags = (
   row: CompetitorRow,
-  selfAvg: number | null,
-  radiusKm: number
+  context: { selfAvg: number | null; radiusKm: number }
 ) => {
-  const tags: string[] = [];
   const rating = typeof row.rating === "number" ? row.rating : null;
   const reviews =
     typeof row.user_ratings_total === "number" ? row.user_ratings_total : null;
   const distance = typeof row.distance_m === "number" ? row.distance_m : null;
-  const delta = selfAvg !== null && rating !== null ? rating - selfAvg : null;
-  const dangerRadius = radiusKm * 1000 * 0.5;
+  const delta =
+    context.selfAvg !== null && rating !== null ? rating - context.selfAvg : null;
+  const extremeDistance =
+    distance !== null && distance <= Math.max(400, context.radiusKm * 1000 * 0.2);
+  const tags: string[] = [];
+  const addTag = (value: string) => {
+    if (!tags.includes(value)) tags.push(value);
+  };
 
-  if (rating !== null && rating >= 4.8) tags.push("Tres bien note");
-  if (reviews !== null && reviews >= 200) tags.push("Fort volume");
-  if (distance !== null && distance <= 800) tags.push("Tres proche");
-  if (delta !== null && delta <= -0.3) tags.push("Risque eleve");
-  if (delta !== null && delta >= 0.2) tags.push("A surveiller");
-  if (distance !== null && distance <= dangerRadius && rating !== null && rating >= 4.8) {
-    tags.push("Impact local");
+  if (extremeDistance) addTag("Tres proche");
+  if (delta !== null && delta >= 0.2) addTag("Note superieure");
+  if (reviews !== null && reviews >= 200) addTag("Fort volume");
+  if (
+    distance !== null &&
+    distance <= context.radiusKm * 1000 * 0.5 &&
+    rating !== null &&
+    rating >= 4.7
+  ) {
+    addTag("Impact local");
   }
-  return tags.slice(0, 4);
+
+  return tags.slice(0, 3);
 };
 
 const getOpportunitiesToCheck = (row: CompetitorRow) => {
-  const suggestions: string[] = [];
   const rating = typeof row.rating === "number" ? row.rating : null;
   const reviews =
     typeof row.user_ratings_total === "number" ? row.user_ratings_total : null;
-  if (rating !== null && rating >= 4.6) {
-    suggestions.push("Verifier l’accueil et les services additionnels.");
+  const distance = typeof row.distance_m === "number" ? row.distance_m : null;
+  const bullets: string[] = [];
+  const addBullet = (value: string) => {
+    if (!bullets.includes(value)) bullets.push(value);
+  };
+
+  if (rating !== null && rating >= 4.6 && (reviews === null || reviews < 80)) {
+    addBullet("Accélérer l’acquisition d’avis pour rattraper le volume.");
   }
-  if (reviews !== null && reviews >= 200) {
-    suggestions.push("Verifier les leviers d’acquisition d’avis.");
+  if (rating !== null && rating < 4.0 && reviews !== null && reviews >= 150) {
+    addBullet("Travailler la qualite d’experience pour réduire l’écart.");
   }
-  if (suggestions.length === 0) {
-    suggestions.push("Verifier les avantages perçus par les clients.");
+  if (distance !== null && distance <= 800) {
+    addBullet("Renforcer la différenciation locale a proximite.");
   }
-  return suggestions.slice(0, 2);
+  if (bullets.length === 0) {
+    addBullet("Analyser les axes perçus comme prioritaires.");
+  }
+  return bullets.slice(0, 2);
 };
 
 const getWatchlistRationale = (row: CompetitorRow, selfAvg: number | null) => {
@@ -193,6 +209,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [lastScanAt, setLastScanAt] = useState<Date | null>(null);
   const [benchmarkLoading, setBenchmarkLoading] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
 
   const token = session?.access_token ?? null;
   const userId = session?.user?.id ?? null;
@@ -322,38 +339,43 @@ const Competitors = ({ session }: CompetitorsProps) => {
 
   const scanMutation = useMutation({
     mutationFn: async (input?: { keyword?: string; radiusKm?: number }) => {
-      if (!token || !selectedLocationId) {
-        throw new Error("Missing location");
-      }
-      const scanKeyword = (input?.keyword ?? keyword).trim();
-      const scanRadius = input?.radiusKm ?? radiusKm;
-      if (!scanKeyword || !scanRadius) {
-        throw new Error("Missing scan parameters");
-      }
-      const response = await fetch("/api/reports/competitors", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          action: "scan",
-          location_id: selectedLocationId,
-          radius_km: scanRadius,
-          keyword: scanKeyword
-        })
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        const err = new Error(payload?.error?.message ?? "Scan failed") as Error & {
-          details?: { hint?: string };
-        };
-        if (payload?.error?.details?.hint) {
-          err.details = { hint: payload.error.details.hint };
+      setIsScanning(true);
+      try {
+        if (!token || !selectedLocationId) {
+          throw new Error("Missing location");
         }
-        throw err;
+        const scanKeyword = (input?.keyword ?? keyword).trim();
+        const scanRadius = input?.radiusKm ?? radiusKm;
+        if (!scanKeyword || !scanRadius) {
+          throw new Error("Missing scan parameters");
+        }
+        const response = await fetch("/api/reports/competitors", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            action: "scan",
+            location_id: selectedLocationId,
+            radius_km: scanRadius,
+            keyword: scanKeyword
+          })
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          const err = new Error(payload?.error?.message ?? "Scan failed") as Error & {
+            details?: { hint?: string };
+          };
+          if (payload?.error?.details?.hint) {
+            err.details = { hint: payload.error.details.hint };
+          }
+          throw err;
+        }
+        return payload;
+      } finally {
+        setIsScanning(false);
       }
-      return payload;
     },
     onSuccess: (payload) => {
       const count = typeof payload?.scanned === "number" ? payload.scanned : null;
@@ -721,12 +743,50 @@ const Competitors = ({ session }: CompetitorsProps) => {
 
   const buildGoogleLink = (placeId: string) =>
     `https://www.google.com/maps/place/?q=place_id:${placeId}`;
-  const formatDelta = (delta: number) =>
-    `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`;
+const formatDelta = (delta: number) =>
+  `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`;
+const normalizeName = (value: string) =>
+  value.toLowerCase().replace(/\s+/g, " ").trim();
   const selfAvg = selfStatsQuery.data?.avg ?? null;
   const selfCount = selfStatsQuery.data?.count ?? null;
-  const selfScoreLabel = selfAvg !== null ? selfAvg.toFixed(2) : "—";
-  const selfReviewsLabel = selfCount !== null ? `${selfCount}` : "—";
+  const selectedLocation = (locationsQuery.data ?? []).find(
+    (location) => location.id === selectedLocationId
+  );
+  const locationRating =
+    typeof (selectedLocation as { rating?: number | null })?.rating === "number"
+      ? (selectedLocation as { rating?: number | null }).rating
+      : null;
+  const locationReviewCount =
+    typeof (selectedLocation as { reviewCount?: number | null })?.reviewCount ===
+    "number"
+      ? (selectedLocation as { reviewCount?: number | null }).reviewCount
+      : typeof (selectedLocation as { review_count?: number | null })?.review_count ===
+        "number"
+        ? (selectedLocation as { review_count?: number | null }).review_count
+        : null;
+  const selectedName =
+    typeof selectedLocation?.location_title === "string"
+      ? selectedLocation.location_title
+      : null;
+  const fallbackSelf =
+    selectedName && radarItems.length > 0
+      ? radarItems.find((item) =>
+          normalizeName(item.name).includes(normalizeName(selectedName))
+        )
+      : null;
+  const displaySelfAvg =
+    locationRating ??
+    (typeof fallbackSelf?.rating === "number" ? fallbackSelf.rating : null) ??
+    selfAvg;
+  const displaySelfCount =
+    locationReviewCount ??
+    (typeof fallbackSelf?.user_ratings_total === "number"
+      ? fallbackSelf.user_ratings_total
+      : null) ??
+    selfCount;
+  const selfScoreLabel = displaySelfAvg !== null ? displaySelfAvg.toFixed(2) : "—";
+  const selfReviewsLabel =
+    displaySelfCount !== null ? `${displaySelfCount}` : "—";
 
   const radarSummary = useMemo(() => {
     const total = radarItems.length;
@@ -1165,8 +1225,10 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       </div>
                       <div className="text-xs text-slate-500">
                         Delta:{" "}
-                        {selfAvg !== null && swotReport.leader.rating !== null
-                          ? `${formatDelta(swotReport.leader.rating - selfAvg)}`
+                        {displaySelfAvg !== null && swotReport.leader.rating !== null
+                          ? `${formatDelta(
+                              swotReport.leader.rating - displaySelfAvg
+                            )}`
                           : "—"}
                       </div>
                       <div className="text-xs text-slate-500">
@@ -1196,8 +1258,10 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       </div>
                       <div className="text-xs text-slate-500">
                         Delta:{" "}
-                        {selfAvg !== null && swotReport.challenger.rating !== null
-                          ? `${formatDelta(swotReport.challenger.rating - selfAvg)}`
+                        {displaySelfAvg !== null && swotReport.challenger.rating !== null
+                          ? `${formatDelta(
+                              swotReport.challenger.rating - displaySelfAvg
+                            )}`
                           : "—"}
                       </div>
                       <div className="text-xs text-slate-500">
@@ -1266,7 +1330,10 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 {sortedFollowed.map((competitor) => {
                   const tier = getSelectionTier(competitor);
                   const insights = getCompetitorInsights(competitor);
-                  const strategicTags = getStrategicTags(competitor, selfAvg, radiusKm);
+                  const strategicTags = getStrategicTags(competitor, {
+                    selfAvg,
+                    radiusKm
+                  });
                   const opportunities = getOpportunitiesToCheck(competitor);
                   const rationale = getWatchlistRationale(competitor, selfAvg);
                   const ratingDelta =
@@ -1546,8 +1613,8 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       100% { transform: rotate(360deg); }
                     }
                   `}</style>
-                  {scanMutation.isPending && (
-                    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50/60">
+                  {isScanning && (
+                    <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50/60">
                       <div className="relative flex h-40 w-40 items-center justify-center">
                         <div className="absolute inset-0 rounded-full border border-emerald-300/40" />
                         <div
@@ -1628,7 +1695,10 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       typeof competitor.rating === "number" && selfAvg !== null
                         ? competitor.rating - selfAvg
                         : null;
-                    const strategicTags = getStrategicTags(competitor, selfAvg, radiusKm);
+                    const strategicTags = getStrategicTags(competitor, {
+                      selfAvg,
+                      radiusKm
+                    });
                     const opportunities = getOpportunitiesToCheck(competitor);
                     const ratingDelta =
                       selfAvg !== null && competitor.rating !== null
