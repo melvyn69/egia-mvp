@@ -214,12 +214,34 @@ const getMajorWeakPoint = (row: CompetitorRow, radiusKm: number) => {
   return "Expérience";
 };
 
+const normalizeZoneLabel = (value: string) => {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return "";
+  return normalized.slice(0, 40);
+};
+
+const renderChipList = (items: string[]) => {
+  const visible = items.slice(0, 2);
+  const extra = items.length - visible.length;
+  return (
+    <>
+      {visible.map((item) => (
+        <Badge key={item} variant="neutral">
+          {item}
+        </Badge>
+      ))}
+      {extra > 0 && (
+        <Badge variant="neutral">+{extra}</Badge>
+      )}
+    </>
+  );
+};
+
 const Competitors = ({ session }: CompetitorsProps) => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>("selection");
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
-  const [keyword, setKeyword] = useState("");
   const [radiusKm, setRadiusKm] = useState(5);
   const [scanMessage, setScanMessage] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -232,7 +254,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
   >("all");
   const [radarSearch, setRadarSearch] = useState("");
   const [radarFollowedOnly, setRadarFollowedOnly] = useState(false);
-  const [radarTopLimit, setRadarTopLimit] = useState<10 | 25 | 50>(25);
+  const [radarTopLimit, setRadarTopLimit] = useState<number | null>(20);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [radarPageSize, setRadarPageSize] = useState(6);
   const [pendingPlaceIds, setPendingPlaceIds] = useState<string[]>([]);
@@ -246,6 +268,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
       keyword: string;
       radiusKm: number;
       locationLabel: string;
+      locationId: string | null;
       zoneLabel: string | null;
       createdAt: string;
     }>
@@ -296,13 +319,10 @@ const Competitors = ({ session }: CompetitorsProps) => {
   useEffect(() => {
     const row = settingsQuery.data;
     if (!row) return;
-    if (!keyword) {
-      setKeyword(row.competitive_monitoring_keyword ?? "");
-    }
     if (row.competitive_monitoring_radius_km && radiusKm === 5) {
       setRadiusKm(row.competitive_monitoring_radius_km);
     }
-  }, [settingsQuery.data, keyword, radiusKm]);
+  }, [settingsQuery.data, radiusKm]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -404,7 +424,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
         if (!token || !selectedLocationId) {
           throw new Error("Missing location");
         }
-        const scanKeyword = (input?.keyword ?? keyword).trim();
+        const scanKeyword = (input?.keyword ?? keywordValue).trim();
         const scanRadius = input?.radiusKm ?? radiusKm;
         if (!scanKeyword || !scanRadius) {
           throw new Error("Missing scan parameters");
@@ -451,7 +471,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
       const labelParts = [
         count !== null ? `${count} concurrents` : null,
         payload?.radius_km ? `${payload.radius_km} km` : null,
-        payload?.keyword ? `"${payload.keyword}"` : null,
+        payload?.keyword ? `"${payload.keyword}"` : keywordValue ? `"${keywordValue}"` : null,
         durationLabel ? `${durationLabel}` : null
       ].filter(Boolean);
       setScanMessage(
@@ -468,10 +488,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
           selectedLocation?.location_resource_name ??
           "Établissement";
         const entry = {
-          keyword: payload?.keyword ?? keyword,
+          keyword: payload?.keyword ?? keywordValue,
           radiusKm: payload?.radius_km ?? radiusKm,
           locationLabel,
-          zoneLabel: zoneInput.trim() || null,
+          locationId: selectedLocationId ?? null,
+          zoneLabel: normalizedZoneInput || null,
           createdAt: new Date().toISOString()
         };
         setScanHistory((prev) => {
@@ -521,7 +542,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
       const payload = {
         action: "generate",
         location_id: selectedLocationId,
-        keyword: keyword.trim() || settingsQuery.data?.competitive_monitoring_keyword,
+        keyword: keywordValue.trim() || settingsQuery.data?.competitive_monitoring_keyword,
         radius_km: radiusKm || settingsQuery.data?.competitive_monitoring_radius_km
       };
       const response = await fetch("/api/reports/competitors-benchmark", {
@@ -536,10 +557,13 @@ const Competitors = ({ session }: CompetitorsProps) => {
       if (!response.ok || !data?.report) {
         throw new Error(data?.error?.message ?? "Échec de génération.");
       }
+      const reportId =
+        typeof data?.report?.id === "string" ? data.report.id : null;
       setToast({
         type: "success",
-        message: "Rapport concurrentiel généré."
+        message: "Rapport généré. Télécharge-le depuis Rapports."
       });
+      navigate(reportId ? `/reports?report_id=${reportId}` : "/reports");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Échec de génération.";
@@ -643,6 +667,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const followedItems = followedQuery.data ?? [];
   const settingsRow = settingsQuery.data;
   const enabled = Boolean(settingsRow?.competitive_monitoring_enabled);
+  const keywordValue = settingsRow?.competitive_monitoring_keyword ?? "";
   const googleConnected = (locationsQuery.data ?? []).length > 0;
   const statusKeyword = settingsRow?.competitive_monitoring_keyword ?? "";
   const statusRadius = settingsRow?.competitive_monitoring_radius_km ?? radiusKm;
@@ -701,6 +726,27 @@ const Competitors = ({ session }: CompetitorsProps) => {
     }
     return items;
   }, [radarItems, radarFilter, radarSort, radarSearch, radarFollowedOnly, radarTopLimit]);
+
+  const topLimitOptions = useMemo(() => {
+    const total = radarItems.length;
+    const options: number[] = [];
+    if (total >= 10) options.push(10);
+    if (total >= 20) options.push(20);
+    if (total >= 50) options.push(50);
+    return options;
+  }, [radarItems.length]);
+
+  useEffect(() => {
+    if (topLimitOptions.length === 0) {
+      if (radarTopLimit !== null) {
+        setRadarTopLimit(null);
+      }
+      return;
+    }
+    if (!radarTopLimit || !topLimitOptions.includes(radarTopLimit)) {
+      setRadarTopLimit(topLimitOptions[topLimitOptions.length - 1]);
+    }
+  }, [topLimitOptions, radarTopLimit]);
 
   useEffect(() => {
     setRadarPageSize(6);
@@ -837,8 +883,9 @@ const normalizeName = (value: string) =>
   const selectedLocation = (locationsQuery.data ?? []).find(
     (location) => location.id === selectedLocationId
   );
-  const zoneLabel = zoneInput.trim()
-    ? zoneInput.trim()
+  const normalizedZoneInput = normalizeZoneLabel(zoneInput);
+  const zoneLabel = normalizedZoneInput
+    ? normalizedZoneInput
     : selectedLocation?.location_title || "—";
   const locationRating =
     typeof (selectedLocation as { rating?: number | null })?.rating === "number"
@@ -866,12 +913,14 @@ const normalizeName = (value: string) =>
     locationRating ??
     (typeof fallbackSelf?.rating === "number" ? fallbackSelf.rating : null) ??
     selfAvg;
+  const normalizedSelfCount =
+    selfAvg === null && selfCount === 0 ? null : selfCount;
   const displaySelfCount =
     locationReviewCount ??
     (typeof fallbackSelf?.user_ratings_total === "number"
       ? fallbackSelf.user_ratings_total
       : null) ??
-    selfCount;
+    normalizedSelfCount;
   const selfScoreLabel = displaySelfAvg !== null ? displaySelfAvg.toFixed(2) : "—";
   const selfReviewsLabel =
     displaySelfCount !== null ? `${displaySelfCount}` : "—";
@@ -879,8 +928,8 @@ const normalizeName = (value: string) =>
   const radarSummary = useMemo(() => {
     const total = radarItems.length;
     const higherThanSelf =
-      selfAvg !== null
-        ? radarItems.filter((row) => (row.rating ?? 0) > selfAvg).length
+      displaySelfAvg !== null
+        ? radarItems.filter((row) => (row.rating ?? 0) > displaySelfAvg).length
         : null;
     const distances = radarItems
       .map((row) => row.distance_m)
@@ -913,7 +962,7 @@ const normalizeName = (value: string) =>
       bestRating,
       riskyCount
     };
-  }, [radarItems, selfAvg, radiusKm]);
+  }, [radarItems, displaySelfAvg, radiusKm]);
 
   const swotBullets = useMemo(() => {
     const forces: string[] = [];
@@ -1209,27 +1258,50 @@ const normalizeName = (value: string) =>
                     Secteur d’activité
                     <input
                       className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
-                      value={keyword}
-                      onChange={(event) => setKeyword(event.target.value)}
+                      value={keywordValue}
+                      disabled
                       placeholder="ex: Restaurant Italien"
                     />
                   </label>
+                  {!keywordValue && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold">Secteur non défini</span>
+                        <Badge variant="warning">À compléter</Badge>
+                      </div>
+                      <p className="mt-1 text-[11px] text-amber-700/90">
+                        Définis le secteur d’activité dans Paramètres.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-2"
+                        onClick={() => navigate("/settings")}
+                      >
+                        Ouvrir les paramètres
+                      </Button>
+                    </div>
+                  )}
                   <label className="text-xs font-semibold text-slate-600">
                     Zone géographique
                     <input
                       className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
                       value={zoneInput}
                       onChange={(event) => {
-                        setZoneInput(event.target.value);
+                        const nextValue = event.target.value.slice(0, 40);
+                        setZoneInput(nextValue);
                         if (typeof window !== "undefined") {
                           window.localStorage.setItem(
                             "competitors_zone_label",
-                            event.target.value
+                            nextValue
                           );
                         }
                       }}
-                      placeholder="ex: Paris 11e"
+                      placeholder="ex: ecully, lyon 9…"
                     />
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      Libellé de zone pour vos analyses (max 40 caractères).
+                    </p>
                   </label>
                   <label className="text-xs font-semibold text-slate-600">
                     Zone géographique / Rayon
@@ -1249,7 +1321,9 @@ const normalizeName = (value: string) =>
                   <Button
                     className="w-full bg-ink text-white hover:bg-ink/90"
                     onClick={() => scanMutation.mutate({})}
-                    disabled={!keyword || scanMutation.isPending || !selectedLocationId}
+                    disabled={
+                      !keywordValue || scanMutation.isPending || !selectedLocationId
+                    }
                   >
                     <span className="flex items-center justify-center gap-2">
                       {scanMutation.isPending && (
@@ -1262,29 +1336,41 @@ const normalizeName = (value: string) =>
                     variant="outline"
                     className="w-full"
                     onClick={() => {
-                      const fallbackKeyword =
-                        keyword || settingsRow?.competitive_monitoring_keyword || "";
+                      const lastScan = scanHistory[0] ?? null;
                       const fallbackRadius =
-                        radiusKm || settingsRow?.competitive_monitoring_radius_km || 0;
+                        lastScan?.radiusKm ??
+                        radiusKm ??
+                        settingsRow?.competitive_monitoring_radius_km ??
+                        0;
                       if (!selectedLocationId) return;
-                      if (!enabled || !fallbackKeyword || !fallbackRadius) {
+                      if (!enabled || !keywordValue || !fallbackRadius || !lastScan) {
                         setScanError(
-                          "Configurez le mot-clé et le rayon avant de lancer un scan."
+                          "Relance indisponible sans analyse précédente."
                         );
                         setScanErrorHint(
-                          "Renseignez les paramètres dans Paramètres > Établissements."
+                          "Lance d’abord une analyse depuis le panneau."
                         );
                         setScanMessage(null);
                         return;
                       }
-                      setKeyword(fallbackKeyword);
                       setRadiusKm(fallbackRadius);
+                      if (lastScan?.zoneLabel) {
+                        setZoneInput(lastScan.zoneLabel);
+                      }
+                      if (lastScan?.locationId) {
+                        setSelectedLocationId(lastScan.locationId);
+                      }
                       scanMutation.mutate({
-                        keyword: fallbackKeyword,
+                        keyword: keywordValue,
                         radiusKm: fallbackRadius
                       });
                     }}
-                    disabled={!selectedLocationId || scanMutation.isPending}
+                    disabled={
+                      !selectedLocationId ||
+                      scanMutation.isPending ||
+                      !scanHistory[0]
+                    }
+                    title="Relance la dernière analyse"
                   >
                     Relancer
                   </Button>
@@ -1322,9 +1408,11 @@ const normalizeName = (value: string) =>
                     key={`${item.keyword}-${item.createdAt}`}
                     type="button"
                     onClick={() => {
-                      setKeyword(item.keyword);
                       setRadiusKm(item.radiusKm);
                       setZoneInput(item.zoneLabel ?? "");
+                      if (item.locationId) {
+                        setSelectedLocationId(item.locationId);
+                      }
                     }}
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50"
                   >
@@ -1359,7 +1447,7 @@ const normalizeName = (value: string) =>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-2xl font-semibold text-slate-900">
-              Analyse: {keyword || "—"} - {zoneLabel}
+              Analyse: {keywordValue || "—"} - {zoneLabel}
             </h2>
             <Button
               variant="outline"
@@ -1510,23 +1598,22 @@ const normalizeName = (value: string) =>
                   const tier = getSelectionTier(competitor);
                   const insights = getCompetitorInsights(competitor);
                   const strategicTags = getStrategicTags(competitor, {
-                    selfAvg,
+                    selfAvg: displaySelfAvg,
                     radiusKm
                   });
                   const opportunities = getOpportunitiesToCheck(competitor);
-                  const rationale = getWatchlistRationale(competitor, selfAvg);
+                  const rationale = getWatchlistRationale(competitor, displaySelfAvg);
                   const ratingDelta =
-                    selfAvg !== null && competitor.rating !== null
-                      ? formatDelta(competitor.rating - selfAvg)
+                    displaySelfAvg !== null && competitor.rating !== null
+                      ? formatDelta(competitor.rating - displaySelfAvg)
                       : null;
                   const reviewsDelta =
-                    selfCount !== null && competitor.user_ratings_total !== null
-                      ? formatDelta(competitor.user_ratings_total - selfCount)
+                    displaySelfCount !== null &&
+                    competitor.user_ratings_total !== null
+                      ? formatDelta(
+                          competitor.user_ratings_total - displaySelfCount
+                        )
                       : null;
-                  const yearsActive =
-                    typeof competitor.years_active === "number"
-                      ? `${competitor.years_active} ans`
-                      : "indisponible";
                   return (
                     <Card key={competitor.id} className="h-full">
                       <CardContent className="flex h-full flex-col gap-3 pt-6">
@@ -1553,11 +1640,7 @@ const normalizeName = (value: string) =>
                         </div>
                         <div className="flex flex-wrap gap-2 text-xs text-slate-500">
                           {insights.length > 0 ? (
-                            insights.map((insight) => (
-                              <Badge key={insight} variant="neutral">
-                                {insight}
-                              </Badge>
-                            ))
+                            renderChipList(insights)
                           ) : (
                             <span>
                               Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir l’analyse.
@@ -1576,22 +1659,13 @@ const normalizeName = (value: string) =>
                               {reviewsDelta ? ` (${reviewsDelta} vs vous)` : ""}
                             </li>
                             <li>Distance: {formatDistance(competitor.distance_m)}</li>
-                            <li
-                              title="Google ne fournit pas toujours l’année d’ouverture via notre flux actuel."
-                            >
-                              Ancienneté: {yearsActive}
-                            </li>
                           </ul>
                         </div>
                         <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
                           <div className="font-semibold text-slate-700">Tags stratégiques</div>
                           <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
                             {strategicTags.length > 0 ? (
-                              strategicTags.map((tag) => (
-                                <Badge key={tag} variant="neutral">
-                                  {tag}
-                                </Badge>
-                              ))
+                              renderChipList(strategicTags)
                             ) : (
                               <span>Aucun tag stratégique.</span>
                             )}
@@ -1710,22 +1784,24 @@ const normalizeName = (value: string) =>
                       <option value="reviews">Volume avis</option>
                     </select>
                   </label>
-                  <label className="text-xs font-semibold text-slate-600">
-                    Top
-                    <select
-                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                      value={radarTopLimit}
-                      onChange={(event) =>
-                        setRadarTopLimit(
-                          Number(event.target.value) as 10 | 25 | 50
-                        )
-                      }
-                    >
-                      <option value={10}>Top 10</option>
-                      <option value={25}>Top 25</option>
-                      <option value={50}>Top 50</option>
-                    </select>
-                  </label>
+                  {topLimitOptions.length > 0 && (
+                    <label className="text-xs font-semibold text-slate-600">
+                      Top
+                      <select
+                        className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                        value={radarTopLimit ?? ""}
+                        onChange={(event) =>
+                          setRadarTopLimit(Number(event.target.value))
+                        }
+                      >
+                        {topLimitOptions.map((value) => (
+                          <option key={value} value={value}>
+                            Top {value}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                     <input
                       type="checkbox"
@@ -1829,7 +1905,7 @@ const normalizeName = (value: string) =>
                     const isPending = pendingPlaceIds.includes(competitor.place_id);
                     const isFollowed = competitor.is_followed;
                     const insights = getCompetitorInsights(competitor);
-                    const selfAvg = selfStatsQuery.data?.avg ?? null;
+                    const selfAvg = displaySelfAvg;
                     const delta =
                       typeof competitor.rating === "number" && selfAvg !== null
                         ? competitor.rating - selfAvg
@@ -1844,13 +1920,12 @@ const normalizeName = (value: string) =>
                         ? formatDelta(competitor.rating - selfAvg)
                         : null;
                     const reviewsDelta =
-                      selfCount !== null && competitor.user_ratings_total !== null
-                        ? formatDelta(competitor.user_ratings_total - selfCount)
+                      displaySelfCount !== null &&
+                      competitor.user_ratings_total !== null
+                        ? formatDelta(
+                            competitor.user_ratings_total - displaySelfCount
+                          )
                         : null;
-                    const yearsActive =
-                      typeof competitor.years_active === "number"
-                        ? `${competitor.years_active} ans`
-                        : "indisponible";
                     const dangerRadius =
                       typeof radiusKm === "number" ? radiusKm * 1000 * 0.5 : null;
                     const isDangerous =
@@ -1916,11 +1991,7 @@ const normalizeName = (value: string) =>
                         </div>
                         <div className="flex flex-wrap gap-2 text-xs text-slate-500">
                           {insights.length > 0 ? (
-                            insights.map((insight) => (
-                              <Badge key={insight} variant="neutral">
-                                {insight}
-                              </Badge>
-                            ))
+                            renderChipList(insights)
                           ) : (
                             <span>
                               Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir l’analyse.
@@ -1939,22 +2010,13 @@ const normalizeName = (value: string) =>
                               {reviewsDelta ? ` (${reviewsDelta} vs vous)` : ""}
                             </li>
                             <li>Distance: {formatDistance(competitor.distance_m)}</li>
-                            <li
-                              title="Google ne fournit pas toujours l’année d’ouverture via notre flux actuel."
-                            >
-                              Ancienneté: {yearsActive}
-                            </li>
                           </ul>
                         </div>
                         <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
                           <div className="font-semibold text-slate-700">Tags stratégiques</div>
                           <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
                             {strategicTags.length > 0 ? (
-                              strategicTags.map((tag) => (
-                                <Badge key={tag} variant="neutral">
-                                  {tag}
-                                </Badge>
-                              ))
+                              renderChipList(strategicTags)
                             ) : (
                               <span>Aucun tag stratégique.</span>
                             )}
