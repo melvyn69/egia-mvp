@@ -82,7 +82,7 @@ const getCompetitorInsights = (row: CompetitorRow) => {
     if (row.rating <= 3.5) insights.push("Note à améliorer");
   }
   if (typeof row.user_ratings_total === "number") {
-    if (row.user_ratings_total >= 200) insights.push("Volume d'avis élevé");
+    if (row.user_ratings_total >= 200) insights.push("Avis élevés");
     if (row.user_ratings_total <= 20) insights.push("Peu d'avis");
   }
   if (typeof row.distance_m === "number" && row.distance_m <= 800) {
@@ -163,10 +163,10 @@ const getWatchlistRationale = (row: CompetitorRow, selfAvg: number | null) => {
       return "Note supérieure et concurrent très proche.";
     }
     if (delta >= 0.2 && hasStrongVolume) {
-      return "Note supérieure avec un volume d’avis élevé.";
+      return "Note supérieure avec des avis élevés.";
     }
     if (delta <= -0.2 && hasStrongVolume) {
-      return "Volume d’avis élevé mais note inférieure à la vôtre.";
+      return "Avis élevés mais note inférieure à la vôtre.";
     }
     if (delta >= 0.2 && isClose) {
       return "Note supérieure dans votre zone immédiate.";
@@ -174,33 +174,17 @@ const getWatchlistRationale = (row: CompetitorRow, selfAvg: number | null) => {
   }
 
   if (isVeryClose && hasStrongVolume) {
-    return "Concurrent très proche avec un volume d’avis élevé.";
+    return "Concurrent très proche avec des avis élevés.";
   }
   if (isVeryClose) {
     return "Concurrent très proche de votre emplacement.";
   }
   if (hasStrongVolume) {
-    return "Volume d’avis élevé dans votre zone.";
+    return "Avis élevés dans votre zone.";
   }
   return "Concurrent comparable dans votre zone.";
 };
 
-const getCompetitorStatus = (row: CompetitorRow, selfAvg: number | null) => {
-  const rating = typeof row.rating === "number" ? row.rating : null;
-  const distance = typeof row.distance_m === "number" ? row.distance_m : null;
-  const delta = selfAvg !== null && rating !== null ? rating - selfAvg : null;
-
-  if (delta !== null && delta >= 0.4) {
-    return { label: "RISQUE", variant: "warning" as const };
-  }
-  if (delta !== null && delta <= -0.3) {
-    return { label: "OPPORTUNITÉ", variant: "neutral" as const };
-  }
-  if (distance !== null && distance <= 800) {
-    return { label: "PROCHE", variant: "neutral" as const };
-  }
-  return { label: "STABLE", variant: "neutral" as const };
-};
 
 const getMajorWeakPoint = (row: CompetitorRow, radiusKm: number) => {
   const rating = typeof row.rating === "number" ? row.rating : null;
@@ -744,8 +728,21 @@ const Competitors = ({ session }: CompetitorsProps) => {
     displaySelfCount !== null ? `${displaySelfCount}` : "—";
   const buildGoogleLink = (placeId: string) =>
     `https://www.google.com/maps/place/?q=place_id:${placeId}`;
-  const formatDelta = (delta: number) =>
-    `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`;
+const formatDelta = (delta: number) =>
+  `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`;
+
+const formatVsDelta = (delta: number | null) => {
+  if (delta === null) return null;
+  if (Math.abs(delta) < 0.05) return null;
+  return formatDelta(delta);
+};
+
+const formatCountDelta = (delta: number | null) => {
+  if (delta === null) return null;
+  if (Math.abs(delta) < 1) return null;
+  const rounded = Math.round(delta);
+  return `${rounded >= 0 ? "+" : ""}${rounded}`;
+};
 
   const radarRatings = radarItems
     .map((row) => row.rating)
@@ -756,10 +753,6 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const radarDistances = radarItems
     .map((row) => row.distance_m)
     .filter((value): value is number => typeof value === "number");
-  const medianRating = median(radarRatings);
-  const medianReviews = median(radarReviewCounts);
-  const medianDistance = median(radarDistances);
-  const maxRating = radarRatings.length > 0 ? Math.max(...radarRatings) : 0;
 
   const filteredRadar = useMemo(() => {
     let items = radarItems.slice();
@@ -840,14 +833,19 @@ const Competitors = ({ session }: CompetitorsProps) => {
   }, [toast]);
 
   const getRadarTier = (row: CompetitorRow) => {
-    const rating = row.rating ?? 0;
-    const reviews = row.user_ratings_total ?? 0;
-    const distance = row.distance_m ?? Number.MAX_SAFE_INTEGER;
-    if (rating >= maxRating && reviews > medianReviews) {
-      return { label: "Leader", variant: "success" as const };
-    }
-    if (rating >= medianRating && distance <= medianDistance) {
-      return { label: "Challenger", variant: "warning" as const };
+    const rating = typeof row.rating === "number" ? row.rating : null;
+    const reviews =
+      typeof row.user_ratings_total === "number" ? row.user_ratings_total : null;
+    if (displaySelfAvg !== null && displaySelfCount !== null) {
+      if (rating !== null && reviews !== null) {
+        if (rating >= displaySelfAvg && reviews >= displaySelfCount) {
+          return { label: "Leader", variant: "success" as const };
+        }
+        if (rating >= displaySelfAvg || reviews >= displaySelfCount) {
+          return { label: "Challenger", variant: "warning" as const };
+        }
+        return { label: "Outsider", variant: "neutral" as const };
+      }
     }
     return { label: "Outsider", variant: "neutral" as const };
   };
@@ -859,16 +857,19 @@ const Competitors = ({ session }: CompetitorsProps) => {
   }, [followedItems]);
 
   const getSelectionTier = (row: CompetitorRow) => {
-    const baseAvg = displaySelfAvg;
-    if (baseAvg === null) {
-      return { label: "OUTSIDER", variant: "neutral" as const };
-    }
-    const rating = row.rating ?? 0;
-    if (rating >= baseAvg + 0.2) {
-      return { label: "LEADER", variant: "success" as const };
-    }
-    if (rating >= baseAvg - 0.2) {
-      return { label: "CHALLENGER", variant: "warning" as const };
+    const rating = typeof row.rating === "number" ? row.rating : null;
+    const reviews =
+      typeof row.user_ratings_total === "number" ? row.user_ratings_total : null;
+    if (displaySelfAvg !== null && displaySelfCount !== null) {
+      if (rating !== null && reviews !== null) {
+        if (rating >= displaySelfAvg && reviews >= displaySelfCount) {
+          return { label: "LEADER", variant: "success" as const };
+        }
+        if (rating >= displaySelfAvg || reviews >= displaySelfCount) {
+          return { label: "CHALLENGER", variant: "warning" as const };
+        }
+        return { label: "OUTSIDER", variant: "neutral" as const };
+      }
     }
     return { label: "OUTSIDER", variant: "neutral" as const };
   };
@@ -988,6 +989,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
   }, [radarItems, displaySelfAvg, radiusKm]);
 
   const swotBullets = useMemo(() => {
+    const hasEnoughData = swotReport.source.length >= 10;
     const forces: string[] = [];
     const weaknesses: string[] = [];
     const opportunities: string[] = [];
@@ -1015,13 +1017,13 @@ const Competitors = ({ session }: CompetitorsProps) => {
       const avgVolume = swotReport.avgVolume;
       if (displaySelfCount >= avgVolume * 1.2) {
         forces.push(
-          `Volume d'avis supérieur à la moyenne (${displaySelfCount} vs ~${Math.round(
+          `Avis supérieurs à la moyenne (${displaySelfCount} vs ~${Math.round(
             avgVolume
           )}).`
         );
       } else if (displaySelfCount <= avgVolume * 0.8) {
         weaknesses.push(
-          `Volume d'avis inférieur à la moyenne (${displaySelfCount} vs ~${Math.round(
+          `Avis inférieurs à la moyenne (${displaySelfCount} vs ~${Math.round(
             avgVolume
           )}).`
         );
@@ -1119,13 +1121,40 @@ const Competitors = ({ session }: CompetitorsProps) => {
       );
     }
 
-    const trimList = (list: string[]) => list.slice(0, 3);
+    if (hasEnoughData) {
+      if (forces.length === 0 && swotReport.avgRating !== null) {
+        forces.push(
+          `Marché stable autour de ${swotReport.avgRating.toFixed(1)} de note.`
+        );
+      }
+      if (weaknesses.length === 0 && swotReport.avgRating !== null) {
+        weaknesses.push(
+          `Écart de note à surveiller vs moyenne (${swotReport.avgRating.toFixed(1)}).`
+        );
+      }
+      if (opportunities.length === 0 && swotReport.avgVolume !== null) {
+        opportunities.push(
+          `Volume moyen ~${Math.round(swotReport.avgVolume)} avis à capter.`
+        );
+      }
+      if (threats.length === 0 && swotReport.highRatedCount > 0) {
+        threats.push(
+          `${swotReport.highRatedCount} concurrent(s) très bien notés.`
+        );
+      }
+      if (actions.length === 0) {
+        actions.push(
+          "Prioriser la collecte d’avis sur les périodes creuses."
+        );
+      }
+    }
+    const trimList = (list: string[]) => list.slice(0, 1);
     return {
       forces: trimList(forces),
       weaknesses: trimList(weaknesses),
       opportunities: trimList(opportunities),
       threats: trimList(threats),
-      actions: actions.slice(0, 5)
+      actions: actions.slice(0, 1)
     };
   }, [displaySelfAvg, displaySelfCount, swotReport]);
 
@@ -1536,7 +1565,6 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       <div className="text-xs text-slate-500">
                         Note: {selfScoreLabel} / Avis: {selfReviewsLabel}
                       </div>
-                      <div className="text-xs text-slate-500">Distance: —</div>
                     </CardContent>
                   </Card>
                   <Card className="h-full">
@@ -1550,15 +1578,15 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       {swotReport.leader ? (
                         <>
                           <div className="text-xs text-slate-500">
-                            Note: {swotReport.leader.rating ?? "—"} / Avis:{" "}
-                            {swotReport.leader.user_ratings_total ?? "—"}
+                            Note: {swotReport.leader.rating ?? "n.c."} / Avis:{" "}
+                            {swotReport.leader.user_ratings_total ?? "n.c."}
                           </div>
                           <div className="text-xs text-slate-500">
                             Delta:{" "}
                             {displaySelfAvg !== null && swotReport.leader.rating !== null
-                              ? `${formatDelta(
+                              ? formatVsDelta(
                                   swotReport.leader.rating - displaySelfAvg
-                                )}`
+                                ) ?? "—"
                               : "—"}
                           </div>
                           <div className="text-xs text-slate-500">
@@ -1583,15 +1611,15 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       {swotReport.challenger ? (
                         <>
                           <div className="text-xs text-slate-500">
-                            Note: {swotReport.challenger.rating ?? "—"} / Avis:{" "}
-                            {swotReport.challenger.user_ratings_total ?? "—"}
+                            Note: {swotReport.challenger.rating ?? "n.c."} / Avis:{" "}
+                            {swotReport.challenger.user_ratings_total ?? "n.c."}
                           </div>
                           <div className="text-xs text-slate-500">
                             Delta:{" "}
                             {displaySelfAvg !== null && swotReport.challenger.rating !== null
-                              ? `${formatDelta(
+                              ? formatVsDelta(
                                   swotReport.challenger.rating - displaySelfAvg
-                                )}`
+                                ) ?? "—"
                               : "—"}
                           </div>
                           <div className="text-xs text-slate-500">
@@ -1647,17 +1675,17 @@ const Competitors = ({ session }: CompetitorsProps) => {
                   });
                   const opportunities = getOpportunitiesToCheck(competitor);
                   const rationale = getWatchlistRationale(competitor, displaySelfAvg);
-                  const ratingDeltaLabel =
+                  const ratingDeltaLabel = formatVsDelta(
                     displaySelfAvg !== null && competitor.rating !== null
-                      ? formatDelta(competitor.rating - displaySelfAvg)
-                      : "—";
-                  const reviewsDeltaLabel =
+                      ? competitor.rating - displaySelfAvg
+                      : null
+                  );
+                  const reviewsDeltaLabel = formatCountDelta(
                     displaySelfCount !== null &&
-                    competitor.user_ratings_total !== null
-                      ? formatDelta(
-                          competitor.user_ratings_total - displaySelfCount
-                        )
-                      : "—";
+                      competitor.user_ratings_total !== null
+                      ? competitor.user_ratings_total - displaySelfCount
+                      : null
+                  );
                   return (
                     <Card key={competitor.id} className="h-full">
                       <CardContent className="flex h-full flex-col gap-3 pt-6">
@@ -1675,15 +1703,19 @@ const Competitors = ({ session }: CompetitorsProps) => {
                             </p>
                           </div>
                           <div className="text-xs text-slate-500">
-                            {formatDistance(competitor.distance_m)}
+                            {competitor.distance_m === null
+                              ? "n.c."
+                              : formatDistance(competitor.distance_m)}
                           </div>
                         </div>
                         <div className="flex items-center gap-4 text-xs text-slate-500">
-                          <span>Note: {competitor.rating ?? "—"}</span>
-                          <span>Avis: {competitor.user_ratings_total ?? "—"}</span>
+                          <span>Note: {competitor.rating ?? "n.c."}</span>
+                          <span>Avis: {competitor.user_ratings_total ?? "n.c."}</span>
                         </div>
                         <div className="flex flex-wrap gap-2 text-xs text-slate-500">
-                          {insights.length > 0 ? (
+                          {strategicTags.length > 0 ? (
+                            renderChipList(strategicTags)
+                          ) : insights.length > 0 ? (
                             renderChipList(insights)
                           ) : (
                             <span>Aucun signal distinctif détecté.</span>
@@ -1693,24 +1725,20 @@ const Competitors = ({ session }: CompetitorsProps) => {
                           <div className="font-semibold text-slate-700">Comparaison</div>
                           <ul className="mt-1 space-y-1 text-xs text-slate-500">
                             <li>
-                              Note: {competitor.rating ?? "—"} ({ratingDeltaLabel} vs vous)
+                              Note: {competitor.rating ?? "n.c."}
+                              {ratingDeltaLabel ? ` (${ratingDeltaLabel} vs vous)` : ""}
                             </li>
                             <li>
-                              Avis: {competitor.user_ratings_total ?? "—"} (
-                              {reviewsDeltaLabel} vs vous)
+                              Avis: {competitor.user_ratings_total ?? "n.c."}
+                              {reviewsDeltaLabel ? ` (${reviewsDeltaLabel} vs vous)` : ""}
                             </li>
-                            <li>Distance: {formatDistance(competitor.distance_m)}</li>
+                            <li>
+                              Distance:{" "}
+                              {competitor.distance_m === null
+                                ? "n.c."
+                                : formatDistance(competitor.distance_m)}
+                            </li>
                           </ul>
-                        </div>
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                          <div className="font-semibold text-slate-700">Tags stratégiques</div>
-                          <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                            {strategicTags.length > 0 ? (
-                              renderChipList(strategicTags)
-                            ) : (
-                              <span>Aucun tag stratégique.</span>
-                            )}
-                          </div>
                         </div>
                         <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
                           <div className="font-semibold text-slate-700">
@@ -1718,16 +1746,18 @@ const Competitors = ({ session }: CompetitorsProps) => {
                           </div>
                           <div className="mt-1">{rationale}</div>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                          <div className="font-semibold text-slate-700">
-                            Opportunités à vérifier
+                        {opportunities.length > 1 && (
+                          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                            <div className="font-semibold text-slate-700">
+                              Opportunités à vérifier
+                            </div>
+                            <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-slate-500">
+                              {opportunities.slice(0, 2).map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
                           </div>
-                          <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-slate-500">
-                            {opportunities.map((item) => (
-                              <li key={item}>{item}</li>
-                            ))}
-                          </ul>
-                        </div>
+                        )}
                         <div className="mt-auto flex flex-wrap items-center justify-between gap-3">
                           {confirmRemoveId === competitor.id ? (
                             <div className="flex items-center gap-2">
@@ -1822,7 +1852,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     >
                       <option value="distance">Distance</option>
                       <option value="rating">Note</option>
-                      <option value="reviews">Volume avis</option>
+                      <option value="reviews">Avis</option>
                     </select>
                   </label>
                   {topLimitOptions.length > 0 && (
@@ -1902,25 +1932,22 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                         <span className="font-semibold text-slate-700">
-                          Résumé radar —
-                        </span>
-                        <span>
                           {[
-                            `${radarSummary.total} établissements`,
+                            `${radarSummary.total} concurrents`,
                             radarSummary.higherThanSelf !== null
                               ? `${radarSummary.higherThanSelf} mieux notés que vous`
                               : null,
                             radarSummary.closestDistance !== null
-                              ? `Plus proche: ${formatDistance(
+                              ? `Plus proche : ${formatDistance(
                                   radarSummary.closestDistance
                                 )}`
                               : null,
                             radarSummary.bestRating !== null
-                              ? `Meilleure note: ${radarSummary.bestRating.toFixed(1)}`
+                              ? `Meilleure note : ${radarSummary.bestRating.toFixed(1)}`
                               : null
                           ]
                             .filter(Boolean)
-                            .join(" • ")}
+                            .join(" · ")}
                         </span>
                       </div>
                       <span
@@ -1947,26 +1974,22 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     const isFollowed = competitor.is_followed;
                     const insights = getCompetitorInsights(competitor);
                     const selfAvg = displaySelfAvg;
-                    const delta =
-                      typeof competitor.rating === "number" && selfAvg !== null
-                        ? competitor.rating - selfAvg
-                        : null;
                     const strategicTags = getStrategicTags(competitor, {
                       selfAvg,
                       radiusKm
                     });
                     const opportunities = getOpportunitiesToCheck(competitor);
-                    const ratingDeltaLabel =
+                    const ratingDeltaLabel = formatVsDelta(
                       selfAvg !== null && competitor.rating !== null
-                        ? formatDelta(competitor.rating - selfAvg)
-                        : "—";
-                    const reviewsDeltaLabel =
+                        ? competitor.rating - selfAvg
+                        : null
+                    );
+                    const reviewsDeltaLabel = formatCountDelta(
                       displaySelfCount !== null &&
-                      competitor.user_ratings_total !== null
-                        ? formatDelta(
-                            competitor.user_ratings_total - displaySelfCount
-                          )
-                        : "—";
+                        competitor.user_ratings_total !== null
+                        ? competitor.user_ratings_total - displaySelfCount
+                        : null
+                    );
                     const dangerRadius =
                       typeof radiusKm === "number" ? radiusKm * 1000 * 0.5 : null;
                     const isDangerous =
@@ -1975,7 +1998,6 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       competitor.rating >= 4.8 &&
                       dangerRadius !== null &&
                       competitor.distance_m <= dangerRadius;
-                    const status = getCompetitorStatus(competitor, selfAvg);
                     const weakPoint = getMajorWeakPoint(competitor, radiusKm);
                     const growthProxy =
                       radarSummary.medianRating !== null &&
@@ -1985,7 +2007,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
                           )
                         : null;
                     const growthLabel =
-                      growthProxy === null ? "—" : `${growthProxy >= 0 ? "+" : ""}${growthProxy}%`;
+                      growthProxy === null
+                        ? "n.c."
+                        : `${growthProxy >= 0 ? "+" : ""}${growthProxy}%`;
                     return (
                     <Card
                       key={competitor.id}
@@ -1999,39 +2023,28 @@ const Competitors = ({ session }: CompetitorsProps) => {
                                 {competitor.name}
                               </p>
                               <Badge variant={tier.variant}>{tier.label}</Badge>
-                              <Badge variant={status.variant}>{status.label}</Badge>
                               {isFollowed && <Badge variant="neutral">Suivi</Badge>}
                               {isDangerous && <Badge variant="warning">Impact fort</Badge>}
-                              {delta !== null && (
-                                <Badge variant="neutral">
-                                  {delta >= 0 ? "+" : ""}
-                                  {delta.toFixed(1)} vs vous
-                                </Badge>
-                              )}
                             </div>
                             <p className="text-xs text-slate-500">
                               {competitor.address ?? "Adresse indisponible"}
                             </p>
                           </div>
                           <Badge variant="neutral">
-                            {formatDistance(competitor.distance_m)}
+                            {competitor.distance_m === null
+                              ? "n.c."
+                              : formatDistance(competitor.distance_m)}
                           </Badge>
                         </div>
                         <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                          <span>Note: {competitor.rating ?? "—"}</span>
-                          <span>Avis: {competitor.user_ratings_total ?? "—"}</span>
+                          <span>Note: {competitor.rating ?? "n.c."}</span>
+                          <span>Avis: {competitor.user_ratings_total ?? "n.c."}</span>
                           <span>Croissance: {growthLabel}</span>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                          <div className="text-[10px] font-semibold tracking-[0.2em] text-slate-500">
-                            POINT FAIBLE MAJEUR
-                          </div>
-                          <div className="text-sm font-semibold text-slate-700">
-                            {weakPoint}
-                          </div>
-                        </div>
                         <div className="flex flex-wrap gap-2 text-xs text-slate-500">
-                          {insights.length > 0 ? (
+                          {strategicTags.length > 0 ? (
+                            renderChipList(strategicTags)
+                          ) : insights.length > 0 ? (
                             renderChipList(insights)
                           ) : (
                             <span>Lecture limitée : peu de signaux fiables.</span>
@@ -2041,35 +2054,41 @@ const Competitors = ({ session }: CompetitorsProps) => {
                           <div className="font-semibold text-slate-700">Comparaison</div>
                           <ul className="mt-1 space-y-1 text-xs text-slate-500">
                             <li>
-                              Note: {competitor.rating ?? "—"} ({ratingDeltaLabel} vs vous)
+                              Note: {competitor.rating ?? "n.c."}
+                              {ratingDeltaLabel ? ` (${ratingDeltaLabel} vs vous)` : ""}
                             </li>
                             <li>
-                              Avis: {competitor.user_ratings_total ?? "—"} (
-                              {reviewsDeltaLabel} vs vous)
+                              Avis: {competitor.user_ratings_total ?? "n.c."}
+                              {reviewsDeltaLabel ? ` (${reviewsDeltaLabel} vs vous)` : ""}
                             </li>
-                            <li>Distance: {formatDistance(competitor.distance_m)}</li>
+                            <li>
+                              Distance:{" "}
+                              {competitor.distance_m === null
+                                ? "n.c."
+                                : formatDistance(competitor.distance_m)}
+                            </li>
                           </ul>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                          <div className="font-semibold text-slate-700">Tags stratégiques</div>
-                          <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                            {strategicTags.length > 0 ? (
-                              renderChipList(strategicTags)
-                            ) : (
-                              <span>Aucun tag stratégique.</span>
-                            )}
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                          <div className="text-[10px] font-semibold tracking-[0.2em] text-slate-500">
+                            POINT FAIBLE MAJEUR
+                          </div>
+                          <div className="text-sm font-semibold text-slate-700">
+                            {weakPoint}
                           </div>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                          <div className="font-semibold text-slate-700">
-                            Opportunités à vérifier
+                        {opportunities.length > 1 && (
+                          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                            <div className="font-semibold text-slate-700">
+                              Opportunités à vérifier
+                            </div>
+                            <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-slate-500">
+                              {opportunities.slice(0, 2).map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
                           </div>
-                          <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-slate-500">
-                            {opportunities.map((item) => (
-                              <li key={item}>{item}</li>
-                            ))}
-                          </ul>
-                        </div>
+                        )}
                         <div className="mt-auto flex flex-wrap items-center justify-between gap-3">
                           <Button
                             variant="outline"
@@ -2198,7 +2217,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     </p>
                   ) : (
                     <ul className="list-disc space-y-1 pl-4 text-sm">
-                      {swotBullets.forces.slice(0, 2).map((item) => (
+                      {swotBullets.forces.map((item) => (
                         <li key={item}>{item}</li>
                       ))}
                     </ul>
@@ -2220,7 +2239,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     </p>
                   ) : (
                     <ul className="list-disc space-y-1 pl-4 text-sm">
-                      {swotBullets.weaknesses.slice(0, 2).map((item) => (
+                      {swotBullets.weaknesses.map((item) => (
                         <li key={item}>{item}</li>
                       ))}
                     </ul>
@@ -2245,11 +2264,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     Élargis le rayon ou suis des concurrents pour révéler des opportunités.
                   </p>
                 ) : (
-                  <ul className="list-disc space-y-1 pl-4 text-sm">
-                    {swotBullets.opportunities.slice(0, 2).map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
+                    <ul className="list-disc space-y-1 pl-4 text-sm">
+                      {swotBullets.opportunities.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
                 )}
                 <p className="text-xs text-sky-700/70">
                   Prochaine action : viser les gains rapides sur les points faibles.
@@ -2267,11 +2286,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     Impossible d’isoler des menaces sans davantage de données.
                   </p>
                 ) : (
-                  <ul className="list-disc space-y-1 pl-4 text-sm">
-                    {swotBullets.threats.slice(0, 3).map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
+                    <ul className="list-disc space-y-1 pl-4 text-sm">
+                      {swotBullets.threats.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
                 )}
                 <p className="text-xs text-slate-500">
                   Prochaine action : surveiller ces rivaux chaque semaine.

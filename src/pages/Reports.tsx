@@ -32,6 +32,22 @@ type Preset =
 
 type RenderMode = "classic" | "premium";
 
+const formatDateLabel = (value: string | null) => {
+  if (!value) return "—";
+  const date = new Date(value);
+  return date.toLocaleDateString("fr-FR", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric"
+  });
+};
+
+const formatDistance = (value: number | null | undefined) => {
+  if (typeof value !== "number") return "n.c.";
+  if (value < 1000) return `${value} m`;
+  return `${(value / 1000).toFixed(1)} km`;
+};
+
 const Reports = ({ session, locations }: ReportsProps) => {
   const supabaseClient = supabase;
   const queryClient = useQueryClient();
@@ -466,86 +482,248 @@ const Reports = ({ session, locations }: ReportsProps) => {
                       </Button>
                     </div>
                   </div>
-                  {isOpen && (
-                    <div className="mt-4 space-y-4">
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-600">
-                          <div className="font-semibold text-slate-700">
-                            Indicateurs
+                  {isOpen && (() => {
+                    const stats = payload?.stats ?? {};
+                    const swot = payload?.swot ?? {};
+                    const plan = payload?.plan_14_days ?? [];
+                    const topCompetitors = payload?.top_competitors ?? [];
+                    const locationLabel =
+                      locations.find((location) => location.id === report.location_id)
+                        ?.location_title ?? "Établissement";
+                    const zoneLabel =
+                      report.title || (report as { name?: string | null }).name || "Zone non précisée";
+                    const radiusLabel =
+                      typeof (payload as { radius_km?: number | null })?.radius_km === "number"
+                        ? `${(payload as { radius_km?: number | null }).radius_km} km`
+                        : "—";
+                    const generatedAt = formatDateLabel(report.created_at ?? null);
+                    const positioning =
+                      typeof stats.high_risk_count === "number" && stats.high_risk_count >= 3
+                        ? "Outsider"
+                        : typeof stats.best_rating === "number" && stats.best_rating >= 4.7
+                          ? "Challenger"
+                          : "Leader";
+                    const risks =
+                      swot.threats?.length
+                        ? swot.threats.slice(0, 3)
+                        : typeof stats.high_risk_count === "number"
+                          ? [`${stats.high_risk_count} concurrent(s) à fort impact local.`]
+                          : ["Risque concurrentiel non quantifié."];
+                    const opportunities =
+                      swot.opportunities?.length
+                        ? swot.opportunities.slice(0, 3)
+                        : typeof stats.median_reviews === "number"
+                          ? [
+                              `Volume moyen ~${Math.round(
+                                stats.median_reviews
+                              )} avis à capter.`
+                            ]
+                          : ["Opportunités en attente de données complémentaires."];
+                    const executiveSummary =
+                      report.summary ||
+                      (typeof stats.best_rating === "number"
+                        ? `Marché compétitif avec des acteurs jusqu'à ${stats.best_rating.toFixed(
+                            1
+                          )}/5.`
+                        : "Marché concurrentiel à surveiller.");
+                    const actions = plan.length > 0 ? plan.slice(0, 3) : [];
+                    const actionWhy =
+                      typeof stats.best_rating === "number"
+                        ? `Pourquoi : marché noté jusqu'à ${stats.best_rating.toFixed(1)}/5.`
+                        : `Pourquoi : ${stats.total ?? "—"} concurrents observés.`;
+                    const actionImpact =
+                      "Impact attendu : améliorer la perception et la préférence locale.";
+                    return (
+                      <div className="mt-6 space-y-6">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <Badge variant="neutral">
+                              Veille concurrentielle – EGIA
+                            </Badge>
+                            <span className="text-xs text-slate-500">{generatedAt}</span>
                           </div>
-                          <div className="mt-2 space-y-1">
-                            <div>Total: {payload?.stats?.total ?? "—"}</div>
-                            <div>
-                              Mediane note: {payload?.stats?.median_rating ?? "—"}
+                          <div className="mt-4 space-y-1">
+                            <p className="text-xl font-semibold text-slate-900">
+                              {locationLabel}
+                            </p>
+                            <p className="text-sm text-slate-500">
+                              Zone analysée : {zoneLabel} · Rayon : {radiusLabel}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                          <div className="text-sm font-semibold text-slate-900">
+                            Résumé exécutif
+                          </div>
+                          <div className="mt-3 grid gap-4 md:grid-cols-2">
+                            <div className="space-y-2 text-sm text-slate-600">
+                              <div>
+                                Positionnement global :{" "}
+                                <span className="font-semibold text-slate-900">
+                                  {positioning}
+                                </span>
+                              </div>
+                              <div>
+                                Concurrents observés :{" "}
+                                <span className="font-semibold text-slate-900">
+                                  {stats.total ?? "—"}
+                                </span>
+                              </div>
+                              <div className="text-xs text-slate-500">
+                                {executiveSummary}
+                              </div>
                             </div>
-                            <div>
-                              Mediane avis: {payload?.stats?.median_reviews ?? "—"}
-                            </div>
-                            <div>
-                              Plus proche: {payload?.stats?.closest_m ?? "—"} m
+                            <div className="grid gap-3 text-xs text-slate-600">
+                              <div>
+                                <div className="font-semibold text-slate-700">
+                                  Top 3 risques
+                                </div>
+                                <ul className="mt-2 list-disc space-y-1 pl-4">
+                                  {risks.map((item) => (
+                                    <li key={item}>{item}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div>
+                                <div className="font-semibold text-slate-700">
+                                  Top 3 opportunités
+                                </div>
+                                <ul className="mt-2 list-disc space-y-1 pl-4">
+                                  {opportunities.map((item) => (
+                                    <li key={item}>{item}</li>
+                                  ))}
+                                </ul>
+                              </div>
                             </div>
                           </div>
                         </div>
-                        <div className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-600">
-                          <div className="font-semibold text-slate-700">
-                            Top concurrents
+
+                        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                          <div className="text-sm font-semibold text-slate-900">
+                            Podium concurrentiel
                           </div>
-                          <ul className="mt-2 list-disc space-y-1 pl-4">
-                            {payload?.top_competitors?.length ? (
-                              payload.top_competitors.map((item, index) => (
-                                <li key={`${item.name ?? "conc"}-${index}`}>
-                                  {item.name ?? "Concurrent"} · {item.rating ?? "—"}/5 ·{" "}
-                                  {item.reviews ?? "—"} avis
-                                </li>
-                              ))
-                            ) : (
-                              <li>Aucun concurrent disponible.</li>
-                            )}
-                          </ul>
+                          <div className="mt-4 grid gap-4 md:grid-cols-3">
+                            <div className="rounded-xl border border-slate-200 p-4 text-xs text-slate-600">
+                              <div className="font-semibold text-slate-900">Vous</div>
+                              <div className="mt-2 space-y-1">
+                                <div>Note : —</div>
+                                <div>Avis : —</div>
+                                <div>Distance : —</div>
+                              </div>
+                            </div>
+                            {topCompetitors.slice(0, 2).map((item, index) => (
+                              <div
+                                key={`${item.name ?? "competitor"}-${index}`}
+                                className="rounded-xl border border-slate-200 p-4 text-xs text-slate-600"
+                              >
+                                <div className="font-semibold text-slate-900">
+                                  {item.name ?? "Concurrent"}
+                                </div>
+                                <div className="mt-2 space-y-1">
+                                  <div>Note : {item.rating ?? "n.c."}</div>
+                                  <div>Avis : {item.reviews ?? "n.c."}</div>
+                                  <div>Distance : {formatDistance(item.distance_m)}</div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                      <div className="grid gap-3 md:grid-cols-2">
-                        {(["forces", "weaknesses", "opportunities", "threats"] as const).map(
-                          (key) => (
+
+                        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                          <div className="text-sm font-semibold text-slate-900">
+                            Analyse radar
+                          </div>
+                          <div className="mt-3 grid gap-3 text-xs text-slate-600 md:grid-cols-2">
+                            <div>
+                              % mieux notés que vous :{" "}
+                              <span className="font-semibold text-slate-900">Non disponible</span>
+                            </div>
+                            <div>
+                              Concurrent le plus proche :{" "}
+                              <span className="font-semibold text-slate-900">
+                                {formatDistance(stats.closest_m)}
+                              </span>
+                            </div>
+                            <div>
+                              Meilleure note du marché :{" "}
+                              <span className="font-semibold text-slate-900">
+                                {typeof stats.best_rating === "number"
+                                  ? stats.best_rating.toFixed(1)
+                                  : "n.c."}
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              {typeof stats.high_risk_count === "number" &&
+                              stats.high_risk_count > 0
+                                ? "Pression concurrentielle élevée à proximité."
+                                : "Marché concurrentiel maîtrisable avec des actions ciblées."}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-4 md:grid-cols-2">
+                          {([
+                            ["forces", "Force"],
+                            ["weaknesses", "Faiblesse"],
+                            ["opportunities", "Opportunité"],
+                            ["threats", "Menace"]
+                          ] as const).map(([key, label]) => (
                             <div
                               key={key}
-                              className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-600"
+                              className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-600"
                             >
                               <div className="font-semibold text-slate-700">
-                                {key === "forces" && "Forces"}
-                                {key === "weaknesses" && "Faiblesses"}
-                                {key === "opportunities" && "Opportunites"}
-                                {key === "threats" && "Menaces"}
+                                {label}
                               </div>
-                              <ul className="mt-2 list-disc space-y-1 pl-4">
-                                {payload?.swot?.[key]?.length ? (
-                                  payload.swot[key].map((item) => (
-                                    <li key={item}>{item}</li>
-                                  ))
-                                ) : (
-                                  <li>Données insuffisantes.</li>
-                                )}
-                              </ul>
+                              <div className="mt-2 text-sm text-slate-600">
+                                {swot[key]?.[0] ?? "Donnée non disponible."}
+                              </div>
+                              <div className="mt-2 text-[11px] text-slate-500">
+                                Prochaine action :{" "}
+                                {key === "forces" &&
+                                  "capitaliser sur ce point fort dans la communication."}
+                                {key === "weaknesses" &&
+                                  "corriger ce point faible avant le prochain cycle d’avis."}
+                                {key === "opportunities" &&
+                                  "prioriser ce levier pour gagner des avis."}
+                                {key === "threats" &&
+                                  "mettre en place un suivi hebdomadaire dédié."}
+                              </div>
                             </div>
-                          )
-                        )}
-                      </div>
-                      <div className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-600">
-                        <div className="font-semibold text-slate-700">
-                          Plan 14 jours
+                          ))}
                         </div>
-                        <ul className="mt-2 list-disc space-y-1 pl-4">
-                          {payload?.plan_14_days?.length ? (
-                            payload.plan_14_days.map((item) => (
-                              <li key={item}>{item}</li>
-                            ))
-                          ) : (
-                            <li>Données insuffisantes.</li>
-                          )}
-                        </ul>
+
+                        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                          <div className="text-sm font-semibold text-slate-900">
+                            Actions recommandées
+                          </div>
+                          <div className="mt-4 grid gap-3 text-xs text-slate-600">
+                            {actions.length > 0 ? (
+                              actions.map((item) => (
+                                <div
+                                  key={item}
+                                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3"
+                                >
+                                  <div className="font-semibold text-slate-700">
+                                    Action : {item}
+                                  </div>
+                                  <div className="mt-1">{actionWhy}</div>
+                                  <div className="mt-1 text-[11px] text-slate-500">
+                                    {actionImpact}
+                                  </div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="text-sm text-slate-500">
+                                Actions en attente de données supplémentaires.
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               );
             })

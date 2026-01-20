@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "../components/ui/badge";
@@ -19,11 +19,36 @@ type AlertRow = {
   payload?: Record<string, unknown> | null;
 };
 
+type AutomationType =
+  | "rating_drop"
+  | "negative_review"
+  | "volume_drop"
+  | "weekly_summary";
+
+type AutomationConfig = {
+  id: string;
+  type: AutomationType;
+  name: string;
+  enabled: boolean;
+  scope: { mode: "all" | "location"; locationId: string | null };
+  frequency: "daily" | "weekly";
+  channel: { inApp: true; email: boolean };
+  params: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const AUTOMATION_STORAGE_KEY = "egia:automations:v1";
+
 const ruleLabelMap: Record<string, string> = {
   NEGATIVE_NO_REPLY: "Avis negatif sans reponse",
   RATING_DROP: "Baisse de satisfaction recente",
   NEGATIVE_SPIKE: "Pic d'avis negatifs",
-  LONG_NEGATIVE: "Avis detaille et sensible"
+  LONG_NEGATIVE: "Avis detaille et sensible",
+  AUTO_RATING_DROP: "Concurrence en hausse de note",
+  AUTO_NEGATIVE_REVIEW: "Avis negatif detecte",
+  AUTO_VOLUME_DROP: "Volume d'avis en baisse",
+  AUTO_WEEKLY_SUMMARY: "Resume hebdomadaire"
 };
 
 const severityLabelMap: Record<AlertRow["severity"], string> = {
@@ -40,6 +65,7 @@ const severityVariantMap: Record<AlertRow["severity"], "neutral" | "warning"> = 
 
 const buildSummary = (payload: Record<string, unknown> | null | undefined) => {
   if (!payload) return "Une alerte prioritaire a ete detectee.";
+  if (typeof payload.message === "string") return payload.message;
   const parts: string[] = [];
   if (typeof payload.rating === "number") {
     parts.push(`${payload.rating}★`);
@@ -79,6 +105,22 @@ const Alerts = ({ session }: AlertsProps) => {
   const queryClient = useQueryClient();
   const [resolveError, setResolveError] = useState<string | null>(null);
   const accessToken = session?.access_token ?? null;
+  const [automations, setAutomations] = useState<AutomationConfig[]>([]);
+  const [mockAlerts, setMockAlerts] = useState<AlertRow[]>([]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(AUTOMATION_STORAGE_KEY);
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored) as AutomationConfig[];
+      if (Array.isArray(parsed)) {
+        setAutomations(parsed);
+      }
+    } catch {
+      setAutomations([]);
+    }
+  }, []);
 
   const alertsQuery = useQuery({
     queryKey: ["alerts", session?.user?.id],
@@ -134,9 +176,10 @@ const Alerts = ({ session }: AlertsProps) => {
   };
 
   const alerts = alertsQuery.data ?? [];
+  const combinedAlerts = [...mockAlerts, ...alerts];
   const formattedAlerts = useMemo(
     () =>
-      alerts.map((alert) => ({
+      combinedAlerts.map((alert) => ({
         ...alert,
         label: ruleLabelMap[alert.rule_code] ?? alert.rule_code,
         summary: buildSummary(alert.payload ?? null),
@@ -149,8 +192,56 @@ const Alerts = ({ session }: AlertsProps) => {
             })
           : "Date inconnue"
       })),
-    [alerts]
+    [combinedAlerts]
   );
+
+  const activeAutomations = useMemo(
+    () => automations.filter((item) => item.enabled),
+    [automations]
+  );
+
+  const buildAutomationPreview = (automation: AutomationConfig) => {
+    const lastRun = new Date(automation.updatedAt);
+    const nextRun = new Date(lastRun.getTime());
+    nextRun.setDate(
+      nextRun.getDate() + (automation.frequency === "weekly" ? 7 : 1)
+    );
+    return {
+      lastLabel: formatRelativeDate(lastRun.toISOString()),
+      nextLabel: nextRun.toLocaleDateString("fr-FR", {
+        day: "2-digit",
+        month: "short"
+      })
+    };
+  };
+
+  const handleTestAutomation = (automation: AutomationConfig) => {
+    const ruleCode =
+      automation.type === "rating_drop"
+        ? "AUTO_RATING_DROP"
+        : automation.type === "negative_review"
+          ? "AUTO_NEGATIVE_REVIEW"
+          : automation.type === "volume_drop"
+            ? "AUTO_VOLUME_DROP"
+            : "AUTO_WEEKLY_SUMMARY";
+    const message =
+      automation.type === "rating_drop"
+        ? "Un concurrent passe devant vous en note."
+        : automation.type === "negative_review"
+          ? "Un nouvel avis negatif sans reponse est detecte."
+          : automation.type === "volume_drop"
+            ? "Le volume d'avis est en baisse sur 7 jours."
+            : "Resume hebdomadaire pret a consulter.";
+    const mockAlert: AlertRow = {
+      id: `mock-${automation.id}-${Date.now()}`,
+      rule_code: ruleCode,
+      severity: "medium",
+      review_id: "mock",
+      triggered_at: new Date().toISOString(),
+      payload: { message }
+    };
+    setMockAlerts((prev) => [mockAlert, ...prev]);
+  };
 
   const lastCheckedLabel =
     alertsQuery.dataUpdatedAt && alertsQuery.dataUpdatedAt > 0
@@ -193,6 +284,53 @@ const Alerts = ({ session }: AlertsProps) => {
           <CardTitle>Alertes a traiter</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs font-semibold text-slate-700">
+                  Automatisations (aperçu)
+                </div>
+                <div className="mt-1 text-[11px] text-slate-500">
+                  Déclenchements simulés pour tester vos règles.
+                </div>
+              </div>
+              <Badge variant="neutral">{activeAutomations.length} actives</Badge>
+            </div>
+            {activeAutomations.length === 0 ? (
+              <p className="mt-2 text-[11px] text-slate-500">
+                Aucune automatisation active pour le moment.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {activeAutomations.map((automation) => {
+                  const preview = buildAutomationPreview(automation);
+                  return (
+                    <div
+                      key={automation.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-600"
+                    >
+                      <div>
+                        <div className="font-semibold text-slate-700">
+                          {automation.name}
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          Dernier declenchement: {preview.lastLabel} · Prochaine
+                          execution: {preview.nextLabel}
+                        </div>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleTestAutomation(automation)}
+                      >
+                        Tester
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           {alertsQuery.isLoading ? (
             <div className="space-y-3">
               <Skeleton className="h-20 w-full" />

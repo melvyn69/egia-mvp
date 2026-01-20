@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Skeleton } from "../components/ui/skeleton";
-import type { Database } from "../database.types";
-import { supabase } from "../lib/supabase";
 
 type AutomationProps = {
   session: Session | null;
@@ -19,695 +15,454 @@ type AutomationProps = {
   locationsError: string | null;
 };
 
-type WorkflowRow = Database["public"]["Tables"]["automation_workflows"]["Row"];
-type ConditionRow = Database["public"]["Tables"]["automation_conditions"]["Row"];
-type ActionRow = Database["public"]["Tables"]["automation_actions"]["Row"];
-type ReviewRow = Database["public"]["Tables"]["google_reviews"]["Row"];
+type AutomationType =
+  | "rating_drop"
+  | "negative_review"
+  | "volume_drop"
+  | "weekly_summary";
 
-type TesterResult = {
-  review: ReviewRow;
-  draftText: string | null;
-  tags: string[];
+type AutomationFrequency = "daily" | "weekly";
+
+type AutomationScope = {
+  mode: "all" | "location";
+  locationId: string | null;
 };
 
-const templates = [
-  {
-    id: "winback",
-    title: "Win-back VIP",
-    description: "Relancer automatiquement les avis VIP et renforcer la fidelisation."
-  },
-  {
-    id: "crisis",
-    title: "Gestion de crise",
-    description: "Prioriser les avis 1-2 etoiles pour reponse rapide."
-  },
-  {
-    id: "autopilot",
-    title: "Pilote automatique",
-    description: "Mode futur: reponses et tags automatiques en continu."
-  }
-];
+type AutomationParams =
+  | { threshold: number }
+  | { maxStars: number; unresolvedHours: number }
+  | { minReviews: number; windowDays: number }
+  | { placeholder: true };
 
-const getSortValue = (row: Record<string, unknown>) => {
-  const position = row.position;
-  const sortOrder = row.sort_order;
-  const createdAt = row.created_at;
-  if (typeof position === "number") {
-    return position;
-  }
-  if (typeof sortOrder === "number") {
-    return sortOrder;
-  }
-  if (typeof createdAt === "string") {
-    return createdAt;
-  }
-  return "";
+type AutomationConfig = {
+  id: string;
+  type: AutomationType;
+  name: string;
+  enabled: boolean;
+  scope: AutomationScope;
+  frequency: AutomationFrequency;
+  channel: { inApp: true; email: boolean };
+  params: AutomationParams;
+  createdAt: string;
+  updatedAt: string;
 };
 
-const normalizeConfig = (value: unknown): Record<string, unknown> => {
-  if (!value) {
-    return {};
+const STORAGE_KEY = "egia:automations:v1";
+
+const automationLabels: Record<AutomationType, string> = {
+  rating_drop: "Alerte baisse de note",
+  negative_review: "Alerte avis negatif",
+  volume_drop: "Alerte volume",
+  weekly_summary: "Resume hebdo"
+};
+
+const defaultParamsByType = (type: AutomationType): AutomationParams => {
+  switch (type) {
+    case "rating_drop":
+      return { threshold: 4.6 };
+    case "negative_review":
+      return { maxStars: 2, unresolvedHours: 48 };
+    case "volume_drop":
+      return { minReviews: 3, windowDays: 7 };
+    case "weekly_summary":
+      return { placeholder: true };
+    default:
+      return { placeholder: true };
   }
-  if (typeof value === "string") {
+};
+
+const buildAutomation = (type: AutomationType): AutomationConfig => {
+  const now = new Date().toISOString();
+  return {
+    id: `auto_${Date.now()}`,
+    type,
+    name: automationLabels[type],
+    enabled: true,
+    scope: { mode: "all", locationId: null },
+    frequency: "daily",
+    channel: { inApp: true, email: false },
+    params: defaultParamsByType(type),
+    createdAt: now,
+    updatedAt: now
+  };
+};
+
+const formatScope = (scope: AutomationScope, locations: AutomationProps["locations"]) => {
+  if (scope.mode === "all") return "Tous les etablissements";
+  if (!scope.locationId) return "Etablissement non defini";
+  const match = locations.find((loc) => loc.id === scope.locationId);
+  return match?.location_title ?? match?.location_resource_name ?? "Etablissement";
+};
+
+const Automation = ({ locations, locationsLoading, locationsError }: AutomationProps) => {
+  const [automations, setAutomations] = useState<AutomationConfig[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (!stored) return;
     try {
-      return JSON.parse(value) as Record<string, unknown>;
+      const parsed = JSON.parse(stored) as AutomationConfig[];
+      if (Array.isArray(parsed)) {
+        setAutomations(parsed);
+        setSelectedId(parsed[0]?.id ?? null);
+      }
     } catch {
-      return {};
+      setAutomations([]);
     }
-  }
-  if (typeof value === "object") {
-    return value as Record<string, unknown>;
-  }
-  return {};
-};
-
-const matchesCondition = (review: ReviewRow, condition: ConditionRow): boolean => {
-  const field = condition.field ?? "";
-  const operator = condition.operator ?? "";
-  const value = (condition.value ?? "").toString();
-
-  if (field === "rating") {
-    const rating = review.rating;
-    const target = Number(value);
-    if (!Number.isFinite(target) || rating === null) {
-      return false;
-    }
-    if (operator === "eq") return rating === target;
-    if (operator === "gte") return rating >= target;
-    if (operator === "lte") return rating <= target;
-    return false;
-  }
-
-  if (field === "source") {
-    const source = "google";
-    if (operator === "eq") {
-      return source === value.toLowerCase();
-    }
-    return false;
-  }
-
-  if (field === "comment") {
-    const comment = (review.comment ?? "").toLowerCase();
-    const needle = value.toLowerCase();
-    if (operator === "contains") {
-      return needle.length > 0 && comment.includes(needle);
-    }
-    if (operator === "not_contains") {
-      return needle.length > 0 ? !comment.includes(needle) : true;
-    }
-    if (operator === "eq") {
-      return comment === needle;
-    }
-  }
-
-  return false;
-};
-
-const resolveLocationResourceNames = (
-  locationIds: string[] | null,
-  legacyLocationId: string | null,
-  locations: AutomationProps["locations"]
-) => {
-  if (Array.isArray(locationIds) && locationIds.length > 0) {
-    return locationIds
-      .map(
-        (id) =>
-          locations.find((location) => location.id === id)
-            ?.location_resource_name
-      )
-      .filter((value): value is string => Boolean(value));
-  }
-  if (legacyLocationId) {
-    return [legacyLocationId];
-  }
-  return [];
-};
-
-const formatLocationLabel = (
-  locationIds: string[] | null,
-  legacyLocationId: string | null,
-  locations: AutomationProps["locations"]
-) => {
-  const resolved = resolveLocationResourceNames(
-    locationIds,
-    legacyLocationId,
-    locations
-  );
-  if (resolved.length === 0) {
-    return "Toutes les fiches";
-  }
-  const labels = resolved.map((resource) => {
-    const match = locations.find(
-      (location) => location.location_resource_name === resource
-    );
-    return match?.location_title ?? resource;
-  });
-  if (labels.length === 1) {
-    return labels[0];
-  }
-  return `${labels[0]} +${labels.length - 1}`;
-};
-
-const Automation = ({
-  session,
-  locations,
-  locationsLoading,
-  locationsError
-}: AutomationProps) => {
-  const navigate = useNavigate();
-  const [workflows, setWorkflows] = useState<WorkflowRow[]>([]);
-  const [conditionsMap, setConditionsMap] = useState<Record<string, ConditionRow[]>>(
-    {}
-  );
-  const [actionsMap, setActionsMap] = useState<Record<string, ActionRow[]>>({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [testingId, setTestingId] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<TesterResult | null>(null);
-  const [testError, setTestError] = useState<string | null>(null);
-  const [activeLocationIds, setActiveLocationIds] = useState<string[] | null>(
-    null
-  );
-  const supabaseClient = supabase;
-
-  const workflowById = useMemo(
-    () =>
-      workflows.reduce<Record<string, WorkflowRow>>((acc, workflow) => {
-        acc[workflow.id] = workflow;
-        return acc;
-      }, {}),
-    [workflows]
-  );
+  }, []);
 
   useEffect(() => {
-    if (!supabaseClient || !session) {
-      setWorkflows([]);
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      const { data, error } = await supabaseClient
-        .from("automation_workflows")
-        .select("*")
-        .order("updated_at", { ascending: false });
-      if (cancelled) {
-        return;
-      }
-      if (error) {
-        console.error("automation_workflows fetch error:", error);
-        setError("Impossible de charger les automatisations.");
-        setWorkflows([]);
-        setLoading(false);
-        return;
-      }
-      const rows = data ?? [];
-      setWorkflows(rows);
-      const ids = rows.map((row) => row.id);
-      if (ids.length === 0) {
-        setConditionsMap({});
-        setActionsMap({});
-        setLoading(false);
-        return;
-      }
-      const [conditionsRes, actionsRes] = await Promise.all([
-        supabaseClient
-          .from("automation_conditions")
-          .select("*")
-          .in("workflow_id", ids),
-        supabaseClient
-          .from("automation_actions")
-          .select("*")
-          .in("workflow_id", ids)
-      ]);
-      if (cancelled) {
-        return;
-      }
-      if (conditionsRes.error) {
-        console.error("automation_conditions fetch error:", conditionsRes.error);
-      }
-      if (actionsRes.error) {
-        console.error("automation_actions fetch error:", actionsRes.error);
-      }
-      const conditionsRows = conditionsRes.data ?? [];
-      const actionsRows = actionsRes.data ?? [];
-      const nextConditions: Record<string, ConditionRow[]> = {};
-      const nextActions: Record<string, ActionRow[]> = {};
-      conditionsRows.forEach((row) => {
-        if (!nextConditions[row.workflow_id]) {
-          nextConditions[row.workflow_id] = [];
-        }
-        nextConditions[row.workflow_id].push(row);
-      });
-      actionsRows.forEach((row) => {
-        if (!nextActions[row.workflow_id]) {
-          nextActions[row.workflow_id] = [];
-        }
-        nextActions[row.workflow_id].push(row);
-      });
-      Object.keys(nextConditions).forEach((key) => {
-        nextConditions[key].sort(
-          (a, b) => (getSortValue(a as Record<string, unknown>) as number | string) >
-            (getSortValue(b as Record<string, unknown>) as number | string)
-            ? 1
-            : -1
-        );
-      });
-      Object.keys(nextActions).forEach((key) => {
-        nextActions[key].sort(
-          (a, b) => (getSortValue(a as Record<string, unknown>) as number | string) >
-            (getSortValue(b as Record<string, unknown>) as number | string)
-            ? 1
-            : -1
-        );
-      });
-      setConditionsMap(nextConditions);
-      setActionsMap(nextActions);
-      setLoading(false);
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [session, supabaseClient]);
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(automations));
+  }, [automations]);
 
-  useEffect(() => {
-    if (!supabaseClient || !session) {
-      setActiveLocationIds(null);
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      const { data, error } = await supabaseClient
-        .from("business_settings")
-        .select("active_location_ids")
-        .eq("user_id", session.user.id)
-        .maybeSingle();
-      if (cancelled) {
-        return;
-      }
-      if (error) {
-        console.error("business_settings fetch error:", error);
-        setActiveLocationIds(null);
-        return;
-      }
-      const ids = Array.isArray(data?.active_location_ids)
-        ? data.active_location_ids.filter(Boolean)
-        : null;
-      setActiveLocationIds(ids && ids.length > 0 ? ids : null);
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [session, supabaseClient]);
+  const selected = useMemo(
+    () => automations.find((item) => item.id === selectedId) ?? null,
+    [automations, selectedId]
+  );
 
-  const toggleWorkflow = async (workflow: WorkflowRow) => {
-    if (!supabaseClient) return;
-    const nextEnabled = !(workflow.enabled ?? false);
-    const { error } = await supabaseClient
-      .from("automation_workflows")
-      .update({ enabled: nextEnabled })
-      .eq("id", workflow.id);
-    if (error) {
-      console.error("automation_workflows update error:", error);
-      setError("Impossible de mettre a jour le workflow.");
-      return;
-    }
-    setWorkflows((prev) =>
+  const updateAutomation = (id: string, patch: Partial<AutomationConfig>) => {
+    setAutomations((prev) =>
       prev.map((item) =>
-        item.id === workflow.id ? { ...item, enabled: nextEnabled } : item
+        item.id === id
+          ? { ...item, ...patch, updatedAt: new Date().toISOString() }
+          : item
       )
     );
   };
 
-  const runTest = async (workflowId: string) => {
-    if (!supabaseClient || !session) {
-      return;
-    }
-    setTestingId(workflowId);
-    setTestError(null);
-    setTestResult(null);
-    const workflow = workflowById[workflowId];
-    if (!workflow) {
-      setTestingId(null);
-      return;
-    }
-
-    const workflowConditions = conditionsMap[workflowId] ?? [];
-    const workflowActions = actionsMap[workflowId] ?? [];
-
-    let query = supabaseClient
-      .from("google_reviews")
-      .select("*")
-      .order("create_time", { ascending: false })
-      .limit(20);
-    const locationResourceNames = resolveLocationResourceNames(
-      workflow.location_ids ?? null,
-      workflow.location_id ?? null,
-      locations
-    );
-    const activeResourceNames =
-      activeLocationIds && activeLocationIds.length > 0
-        ? locations
-            .filter((location) => activeLocationIds.includes(location.id))
-            .map((location) => location.location_resource_name)
-        : null;
-    const allowedResourceNames = activeResourceNames
-      ? locationResourceNames.filter((name) =>
-          activeResourceNames.includes(name)
-        )
-      : locationResourceNames;
-    if (allowedResourceNames.length === 1) {
-      query = query.eq("location_id", allowedResourceNames[0]);
-    } else if (allowedResourceNames.length > 1) {
-      query = query.in("location_id", allowedResourceNames);
-    } else if (activeResourceNames) {
-      setTestError("Aucun lieu actif pour ce workflow.");
-      setTestingId(null);
-      return;
-    }
-
-    const { data: reviewData, error: reviewError } = await query;
-    if (reviewError) {
-      console.error("automation test reviews error:", reviewError);
-      setTestError("Impossible de charger des avis pour le test.");
-      setTestingId(null);
-      return;
-    }
-    const reviews = reviewData ?? [];
-    const match = reviews.find((review) =>
-      workflowConditions.every((condition) => matchesCondition(review, condition))
-    );
-    if (!match) {
-      setTestError("Aucun avis ne correspond aux conditions.");
-      setTestingId(null);
-      return;
-    }
-
-    const tags: string[] = [];
-    let draftText: string | null = null;
-
-    for (const action of workflowActions) {
-      const type = action.type ?? "";
-      const config = normalizeConfig(action.config);
-      if (type === "ai_draft") {
-        const tone = (config.tone as string) ?? "professional";
-        try {
-          const res = await fetch("/api/google/reply", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              mode: "draft",
-              id: match.id,
-              review_id: match.review_id ?? match.id,
-              location_id: match.location_id ?? undefined,
-              tone
-            })
-          });
-          if (!res.ok) {
-            const txt = await res.text();
-            throw new Error(txt);
-          }
-          const payload = (await res.json()) as { draft_text?: string };
-          draftText = payload.draft_text ?? null;
-          if (draftText) {
-            const { error } = await supabaseClient.from("review_drafts").insert({
-              user_id: session.user.id,
-              review_id: match.review_id ?? match.id,
-              location_id: match.location_id ?? null,
-              tone,
-              draft_text: draftText,
-              status: "draft"
-            });
-            if (error) {
-              console.error("review_drafts insert error:", error);
-            }
-          }
-        } catch (error) {
-          console.error("automation draft error:", error);
-          setTestError("Erreur lors de la generation du brouillon.");
-        }
-      }
-      if (type === "add_tag") {
-        const tag = (config.tag as string) ?? "";
-        if (tag.trim().length === 0) {
-          continue;
-        }
-        tags.push(tag);
-        const { error } = await supabaseClient.from("review_tags").insert({
-          user_id: session.user.id,
-          review_id: match.review_id ?? match.id,
-          location_id: match.location_id ?? null,
-          tag
-        });
-        if (error) {
-          console.error("review_tags insert error:", error);
-        }
-      }
-      if (type === "monthly_report") {
-        const reportId = (config.report_id as string) ?? "";
-        if (!reportId) {
-          continue;
-        }
-        try {
-          const res = await fetch("/api/reports/generate", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ report_id: reportId })
-          });
-          if (!res.ok) {
-            const txt = await res.text();
-            throw new Error(txt);
-          }
-        } catch (error) {
-          console.error("report generation error:", error);
-          setTestError("Erreur lors de la generation du rapport.");
-        }
-      }
-    }
-
-    setTestResult({ review: match, draftText, tags });
-    setTestingId(null);
+  const updateParams = (id: string, params: AutomationParams) => {
+    updateAutomation(id, { params });
   };
 
-  const closeModal = () => {
-    setTestResult(null);
-    setTestError(null);
+  const handleCreate = () => {
+    const next = buildAutomation("rating_drop");
+    setAutomations((prev) => [next, ...prev]);
+    setSelectedId(next.id);
   };
-
-  if (!supabaseClient) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-900">
-            Automatisations
-          </h2>
-          <p className="text-sm text-slate-500">
-            Orchestration des reponses et tags assistes.
-          </p>
-        </div>
-        <Card>
-          <CardContent className="pt-6 text-sm text-slate-500">
-            Configuration Supabase manquante.
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-semibold text-slate-900">Automatisations</h2>
         <p className="text-sm text-slate-500">
-          Orchestration des reponses et tags assistes.
+          Configurez des alertes utiles et actionnables, sans bruit.
         </p>
       </div>
 
-      <section className="grid gap-4 lg:grid-cols-3">
-        {templates.map((template) => (
-          <Card key={template.id}>
-            <CardHeader>
-              <CardTitle>{template.title}</CardTitle>
-              <p className="text-sm text-slate-500">{template.description}</p>
-            </CardHeader>
-            <CardContent>
-              <Button variant="outline" size="sm" disabled>
-                Bientot disponible
+      <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+        <div className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-base">Vos automatisations</CardTitle>
+              <Button size="sm" onClick={handleCreate}>
+                Nouvelle automatisation
               </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {automations.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                  <p className="font-semibold text-slate-700">
+                    Aucune automatisation active
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Creez votre premiere regle pour declencher des alertes utiles.
+                  </p>
+                </div>
+              ) : (
+                automations.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setSelectedId(item.id)}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm transition ${
+                      selectedId === item.id
+                        ? "border-ink bg-ink/5"
+                        : "border-slate-200 bg-white hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="font-semibold text-slate-800">{item.name}</p>
+                      <Badge variant={item.enabled ? "success" : "neutral"}>
+                        {item.enabled ? "Actif" : "Inactif"}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {automationLabels[item.type]}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {item.frequency === "daily" ? "Quotidien" : "Hebdo"} · {" "}
+                      {formatScope(item.scope, locations)}
+                    </p>
+                  </button>
+                ))
+              )}
             </CardContent>
           </Card>
-        ))}
-      </section>
-
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900">
-              Vos scenarios actifs
-            </h3>
-            <p className="text-sm text-slate-500">
-              Declencheurs et actions personnalises.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => navigate("/automation/builder")}>
-              Creer manuellement
-            </Button>
-          </div>
         </div>
 
-        {locationsError && (
-          <p className="text-xs text-amber-700">{locationsError}</p>
-        )}
-        {loading ? (
-          <Skeleton className="h-40 w-full" />
-        ) : error ? (
+        <div>
           <Card>
-            <CardContent className="pt-6 text-sm text-amber-700">
-              {error}
-            </CardContent>
-          </Card>
-        ) : workflows.length === 0 ? (
-          <Card>
-            <CardContent className="pt-6 text-sm text-slate-500">
-              Aucun workflow pour le moment.
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid gap-4">
-            {workflows.map((workflow) => (
-              <Card key={workflow.id}>
-                <CardContent className="space-y-3 pt-6">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-base font-semibold text-slate-900">
-                        {workflow.name ?? "Workflow sans nom"}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {workflow.trigger ?? "new_review"} ·{" "}
-                        {formatLocationLabel(
-                          workflow.location_ids ?? null,
-                          workflow.location_id ?? null,
-                          locations
-                        )}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() => runTest(workflow.id)}
-                        disabled={Boolean(testingId)}
-                      >
-                        {testingId === workflow.id ? "Test..." : "Tester"}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          navigate(`/automation/builder?id=${workflow.id}`)
-                        }
-                      >
-                        Editer
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => toggleWorkflow(workflow)}
-                      >
-                        {workflow.enabled ? "Desactiver" : "Activer"}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                    <Badge variant={workflow.enabled ? "success" : "neutral"}>
-                      {workflow.enabled ? "Actif" : "Inactif"}
-                    </Badge>
-                    <span>
-                      Conditions: {(conditionsMap[workflow.id] ?? []).length}
-                    </span>
-                    <span>Actions: {(actionsMap[workflow.id] ?? []).length}</span>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {(testResult || testError) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-          <Card className="w-full max-w-2xl">
             <CardHeader>
-              <CardTitle>Resultat du test</CardTitle>
-              <p className="text-sm text-slate-500">
-                Simulation sur un avis recent.
-              </p>
+              <CardTitle>Editeur</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {testError ? (
-                <p className="text-sm text-amber-700">{testError}</p>
-              ) : testResult ? (
-                <>
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                    <p className="font-semibold">
-                      {testResult.review.author_name ?? "Client"}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Note: {testResult.review.rating ?? "—"} ·{" "}
-                      {formatLocationLabel(
-                        null,
-                        testResult.review.location_id,
-                        locations
-                      )}
-                    </p>
-                    <p className="mt-2 text-sm text-slate-600">
-                      {testResult.review.comment ?? "Avis sans commentaire."}
-                    </p>
+              {!selected ? (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+                  Selectionnez une automatisation pour la configurer.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <label className="text-xs font-semibold text-slate-600">
+                    Nom
+                    <input
+                      className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                      value={selected.name}
+                      onChange={(event) =>
+                        updateAutomation(selected.id, { name: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-600">
+                    Type
+                    <select
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                      value={selected.type}
+                      onChange={(event) => {
+                        const nextType = event.target.value as AutomationType;
+                        updateAutomation(selected.id, {
+                          type: nextType,
+                          name: automationLabels[nextType],
+                          params: defaultParamsByType(nextType)
+                        });
+                      }}
+                    >
+                      <option value="rating_drop">Alerte baisse de note</option>
+                      <option value="negative_review">Alerte avis negatif</option>
+                      <option value="volume_drop">Alerte volume</option>
+                      <option value="weekly_summary">Resume hebdo</option>
+                    </select>
+                  </label>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="text-xs font-semibold text-slate-600">
+                      Frequence
+                      <select
+                        className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                        value={selected.frequency}
+                        onChange={(event) =>
+                          updateAutomation(selected.id, {
+                            frequency: event.target.value as AutomationFrequency
+                          })
+                        }
+                      >
+                        <option value="daily">Quotidien</option>
+                        <option value="weekly">Hebdomadaire</option>
+                      </select>
+                    </label>
+                    <label className="text-xs font-semibold text-slate-600">
+                      Portee
+                      <select
+                        className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                        value={selected.scope.mode}
+                        onChange={(event) =>
+                          updateAutomation(selected.id, {
+                            scope: {
+                              mode: event.target.value as AutomationScope["mode"],
+                              locationId:
+                                event.target.value === "all"
+                                  ? null
+                                  : selected.scope.locationId
+                            }
+                          })
+                        }
+                      >
+                        <option value="all">Tous les etablissements</option>
+                        <option value="location">Etablissement selectionne</option>
+                      </select>
+                    </label>
                   </div>
-                  <div>
-                    <p className="text-xs font-semibold text-slate-500">Brouillon IA</p>
-                    <p className="mt-2 text-sm text-slate-700">
-                      {testResult.draftText ?? "—"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-slate-500">Tags ajoutes</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {testResult.tags.length > 0 ? (
-                        testResult.tags.map((tag) => (
-                          <Badge key={tag} variant="neutral">
-                            {tag}
-                          </Badge>
-                        ))
-                      ) : (
-                        <span className="text-sm text-slate-500">—</span>
+
+                  {selected.scope.mode === "location" && (
+                    <label className="text-xs font-semibold text-slate-600">
+                      Etablissement
+                      <select
+                        className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                        value={selected.scope.locationId ?? ""}
+                        onChange={(event) =>
+                          updateAutomation(selected.id, {
+                            scope: {
+                              mode: "location",
+                              locationId: event.target.value || null
+                            }
+                          })
+                        }
+                      >
+                        <option value="">Selectionner...</option>
+                        {locations.map((location) => (
+                          <option key={location.id} value={location.id}>
+                            {location.location_title ?? location.location_resource_name}
+                          </option>
+                        ))}
+                      </select>
+                      {locationsLoading && (
+                        <p className="mt-1 text-[11px] text-slate-400">
+                          Chargement des etablissements...
+                        </p>
                       )}
+                      {locationsError && (
+                        <p className="mt-1 text-[11px] text-rose-500">
+                          {locationsError}
+                        </p>
+                      )}
+                    </label>
+                  )}
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="text-xs font-semibold text-slate-600">
+                      Canal
+                      <div className="mt-2 space-y-2 text-xs text-slate-500">
+                        <label className="flex items-center gap-2">
+                          <input type="checkbox" checked readOnly />
+                          In-app (obligatoire)
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <input type="checkbox" checked={selected.channel.email} disabled />
+                          Email (bientot)
+                        </label>
+                      </div>
+                    </label>
+                    <label className="text-xs font-semibold text-slate-600">
+                      Actif
+                      <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                        <input
+                          type="checkbox"
+                          checked={selected.enabled}
+                          onChange={(event) =>
+                            updateAutomation(selected.id, {
+                              enabled: event.target.checked
+                            })
+                          }
+                        />
+                        {selected.enabled ? "Active" : "Inactive"}
+                      </div>
+                    </label>
+                  </div>
+
+                  {selected.type === "rating_drop" && (
+                    <label className="text-xs font-semibold text-slate-600">
+                      Alerte si note passe sous
+                      <input
+                        type="number"
+                        step="0.1"
+                        className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                        value={
+                          (selected.params as { threshold: number }).threshold ?? 4.6
+                        }
+                        onChange={(event) =>
+                          updateParams(selected.id, {
+                            threshold: Number(event.target.value)
+                          })
+                        }
+                      />
+                    </label>
+                  )}
+
+                  {selected.type === "negative_review" && (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="text-xs font-semibold text-slate-600">
+                        Note max
+                        <input
+                          type="number"
+                          className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                          value={
+                            (selected.params as { maxStars: number }).maxStars ?? 2
+                          }
+                          onChange={(event) =>
+                            updateParams(selected.id, {
+                              maxStars: Number(event.target.value),
+                              unresolvedHours: (selected.params as {
+                                unresolvedHours: number;
+                              }).unresolvedHours
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="text-xs font-semibold text-slate-600">
+                        Sans reponse depuis (h)
+                        <input
+                          type="number"
+                          className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                          value={
+                            (selected.params as { unresolvedHours: number })
+                              .unresolvedHours ?? 48
+                          }
+                          onChange={(event) =>
+                            updateParams(selected.id, {
+                              maxStars: (selected.params as { maxStars: number }).maxStars,
+                              unresolvedHours: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </label>
                     </div>
-                  </div>
-                </>
-              ) : null}
-              <div className="flex justify-end">
-                <Button variant="outline" onClick={closeModal}>
-                  Fermer
-                </Button>
-              </div>
+                  )}
+
+                  {selected.type === "volume_drop" && (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="text-xs font-semibold text-slate-600">
+                        Moins de
+                        <input
+                          type="number"
+                          className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                          value={
+                            (selected.params as { minReviews: number }).minReviews ??
+                            3
+                          }
+                          onChange={(event) =>
+                            updateParams(selected.id, {
+                              minReviews: Number(event.target.value),
+                              windowDays: (selected.params as {
+                                windowDays: number;
+                              }).windowDays
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="text-xs font-semibold text-slate-600">
+                        Sur (jours)
+                        <input
+                          type="number"
+                          className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                          value={
+                            (selected.params as { windowDays: number }).windowDays ??
+                            7
+                          }
+                          onChange={(event) =>
+                            updateParams(selected.id, {
+                              minReviews: (selected.params as { minReviews: number })
+                                .minReviews,
+                              windowDays: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  {selected.type === "weekly_summary" && (
+                    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
+                      Resume hebdomadaire en preparation (configuration bientot).
+                    </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
-      )}
-
-      {locationsLoading && (
-        <p className="text-xs text-slate-500">Chargement des lieux...</p>
-      )}
+      </div>
     </div>
   );
 };
