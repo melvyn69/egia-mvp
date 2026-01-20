@@ -744,15 +744,6 @@ const formatCountDelta = (delta: number | null) => {
   return `${rounded >= 0 ? "+" : ""}${rounded}`;
 };
 
-  const radarRatings = radarItems
-    .map((row) => row.rating)
-    .filter((value): value is number => typeof value === "number");
-  const radarReviewCounts = radarItems
-    .map((row) => row.user_ratings_total)
-    .filter((value): value is number => typeof value === "number");
-  const radarDistances = radarItems
-    .map((row) => row.distance_m)
-    .filter((value): value is number => typeof value === "number");
 
   const filteredRadar = useMemo(() => {
     let items = radarItems.slice();
