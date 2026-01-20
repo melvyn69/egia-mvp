@@ -74,6 +74,12 @@ const severityVariantMap: Record<AlertRow["severity"], "neutral" | "warning"> = 
   high: "warning"
 };
 
+const mapSeverity = (value: MockAlert["severity"]): AlertRow["severity"] => {
+  if (value === "crit") return "high";
+  if (value === "warn") return "medium";
+  return "low";
+};
+
 const buildSummary = (payload: Record<string, unknown> | null | undefined) => {
   if (!payload) return "Une alerte prioritaire a ete detectee.";
   if (typeof payload.message === "string") return payload.message;
@@ -140,15 +146,10 @@ const Alerts = ({ session }: AlertsProps) => {
     try {
       const parsed = JSON.parse(stored) as MockAlert[];
       if (Array.isArray(parsed)) {
-        const mapped = parsed.map((item) => ({
+        const mapped: AlertRow[] = parsed.map((item) => ({
           id: item.id,
           rule_code: "AUTOMATION",
-          severity:
-            item.severity === "crit"
-              ? "high"
-              : item.severity === "warn"
-                ? "medium"
-                : "low",
+          severity: mapSeverity(item.severity),
           review_id: item.automation_id,
           triggered_at: item.created_at,
           payload: {
@@ -280,15 +281,10 @@ const Alerts = ({ session }: AlertsProps) => {
     const parsed = stored ? (JSON.parse(stored) as MockAlert[]) : [];
     const next = [mockAlert, ...(Array.isArray(parsed) ? parsed : [])].slice(0, 20);
     window.localStorage.setItem(ALERTS_STORAGE_KEY, JSON.stringify(next));
-    const mapped = next.map((item) => ({
+    const mapped: AlertRow[] = next.map((item) => ({
       id: item.id,
       rule_code: "AUTOMATION",
-      severity:
-        item.severity === "crit"
-          ? "high"
-          : item.severity === "warn"
-            ? "medium"
-            : "low",
+      severity: mapSeverity(item.severity),
       review_id: item.automation_id,
       triggered_at: item.created_at,
       payload: { message: item.message, location_name: item.location_name }
