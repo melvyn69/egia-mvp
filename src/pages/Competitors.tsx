@@ -27,6 +27,7 @@ type LocationOption = {
   id: string;
   location_title: string | null;
   location_resource_name: string;
+  address_json?: unknown | null;
 };
 
 type CompetitorRow = {
@@ -73,6 +74,31 @@ const median = (values: number[]) => {
     return (sorted[mid - 1] + sorted[mid]) / 2;
   }
   return sorted[mid];
+};
+
+const extractCategoryLabel = (raw: unknown | null | undefined) => {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Record<string, unknown>;
+  const primary = (record.primaryCategory as { displayName?: unknown } | undefined)
+    ?.displayName;
+  if (typeof primary === "string" && primary.trim()) {
+    return primary.trim();
+  }
+  const categories = record.categories;
+  if (Array.isArray(categories)) {
+    for (const item of categories) {
+      const label = (item as { displayName?: unknown } | undefined)?.displayName;
+      if (typeof label === "string" && label.trim()) {
+        return label.trim();
+      }
+    }
+  }
+  const fallback = (record.category as { displayName?: unknown } | undefined)
+    ?.displayName;
+  if (typeof fallback === "string" && fallback.trim()) {
+    return fallback.trim();
+  }
+  return null;
 };
 
 const getCompetitorInsights = (row: CompetitorRow) => {
@@ -266,7 +292,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
       if (!supabase || !userId) return [] as LocationOption[];
       const { data, error } = await supabase
         .from("google_locations")
-        .select("id, location_title, location_resource_name")
+        .select("id, location_title, location_resource_name, address_json")
         .eq("user_id", userId)
         .order("location_title", { ascending: true });
       if (error) throw error;
@@ -413,7 +439,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
         if (!token || !selectedLocationId) {
           throw new Error("Missing location");
         }
-        const scanKeyword = (input?.keyword ?? keywordValue).trim();
+        const scanKeyword = (input?.keyword ?? "").trim();
         const scanRadius = input?.radiusKm ?? radiusKm;
         if (!scanKeyword || !scanRadius) {
           throw new Error("Missing scan parameters");
@@ -460,7 +486,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
       const labelParts = [
         count !== null ? `${count} concurrents` : null,
         payload?.radius_km ? `${payload.radius_km} km` : null,
-        payload?.keyword ? `"${payload.keyword}"` : keywordValue ? `"${keywordValue}"` : null,
+        payload?.keyword ? `"${payload.keyword}"` : sectorLabel ? `"${sectorLabel}"` : null,
         durationLabel ? `${durationLabel}` : null
       ].filter(Boolean);
       setScanMessage(
@@ -475,7 +501,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
         const entry = {
           ts: Date.now(),
           locationId: selectedLocationId ?? null,
-          keyword: payload?.keyword ?? keywordValue,
+          keyword: payload?.keyword ?? sectorLabel,
           radiusKm: payload?.radius_km ?? radiusKm,
           zoneLabel: normalizedZoneInput || null
         };
@@ -520,13 +546,20 @@ const Competitors = ({ session }: CompetitorsProps) => {
       setToast({ type: "error", message: "Sélectionnez un établissement." });
       return;
     }
+    if (!sectorLabel) {
+      setToast({
+        type: "error",
+        message: "Définis d’abord la catégorie de l’établissement."
+      });
+      return;
+    }
     setBenchmarkLoading(true);
     setToast(null);
     try {
       const payload = {
         action: "generate",
         location_id: selectedLocationId,
-        keyword: keywordValue.trim() || settingsQuery.data?.competitive_monitoring_keyword,
+        keyword: sectorLabel,
         radius_km: radiusKm || settingsQuery.data?.competitive_monitoring_radius_km
       };
       const response = await fetch("/api/reports/competitors-benchmark", {
@@ -551,12 +584,6 @@ const Competitors = ({ session }: CompetitorsProps) => {
             : typeof data?.report?.pdf_url === "string"
               ? data.report.pdf_url
               : null;
-      setToast({
-        type: "success",
-        message: downloadUrl
-          ? "Rapport généré. Téléchargement en cours."
-          : "Rapport généré. Télécharge-le depuis Rapports."
-      });
       if (downloadUrl) {
         const link = document.createElement("a");
         link.href = downloadUrl;
@@ -566,9 +593,45 @@ const Competitors = ({ session }: CompetitorsProps) => {
         document.body.appendChild(link);
         link.click();
         link.remove();
-      } else {
-        navigate(reportId ? `/reports?report_id=${reportId}` : "/reports");
+        setToast({
+          type: "success",
+          message: "Rapport généré. Téléchargement en cours."
+        });
+        return;
       }
+      if (reportId) {
+        const pdfRes = await fetch(
+          `/api/reports/competitors-benchmark/pdf?report_id=${reportId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          }
+        );
+        if (pdfRes.ok) {
+          const blob = await pdfRes.blob();
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `benchmark-${reportId}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+          setToast({
+            type: "success",
+            message: "PDF téléchargé."
+          });
+          return;
+        }
+        navigate(`/reports?report_id=${reportId}`);
+        setToast({
+          type: "success",
+          message: "Rapport généré. Télécharge-le depuis Rapports."
+        });
+        return;
+      }
+      navigate("/reports");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Échec de génération.";
@@ -672,9 +735,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const followedItems = followedQuery.data ?? [];
   const settingsRow = settingsQuery.data;
   const enabled = Boolean(settingsRow?.competitive_monitoring_enabled);
-  const keywordValue = settingsRow?.competitive_monitoring_keyword ?? "";
   const googleConnected = (locationsQuery.data ?? []).length > 0;
-  const statusKeyword = settingsRow?.competitive_monitoring_keyword ?? "";
   const statusRadius = settingsRow?.competitive_monitoring_radius_km ?? radiusKm;
   const locationsEmpty =
     !locationsQuery.isLoading && (locationsQuery.data ?? []).length === 0;
@@ -691,6 +752,10 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const selectedLocation = (locationsQuery.data ?? []).find(
     (location) => location.id === selectedLocationId
   );
+  const sectorLabel =
+    extractCategoryLabel(selectedLocation?.address_json) ??
+    (settingsRow?.competitive_monitoring_keyword ?? "").trim();
+  const sectorMissing = !sectorLabel;
   const normalizedZoneInput = normalizeZoneLabel(zoneInput);
   const zoneLabel = normalizedZoneInput
     ? normalizedZoneInput
@@ -1169,10 +1234,10 @@ const formatCountDelta = (delta: number | null) => {
             <Badge variant={enabled ? "success" : "neutral"}>
               {enabled ? "Veille activée" : "Veille désactivée"}
             </Badge>
-            {statusKeyword ? (
-              <Badge variant="neutral">Mot-clé: {statusKeyword}</Badge>
+            {sectorLabel ? (
+              <Badge variant="neutral">Secteur: {sectorLabel}</Badge>
             ) : (
-              <Badge variant="neutral">Mot-clé manquant</Badge>
+              <Badge variant="neutral">Secteur manquant</Badge>
             )}
             <Badge variant="neutral">Rayon: {statusRadius} km</Badge>
           </div>
@@ -1301,31 +1366,34 @@ const formatCountDelta = (delta: number | null) => {
                         ))}
                     </select>
                   </label>
-                  <label className="text-xs font-semibold text-slate-600">
+                  <div className="text-xs font-semibold text-slate-600">
                     Secteur d’activité
-                    <input
-                      className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
-                      value={keywordValue}
-                      disabled
-                      placeholder="ex: Restaurant Italien"
-                    />
-                  </label>
-                  {!keywordValue && (
+                    <div className="mt-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      {sectorLabel ? (
+                        <Badge variant="neutral" className="text-xs">
+                          Secteur: {sectorLabel}
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-slate-400">Non défini</span>
+                      )}
+                    </div>
+                  </div>
+                  {sectorMissing && (
                     <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-semibold">Secteur non défini</span>
                         <Badge variant="warning">À compléter</Badge>
                       </div>
                       <p className="mt-1 text-[11px] text-amber-700/90">
-                        Définis le secteur d’activité dans Paramètres.
+                        Complète la catégorie de l’établissement dans Paramètres.
                       </p>
                       <Button
                         variant="outline"
                         size="sm"
                         className="mt-2"
-                        onClick={() => navigate("/settings")}
+                        onClick={() => navigate("/settings?tab=locations")}
                       >
-                        Configurer dans Paramètres
+                        Compléter l’établissement
                       </Button>
                     </div>
                   )}
@@ -1367,9 +1435,21 @@ const formatCountDelta = (delta: number | null) => {
                   </label>
                   <Button
                     className="w-full bg-ink text-white hover:bg-ink/90"
-                    onClick={() => scanMutation.mutate({})}
+                    onClick={() => {
+                      if (!sectorLabel) {
+                        setScanError(
+                          "Définis la catégorie de l’établissement avant de scanner."
+                        );
+                        setScanErrorHint(
+                          "Renseigne-la dans Paramètres > Établissements."
+                        );
+                        setScanMessage(null);
+                        return;
+                      }
+                      scanMutation.mutate({ keyword: sectorLabel, radiusKm });
+                    }}
                     disabled={
-                      !keywordValue || scanMutation.isPending || !selectedLocationId
+                      sectorMissing || scanMutation.isPending || !selectedLocationId
                     }
                   >
                     <span className="flex items-center justify-center gap-2">
@@ -1511,7 +1591,7 @@ const formatCountDelta = (delta: number | null) => {
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-2xl font-semibold text-slate-900">
-              Analyse: {keywordValue || "—"} - {zoneLabel}
+              Analyse: {sectorLabel || "—"} - {zoneLabel}
             </h2>
             <Button
               variant="outline"
@@ -1904,15 +1984,27 @@ const formatCountDelta = (delta: number | null) => {
                   </p>
                   <ul className="mt-4 list-disc space-y-1 pl-5 text-xs text-slate-500">
                     <li>Choisir un établissement</li>
-                    <li>Vérifier mot-clé et rayon</li>
+                    <li>Vérifier le secteur et le rayon</li>
                     <li>Lancer l’analyse</li>
                   </ul>
                   <Button
                     variant="outline"
                     size="sm"
                     className="mt-4"
-                    onClick={() => scanMutation.mutate({})}
-                    disabled={scanMutation.isPending || !selectedLocationId || !keywordValue}
+                    onClick={() => {
+                      if (!sectorLabel) {
+                        setScanError(
+                          "Définis la catégorie de l’établissement avant de scanner."
+                        );
+                        setScanErrorHint(
+                          "Renseigne-la dans Paramètres > Établissements."
+                        );
+                        setScanMessage(null);
+                        return;
+                      }
+                      scanMutation.mutate({ keyword: sectorLabel, radiusKm });
+                    }}
+                    disabled={scanMutation.isPending || !selectedLocationId || sectorMissing}
                   >
                     Lancer l’analyse
                   </Button>

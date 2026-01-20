@@ -8,6 +8,7 @@ import {
   parseQuery,
   getParam
 } from "../../server/_shared_dist/api_utils.js";
+import { renderPdfFromHtml } from "../../server/_shared_dist/pdf_html.js";
 
 type LocationCenter = {
   lat: number;
@@ -190,6 +191,213 @@ const buildCompetitorsBenchmark = (
     plan_14_days: plan14Days,
     summary: summaryParts.join(" · ")
   };
+};
+
+const formatPdfDate = (value: string | null) => {
+  if (!value) return "—";
+  const date = new Date(value);
+  return date.toLocaleDateString("fr-FR", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric"
+  });
+};
+
+const buildBenchmarkHtml = (input: {
+  title: string;
+  locationLabel: string;
+  zoneLabel: string;
+  radiusLabel: string;
+  createdAt: string | null;
+  stats: Record<string, number | null>;
+  swot: Record<string, string[]>;
+  topCompetitors: Array<{
+    name?: string;
+    rating?: number | null;
+    reviews?: number | null;
+    distance_m?: number | null;
+  }>;
+  actions: string[];
+  summary: string | null;
+}) => {
+  const risks = input.swot.threats?.slice(0, 3) ?? [];
+  const opportunities = input.swot.opportunities?.slice(0, 3) ?? [];
+  const force =
+    input.swot.forces?.[0] ?? "Données insuffisantes pour qualifier une force.";
+  const weakness =
+    input.swot.weaknesses?.[0] ??
+    "Données insuffisantes pour qualifier une faiblesse.";
+  const opportunity =
+    input.swot.opportunities?.[0] ??
+    "Données insuffisantes pour qualifier une opportunité.";
+  const threat =
+    input.swot.threats?.[0] ??
+    "Données insuffisantes pour qualifier une menace.";
+  const bestRating =
+    typeof input.stats.best_rating === "number"
+      ? input.stats.best_rating.toFixed(1)
+      : "—";
+  const closest =
+    typeof input.stats.closest_m === "number"
+      ? input.stats.closest_m < 1000
+        ? `${input.stats.closest_m} m`
+        : `${(input.stats.closest_m / 1000).toFixed(1)} km`
+      : "—";
+  const total = typeof input.stats.total === "number" ? input.stats.total : null;
+  const riskCount =
+    typeof input.stats.high_risk_count === "number"
+      ? input.stats.high_risk_count
+      : null;
+  const actions = input.actions.slice(0, 3);
+
+  return `<!doctype html>
+  <html lang="fr">
+    <head>
+      <meta charset="utf-8" />
+      <style>
+        * { box-sizing: border-box; }
+        body { font-family: "Inter", Arial, sans-serif; color: #111827; margin: 0; background: #f8fafc; }
+        .page { background: #ffffff; border-radius: 18px; padding: 32px; margin: 24px auto; width: 100%; }
+        .cover { background: #0f172a; color: #ffffff; border-radius: 20px; padding: 36px; }
+        .badge { display: inline-block; padding: 6px 12px; border-radius: 999px; font-size: 12px; background: rgba(255,255,255,0.15); }
+        .muted { color: #64748b; font-size: 13px; }
+        h1 { margin: 12px 0 4px; font-size: 28px; }
+        h2 { margin: 0; font-size: 18px; }
+        .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+        .card { border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; background: #ffffff; }
+        .section-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+        ul { margin: 8px 0 0 18px; padding: 0; }
+        li { font-size: 13px; margin-bottom: 6px; color: #334155; }
+        .metric { font-size: 13px; color: #475569; }
+        .kpi { font-size: 14px; font-weight: 600; }
+        .soft { background: #f1f5f9; }
+        .success { background: #ecfdf3; border-color: #bbf7d0; }
+        .warn { background: #fef3c7; border-color: #fde68a; }
+        .info { background: #eff6ff; border-color: #bfdbfe; }
+        .danger { background: #fef2f2; border-color: #fecaca; }
+      </style>
+    </head>
+    <body>
+      <div class="page cover">
+        <div class="badge">Veille concurrentielle – EGIA</div>
+        <h1>${input.locationLabel}</h1>
+        <div class="muted" style="color:#e2e8f0;">
+          Zone analysée : ${input.zoneLabel} · Rayon : ${input.radiusLabel}
+        </div>
+        <div class="muted" style="color:#e2e8f0; margin-top: 8px;">
+          Généré le ${formatPdfDate(input.createdAt)}
+        </div>
+      </div>
+
+      <div class="page">
+        <div class="section-title">Résumé exécutif</div>
+        <div class="grid-2">
+          <div class="card soft">
+            <div class="kpi">Positionnement global</div>
+            <p class="metric">${input.summary ?? "Positionnement en cours d'analyse."}</p>
+          </div>
+          <div class="card soft">
+            <div class="kpi">Marché observé</div>
+            <p class="metric">${total ?? "—"} concurrents · ${riskCount ?? "—"} à risque élevé</p>
+          </div>
+        </div>
+        <div class="grid-2" style="margin-top: 12px;">
+          <div class="card">
+            <div class="section-title">Top 3 risques</div>
+            <ul>${(risks.length ? risks : ["Aucun risque majeur détecté."])
+              .slice(0, 3)
+              .map((item) => `<li>${item}</li>`)
+              .join("")}</ul>
+          </div>
+          <div class="card">
+            <div class="section-title">Top 3 opportunités</div>
+            <ul>${(opportunities.length ? opportunities : ["Opportunités à préciser."])
+              .slice(0, 3)
+              .map((item) => `<li>${item}</li>`)
+              .join("")}</ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="page">
+        <div class="section-title">Podium concurrentiel</div>
+        <div class="grid-3">
+          <div class="card">
+            <div class="kpi">Vous</div>
+            <div class="metric">Note: n.c. · Avis: n.c.</div>
+            <div class="metric">Distance: —</div>
+          </div>
+          ${input.topCompetitors.slice(0, 2).map((item) => `
+            <div class="card">
+              <div class="kpi">${item.name ?? "Concurrent"}</div>
+              <div class="metric">Note: ${item.rating ?? "n.c."} · Avis: ${item.reviews ?? "n.c."}</div>
+              <div class="metric">Distance: ${typeof item.distance_m === "number" ? (item.distance_m < 1000 ? `${item.distance_m} m` : `${(item.distance_m / 1000).toFixed(1)} km`) : "—"}</div>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+
+      <div class="page">
+        <div class="section-title">Analyse radar</div>
+        <div class="grid-2">
+          <div class="card soft">
+            <div class="kpi">Statistiques clés</div>
+            <ul>
+              <li>Concurrent le plus proche : ${closest}</li>
+              <li>Meilleure note du marché : ${bestRating}</li>
+              <li>Concurrents observés : ${total ?? "—"}</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="kpi">Interprétation</div>
+            <p class="metric">
+              Le marché local montre une concurrence ${bestRating !== "—" ? `jusqu’à ${bestRating}/5` : "en cours d’analyse"} avec un acteur très proche à ${closest}.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="page">
+        <div class="section-title">Analyse SWOT</div>
+        <div class="grid-2">
+          <div class="card success">
+            <div class="kpi">Force</div>
+            <p class="metric">${force}</p>
+          </div>
+          <div class="card danger">
+            <div class="kpi">Faiblesse</div>
+            <p class="metric">${weakness}</p>
+          </div>
+          <div class="card info">
+            <div class="kpi">Opportunité</div>
+            <p class="metric">${opportunity}</p>
+          </div>
+          <div class="card soft">
+            <div class="kpi">Menace</div>
+            <p class="metric">${threat}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="page">
+        <div class="section-title">Actions recommandées</div>
+        <div class="grid-2">
+          ${(actions.length ? actions : ["Définir une action prioritaire cette semaine."])
+            .slice(0, 3)
+            .map((action) => `
+              <div class="card">
+                <div class="kpi">Action</div>
+                <p class="metric">${action}</p>
+                <p class="metric"><strong>Pourquoi :</strong> renforcer votre position locale.</p>
+                <p class="metric"><strong>Impact attendu :</strong> amélioration de la préférence client.</p>
+              </div>
+            `)
+            .join("")}
+        </div>
+      </div>
+    </body>
+  </html>`;
 };
 
 const extractAddress = (value: unknown) => {
@@ -1037,6 +1245,118 @@ const handleCompetitorsBenchmark = async (
   return res.status(200).json({ ok: true, report, requestId });
 };
 
+const handleCompetitorsBenchmarkPdf = async (
+  req: VercelRequest,
+  res: VercelResponse
+) => {
+  if (req.method !== "GET" && req.method !== "POST") {
+    return sendError(
+      res,
+      getRequestId(req),
+      { code: "BAD_REQUEST", message: "Method not allowed" },
+      405
+    );
+  }
+
+  const auth = await requireUser(req, res);
+  if (!auth) return;
+  const { supabaseAdmin, userId } = auth;
+  const requestId = getRequestId(req);
+  const queryParams = parseQuery(req).params;
+  const payload = parseBody(req);
+  const reportId =
+    getParam(queryParams, "report_id") ??
+    String(payload?.report_id ?? "").trim();
+
+  if (!reportId) {
+    return sendError(
+      res,
+      requestId,
+      { code: "BAD_REQUEST", message: "Missing report_id" },
+      400
+    );
+  }
+
+  const { data: report, error } = await supabaseAdmin
+    .from("generated_reports")
+    .select("*")
+    .eq("id", reportId)
+    .eq("user_id", userId)
+    .eq("report_type", "competitors_benchmark")
+    .maybeSingle();
+
+  if (error || !report) {
+    return sendError(
+      res,
+      requestId,
+      { code: "NOT_FOUND", message: "Report not found" },
+      404
+    );
+  }
+
+  const payloadData = report.payload as
+    | {
+        stats?: Record<string, number | null>;
+        swot?: Record<string, string[]>;
+        plan_14_days?: string[];
+        top_competitors?: Array<{
+          name?: string;
+          rating?: number | null;
+          reviews?: number | null;
+          distance_m?: number | null;
+        }>;
+        radius_km?: number | null;
+        keyword?: string | null;
+      }
+    | null;
+
+  const { data: location } = await supabaseAdmin
+    .from("google_locations")
+    .select("location_title, location_resource_name")
+    .eq("id", report.location_id)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  const locationLabel =
+    location?.location_title ?? location?.location_resource_name ?? "Établissement";
+  const zoneLabel = payloadData?.keyword ?? report.title ?? "Zone non précisée";
+  const radiusLabel =
+    typeof payloadData?.radius_km === "number"
+      ? `${payloadData.radius_km} km`
+      : "—";
+
+  const html = buildBenchmarkHtml({
+    title: report.title ?? "Benchmark concurrents",
+    locationLabel,
+    zoneLabel,
+    radiusLabel,
+    createdAt: report.created_at ?? null,
+    stats: payloadData?.stats ?? {},
+    swot: payloadData?.swot ?? {},
+    topCompetitors: payloadData?.top_competitors ?? [],
+    actions: payloadData?.plan_14_days ?? [],
+    summary: report.summary ?? null
+  });
+
+  try {
+    const pdfBytes = await renderPdfFromHtml(html);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="benchmark-${reportId}.pdf"`
+    );
+    return res.status(200).send(pdfBytes);
+  } catch (pdfError) {
+    console.error("[reports] pdf export failed", pdfError);
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Failed to generate PDF" },
+      500
+    );
+  }
+};
+
 // Manual test plan:
 // 1) /competitors -> select location -> scan 1km -> list returns items.
 // 2) If coords missing, error message is actionable and no 500.
@@ -1054,6 +1374,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   if (route === "competitors-benchmark") {
     return handleCompetitorsBenchmark(req, res);
+  }
+  if (route === "competitors-benchmark/pdf") {
+    return handleCompetitorsBenchmarkPdf(req, res);
   }
   return res.status(404).json({ error: "Not found" });
 }

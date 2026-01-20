@@ -237,6 +237,33 @@ const Reports = ({ session, locations }: ReportsProps) => {
     void queryClient.invalidateQueries({ queryKey: ["reports"] });
   };
 
+  const handleDownloadBenchmark = async (reportId: string) => {
+    if (!session?.access_token) {
+      setError("Connectez-vous pour télécharger.");
+      return;
+    }
+    setError(null);
+    const res = await fetch(
+      `/api/reports/competitors-benchmark/pdf?report_id=${reportId}`,
+      {
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      }
+    );
+    if (!res.ok) {
+      setError("Impossible de télécharger le PDF.");
+      return;
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `benchmark-${reportId}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -471,6 +498,13 @@ const Reports = ({ session, locations }: ReportsProps) => {
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant="neutral">Snapshot</Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDownloadBenchmark(report.id)}
+                      >
+                        Télécharger PDF
+                      </Button>
                       <Button
                         variant="outline"
                         size="sm"

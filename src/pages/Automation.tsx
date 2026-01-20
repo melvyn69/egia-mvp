@@ -48,6 +48,7 @@ type AutomationConfig = {
 };
 
 const STORAGE_KEY = "egia:automations:v1";
+const ALERTS_STORAGE_KEY = "egia:alerts:v1";
 
 const automationLabels: Record<AutomationType, string> = {
   rating_drop: "Alerte baisse de note",
@@ -76,7 +77,7 @@ const buildAutomation = (type: AutomationType): AutomationConfig => {
   return {
     id: `auto_${Date.now()}`,
     type,
-    name: automationLabels[type],
+    name: "",
     enabled: true,
     scope: { mode: "all", locationId: null },
     frequency: "daily",
@@ -97,6 +98,8 @@ const formatScope = (scope: AutomationScope, locations: AutomationProps["locatio
 const Automation = ({ locations, locationsLoading, locationsError }: AutomationProps) => {
   const [automations, setAutomations] = useState<AutomationConfig[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<AutomationConfig | null>(null);
+  const [draftDirty, setDraftDirty] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -119,28 +122,88 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
   }, [automations]);
 
   const selected = useMemo(
-    () => automations.find((item) => item.id === selectedId) ?? null,
-    [automations, selectedId]
+    () => {
+      if (draft && draft.id === selectedId) return draft;
+      return automations.find((item) => item.id === selectedId) ?? null;
+    },
+    [automations, selectedId, draft]
   );
 
-  const updateAutomation = (id: string, patch: Partial<AutomationConfig>) => {
-    setAutomations((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? { ...item, ...patch, updatedAt: new Date().toISOString() }
-          : item
-      )
-    );
+  const updateDraft = (id: string, patch: Partial<AutomationConfig>) => {
+    setDraft((prev) => {
+      if (!prev || prev.id !== id) return prev;
+      return { ...prev, ...patch, updatedAt: new Date().toISOString() };
+    });
+    setDraftDirty(true);
   };
 
   const updateParams = (id: string, params: AutomationParams) => {
-    updateAutomation(id, { params });
+    updateDraft(id, { params });
   };
 
   const handleCreate = () => {
     const next = buildAutomation("rating_drop");
-    setAutomations((prev) => [next, ...prev]);
+    setDraft(next);
+    setDraftDirty(false);
     setSelectedId(next.id);
+  };
+
+  const handleSelect = (id: string) => {
+    const existing = automations.find((item) => item.id === id);
+    setSelectedId(id);
+    setDraft(existing ? { ...existing } : null);
+    setDraftDirty(false);
+  };
+
+  const handleSave = () => {
+    if (!draft) return;
+    const nameValue = draft.name.trim() || "Nouvelle automatisation";
+    const next = { ...draft, name: nameValue, updatedAt: new Date().toISOString() };
+    setAutomations((prev) => {
+      const exists = prev.some((item) => item.id === next.id);
+      if (exists) {
+        return prev.map((item) => (item.id === next.id ? next : item));
+      }
+      return [next, ...prev];
+    });
+    setDraft(next);
+    setDraftDirty(false);
+  };
+
+  const handleCancel = () => {
+    if (!draft) return;
+    const existing = automations.find((item) => item.id === draft.id);
+    if (existing) {
+      setDraft({ ...existing });
+      setDraftDirty(false);
+      return;
+    }
+    setDraft(null);
+    setDraftDirty(false);
+    setSelectedId(automations[0]?.id ?? null);
+  };
+
+  const persistMockAlert = (alert: Record<string, unknown>) => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(ALERTS_STORAGE_KEY);
+    const parsed = stored ? (JSON.parse(stored) as Record<string, unknown>[]) : [];
+    const next = [alert, ...(Array.isArray(parsed) ? parsed : [])].slice(0, 20);
+    window.localStorage.setItem(ALERTS_STORAGE_KEY, JSON.stringify(next));
+  };
+
+  const handleTestAutomation = () => {
+    if (!draft || !draft.enabled) return;
+    const locationName = formatScope(draft.scope, locations);
+    const alert = {
+      id: `alert_${Date.now()}`,
+      automation_id: draft.id,
+      title: draft.name.trim() || "Nouvelle automatisation",
+      message: `${automationLabels[draft.type]} detectee.`,
+      severity: draft.type === "weekly_summary" ? "info" : "warn",
+      created_at: new Date().toISOString(),
+      location_name: locationName
+    };
+    persistMockAlert(alert);
   };
 
   return (
@@ -172,11 +235,13 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                   </p>
                 </div>
               ) : (
-                automations.map((item) => (
+                automations.map((item) => {
+                  const label = item.name.trim() || "Nouvelle automatisation";
+                  return (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => setSelectedId(item.id)}
+                    onClick={() => handleSelect(item.id)}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm transition ${
                       selectedId === item.id
                         ? "border-ink bg-ink/5"
@@ -184,7 +249,7 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <p className="font-semibold text-slate-800">{item.name}</p>
+                      <p className="font-semibold text-slate-800">{label}</p>
                       <Badge variant={item.enabled ? "success" : "neutral"}>
                         {item.enabled ? "Actif" : "Inactif"}
                       </Badge>
@@ -197,7 +262,8 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                       {formatScope(item.scope, locations)}
                     </p>
                   </button>
-                ))
+                );
+                })
               )}
             </CardContent>
           </Card>
@@ -215,13 +281,18 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                 </div>
               ) : (
                 <div className="space-y-4">
+                  {draftDirty && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                      Modifications non enregistrees.
+                    </div>
+                  )}
                   <label className="text-xs font-semibold text-slate-600">
                     Nom
                     <input
                       className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                       value={selected.name}
                       onChange={(event) =>
-                        updateAutomation(selected.id, { name: event.target.value })
+                        updateDraft(selected.id, { name: event.target.value })
                       }
                     />
                   </label>
@@ -232,9 +303,8 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                       value={selected.type}
                       onChange={(event) => {
                         const nextType = event.target.value as AutomationType;
-                        updateAutomation(selected.id, {
+                        updateDraft(selected.id, {
                           type: nextType,
-                          name: automationLabels[nextType],
                           params: defaultParamsByType(nextType)
                         });
                       }}
@@ -253,7 +323,7 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                         className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                         value={selected.frequency}
                         onChange={(event) =>
-                          updateAutomation(selected.id, {
+                          updateDraft(selected.id, {
                             frequency: event.target.value as AutomationFrequency
                           })
                         }
@@ -268,7 +338,7 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                         className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                         value={selected.scope.mode}
                         onChange={(event) =>
-                          updateAutomation(selected.id, {
+                          updateDraft(selected.id, {
                             scope: {
                               mode: event.target.value as AutomationScope["mode"],
                               locationId:
@@ -292,7 +362,7 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                         className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                         value={selected.scope.locationId ?? ""}
                         onChange={(event) =>
-                          updateAutomation(selected.id, {
+                          updateDraft(selected.id, {
                             scope: {
                               mode: "location",
                               locationId: event.target.value || null
@@ -341,7 +411,7 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                           type="checkbox"
                           checked={selected.enabled}
                           onChange={(event) =>
-                            updateAutomation(selected.id, {
+                            updateDraft(selected.id, {
                               enabled: event.target.checked
                             })
                           }
@@ -457,6 +527,26 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                       Resume hebdomadaire en preparation (configuration bientot).
                     </div>
                   )}
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={handleSave} disabled={!draftDirty}>
+                      Enregistrer
+                    </Button>
+                    <Button variant="outline" onClick={handleCancel}>
+                      Annuler
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={handleTestAutomation}
+                      disabled={!selected.enabled}
+                      title={
+                        selected.enabled
+                          ? "Generer une alerte de test"
+                          : "Activez l'automatisation pour tester"
+                      }
+                    >
+                      Tester cette automatisation
+                    </Button>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -468,3 +558,9 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
 };
 
 export { Automation };
+
+// Manual test plan:
+// 1) Nouvelle automatisation -> nom vide, modifications non enregistrees visibles.
+// 2) Editer, puis Annuler -> retour au dernier etat sauvegarde.
+// 3) Enregistrer -> persistence localStorage (egia:automations:v1).
+// 4) Tester cette automatisation -> ajoute une alerte mock (egia:alerts:v1).

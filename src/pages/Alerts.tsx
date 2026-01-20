@@ -38,7 +38,18 @@ type AutomationConfig = {
   updatedAt: string;
 };
 
+type MockAlert = {
+  id: string;
+  automation_id: string;
+  title: string;
+  message: string;
+  severity: "info" | "warn" | "crit";
+  created_at: string;
+  location_name: string;
+};
+
 const AUTOMATION_STORAGE_KEY = "egia:automations:v1";
+const ALERTS_STORAGE_KEY = "egia:alerts:v1";
 
 const ruleLabelMap: Record<string, string> = {
   NEGATIVE_NO_REPLY: "Avis negatif sans reponse",
@@ -119,6 +130,37 @@ const Alerts = ({ session }: AlertsProps) => {
       }
     } catch {
       setAutomations([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(ALERTS_STORAGE_KEY);
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored) as MockAlert[];
+      if (Array.isArray(parsed)) {
+        const mapped = parsed.map((item) => ({
+          id: item.id,
+          rule_code: "AUTOMATION",
+          severity:
+            item.severity === "crit"
+              ? "high"
+              : item.severity === "warn"
+                ? "medium"
+                : "low",
+          review_id: item.automation_id,
+          triggered_at: item.created_at,
+          payload: {
+            message: item.message,
+            location_name: item.location_name,
+            title: item.title
+          }
+        }));
+        setMockAlerts(mapped);
+      }
+    } catch {
+      setMockAlerts([]);
     }
   }, []);
 
@@ -216,14 +258,6 @@ const Alerts = ({ session }: AlertsProps) => {
   };
 
   const handleTestAutomation = (automation: AutomationConfig) => {
-    const ruleCode =
-      automation.type === "rating_drop"
-        ? "AUTO_RATING_DROP"
-        : automation.type === "negative_review"
-          ? "AUTO_NEGATIVE_REVIEW"
-          : automation.type === "volume_drop"
-            ? "AUTO_VOLUME_DROP"
-            : "AUTO_WEEKLY_SUMMARY";
     const message =
       automation.type === "rating_drop"
         ? "Un concurrent passe devant vous en note."
@@ -232,15 +266,34 @@ const Alerts = ({ session }: AlertsProps) => {
           : automation.type === "volume_drop"
             ? "Le volume d'avis est en baisse sur 7 jours."
             : "Resume hebdomadaire pret a consulter.";
-    const mockAlert: AlertRow = {
+    const mockAlert: MockAlert = {
       id: `mock-${automation.id}-${Date.now()}`,
-      rule_code: ruleCode,
-      severity: "medium",
-      review_id: "mock",
-      triggered_at: new Date().toISOString(),
-      payload: { message }
+      automation_id: automation.id,
+      title: automation.name,
+      message,
+      severity: automation.type === "weekly_summary" ? "info" : "warn",
+      created_at: new Date().toISOString(),
+      location_name:
+        automation.scope.mode === "all" ? "Tous les etablissements" : "Etablissement"
     };
-    setMockAlerts((prev) => [mockAlert, ...prev]);
+    const stored = window.localStorage.getItem(ALERTS_STORAGE_KEY);
+    const parsed = stored ? (JSON.parse(stored) as MockAlert[]) : [];
+    const next = [mockAlert, ...(Array.isArray(parsed) ? parsed : [])].slice(0, 20);
+    window.localStorage.setItem(ALERTS_STORAGE_KEY, JSON.stringify(next));
+    const mapped = next.map((item) => ({
+      id: item.id,
+      rule_code: "AUTOMATION",
+      severity:
+        item.severity === "crit"
+          ? "high"
+          : item.severity === "warn"
+            ? "medium"
+            : "low",
+      review_id: item.automation_id,
+      triggered_at: item.created_at,
+      payload: { message: item.message, location_name: item.location_name }
+    }));
+    setMockAlerts(mapped);
   };
 
   const lastCheckedLabel =
@@ -401,3 +454,8 @@ const Alerts = ({ session }: AlertsProps) => {
 };
 
 export default Alerts;
+
+// Manual test plan:
+// 1) Ouvrir /automation -> tester une automatisation -> creer un mock.
+// 2) Ouvrir /alerts -> voir le mock dans la liste.
+// 3) Actualiser la page -> le mock reste via localStorage egia:alerts:v1.
