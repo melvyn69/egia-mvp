@@ -730,6 +730,146 @@ const handleCompetitors = async (req: VercelRequest, res: VercelResponse) => {
     return res.status(200).json({ ok: true, items: data ?? [], requestId });
   }
 
+  if (normalizedAction === "self") {
+    const payload = req.method === "GET" ? null : parseBody(req);
+    const { params } = parseQuery(req);
+    const locationId =
+      String(payload?.location_id ?? getParam(params, "location_id") ?? "").trim() ||
+      null;
+    if (!locationId) {
+      return sendError(
+        res,
+        requestId,
+        { code: "BAD_REQUEST", message: "Missing location_id" },
+        400
+      );
+    }
+
+    const { data: locationRow, error: locationError } = await supabaseAdmin
+      .from("google_locations")
+      .select("location_resource_name, location_title, last_synced_at")
+      .eq("id", locationId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (locationError) {
+      console.error("[competitors] self_location_error", {
+        requestId,
+        code: locationError.code,
+        message: locationError.message
+      });
+    }
+
+    const runMetrics = async (filter: { field: "location_id" | "location_name"; value: string }) => {
+      let query = supabaseAdmin
+        .from("google_reviews")
+        .select("rating, star_rating", { count: "exact" })
+        .eq("user_id", userId);
+      if (filter.field === "location_name") {
+        query = query.ilike("location_name", filter.value);
+      } else {
+        query = query.eq(filter.field, filter.value);
+      }
+      const { data, error, count } = await query.limit(200);
+      if (error) {
+        console.error("[competitors] self_metrics_error", {
+          requestId,
+          field: filter.field,
+          code: error.code,
+          message: error.message
+        });
+        return { rows: [], count: null };
+      }
+      return {
+        rows: (data ?? []) as Array<{ rating: number | null; star_rating: string | null }>,
+        count
+      };
+    };
+
+    const mapStarRating = (value: string | null) => {
+      switch (value) {
+        case "ONE":
+          return 1;
+        case "TWO":
+          return 2;
+        case "THREE":
+          return 3;
+        case "FOUR":
+          return 4;
+        case "FIVE":
+          return 5;
+        default:
+          return null;
+      }
+    };
+
+    const buildStats = (
+      rows: Array<{ rating: number | null; star_rating: string | null }>,
+      count: number | null
+    ) => {
+      const ratings = rows
+        .map((row) => {
+          if (typeof row.rating === "number") return row.rating;
+          if (typeof row.star_rating === "string") return mapStarRating(row.star_rating);
+          return null;
+        })
+        .filter((value): value is number => typeof value === "number");
+      const hasAny = (count ?? 0) > 0 || rows.length > 0;
+      const avgRaw =
+        ratings.length > 0
+          ? ratings.reduce((acc, value) => acc + value, 0) / ratings.length
+          : null;
+      const avg =
+        avgRaw !== null ? Math.round(avgRaw * 10) / 10 : null;
+      const reviewCount = hasAny ? count ?? rows.length : null;
+      return { rating: avg, review_count: reviewCount };
+    };
+
+    let source = "location_id";
+    let result = await runMetrics({ field: "location_id", value: locationId });
+    let stats = buildStats(result.rows, result.count ?? null);
+
+    if (
+      stats.review_count === null &&
+      locationRow?.location_resource_name
+    ) {
+      source = "location_name_resource";
+      result = await runMetrics({
+        field: "location_name",
+        value: locationRow.location_resource_name
+      });
+      stats = buildStats(result.rows, result.count ?? null);
+    }
+
+    if (stats.review_count === null && locationRow?.location_title) {
+      source = "location_name_title";
+      result = await runMetrics({
+        field: "location_name",
+        value: locationRow.location_title
+      });
+      stats = buildStats(result.rows, result.count ?? null);
+    }
+
+    console.info("[competitors] self_metrics", {
+      requestId,
+      locationId,
+      source,
+      review_count: stats.review_count,
+      rating: stats.rating
+    });
+
+    return res.status(200).json({
+      ok: true,
+      self: {
+        rating: stats.rating,
+        review_count: stats.review_count,
+        last_synced_at: locationRow?.last_synced_at ?? null,
+        latest_reviews: []
+      },
+      requestId
+    });
+  }
+
   if (normalizedAction === "follow" || normalizedAction === "unfollow") {
     if (req.method !== "POST") {
       return sendError(

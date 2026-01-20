@@ -254,7 +254,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
   >("all");
   const [radarSearch, setRadarSearch] = useState("");
   const [radarFollowedOnly, setRadarFollowedOnly] = useState(false);
-  const [radarTopLimit, setRadarTopLimit] = useState<number | null>(20);
+  const [radarTopLimit, setRadarTopLimit] = useState<number | null>(25);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [radarPageSize, setRadarPageSize] = useState(6);
   const [pendingPlaceIds, setPendingPlaceIds] = useState<string[]>([]);
@@ -265,12 +265,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const [zoneInput, setZoneInput] = useState("");
   const [scanHistory, setScanHistory] = useState<
     Array<{
+      ts: number;
+      locationId: string | null;
       keyword: string;
       radiusKm: number;
-      locationLabel: string;
-      locationId: string | null;
       zoneLabel: string | null;
-      createdAt: string;
     }>
   >([]);
 
@@ -335,7 +334,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
       try {
         const parsed = JSON.parse(history) as typeof scanHistory;
         if (Array.isArray(parsed)) {
-          setScanHistory(parsed);
+          setScanHistory(
+            parsed.filter((item) => typeof item?.ts === "number")
+          );
         }
       } catch {
         setScanHistory([]);
@@ -396,24 +397,28 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const selfStatsQuery = useQuery({
     queryKey: ["competitors-self", userId, selectedLocationId],
     queryFn: async () => {
-      if (!supabase || !userId || !selectedLocationId) return null;
-      const { data, error } = await supabase
-        .from("google_reviews")
-        .select("rating")
-        .eq("user_id", userId)
-        .eq("location_id", selectedLocationId)
-        .limit(200);
-      if (error) throw error;
-      const ratings = (data ?? [])
-        .map((row: { rating: number | null }) => Number(row.rating))
-        .filter((value) => Number.isFinite(value));
-      if (ratings.length === 0) {
-        return { avg: null, count: 0 };
+      if (!token || !selectedLocationId) return null;
+      const response = await fetch("/api/reports/competitors", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ action: "self", location_id: selectedLocationId })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.self) {
+        return { avg: null, count: null };
       }
-      const sum = ratings.reduce((acc, value) => acc + value, 0);
-      return { avg: sum / ratings.length, count: ratings.length };
+      const rating =
+        typeof payload.self.rating === "number" ? payload.self.rating : null;
+      const reviewCount =
+        typeof payload.self.review_count === "number"
+          ? payload.self.review_count
+          : null;
+      return { avg: rating, count: reviewCount };
     },
-    enabled: Boolean(userId && selectedLocationId)
+    enabled: Boolean(token && selectedLocationId)
   });
 
   const scanMutation = useMutation({
@@ -483,17 +488,12 @@ const Competitors = ({ session }: CompetitorsProps) => {
       setScanErrorHint(null);
       setLastScanAt(new Date());
       if (typeof window !== "undefined") {
-        const locationLabel =
-          selectedLocation?.location_title ??
-          selectedLocation?.location_resource_name ??
-          "Établissement";
         const entry = {
+          ts: Date.now(),
+          locationId: selectedLocationId ?? null,
           keyword: payload?.keyword ?? keywordValue,
           radiusKm: payload?.radius_km ?? radiusKm,
-          locationLabel,
-          locationId: selectedLocationId ?? null,
-          zoneLabel: normalizedZoneInput || null,
-          createdAt: new Date().toISOString()
+          zoneLabel: normalizedZoneInput || null
         };
         setScanHistory((prev) => {
           const nextHistory = [entry, ...prev].slice(0, 6);
@@ -559,11 +559,32 @@ const Competitors = ({ session }: CompetitorsProps) => {
       }
       const reportId =
         typeof data?.report?.id === "string" ? data.report.id : null;
+      const downloadUrl =
+        typeof data?.download_url === "string"
+          ? data.download_url
+          : typeof data?.report?.download_url === "string"
+            ? data.report.download_url
+            : typeof data?.report?.pdf_url === "string"
+              ? data.report.pdf_url
+              : null;
       setToast({
         type: "success",
-        message: "Rapport généré. Télécharge-le depuis Rapports."
+        message: downloadUrl
+          ? "Rapport généré. Téléchargement en cours."
+          : "Rapport généré. Télécharge-le depuis Rapports."
       });
-      navigate(reportId ? `/reports?report_id=${reportId}` : "/reports");
+      if (downloadUrl) {
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        link.download = "";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } else {
+        navigate(reportId ? `/reports?report_id=${reportId}` : "/reports");
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Échec de génération.";
@@ -673,6 +694,58 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const statusRadius = settingsRow?.competitive_monitoring_radius_km ?? radiusKm;
   const locationsEmpty =
     !locationsQuery.isLoading && (locationsQuery.data ?? []).length === 0;
+  const locationLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    (locationsQuery.data ?? []).forEach((location) => {
+      map.set(
+        location.id,
+        location.location_title ?? location.location_resource_name
+      );
+    });
+    return map;
+  }, [locationsQuery.data]);
+  const selectedLocation = (locationsQuery.data ?? []).find(
+    (location) => location.id === selectedLocationId
+  );
+  const normalizedZoneInput = normalizeZoneLabel(zoneInput);
+  const zoneLabel = normalizedZoneInput
+    ? normalizedZoneInput
+    : selectedLocation?.location_title || "—";
+  const rawLocationRating =
+    typeof (selectedLocation as { rating?: number | null })?.rating === "number"
+      ? (selectedLocation as { rating?: number | null }).rating
+      : null;
+  const locationRating =
+    typeof rawLocationRating === "number" && rawLocationRating > 0
+      ? rawLocationRating
+      : null;
+  const rawLocationReviewCount =
+    typeof (selectedLocation as { reviewCount?: number | null })?.reviewCount ===
+    "number"
+      ? (selectedLocation as { reviewCount?: number | null }).reviewCount
+      : typeof (selectedLocation as { review_count?: number | null })?.review_count ===
+        "number"
+        ? (selectedLocation as { review_count?: number | null }).review_count
+        : null;
+  const locationReviewCount =
+    typeof rawLocationReviewCount === "number" && rawLocationReviewCount > 0
+      ? rawLocationReviewCount
+      : null;
+  const rawSelfAvg = selfStatsQuery.data?.avg ?? null;
+  const rawSelfCount = selfStatsQuery.data?.count ?? null;
+  const selfAvg =
+    typeof rawSelfAvg === "number" && rawSelfAvg > 0 ? rawSelfAvg : null;
+  const selfCount =
+    typeof rawSelfCount === "number" && rawSelfCount > 0 ? rawSelfCount : null;
+  const displaySelfAvg = locationRating ?? selfAvg;
+  const displaySelfCount = locationReviewCount ?? selfCount;
+  const selfScoreLabel = displaySelfAvg !== null ? displaySelfAvg.toFixed(2) : "—";
+  const selfReviewsLabel =
+    displaySelfCount !== null ? `${displaySelfCount}` : "—";
+  const buildGoogleLink = (placeId: string) =>
+    `https://www.google.com/maps/place/?q=place_id:${placeId}`;
+  const formatDelta = (delta: number) =>
+    `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`;
 
   const radarRatings = radarItems
     .map((row) => row.rating)
@@ -729,11 +802,8 @@ const Competitors = ({ session }: CompetitorsProps) => {
 
   const topLimitOptions = useMemo(() => {
     const total = radarItems.length;
-    const options: number[] = [];
-    if (total >= 10) options.push(10);
-    if (total >= 20) options.push(20);
-    if (total >= 50) options.push(50);
-    return options;
+    const candidates = [10, 20, 25, 50];
+    return candidates.filter((value) => value <= total);
   }, [radarItems.length]);
 
   useEffect(() => {
@@ -744,7 +814,10 @@ const Competitors = ({ session }: CompetitorsProps) => {
       return;
     }
     if (!radarTopLimit || !topLimitOptions.includes(radarTopLimit)) {
-      setRadarTopLimit(topLimitOptions[topLimitOptions.length - 1]);
+      const preferred = topLimitOptions.includes(20)
+        ? 20
+        : topLimitOptions[0];
+      setRadarTopLimit(preferred);
     }
   }, [topLimitOptions, radarTopLimit]);
 
@@ -786,15 +859,15 @@ const Competitors = ({ session }: CompetitorsProps) => {
   }, [followedItems]);
 
   const getSelectionTier = (row: CompetitorRow) => {
-    const selfAvg = selfStatsQuery.data?.avg ?? null;
-    if (selfAvg === null) {
+    const baseAvg = displaySelfAvg;
+    if (baseAvg === null) {
       return { label: "OUTSIDER", variant: "neutral" as const };
     }
     const rating = row.rating ?? 0;
-    if (rating >= selfAvg + 0.2) {
+    if (rating >= baseAvg + 0.2) {
       return { label: "LEADER", variant: "success" as const };
     }
-    if (rating >= selfAvg - 0.2) {
+    if (rating >= baseAvg - 0.2) {
       return { label: "CHALLENGER", variant: "warning" as const };
     }
     return { label: "OUTSIDER", variant: "neutral" as const };
@@ -839,10 +912,12 @@ const Competitors = ({ session }: CompetitorsProps) => {
   }, [radarItems, sortedFollowed]);
 
   const podium = useMemo(() => {
-    const selfAvg = selfStatsQuery.data?.avg ?? null;
-    const selfCount = selfStatsQuery.data?.count ?? 0;
+    const selfAvg = displaySelfAvg;
+    const selfCount = displaySelfCount;
     const selfScore =
-      selfAvg !== null ? selfAvg * Math.log10(1 + selfCount) : null;
+      selfAvg !== null && selfCount !== null
+        ? selfAvg * Math.log10(1 + selfCount)
+        : null;
     const source = sortedFollowed.length > 0 ? sortedFollowed : radarItems;
     const topCompetitors = source
       .slice()
@@ -852,7 +927,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
       self: { score: selfScore, avg: selfAvg, count: selfCount },
       competitors: topCompetitors
     };
-  }, [radarItems, sortedFollowed, selfStatsQuery.data]);
+  }, [radarItems, sortedFollowed, displaySelfAvg, displaySelfCount]);
 
   const topScores = radarItems.map((row) => scoreCompetitor(row));
   const selfScoreValue = podium.self.score ?? null;
@@ -872,58 +947,6 @@ const Competitors = ({ session }: CompetitorsProps) => {
     <Skeleton key={`skeleton-${index}`} className="h-40 w-full" />
   ));
 
-  const buildGoogleLink = (placeId: string) =>
-    `https://www.google.com/maps/place/?q=place_id:${placeId}`;
-const formatDelta = (delta: number) =>
-  `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`;
-const normalizeName = (value: string) =>
-  value.toLowerCase().replace(/\s+/g, " ").trim();
-  const selfAvg = selfStatsQuery.data?.avg ?? null;
-  const selfCount = selfStatsQuery.data?.count ?? null;
-  const selectedLocation = (locationsQuery.data ?? []).find(
-    (location) => location.id === selectedLocationId
-  );
-  const normalizedZoneInput = normalizeZoneLabel(zoneInput);
-  const zoneLabel = normalizedZoneInput
-    ? normalizedZoneInput
-    : selectedLocation?.location_title || "—";
-  const locationRating =
-    typeof (selectedLocation as { rating?: number | null })?.rating === "number"
-      ? (selectedLocation as { rating?: number | null }).rating
-      : null;
-  const locationReviewCount =
-    typeof (selectedLocation as { reviewCount?: number | null })?.reviewCount ===
-    "number"
-      ? (selectedLocation as { reviewCount?: number | null }).reviewCount
-      : typeof (selectedLocation as { review_count?: number | null })?.review_count ===
-        "number"
-        ? (selectedLocation as { review_count?: number | null }).review_count
-        : null;
-  const selectedName =
-    typeof selectedLocation?.location_title === "string"
-      ? selectedLocation.location_title
-      : null;
-  const fallbackSelf =
-    selectedName && radarItems.length > 0
-      ? radarItems.find((item) =>
-          normalizeName(item.name).includes(normalizeName(selectedName))
-        )
-      : null;
-  const displaySelfAvg =
-    locationRating ??
-    (typeof fallbackSelf?.rating === "number" ? fallbackSelf.rating : null) ??
-    selfAvg;
-  const normalizedSelfCount =
-    selfAvg === null && selfCount === 0 ? null : selfCount;
-  const displaySelfCount =
-    locationReviewCount ??
-    (typeof fallbackSelf?.user_ratings_total === "number"
-      ? fallbackSelf.user_ratings_total
-      : null) ??
-    normalizedSelfCount;
-  const selfScoreLabel = displaySelfAvg !== null ? displaySelfAvg.toFixed(2) : "—";
-  const selfReviewsLabel =
-    displaySelfCount !== null ? `${displaySelfCount}` : "—";
 
   const radarSummary = useMemo(() => {
     const total = radarItems.length;
@@ -971,34 +994,34 @@ const normalizeName = (value: string) =>
     const threats: string[] = [];
     const actions: string[] = [];
 
-    if (selfAvg !== null && swotReport.avgRating !== null) {
-      const delta = selfAvg - swotReport.avgRating;
+    if (displaySelfAvg !== null && swotReport.avgRating !== null) {
+      const delta = displaySelfAvg - swotReport.avgRating;
       if (delta >= 0.2) {
         forces.push(
-          `Note supérieure de ${formatDelta(delta)} vs moyenne (${selfAvg.toFixed(
+          `Note supérieure de ${formatDelta(delta)} vs moyenne (${displaySelfAvg.toFixed(
             1
           )} vs ${swotReport.avgRating.toFixed(1)}).`
         );
       } else if (delta <= -0.2) {
         weaknesses.push(
-          `Note inférieure de ${formatDelta(Math.abs(delta))} vs moyenne (${selfAvg.toFixed(
+          `Note inférieure de ${formatDelta(Math.abs(delta))} vs moyenne (${displaySelfAvg.toFixed(
             1
           )} vs ${swotReport.avgRating.toFixed(1)}).`
         );
       }
     }
 
-    if (selfCount !== null && swotReport.avgVolume !== null) {
+    if (displaySelfCount !== null && swotReport.avgVolume !== null) {
       const avgVolume = swotReport.avgVolume;
-      if (selfCount >= avgVolume * 1.2) {
+      if (displaySelfCount >= avgVolume * 1.2) {
         forces.push(
-          `Volume d'avis supérieur à la moyenne (${selfCount} vs ~${Math.round(
+          `Volume d'avis supérieur à la moyenne (${displaySelfCount} vs ~${Math.round(
             avgVolume
           )}).`
         );
-      } else if (selfCount <= avgVolume * 0.8) {
+      } else if (displaySelfCount <= avgVolume * 0.8) {
         weaknesses.push(
-          `Volume d'avis inférieur à la moyenne (${selfCount} vs ~${Math.round(
+          `Volume d'avis inférieur à la moyenne (${displaySelfCount} vs ~${Math.round(
             avgVolume
           )}).`
         );
@@ -1006,15 +1029,15 @@ const normalizeName = (value: string) =>
     }
 
     if (
-      selfAvg !== null &&
+      displaySelfAvg !== null &&
       swotReport.maxRating !== null &&
-      selfAvg >= swotReport.maxRating
+      displaySelfAvg >= swotReport.maxRating
     ) {
-      forces.push(`Au niveau de la meilleure note (${selfAvg.toFixed(1)}).`);
+      forces.push(`Au niveau de la meilleure note (${displaySelfAvg.toFixed(1)}).`);
     }
 
-    if (swotReport.leader?.rating !== null && selfAvg !== null) {
-      const delta = swotReport.leader.rating - selfAvg;
+    if (swotReport.leader?.rating !== null && displaySelfAvg !== null) {
+      const delta = swotReport.leader.rating - displaySelfAvg;
       if (delta >= 0.3) {
         weaknesses.push(`Leader à ${formatDelta(delta)} points d'avance.`);
       } else if (delta > 0 && delta <= 0.2) {
@@ -1030,17 +1053,17 @@ const normalizeName = (value: string) =>
 
     if (swotReport.avgVolume !== null && swotReport.avgVolume < 30) {
       opportunities.push(
-        `Marche peu dense (volume moyen ~${Math.round(swotReport.avgVolume)} avis).`
+        `Marché peu dense (volume moyen ~${Math.round(swotReport.avgVolume)} avis).`
       );
     }
 
     if (
       swotReport.leader?.rating !== null &&
-      selfAvg !== null &&
+      displaySelfAvg !== null &&
       swotReport.leader.user_ratings_total !== null &&
-      selfCount !== null &&
-      swotReport.leader.rating >= selfAvg + 0.3 &&
-      swotReport.leader.user_ratings_total > selfCount
+      displaySelfCount !== null &&
+      swotReport.leader.rating >= displaySelfAvg + 0.3 &&
+      swotReport.leader.user_ratings_total > displaySelfCount
     ) {
       threats.push("Leader mieux noté avec plus d'avis.");
     }
@@ -1064,7 +1087,11 @@ const normalizeName = (value: string) =>
         )}.`
       );
     }
-    if (selfCount !== null && swotReport.avgVolume !== null && selfCount <= swotReport.avgVolume * 0.8) {
+    if (
+      displaySelfCount !== null &&
+      swotReport.avgVolume !== null &&
+      displaySelfCount <= swotReport.avgVolume * 0.8
+    ) {
       actions.push(
         `Collecter plus d'avis parce que le volume moyen est ~${Math.round(
           swotReport.avgVolume
@@ -1076,8 +1103,8 @@ const normalizeName = (value: string) =>
         `Mettre en avant vos atouts locaux parce que ${swotReport.nearbyHighRated} concurrent(s) très bien notés sont proches.`
       );
     }
-    if (swotReport.leader?.rating !== null && selfAvg !== null) {
-      const delta = swotReport.leader.rating - selfAvg;
+    if (swotReport.leader?.rating !== null && displaySelfAvg !== null) {
+      const delta = swotReport.leader.rating - displaySelfAvg;
       if (delta > 0 && delta <= 0.2) {
         actions.push(
           `Gagner quelques points de note pour dépasser le leader (${formatDelta(
@@ -1100,7 +1127,7 @@ const normalizeName = (value: string) =>
       threats: trimList(threats),
       actions: actions.slice(0, 5)
     };
-  }, [selfAvg, selfCount, swotReport]);
+  }, [displaySelfAvg, displaySelfCount, swotReport]);
 
   return (
     <div className="space-y-6">
@@ -1278,7 +1305,7 @@ const normalizeName = (value: string) =>
                         className="mt-2"
                         onClick={() => navigate("/settings")}
                       >
-                        Ouvrir les paramètres
+                        Configurer dans Paramètres
                       </Button>
                     </div>
                   )}
@@ -1343,7 +1370,7 @@ const normalizeName = (value: string) =>
                         settingsRow?.competitive_monitoring_radius_km ??
                         0;
                       if (!selectedLocationId) return;
-                      if (!enabled || !keywordValue || !fallbackRadius || !lastScan) {
+                      if (!enabled || !lastScan?.keyword || !fallbackRadius || !lastScan) {
                         setScanError(
                           "Relance indisponible sans analyse précédente."
                         );
@@ -1357,11 +1384,21 @@ const normalizeName = (value: string) =>
                       if (lastScan?.zoneLabel) {
                         setZoneInput(lastScan.zoneLabel);
                       }
-                      if (lastScan?.locationId) {
+                      if (
+                        lastScan?.locationId &&
+                        lastScan.locationId !== selectedLocationId
+                      ) {
                         setSelectedLocationId(lastScan.locationId);
+                        setTimeout(() => {
+                          scanMutation.mutate({
+                            keyword: lastScan.keyword,
+                            radiusKm: fallbackRadius
+                          });
+                        }, 0);
+                        return;
                       }
                       scanMutation.mutate({
-                        keyword: keywordValue,
+                        keyword: lastScan.keyword,
                         radiusKm: fallbackRadius
                       });
                     }}
@@ -1370,7 +1407,11 @@ const normalizeName = (value: string) =>
                       scanMutation.isPending ||
                       !scanHistory[0]
                     }
-                    title="Relance la dernière analyse"
+                    title={
+                      scanHistory[0]
+                        ? "Relance la dernière analyse"
+                        : "Lance une analyse d’abord"
+                    }
                   >
                     Relancer
                   </Button>
@@ -1405,7 +1446,7 @@ const normalizeName = (value: string) =>
               ) : (
                 scanHistory.map((item) => (
                   <button
-                    key={`${item.keyword}-${item.createdAt}`}
+                    key={`${item.keyword}-${item.ts}`}
                     type="button"
                     onClick={() => {
                       setRadiusKm(item.radiusKm);
@@ -1421,11 +1462,14 @@ const normalizeName = (value: string) =>
                         {item.keyword} • {item.radiusKm} km
                       </span>
                       <span className="text-[11px] text-slate-400">
-                        {new Date(item.createdAt).toLocaleDateString("fr-FR")}
+                        {new Date(item.ts).toLocaleDateString("fr-FR")}
                       </span>
                     </div>
                     <div className="mt-1 text-[11px] text-slate-500">
-                      {item.zoneLabel ?? item.locationLabel}
+                      {item.zoneLabel ??
+                        (item.locationId
+                          ? locationLabelById.get(item.locationId) ?? "Établissement"
+                          : "Établissement")}
                     </div>
                   </button>
                 ))
@@ -1474,7 +1518,7 @@ const normalizeName = (value: string) =>
               {isTop10 && <Badge variant="success">Top 10% du radar</Badge>}
             </CardHeader>
             <CardContent>
-              {selfAvg === null && selfCount === null ? (
+              {displaySelfAvg === null && displaySelfCount === null ? (
                 <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
                   <p className="text-base font-semibold text-slate-800">À configurer</p>
                   <p className="mt-1 text-sm text-slate-500">
@@ -1603,17 +1647,17 @@ const normalizeName = (value: string) =>
                   });
                   const opportunities = getOpportunitiesToCheck(competitor);
                   const rationale = getWatchlistRationale(competitor, displaySelfAvg);
-                  const ratingDelta =
+                  const ratingDeltaLabel =
                     displaySelfAvg !== null && competitor.rating !== null
                       ? formatDelta(competitor.rating - displaySelfAvg)
-                      : null;
-                  const reviewsDelta =
+                      : "—";
+                  const reviewsDeltaLabel =
                     displaySelfCount !== null &&
                     competitor.user_ratings_total !== null
                       ? formatDelta(
                           competitor.user_ratings_total - displaySelfCount
                         )
-                      : null;
+                      : "—";
                   return (
                     <Card key={competitor.id} className="h-full">
                       <CardContent className="flex h-full flex-col gap-3 pt-6">
@@ -1642,21 +1686,18 @@ const normalizeName = (value: string) =>
                           {insights.length > 0 ? (
                             renderChipList(insights)
                           ) : (
-                            <span>
-                              Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir l’analyse.
-                            </span>
+                            <span>Aucun signal distinctif détecté.</span>
                           )}
                         </div>
                         <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
                           <div className="font-semibold text-slate-700">Comparaison</div>
                           <ul className="mt-1 space-y-1 text-xs text-slate-500">
                             <li>
-                              Note: {competitor.rating ?? "—"}
-                              {ratingDelta ? ` (${ratingDelta} vs vous)` : ""}
+                              Note: {competitor.rating ?? "—"} ({ratingDeltaLabel} vs vous)
                             </li>
                             <li>
-                              Avis: {competitor.user_ratings_total ?? "—"}
-                              {reviewsDelta ? ` (${reviewsDelta} vs vous)` : ""}
+                              Avis: {competitor.user_ratings_total ?? "—"} (
+                              {reviewsDeltaLabel} vs vous)
                             </li>
                             <li>Distance: {formatDistance(competitor.distance_m)}</li>
                           </ul>
@@ -1850,7 +1891,7 @@ const normalizeName = (value: string) =>
                     size="sm"
                     className="mt-4"
                     onClick={() => scanMutation.mutate({})}
-                    disabled={scanMutation.isPending || !selectedLocationId}
+                    disabled={scanMutation.isPending || !selectedLocationId || !keywordValue}
                   >
                     Lancer l’analyse
                   </Button>
@@ -1915,17 +1956,17 @@ const normalizeName = (value: string) =>
                       radiusKm
                     });
                     const opportunities = getOpportunitiesToCheck(competitor);
-                    const ratingDelta =
+                    const ratingDeltaLabel =
                       selfAvg !== null && competitor.rating !== null
                         ? formatDelta(competitor.rating - selfAvg)
-                        : null;
-                    const reviewsDelta =
+                        : "—";
+                    const reviewsDeltaLabel =
                       displaySelfCount !== null &&
                       competitor.user_ratings_total !== null
                         ? formatDelta(
                             competitor.user_ratings_total - displaySelfCount
                           )
-                        : null;
+                        : "—";
                     const dangerRadius =
                       typeof radiusKm === "number" ? radiusKm * 1000 * 0.5 : null;
                     const isDangerous =
@@ -1993,21 +2034,18 @@ const normalizeName = (value: string) =>
                           {insights.length > 0 ? (
                             renderChipList(insights)
                           ) : (
-                            <span>
-                              Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir l’analyse.
-                            </span>
+                            <span>Lecture limitée : peu de signaux fiables.</span>
                           )}
                         </div>
                         <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
                           <div className="font-semibold text-slate-700">Comparaison</div>
                           <ul className="mt-1 space-y-1 text-xs text-slate-500">
                             <li>
-                              Note: {competitor.rating ?? "—"}
-                              {ratingDelta ? ` (${ratingDelta} vs vous)` : ""}
+                              Note: {competitor.rating ?? "—"} ({ratingDeltaLabel} vs vous)
                             </li>
                             <li>
-                              Avis: {competitor.user_ratings_total ?? "—"}
-                              {reviewsDelta ? ` (${reviewsDelta} vs vous)` : ""}
+                              Avis: {competitor.user_ratings_total ?? "—"} (
+                              {reviewsDeltaLabel} vs vous)
                             </li>
                             <li>Distance: {formatDistance(competitor.distance_m)}</li>
                           </ul>
@@ -2156,8 +2194,7 @@ const normalizeName = (value: string) =>
                   </div>
                   {swotBullets.forces.length === 0 ? (
                     <p className="text-sm text-emerald-700/70">
-                      Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir
-                      l’analyse.
+                      Données insuffisantes pour qualifier les forces du marché.
                     </p>
                   ) : (
                     <ul className="list-disc space-y-1 pl-4 text-sm">
@@ -2179,8 +2216,7 @@ const normalizeName = (value: string) =>
                   </div>
                   {swotBullets.weaknesses.length === 0 ? (
                     <p className="text-sm text-rose-700/70">
-                      Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir
-                      l’analyse.
+                      Pas assez de données pour isoler les faiblesses.
                     </p>
                   ) : (
                     <ul className="list-disc space-y-1 pl-4 text-sm">
@@ -2206,12 +2242,11 @@ const normalizeName = (value: string) =>
                 </div>
                 {swotBullets.opportunities.length === 0 ? (
                   <p className="text-sm text-sky-700/70">
-                    Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir
-                    l’analyse.
+                    Élargis le rayon ou suis des concurrents pour révéler des opportunités.
                   </p>
                 ) : (
                   <ul className="list-disc space-y-1 pl-4 text-sm">
-                    {swotBullets.opportunities.slice(0, 3).map((item) => (
+                    {swotBullets.opportunities.slice(0, 2).map((item) => (
                       <li key={item}>{item}</li>
                     ))}
                   </ul>
@@ -2229,8 +2264,7 @@ const normalizeName = (value: string) =>
                 </div>
                 {swotBullets.threats.length === 0 ? (
                   <p className="text-sm text-slate-500">
-                    Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir
-                    l’analyse.
+                    Impossible d’isoler des menaces sans davantage de données.
                   </p>
                 ) : (
                   <ul className="list-disc space-y-1 pl-4 text-sm">

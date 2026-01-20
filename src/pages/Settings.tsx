@@ -244,9 +244,9 @@ const Settings = ({ session }: SettingsProps) => {
   const [competitiveEnabled, setCompetitiveEnabled] = useState(false);
   const [competitiveKeyword, setCompetitiveKeyword] = useState("");
   const [competitiveRadius, setCompetitiveRadius] = useState(5);
-  const [competitiveSaving] = useState(false);
-  const [competitiveError] = useState<string | null>(null);
-  const [competitiveSuccess] = useState<string | null>(null);
+  const [competitiveSaving, setCompetitiveSaving] = useState(false);
+  const [competitiveError, setCompetitiveError] = useState<string | null>(null);
+  const [competitiveSuccess, setCompetitiveSuccess] = useState<string | null>(null);
   const [competitiveInitDone, setCompetitiveInitDone] = useState(false);
   const deviceHint = useMemo(() => {
     if (typeof navigator === "undefined") return "desktop";
@@ -506,6 +506,42 @@ const Settings = ({ session }: SettingsProps) => {
       void persistActiveLocations(next);
       return next;
     });
+  };
+
+  const handleSaveCompetitiveSettings = async () => {
+    if (!supabaseClient || !userId) {
+      setCompetitiveError("Connexion Supabase requise.");
+      return;
+    }
+    const trimmedKeyword = competitiveKeyword.trim();
+    if (!trimmedKeyword) {
+      setCompetitiveError("Le secteur d’activité est requis.");
+      setCompetitiveSuccess(null);
+      return;
+    }
+    setCompetitiveSaving(true);
+    setCompetitiveError(null);
+    setCompetitiveSuccess(null);
+    const payload = {
+      user_id: userId,
+      business_id: userId,
+      business_name: session?.user?.email ?? "Business",
+      competitive_monitoring_enabled: Boolean(competitiveEnabled),
+      competitive_monitoring_keyword: trimmedKeyword,
+      competitive_monitoring_radius_km: competitiveRadius,
+      updated_at: new Date().toISOString()
+    };
+    const { error } = await sb
+      .from("business_settings")
+      .upsert(payload, { onConflict: "business_id" });
+    if (error) {
+      console.error("business_settings competitive save error:", error);
+      setCompetitiveError("Impossible d’enregistrer les réglages.");
+    } else {
+      setCompetitiveSuccess("Réglages enregistrés.");
+      businessSettingsQuery.refetch();
+    }
+    setCompetitiveSaving(false);
   };
 
   const handleConnectGoogle = async () => {
@@ -1246,11 +1282,55 @@ const Settings = ({ session }: SettingsProps) => {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-slate-600">
-                Ces reglages se gerent dans Veille concurrentielle.
+                Definissez le secteur d’activite et le rayon utilise par la veille.
               </p>
-              <Button variant="outline" onClick={() => navigate("/competitors")}>
-                Ouvrir la veille concurrentielle
-              </Button>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="text-xs font-semibold text-slate-600">
+                  Secteur d’activite
+                  <input
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    value={competitiveKeyword}
+                    onChange={(event) => setCompetitiveKeyword(event.target.value)}
+                    placeholder="ex: Salon de coiffure"
+                  />
+                </label>
+                <label className="text-xs font-semibold text-slate-600">
+                  Rayon par defaut
+                  <select
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                    value={competitiveRadius}
+                    onChange={(event) => setCompetitiveRadius(Number(event.target.value))}
+                  >
+                    <option value={1}>1 km</option>
+                    <option value={5}>5 km</option>
+                    <option value={10}>10 km</option>
+                    <option value={20}>20 km</option>
+                  </select>
+                </label>
+              </div>
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-slate-300"
+                  checked={competitiveEnabled}
+                  onChange={(event) => setCompetitiveEnabled(event.target.checked)}
+                />
+                Activer la veille concurrentielle
+              </label>
+              {competitiveError && (
+                <p className="text-xs text-rose-600">{competitiveError}</p>
+              )}
+              {competitiveSuccess && (
+                <p className="text-xs text-emerald-600">{competitiveSuccess}</p>
+              )}
+              <div className="flex flex-wrap items-center gap-3">
+                <Button onClick={handleSaveCompetitiveSettings} disabled={competitiveSaving}>
+                  {competitiveSaving ? "Enregistrement..." : "Enregistrer"}
+                </Button>
+                <Button variant="outline" onClick={() => navigate("/competitors")}>
+                  Ouvrir la veille concurrentielle
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
