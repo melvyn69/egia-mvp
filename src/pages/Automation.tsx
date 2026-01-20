@@ -88,6 +88,12 @@ const buildAutomation = (type: AutomationType): AutomationConfig => {
   };
 };
 
+const getDisplayName = (automation: AutomationConfig) => {
+  const trimmed = automation.name.trim();
+  if (trimmed) return trimmed;
+  return automationLabels[automation.type] ?? "Nouvelle automatisation";
+};
+
 const formatScope = (scope: AutomationScope, locations: AutomationProps["locations"]) => {
   if (scope.mode === "all") return "Tous les etablissements";
   if (!scope.locationId) return "Etablissement non defini";
@@ -100,6 +106,7 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AutomationConfig | null>(null);
   const [draftDirty, setDraftDirty] = useState(false);
+  const [testFeedback, setTestFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -157,8 +164,11 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
 
   const handleSave = () => {
     if (!draft) return;
-    const nameValue = draft.name.trim() || "Nouvelle automatisation";
-    const next = { ...draft, name: nameValue, updatedAt: new Date().toISOString() };
+    const next = {
+      ...draft,
+      name: draft.name.trim(),
+      updatedAt: new Date().toISOString()
+    };
     setAutomations((prev) => {
       const exists = prev.some((item) => item.id === next.id);
       if (exists) {
@@ -192,18 +202,35 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
   };
 
   const handleTestAutomation = () => {
-    if (!draft || !draft.enabled) return;
+    if (!draft || !draft.enabled || draftDirty) return;
     const locationName = formatScope(draft.scope, locations);
+    const automationName = getDisplayName(draft);
+    const message =
+      draft.type === "rating_drop"
+        ? `Note sous ${(draft.params as { threshold: number }).threshold} pour ${locationName}.`
+        : draft.type === "negative_review"
+          ? `Avis ≤ ${(draft.params as { maxStars: number }).maxStars}★ sans réponse (${(draft.params as { unresolvedHours: number }).unresolvedHours}h).`
+          : draft.type === "volume_drop"
+            ? `Moins de ${(draft.params as { minReviews: number }).minReviews} avis sur ${(draft.params as { windowDays: number }).windowDays} jours.`
+            : "Résumé hebdomadaire prêt à consulter.";
     const alert = {
-      id: `alert_${Date.now()}`,
+      id: `alert_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       automation_id: draft.id,
-      title: draft.name.trim() || "Nouvelle automatisation",
-      message: `${automationLabels[draft.type]} detectee.`,
-      severity: draft.type === "weekly_summary" ? "info" : "warn",
+      title: automationName,
+      message,
+      severity:
+        draft.type === "negative_review"
+          ? "critical"
+          : draft.type === "weekly_summary"
+            ? "info"
+            : "warn",
       created_at: new Date().toISOString(),
-      location_name: locationName
+      location_name: locationName,
+      location_id: draft.scope.locationId ?? null
     };
     persistMockAlert(alert);
+    setTestFeedback("Alerte de test envoyee.");
+    setTimeout(() => setTestFeedback(null), 1500);
   };
 
   return (
@@ -236,7 +263,7 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                 </div>
               ) : (
                 automations.map((item) => {
-                  const label = item.name.trim() || "Nouvelle automatisation";
+                  const label = getDisplayName(item);
                   return (
                   <button
                     key={item.id}
@@ -281,6 +308,9 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                 </div>
               ) : (
                 <div className="space-y-4">
+                  <div className="text-sm font-semibold text-slate-800">
+                    {getDisplayName(selected)}
+                  </div>
                   {draftDirty && (
                     <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                       Modifications non enregistrees.
@@ -294,6 +324,7 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                       onChange={(event) =>
                         updateDraft(selected.id, { name: event.target.value })
                       }
+                      placeholder="Nouvelle automatisation"
                     />
                   </label>
                   <label className="text-xs font-semibold text-slate-600">
@@ -537,15 +568,22 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                     <Button
                       variant="outline"
                       onClick={handleTestAutomation}
-                      disabled={!selected.enabled}
+                      disabled={!selected.enabled || draftDirty}
                       title={
-                        selected.enabled
-                          ? "Generer une alerte de test"
-                          : "Activez l'automatisation pour tester"
+                        draftDirty
+                          ? "Enregistre d'abord avant de tester"
+                          : selected.enabled
+                            ? "Generer une alerte de test"
+                            : "Activez l'automatisation pour tester"
                       }
                     >
                       Tester cette automatisation
                     </Button>
+                    {testFeedback && (
+                      <span className="text-xs font-semibold text-emerald-600">
+                        {testFeedback}
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
@@ -564,3 +602,4 @@ export { Automation };
 // 2) Editer, puis Annuler -> retour au dernier etat sauvegarde.
 // 3) Enregistrer -> persistence localStorage (egia:automations:v1).
 // 4) Tester cette automatisation -> ajoute une alerte mock (egia:alerts:v1).
+// 5) Tester desactive tant que modifications non enregistrees.

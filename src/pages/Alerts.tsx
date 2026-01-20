@@ -43,7 +43,7 @@ type MockAlert = {
   automation_id: string;
   title: string;
   message: string;
-  severity: "info" | "warn" | "crit";
+  severity: "info" | "warn" | "crit" | "critical";
   created_at: string;
   location_name: string;
 };
@@ -75,7 +75,7 @@ const severityVariantMap: Record<AlertRow["severity"], "neutral" | "warning"> = 
 };
 
 const mapSeverity = (value: MockAlert["severity"]): AlertRow["severity"] => {
-  if (value === "crit") return "high";
+  if (value === "crit" || value === "critical") return "high";
   if (value === "warn") return "medium";
   return "low";
 };
@@ -125,24 +125,13 @@ const Alerts = ({ session }: AlertsProps) => {
   const [automations, setAutomations] = useState<AutomationConfig[]>([]);
   const [mockAlerts, setMockAlerts] = useState<AlertRow[]>([]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem(AUTOMATION_STORAGE_KEY);
-    if (!stored) return;
-    try {
-      const parsed = JSON.parse(stored) as AutomationConfig[];
-      if (Array.isArray(parsed)) {
-        setAutomations(parsed);
-      }
-    } catch {
-      setAutomations([]);
-    }
-  }, []);
-
-  useEffect(() => {
+  const loadMockAlerts = () => {
     if (typeof window === "undefined") return;
     const stored = window.localStorage.getItem(ALERTS_STORAGE_KEY);
-    if (!stored) return;
+    if (!stored) {
+      setMockAlerts([]);
+      return;
+    }
     try {
       const parsed = JSON.parse(stored) as MockAlert[];
       if (Array.isArray(parsed)) {
@@ -159,10 +148,38 @@ const Alerts = ({ session }: AlertsProps) => {
           }
         }));
         setMockAlerts(mapped);
+        return;
       }
+      setMockAlerts([]);
     } catch {
       setMockAlerts([]);
     }
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(AUTOMATION_STORAGE_KEY);
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored) as AutomationConfig[];
+      if (Array.isArray(parsed)) {
+        setAutomations(parsed);
+      }
+    } catch {
+      setAutomations([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    loadMockAlerts();
+    const handler = (event: StorageEvent) => {
+      if (event.key === ALERTS_STORAGE_KEY) {
+        loadMockAlerts();
+      }
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
   }, []);
 
   const alertsQuery = useQuery({
