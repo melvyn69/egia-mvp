@@ -62,6 +62,13 @@ const ruleLabelMap: Record<string, string> = {
   AUTO_WEEKLY_SUMMARY: "Resume hebdomadaire"
 };
 
+const automationLabels: Record<AutomationType, string> = {
+  rating_drop: "Alerte baisse de note",
+  negative_review: "Alerte avis negatif",
+  volume_drop: "Alerte volume",
+  weekly_summary: "Resume hebdo"
+};
+
 const severityLabelMap: Record<AlertRow["severity"], string> = {
   low: "Faible",
   medium: "Moyenne",
@@ -78,6 +85,12 @@ const mapSeverity = (value: MockAlert["severity"]): AlertRow["severity"] => {
   if (value === "crit" || value === "critical") return "high";
   if (value === "warn") return "medium";
   return "low";
+};
+
+const getAutomationName = (automation: AutomationConfig) => {
+  const trimmed = automation.name.trim();
+  if (trimmed) return trimmed;
+  return automationLabels[automation.type] ?? "Nouvelle automatisation";
 };
 
 const buildSummary = (payload: Record<string, unknown> | null | undefined) => {
@@ -124,6 +137,7 @@ const Alerts = ({ session }: AlertsProps) => {
   const accessToken = session?.access_token ?? null;
   const [automations, setAutomations] = useState<AutomationConfig[]>([]);
   const [mockAlerts, setMockAlerts] = useState<AlertRow[]>([]);
+  const [mockFeedback, setMockFeedback] = useState<string | null>(null);
 
   const loadMockAlerts = () => {
     if (typeof window === "undefined") return;
@@ -178,8 +192,13 @@ const Alerts = ({ session }: AlertsProps) => {
         loadMockAlerts();
       }
     };
+    const customHandler = () => loadMockAlerts();
     window.addEventListener("storage", handler);
-    return () => window.removeEventListener("storage", handler);
+    window.addEventListener("egia:alerts:updated", customHandler as EventListener);
+    return () => {
+      window.removeEventListener("storage", handler);
+      window.removeEventListener("egia:alerts:updated", customHandler as EventListener);
+    };
   }, []);
 
   const alertsQuery = useQuery({
@@ -259,6 +278,10 @@ const Alerts = ({ session }: AlertsProps) => {
     () => automations.filter((item) => item.enabled),
     [automations]
   );
+  const mockCount = mockAlerts.length;
+  const lastMockAt =
+    mockAlerts.length > 0 ? mockAlerts[0]?.triggered_at ?? null : null;
+  const lastMockLabel = lastMockAt ? formatRelativeDate(lastMockAt) : "—";
 
   const buildAutomationPreview = (automation: AutomationConfig) => {
     const lastRun = new Date(automation.updatedAt);
@@ -287,7 +310,7 @@ const Alerts = ({ session }: AlertsProps) => {
     const mockAlert: MockAlert = {
       id: `mock-${automation.id}-${Date.now()}`,
       automation_id: automation.id,
-      title: automation.name,
+      title: getAutomationName(automation),
       message,
       severity: automation.type === "weekly_summary" ? "info" : "warn",
       created_at: new Date().toISOString(),
@@ -307,6 +330,9 @@ const Alerts = ({ session }: AlertsProps) => {
       payload: { message: item.message, location_name: item.location_name }
     }));
     setMockAlerts(mapped);
+    window.dispatchEvent(new CustomEvent("egia:alerts:updated"));
+    setMockFeedback("Alerte simulee envoyee.");
+    setTimeout(() => setMockFeedback(null), 1500);
   };
 
   const lastCheckedLabel =
@@ -318,6 +344,7 @@ const Alerts = ({ session }: AlertsProps) => {
       : null;
 
   const handleRefresh = async () => {
+    loadMockAlerts();
     await alertsQuery.refetch();
   };
 
@@ -360,7 +387,13 @@ const Alerts = ({ session }: AlertsProps) => {
                   Déclenchements simulés pour tester vos règles.
                 </div>
               </div>
-              <Badge variant="neutral">{activeAutomations.length} actives</Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="neutral">{activeAutomations.length} actives</Badge>
+                <Badge variant="neutral">{mockCount} alertes simulées</Badge>
+              </div>
+            </div>
+            <div className="mt-2 text-[11px] text-slate-500">
+              Dernier déclenchement : {lastMockLabel}
             </div>
             {activeAutomations.length === 0 ? (
               <p className="mt-2 text-[11px] text-slate-500">
@@ -377,7 +410,7 @@ const Alerts = ({ session }: AlertsProps) => {
                     >
                       <div>
                         <div className="font-semibold text-slate-700">
-                          {automation.name}
+                          {getAutomationName(automation)}
                         </div>
                         <div className="text-[11px] text-slate-400">
                           Dernier declenchement: {preview.lastLabel} · Prochaine
@@ -394,6 +427,11 @@ const Alerts = ({ session }: AlertsProps) => {
                     </div>
                   );
                 })}
+              </div>
+            )}
+            {mockFeedback && (
+              <div className="mt-2 text-[11px] font-semibold text-emerald-600">
+                {mockFeedback}
               </div>
             )}
           </div>
@@ -472,3 +510,4 @@ export default Alerts;
 // 1) Ouvrir /automation -> tester une automatisation -> creer un mock.
 // 2) Ouvrir /alerts -> voir le mock dans la liste.
 // 3) Actualiser la page -> le mock reste via localStorage egia:alerts:v1.
+// 4) Cliquer Tester dans l'aperçu -> alerte simulée et compteur mis a jour.
