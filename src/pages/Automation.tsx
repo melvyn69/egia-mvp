@@ -769,7 +769,6 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                     </div>
                   </div>
 
-                  {selected.type === "rating_drop" && (
                   <div className="flex flex-wrap gap-2">
                     <Button onClick={handleSave} disabled={!draftDirty}>
                       Enregistrer
