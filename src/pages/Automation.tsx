@@ -123,7 +123,7 @@ const buildAutomation = (type: AutomationType): AutomationConfig => {
 const getDisplayName = (automation: AutomationConfig) => {
   const trimmed = automation.name.trim();
   if (trimmed) return trimmed;
-  return automationLabels[automation.type] ?? "Nouvelle automatisation";
+  return automationLabels[automation.type] ?? "Automatisation";
 };
 
 const formatScope = (
@@ -145,6 +145,10 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
   const [toast, setToast] = useState<{ message: string; href?: string } | null>(
     null
   );
+  const showToast = (message: string, href?: string) => {
+    setToast({ message, href });
+    setTimeout(() => setToast(null), 2000);
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -215,7 +219,14 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
   };
 
   const handleSave = () => {
-    if (!draft) return;
+    if (!draft) {
+      showToast("Aucune automatisation sélectionnée.");
+      return;
+    }
+    if (!draftDirty) {
+      showToast("Aucune modification à enregistrer.");
+      return;
+    }
     const next = {
       ...draft,
       name: draft.name.trim(),
@@ -233,7 +244,14 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
   };
 
   const handleCancel = () => {
-    if (!draft) return;
+    if (!draft) {
+      showToast("Aucune modification à annuler.");
+      return;
+    }
+    if (!draftDirty) {
+      showToast("Aucune modification à annuler.");
+      return;
+    }
     const existing = automations.find((item) => item.id === draft.id);
     if (existing) {
       setDraft({ ...existing });
@@ -264,7 +282,18 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
   };
 
   const handleTestAutomation = () => {
-    if (!draft || !draft.enabled || draftDirty) return;
+    if (!draft) {
+      showToast("Sélectionne une automatisation d'abord.");
+      return;
+    }
+    if (draftDirty) {
+      showToast("Enregistre d'abord pour tester.");
+      return;
+    }
+    if (!draft.enabled) {
+      showToast("Active l’automatisation pour tester.");
+      return;
+    }
     const locationName = formatScope(draft.scope, locations);
     const automationName = getDisplayName(draft);
     const message =
@@ -293,15 +322,18 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
     persistMockAlert(alert);
     setTestFeedback("Alerte de test envoyée.");
     setTimeout(() => setTestFeedback(null), 1500);
-    setToast({
-      message: "Alerte simulée envoyée.",
-      href: "/alerts"
-    });
-    setTimeout(() => setToast(null), 2000);
+    showToast("Alerte simulée envoyée.", "/alerts");
   };
 
   const handleTestFromList = (automation: AutomationConfig) => {
-    if (!automation.enabled || (draftDirty && automation.id === selectedId)) return;
+    if (!automation.enabled) {
+      showToast("Active l’automatisation pour tester.");
+      return;
+    }
+    if (draftDirty && automation.id === selectedId) {
+      showToast("Enregistre d'abord pour tester.");
+      return;
+    }
     const locationName = formatScope(automation.scope, locations);
     const automationName = getDisplayName(automation);
     const message =
@@ -330,11 +362,7 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
     persistMockAlert(alert);
     setTestFeedback("Alerte de test envoyée.");
     setTimeout(() => setTestFeedback(null), 1500);
-    setToast({
-      message: "Alerte simulée envoyée.",
-      href: "/alerts"
-    });
-    setTimeout(() => setToast(null), 2000);
+    showToast("Alerte simulée envoyée.", "/alerts");
   };
 
   const toggleEnabled = (automation: AutomationConfig, checked: boolean) => {
@@ -348,6 +376,13 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
       )
     );
   };
+
+  const testerDisabledReason = (() => {
+    if (!selected) return "Selectionne une automatisation pour tester.";
+    if (draftDirty) return "Enregistre d'abord pour tester.";
+    if (!selected.enabled) return "Active l’automatisation pour tester.";
+    return null;
+  })();
 
   return (
     <div className="space-y-6">
@@ -389,6 +424,9 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
           </Button>
           <Button onClick={handleCreate}>Créer manuellement</Button>
         </div>
+        {testerDisabledReason && (
+          <p className="text-xs text-slate-500">{testerDisabledReason}</p>
+        )}
       </div>
 
       <div className="space-y-8">
@@ -821,7 +859,17 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
                                 {testFeedback}
                               </span>
                             )}
+                            {!testFeedback && testerDisabledReason && (
+                              <span className="text-xs text-slate-500">
+                                {testerDisabledReason}
+                              </span>
+                            )}
                           </div>
+                          {!draftDirty && (
+                            <p className="text-xs text-slate-500">
+                              Aucune modification en attente.
+                            </p>
+                          )}
                         </div>
                       </div>
                     </CardContent>
