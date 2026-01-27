@@ -63,6 +63,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const workflowId = searchParams.get("id");
+  const templateId = searchParams.get("template");
   const isEditing = Boolean(workflowId);
 
   const [loading, setLoading] = useState(false);
@@ -76,6 +77,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
   const [enabled, setEnabled] = useState(true);
   const [conditions, setConditions] = useState<ConditionInput[]>([]);
   const [actions, setActions] = useState<ActionInput[]>([]);
+  const [templateApplied, setTemplateApplied] = useState(false);
   const supabaseClient = supabase;
 
   const locationOptions = useMemo(
@@ -182,6 +184,41 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
     };
   }, [session, workflowId, locations, supabaseClient]);
 
+  useEffect(() => {
+    if (workflowId || !templateId || templateApplied) return;
+    const presets: Record<
+      string,
+      { name: string; conditions: ConditionInput[]; actions: ActionInput[] }
+    > = {
+      vip: {
+        name: "Fidélisation VIP",
+        conditions: [{ field: "rating", operator: "eq", value: "5" }],
+        actions: [{ type: "ai_draft", config: { tone: "enthusiastic" } }]
+      },
+      social: {
+        name: "Social Booster 5★",
+        conditions: [{ field: "rating", operator: "gte", value: "4.8" }],
+        actions: [{ type: "add_tag", config: { tag: "meilleur-avis" } }]
+      },
+      recovery: {
+        name: "Récupération Client",
+        conditions: [{ field: "rating", operator: "lte", value: "2" }],
+        actions: [{ type: "ai_draft", config: { tone: "apology" } }]
+      },
+      autopilot: {
+        name: "Pilote Automatique",
+        conditions: [{ field: "rating", operator: "gte", value: "4" }],
+        actions: [{ type: "autopilot", config: {} }]
+      }
+    };
+    const preset = presets[templateId];
+    if (!preset) return;
+    if (!name.trim()) setName(preset.name);
+    setConditions(preset.conditions);
+    setActions(preset.actions);
+    setTemplateApplied(true);
+  }, [workflowId, templateId, templateApplied, name]);
+
   const addCondition = () => {
     setConditions((prev) => [
       ...prev,
@@ -206,6 +243,16 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
     setActions((prev) =>
       prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item))
     );
+  };
+
+  const handleTriggerChange = (nextTrigger: string) => {
+    setTrigger(nextTrigger);
+    if (!name.trim()) {
+      const label =
+        triggerOptions.find((option) => option.id === nextTrigger)?.label ??
+        "Workflow sans nom";
+      setName(label);
+    }
   };
 
   const removeCondition = (index: number) => {
@@ -361,7 +408,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                   <select
                     className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
                     value={trigger}
-                    onChange={(event) => setTrigger(event.target.value)}
+                    onChange={(event) => handleTriggerChange(event.target.value)}
                   >
                     {triggerOptions.map((option) => (
                       <option key={option.id} value={option.id}>

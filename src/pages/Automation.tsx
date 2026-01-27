@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Skeleton } from "../components/ui/skeleton";
+import { supabase } from "../lib/supabase";
 
 type AutomationProps = {
   session: Session | null;
@@ -15,394 +18,116 @@ type AutomationProps = {
   locationsError: string | null;
 };
 
-type AutomationType =
-  | "rating_drop"
-  | "negative_review"
-  | "volume_drop"
-  | "weekly_summary";
-
-type AutomationFrequency = "daily" | "weekly";
-
-type AutomationScope = {
-  mode: "all" | "location";
-  locationId: string | null;
-};
-
-type AutomationParams =
-  | { threshold: number }
-  | { maxStars: number; unresolvedHours: number }
-  | { minReviews: number; windowDays: number }
-  | { placeholder: true };
-
-type AutomationConfig = {
+type WorkflowRow = {
   id: string;
-  type: AutomationType;
-  name: string;
-  enabled: boolean;
-  scope: AutomationScope;
-  frequency: AutomationFrequency;
-  channel: { inApp: true; email: boolean };
-  params: AutomationParams;
-  createdAt: string;
-  updatedAt: string;
+  name: string | null;
+  enabled: boolean | null;
+  trigger: string | null;
+  location_ids: string[] | null;
+  updated_at?: string | null;
 };
 
-const STORAGE_KEY = "egia:automations:v1";
-const ALERTS_STORAGE_KEY = "egia:alerts:v1";
-
-const automationLabels: Record<AutomationType, string> = {
-  rating_drop: "Alerte baisse de note",
-  negative_review: "Alerte avis négatif",
-  volume_drop: "Alerte volume",
-  weekly_summary: "Résumé hebdo"
-};
-
-const templates = [
+const templateCards = [
   {
     id: "vip",
     title: "Fidélisation VIP",
     description:
-      "Générer une réponse enthousiaste et taguer les avis 5 étoiles.",
-    type: "rating_drop" as AutomationType,
-    params: { threshold: 5 }
+      "Générer une réponse enthousiaste et taguer les avis 5 étoiles."
   },
   {
     id: "social",
     title: "Social Booster 5★",
-    description: "Publier automatiquement les meilleurs avis.",
-    type: "rating_drop" as AutomationType,
-    params: { threshold: 4.8 }
+    description: "Publier automatiquement les meilleurs avis."
   },
   {
     id: "recovery",
     title: "Récupération Client",
-    description: "Alerte immédiate pour avis négatif (win-back).",
-    type: "negative_review" as AutomationType,
-    params: { maxStars: 2, unresolvedHours: 24 }
+    description: "Alerte immédiate pour avis négatif (win-back)."
   },
   {
     id: "autopilot",
     title: "Pilote Automatique",
-    description: "Répondre automatiquement aux avis positifs.",
-    type: "weekly_summary" as AutomationType,
-    params: { placeholder: true }
+    description: "Répondre automatiquement aux avis positifs."
   }
 ];
 
-const defaultParamsByType = (type: AutomationType): AutomationParams => {
-  switch (type) {
-    case "rating_drop":
-      return { threshold: 4.6 };
-    case "negative_review":
-      return { maxStars: 2, unresolvedHours: 48 };
-    case "volume_drop":
-      return { minReviews: 3, windowDays: 7 };
-    case "weekly_summary":
-      return { placeholder: true };
-    default:
-      return { placeholder: true };
-  }
-};
-
-const buildAutomation = (type: AutomationType): AutomationConfig => {
-  const now = new Date().toISOString();
-  return {
-    id: `auto_${Date.now()}`,
-    type,
-    name: "",
-    enabled: true,
-    scope: { mode: "all", locationId: null },
-    frequency: "daily",
-    channel: { inApp: true, email: false },
-    params: defaultParamsByType(type),
-    createdAt: now,
-    updatedAt: now
-  };
-};
-
-const getDisplayName = (automation: AutomationConfig) => {
-  const trimmed = automation.name.trim();
-  if (trimmed) return trimmed;
-  return automationLabels[automation.type] ?? "Automatisation";
-};
-
-const formatScope = (
-  scope: AutomationScope,
-  locations: AutomationProps["locations"]
-) => {
-  if (scope.mode === "all") return "Tous les établissements";
-  if (!scope.locationId) return "Établissement non défini";
-  const match = locations.find((loc) => loc.id === scope.locationId);
-  return match?.location_title ?? match?.location_resource_name ?? "Établissement";
-};
-
-const Automation = ({ locations, locationsLoading, locationsError }: AutomationProps) => {
-  const [automations, setAutomations] = useState<AutomationConfig[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<AutomationConfig | null>(null);
-  const [draftDirty, setDraftDirty] = useState(false);
-  const [testFeedback, setTestFeedback] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ message: string; href?: string } | null>(
-    null
-  );
-  const showToast = (message: string, href?: string) => {
-    setToast({ message, href });
-    setTimeout(() => setToast(null), 2000);
-  };
+const Automation = ({ session, locations }: AutomationProps) => {
+  const navigate = useNavigate();
+  const [workflows, setWorkflows] = useState<WorkflowRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (!stored) return;
-    try {
-      const parsed = JSON.parse(stored) as AutomationConfig[];
-      if (Array.isArray(parsed)) {
-        setAutomations(parsed);
-        setSelectedId(parsed[0]?.id ?? null);
+    if (!session) return;
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      if (!supabase) {
+        setError("Client Supabase indisponible.");
+        setLoading(false);
+        return;
       }
-    } catch {
-      setAutomations([]);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(automations));
-  }, [automations]);
-
-  const selected = useMemo(
-    () => {
-      if (draft && draft.id === selectedId) return draft;
-      return automations.find((item) => item.id === selectedId) ?? null;
-    },
-    [automations, selectedId, draft]
-  );
-
-  const updateDraft = (id: string, patch: Partial<AutomationConfig>) => {
-    setDraft((prev) => {
-      if (!prev || prev.id !== id) return prev;
-      return { ...prev, ...patch, updatedAt: new Date().toISOString() };
-    });
-    setDraftDirty(true);
-  };
-
-  const updateParams = (id: string, params: AutomationParams) => {
-    updateDraft(id, { params });
-  };
-
-  const handleCreate = () => {
-    const next = buildAutomation("rating_drop");
-    setDraft(next);
-    setDraftDirty(false);
-    setSelectedId(next.id);
-  };
-
-  const handleCreateFromTemplate = (templateId: string) => {
-    const template = templates.find((item) => item.id === templateId);
-    if (!template) return;
-    const next = buildAutomation(template.type);
-    const name = template.title;
-    setDraft({
-      ...next,
-      name,
-      params: template.params as AutomationParams
-    });
-    setDraftDirty(true);
-    setSelectedId(next.id);
-  };
-
-  const handleSelect = (id: string) => {
-    const existing = automations.find((item) => item.id === id);
-    setSelectedId(id);
-    setDraft(existing ? { ...existing } : null);
-    setDraftDirty(false);
-  };
-
-  const handleSave = () => {
-    if (!draft) {
-      showToast("Aucune automatisation sélectionnée.");
-      return;
-    }
-    if (!draftDirty) {
-      showToast("Aucune modification à enregistrer.");
-      return;
-    }
-    const next = {
-      ...draft,
-      name: draft.name.trim(),
-      updatedAt: new Date().toISOString()
-    };
-    setAutomations((prev) => {
-      const exists = prev.some((item) => item.id === next.id);
-      if (exists) {
-        return prev.map((item) => (item.id === next.id ? next : item));
+      const { data, error: queryError } = await supabase
+        .from("automation_workflows")
+        .select("id,name,enabled,trigger,location_ids,updated_at")
+        .eq("user_id", session.user.id)
+        .order("updated_at", { ascending: false });
+      if (cancelled) return;
+      if (queryError) {
+        setError("Impossible de charger les automatisations.");
+        setLoading(false);
+        return;
       }
-      return [next, ...prev];
-    });
-    setDraft(next);
-    setDraftDirty(false);
-  };
-
-  const handleCancel = () => {
-    if (!draft) {
-      showToast("Aucune modification à annuler.");
-      return;
-    }
-    if (!draftDirty) {
-      showToast("Aucune modification à annuler.");
-      return;
-    }
-    const existing = automations.find((item) => item.id === draft.id);
-    if (existing) {
-      setDraft({ ...existing });
-      setDraftDirty(false);
-      return;
-    }
-    setDraft(null);
-    setDraftDirty(false);
-    setSelectedId(automations[0]?.id ?? null);
-  };
-
-  const handleDelete = (id: string) => {
-    setAutomations((prev) => prev.filter((item) => item.id !== id));
-    if (selectedId === id) {
-      setSelectedId(automations.find((item) => item.id !== id)?.id ?? null);
-      setDraft(null);
-      setDraftDirty(false);
-    }
-  };
-
-  const persistMockAlert = (alert: Record<string, unknown>) => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem(ALERTS_STORAGE_KEY);
-    const parsed = stored ? (JSON.parse(stored) as Record<string, unknown>[]) : [];
-    const next = [alert, ...(Array.isArray(parsed) ? parsed : [])].slice(0, 20);
-    window.localStorage.setItem(ALERTS_STORAGE_KEY, JSON.stringify(next));
-    window.dispatchEvent(new CustomEvent("egia:alerts:updated"));
-  };
-
-  const handleTestAutomation = () => {
-    if (!draft) {
-      showToast("Sélectionne une automatisation d'abord.");
-      return;
-    }
-    if (draftDirty) {
-      showToast("Enregistre d'abord pour tester.");
-      return;
-    }
-    if (!draft.enabled) {
-      showToast("Active l’automatisation pour tester.");
-      return;
-    }
-    const locationName = formatScope(draft.scope, locations);
-    const automationName = getDisplayName(draft);
-    const message =
-      draft.type === "rating_drop"
-        ? `Note sous ${(draft.params as { threshold: number }).threshold} pour ${locationName}.`
-        : draft.type === "negative_review"
-          ? `Avis ≤ ${(draft.params as { maxStars: number }).maxStars}★ sans réponse (${(draft.params as { unresolvedHours: number }).unresolvedHours}h).`
-          : draft.type === "volume_drop"
-            ? `Moins de ${(draft.params as { minReviews: number }).minReviews} avis sur ${(draft.params as { windowDays: number }).windowDays} jours.`
-            : "Résumé hebdomadaire prêt à consulter.";
-    const alert = {
-      id: `alert_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      automation_id: draft.id,
-      title: automationName,
-      message,
-      severity:
-        draft.type === "negative_review"
-          ? "critical"
-          : draft.type === "weekly_summary"
-            ? "info"
-            : "warn",
-      created_at: new Date().toISOString(),
-      location_name: locationName,
-      location_id: draft.scope.locationId ?? null
+      setWorkflows((data as WorkflowRow[]) ?? []);
+      setLoading(false);
     };
-    persistMockAlert(alert);
-    setTestFeedback("Alerte de test envoyée.");
-    setTimeout(() => setTestFeedback(null), 1500);
-    showToast("Alerte simulée envoyée.", "/alerts");
-  };
-
-  const handleTestFromList = (automation: AutomationConfig) => {
-    if (!automation.enabled) {
-      showToast("Active l’automatisation pour tester.");
-      return;
-    }
-    if (draftDirty && automation.id === selectedId) {
-      showToast("Enregistre d'abord pour tester.");
-      return;
-    }
-    const locationName = formatScope(automation.scope, locations);
-    const automationName = getDisplayName(automation);
-    const message =
-      automation.type === "rating_drop"
-        ? `Note sous ${(automation.params as { threshold: number }).threshold} pour ${locationName}.`
-        : automation.type === "negative_review"
-          ? `Avis ≤ ${(automation.params as { maxStars: number }).maxStars}★ sans réponse (${(automation.params as { unresolvedHours: number }).unresolvedHours}h).`
-          : automation.type === "volume_drop"
-            ? `Moins de ${(automation.params as { minReviews: number }).minReviews} avis sur ${(automation.params as { windowDays: number }).windowDays} jours.`
-            : "Résumé hebdomadaire prêt à consulter.";
-    const alert = {
-      id: `alert_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      automation_id: automation.id,
-      title: automationName,
-      message,
-      severity:
-        automation.type === "negative_review"
-          ? "critical"
-          : automation.type === "weekly_summary"
-            ? "info"
-            : "warn",
-      created_at: new Date().toISOString(),
-      location_name: locationName,
-      location_id: automation.scope.locationId ?? null
+    void load();
+    return () => {
+      cancelled = true;
     };
-    persistMockAlert(alert);
-    setTestFeedback("Alerte de test envoyée.");
-    setTimeout(() => setTestFeedback(null), 1500);
-    showToast("Alerte simulée envoyée.", "/alerts");
+  }, [session]);
+
+  const getLocationLabel = (ids: string[] | null) => {
+    if (!ids || ids.length === 0) return "Tous les établissements";
+    const match = locations.find((loc) => loc.id === ids[0]);
+    return match?.location_title ?? match?.location_resource_name ?? "Établissement";
   };
 
-  const toggleEnabled = (automation: AutomationConfig, checked: boolean) => {
-    if (draft && automation.id === draft.id) {
-      updateDraft(automation.id, { enabled: checked });
-      return;
-    }
-    setAutomations((prev) =>
+  const handleToggle = async (workflow: WorkflowRow, enabled: boolean) => {
+    if (!session) return;
+    if (!supabase) return;
+    await supabase
+      .from("automation_workflows")
+      .update({ enabled })
+      .eq("id", workflow.id)
+      .eq("user_id", session.user.id);
+    setWorkflows((prev) =>
       prev.map((item) =>
-        item.id === automation.id ? { ...item, enabled: checked } : item
+        item.id === workflow.id ? { ...item, enabled } : item
       )
     );
   };
 
-  const testerDisabledReason = (() => {
-    if (!selected) return "Selectionne une automatisation pour tester.";
-    if (draftDirty) return "Enregistre d'abord pour tester.";
-    if (!selected.enabled) return "Active l’automatisation pour tester.";
-    return null;
-  })();
+  const activeWorkflows = useMemo(
+    () => workflows.filter((item) => item.enabled),
+    [workflows]
+  );
 
   return (
-    <div className="space-y-6">
-      {toast && (
-        <div className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          <span>{toast.message}</span>
-          {toast.href && (
-            <a
-              href={toast.href}
-              className="text-xs font-semibold text-emerald-800 underline"
-            >
-              Voir l’alerte
-            </a>
-          )}
-        </div>
-      )}
+    <div className="space-y-8">
+      {/* Non-regression checklist:
+         - Créer manuellement -> ouvre /automation/builder
+         - Templates -> ouvrent /automation/builder?template=...
+         - Configurer -> ouvre /automation/builder?id=...
+         - Toggle ON/OFF -> persiste et se reflète
+      */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 className="text-2xl font-semibold text-slate-900">Automatisation</h2>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold text-slate-900">
+              Automatisation
+            </h1>
             <Badge variant="neutral">PRO</Badge>
           </div>
           <p className="text-sm text-slate-500">
@@ -410,485 +135,129 @@ const Automation = ({ locations, locationsLoading, locationsError }: AutomationP
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() => selected && handleTestAutomation()}
-            disabled={!selected || !selected.enabled || draftDirty}
-            title={
-              draftDirty
-                ? "Enregistre d'abord avant de tester"
-                : "Actionner l’auto maintenant"
-            }
-          >
+          <Button variant="outline" disabled title="Bientôt disponible">
             Actionner l’auto maintenant
           </Button>
-          <Button onClick={handleCreate}>Créer manuellement</Button>
+          <Button onClick={() => navigate("/automation/builder")}>
+            Créer manuellement
+          </Button>
         </div>
-        {testerDisabledReason && (
-          <p className="text-xs text-slate-500">{testerDisabledReason}</p>
-        )}
       </div>
 
-      <div className="space-y-8">
-        <section className="space-y-4">
-          <h3 className="text-sm font-semibold text-slate-700">
-            Modèles prêts à l’emploi
-          </h3>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {templates.map((template) => (
-              <button
-                key={template.id}
-                type="button"
-                onClick={() => handleCreateFromTemplate(template.id)}
-                className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-slate-300 hover:shadow-md"
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
-                  ✦
-                </div>
-                <p className="mt-4 text-sm font-semibold text-slate-900">
-                  {template.title}
-                </p>
-                <p className="mt-2 text-xs text-slate-500">
-                  {template.description}
-                </p>
-              </button>
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold text-slate-700">
+          Modèles prêts à l’emploi
+        </h2>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {templateCards.map((card) => (
+            <button
+              key={card.id}
+              type="button"
+              className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-slate-300 hover:shadow-md"
+              onClick={() => navigate(`/automation/builder?template=${card.id}`)}
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+                ✦
+              </div>
+              <p className="mt-4 text-sm font-semibold text-slate-900">
+                {card.title}
+              </p>
+              <p className="mt-2 text-xs text-slate-500">{card.description}</p>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-slate-700">
+            Vos scénarios actifs
+          </span>
+          <Badge variant="neutral">{activeWorkflows.length}</Badge>
+        </div>
+        {loading ? (
+          <div className="space-y-3">
+            <Skeleton className="h-28 w-full" />
+            <Skeleton className="h-28 w-full" />
+          </div>
+        ) : error ? (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+            {error}
+          </div>
+        ) : workflows.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+            <p className="font-semibold text-slate-700">
+              Aucune automatisation active
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Créez votre première règle pour déclencher des alertes utiles.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {workflows.map((workflow) => (
+              <Card key={workflow.id} className="border border-indigo-200">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div className="space-y-1">
+                    <Badge variant="success">Pilote automatique</Badge>
+                    <CardTitle className="text-base">
+                      {workflow.name?.trim() || "Automatisation"}
+                    </CardTitle>
+                    <p className="text-xs text-slate-500">
+                      {getLocationLabel(workflow.location_ids)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-semibold text-emerald-600">
+                      {workflow.enabled ? "ON" : "OFF"}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(workflow.enabled)}
+                      onChange={(event) =>
+                        handleToggle(workflow, event.target.checked)
+                      }
+                    />
+                  </div>
+                </CardHeader>
+                <CardContent className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled
+                    title="Bientôt disponible"
+                  >
+                    Actionner l’auto maintenant
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      navigate(`/automation/builder?id=${workflow.id}`)
+                    }
+                  >
+                    Configurer
+                  </Button>
+                </CardContent>
+              </Card>
             ))}
           </div>
-        </section>
+        )}
+      </section>
 
-        <section className="space-y-4">
-          <h3 className="text-sm font-semibold text-slate-700">
-            Vos scénarios actifs
-          </h3>
-          {automations.length === 0 ? (
-            <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
-              <p className="font-semibold text-slate-700">
-                Aucune automatisation active
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                Créez votre première règle pour déclencher des alertes utiles.
-              </p>
-            </div>
-          ) : (
-            <div className="mt-4 space-y-4">
-              {automations.map((item) => (
-                <Card key={item.id} className="border border-indigo-200">
-                  <CardHeader className="flex flex-row items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Badge variant="success">Pilote automatique</Badge>
-                      <CardTitle className="text-base">{getDisplayName(item)}</CardTitle>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-semibold text-emerald-600">
-                        {item.enabled ? "ON" : "OFF"}
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={item.enabled}
-                        onChange={(event) => toggleEnabled(item, event.target.checked)}
-                      />
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                      <Badge variant="neutral">Source</Badge>
-                      <Badge variant="neutral">{automationLabels[item.type]}</Badge>
-                      <Badge variant="neutral">
-                        {item.frequency === "daily" ? "Quotidien" : "Hebdo"}
-                      </Badge>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleTestFromList(item)}
-                        disabled={!item.enabled || (draftDirty && selectedId === item.id)}
-                        title={
-                          draftDirty && selectedId === item.id
-                            ? "Enregistre d'abord avant de tester"
-                            : "Actionner l’auto maintenant"
-                        }
-                      >
-                        Actionner l’auto maintenant
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleSelect(item.id)}
-                      >
-                        Configurer
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDelete(item.id)}
-                      >
-                        Supprimer
-                      </Button>
-                      {testFeedback && (
-                        <span className="text-xs font-semibold text-emerald-600">
-                          {testFeedback}
-                        </span>
-                      )}
-                    </div>
-                  </CardContent>
-                  {selectedId === item.id && (
-                    <CardContent className="border-t border-slate-200 bg-slate-50/40">
-                      <div className="rounded-2xl border border-slate-200 bg-white">
-                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-                            <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                              Modifier le workflow
-                            </div>
-                          <div className="flex items-center gap-2">
-                            <Button variant="outline" onClick={handleCancel}>
-                              Annuler
-                            </Button>
-                            <Button onClick={handleSave} disabled={!draftDirty}>
-                              Enregistrer
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="space-y-4 p-4">
-                          {draftDirty && (
-                            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                              Modifications non enregistrées.
-                            </div>
-                          )}
-                          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                            <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                              Déclencheur
-                            </div>
-                            <div className="mt-4 grid gap-3 md:grid-cols-2">
-                              <label className="text-xs font-semibold text-slate-600">
-                                Nom du workflow
-                                <input
-                                  className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                                  value={selected?.name ?? ""}
-                                  onChange={(event) =>
-                                    selected &&
-                                    updateDraft(selected.id, {
-                                      name: event.target.value
-                                    })
-                                  }
-                                  placeholder="Nouvelle automatisation"
-                                />
-                              </label>
-                              <label className="text-xs font-semibold text-slate-600">
-                                Quand...
-                                <select
-                                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                                  value={selected?.type ?? "rating_drop"}
-                                  onChange={(event) => {
-                                    if (!selected) return;
-                                    const nextType = event.target.value as AutomationType;
-                                    updateDraft(selected.id, {
-                                      type: nextType,
-                                      params: defaultParamsByType(nextType)
-                                    });
-                                  }}
-                                >
-                                  <option value="rating_drop">Alerte baisse de note</option>
-                                  <option value="negative_review">Alerte avis négatif</option>
-                                  <option value="volume_drop">Alerte volume</option>
-                                  <option value="weekly_summary">Résumé hebdo</option>
-                                </select>
-                              </label>
-                            </div>
-                          </div>
-
-                          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                            <div className="flex items-center justify-between">
-                              <div className="text-sm font-semibold text-slate-800">
-                                Conditions (si)
-                              </div>
-                              <Button variant="outline" size="sm" disabled>
-                                + Ajouter
-                              </Button>
-                            </div>
-                            <div className="mt-4 space-y-3">
-                              <div className="grid gap-3 md:grid-cols-2">
-                                <label className="text-xs font-semibold text-slate-600">
-                                Fréquence
-                                  <select
-                                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                                    value={selected?.frequency ?? "daily"}
-                                    onChange={(event) =>
-                                      selected &&
-                                      updateDraft(selected.id, {
-                                        frequency: event.target.value as AutomationFrequency
-                                      })
-                                    }
-                                  >
-                                    <option value="daily">Quotidien</option>
-                                    <option value="weekly">Hebdomadaire</option>
-                                  </select>
-                                </label>
-                                <label className="text-xs font-semibold text-slate-600">
-                                Portée
-                                <select
-                                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                                  value={selected?.scope.mode ?? "all"}
-                                  onChange={(event) =>
-                                    selected &&
-                                      updateDraft(selected.id, {
-                                        scope: {
-                                          mode: event.target.value as AutomationScope["mode"],
-                                          locationId:
-                                            event.target.value === "all"
-                                              ? null
-                                              : selected.scope.locationId
-                                        }
-                                      })
-                                    }
-                                  >
-                                    <option value="all">Tous les établissements</option>
-                                    <option value="location">Établissement sélectionné</option>
-                                  </select>
-                                </label>
-                              </div>
-
-                              {selected?.scope.mode === "location" && (
-                                <label className="text-xs font-semibold text-slate-600">
-                                  Établissement
-                                  <select
-                                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                                    value={selected.scope.locationId ?? ""}
-                                    onChange={(event) =>
-                                      updateDraft(selected.id, {
-                                        scope: {
-                                          mode: "location",
-                                          locationId: event.target.value || null
-                                        }
-                                      })
-                                    }
-                                  >
-                                    <option value="">Sélectionner...</option>
-                                    {locations.map((location) => (
-                                      <option key={location.id} value={location.id}>
-                                        {location.location_title ?? location.location_resource_name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  {locationsLoading && (
-                                    <p className="mt-1 text-[11px] text-slate-400">
-                                      Chargement des établissements...
-                                    </p>
-                                  )}
-                                  {locationsError && (
-                                    <p className="mt-1 text-[11px] text-rose-500">
-                                      {locationsError}
-                                    </p>
-                                  )}
-                                </label>
-                              )}
-
-                              {selected?.type === "rating_drop" && (
-                                <label className="text-xs font-semibold text-slate-600">
-                                  Alerte si note passe sous
-                                  <input
-                                    type="number"
-                                    step="0.1"
-                                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                                    value={
-                                      (selected.params as { threshold: number }).threshold ?? 4.6
-                                    }
-                                    onChange={(event) =>
-                                      updateParams(selected.id, {
-                                        threshold: Number(event.target.value)
-                                      })
-                                    }
-                                  />
-                                </label>
-                              )}
-
-                              {selected?.type === "negative_review" && (
-                                <div className="grid gap-3 md:grid-cols-2">
-                                  <label className="text-xs font-semibold text-slate-600">
-                                    Note max
-                                    <input
-                                      type="number"
-                                      className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                                      value={
-                                        (selected.params as { maxStars: number }).maxStars ?? 2
-                                      }
-                                      onChange={(event) =>
-                                        updateParams(selected.id, {
-                                          maxStars: Number(event.target.value),
-                                          unresolvedHours: (selected.params as {
-                                            unresolvedHours: number;
-                                          }).unresolvedHours
-                                        })
-                                      }
-                                    />
-                                  </label>
-                                  <label className="text-xs font-semibold text-slate-600">
-                                    Sans réponse depuis (h)
-                                    <input
-                                      type="number"
-                                      className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                                      value={
-                                        (selected.params as { unresolvedHours: number })
-                                          .unresolvedHours ?? 48
-                                      }
-                                      onChange={(event) =>
-                                        updateParams(selected.id, {
-                                          maxStars: (selected.params as { maxStars: number }).maxStars,
-                                          unresolvedHours: Number(event.target.value)
-                                        })
-                                      }
-                                    />
-                                  </label>
-                                </div>
-                              )}
-
-                              {selected?.type === "volume_drop" && (
-                                <div className="grid gap-3 md:grid-cols-2">
-                                  <label className="text-xs font-semibold text-slate-600">
-                                    Moins de
-                                    <input
-                                      type="number"
-                                      className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                                      value={
-                                        (selected.params as { minReviews: number }).minReviews ??
-                                        3
-                                      }
-                                      onChange={(event) =>
-                                        updateParams(selected.id, {
-                                          minReviews: Number(event.target.value),
-                                          windowDays: (selected.params as {
-                                            windowDays: number;
-                                          }).windowDays
-                                        })
-                                      }
-                                    />
-                                  </label>
-                                  <label className="text-xs font-semibold text-slate-600">
-                                    Sur (jours)
-                                    <input
-                                      type="number"
-                                      className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                                      value={
-                                        (selected.params as { windowDays: number }).windowDays ??
-                                        7
-                                      }
-                                      onChange={(event) =>
-                                        updateParams(selected.id, {
-                                          minReviews: (selected.params as { minReviews: number })
-                                            .minReviews,
-                                          windowDays: Number(event.target.value)
-                                        })
-                                      }
-                                    />
-                                  </label>
-                                </div>
-                              )}
-
-                              {selected?.type === "weekly_summary" && (
-                                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
-                                  Résumé hebdomadaire en préparation (configuration bientôt).
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                            <div className="flex items-center justify-between">
-                              <div className="text-sm font-semibold text-slate-800">
-                                Actions (alors)
-                              </div>
-                              <Button variant="outline" size="sm" disabled>
-                                + Ajouter
-                              </Button>
-                            </div>
-                            <div className="mt-4 space-y-3">
-                              <label className="text-xs font-semibold text-slate-600">
-                                Canal
-                                <div className="mt-2 space-y-2 text-xs text-slate-500">
-                                  <label className="flex items-center gap-2">
-                                    <input type="checkbox" checked readOnly />
-                                    In-app (obligatoire)
-                                  </label>
-                                  <label className="flex items-center gap-2">
-                                    <input type="checkbox" checked={selected?.channel.email ?? false} disabled />
-                                    Email (bientôt)
-                                  </label>
-                                </div>
-                              </label>
-                              <label className="text-xs font-semibold text-slate-600">
-                                Actif
-                                <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
-                                  <input
-                                    type="checkbox"
-                                    checked={selected?.enabled ?? false}
-                                    onChange={(event) =>
-                                      selected &&
-                                      updateDraft(selected.id, {
-                                        enabled: event.target.checked
-                                      })
-                                    }
-                                  />
-                                  {selected?.enabled ? "Active" : "Inactive"}
-                                </div>
-                              </label>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2">
-                            <Button onClick={handleSave} disabled={!draftDirty}>
-                              Enregistrer
-                            </Button>
-                            <Button variant="outline" onClick={handleCancel}>
-                              Annuler
-                            </Button>
-                            <Button
-                              variant="outline"
-                              onClick={handleTestAutomation}
-                              disabled={!selected?.enabled || draftDirty}
-                              title={
-                                draftDirty
-                                  ? "Enregistre d'abord avant de tester"
-                                  : selected?.enabled
-                                    ? "Générer une alerte de test"
-                                    : "Activez l’automatisation pour tester"
-                              }
-                            >
-                              Tester cette automatisation
-                            </Button>
-                            {testFeedback && (
-                              <span className="text-xs font-semibold text-emerald-600">
-                                {testFeedback}
-                              </span>
-                            )}
-                            {!testFeedback && testerDisabledReason && (
-                              <span className="text-xs text-slate-500">
-                                {testerDisabledReason}
-                              </span>
-                            )}
-                          </div>
-                          {!draftDirty && (
-                            <p className="text-xs text-slate-500">
-                              Aucune modification en attente.
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </CardContent>
-                  )}
-                </Card>
-              ))}
-            </div>
-          )}
-        </section>
+      <div className="text-xs text-slate-500">
+        Certains scénarios avancés seront activables prochainement.
       </div>
+
+      {/* How to test:
+         1) Creer manuellement -> ouvre /automation/builder.
+         2) Cliquer un template -> ouvre /automation/builder?template=....
+         3) Configurer -> ouvre /automation/builder?id=....
+         4) Toggle ON/OFF -> persiste et se reflète apres refresh.
+         5) Enregistrer dans le builder -> revient sur /automation.
+      */}
     </div>
   );
 };
 
 export { Automation };
-
-// Manual test plan:
-// 1) Nouvelle automatisation -> nom vide, modifications non enregistrees visibles.
-// 2) Editer, puis Annuler -> retour au dernier etat sauvegarde.
-// 3) Enregistrer -> persistence localStorage (egia:automations:v1).
-// 4) Tester cette automatisation -> ajoute une alerte mock (egia:alerts:v1).
-// 5) Tester desactive tant que modifications non enregistrees.
