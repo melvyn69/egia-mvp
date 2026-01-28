@@ -1644,7 +1644,8 @@ const handleAutomationsRun = async (
 // 2) If coords missing, error message is actionable and no 500.
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const slugParam = (req.query as Record<string, unknown>)?.slug;
+  const query = req.query as Record<string, unknown>;
+  const slugParam = query?.slug ?? query?.["...slug"] ?? query?.["slug[]"];
   const parts = Array.isArray(slugParam) ? slugParam : [slugParam];
   const route = parts.filter(Boolean).join("/");
   if (route === "generate") {
