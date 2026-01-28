@@ -213,6 +213,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
     };
     const preset = presets[templateId];
     if (!preset) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!name.trim()) setName(preset.name);
     setConditions(preset.conditions);
     setActions(preset.actions);
