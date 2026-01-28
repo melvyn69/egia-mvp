@@ -1,4 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "../../server/_shared_dist/database.types.js";
 import handleGenerateClassic from "../../server/_shared_dist/handlers/reports/generate.js";
 import handleGeneratePremium from "../../server/_shared_dist/handlers/reports/generate_html.js";
 import { requireUser } from "../../server/_shared_dist/_auth.js";
@@ -24,6 +26,30 @@ type CenterResult = {
 
 const parseBody = (req: VercelRequest) =>
   typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
+
+const createSupabaseAdmin = () => {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error("Missing Supabase service role env");
+  }
+  return createClient<Database>(url, key, { auth: { persistSession: false } });
+};
+
+const isCronAuthorized = (req: VercelRequest) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  const header = req.headers.authorization ?? req.headers.Authorization;
+  const token =
+    typeof header === "string" && header.toLowerCase().startsWith("bearer ")
+      ? header.slice(7).trim()
+      : null;
+  const alt =
+    typeof req.headers["x-cron-secret"] === "string"
+      ? req.headers["x-cron-secret"]
+      : null;
+  return token === secret || alt === secret;
+};
 
 const getRouteParts = (req: VercelRequest) => {
   const raw =
@@ -1357,6 +1383,195 @@ const handleCompetitorsBenchmarkPdf = async (
   }
 };
 
+const handleAutomationsRun = async (
+  req: VercelRequest,
+  res: VercelResponse
+) => {
+  const requestId = getRequestId(req);
+  if (req.method !== "POST") {
+    return sendError(
+      res,
+      requestId,
+      { code: "BAD_REQUEST", message: "Method not allowed" },
+      405
+    );
+  }
+  if (!isCronAuthorized(req)) {
+    return sendError(
+      res,
+      requestId,
+      { code: "UNAUTHORIZED", message: "Missing or invalid CRON_SECRET" },
+      401
+    );
+  }
+
+  let supabaseAdmin;
+  try {
+    supabaseAdmin = createSupabaseAdmin();
+  } catch (error) {
+    return sendError(
+      res,
+      requestId,
+      {
+        code: "INTERNAL",
+        message: error instanceof Error ? error.message : "Missing env"
+      },
+      500
+    );
+  }
+
+  const { data: workflows, error: wfError } = await supabaseAdmin
+    .from("automation_workflows")
+    .select("id,user_id,enabled,trigger,location_ids")
+    .eq("enabled", true)
+    .eq("trigger", "new_review");
+  if (wfError) {
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Failed to load workflows" },
+      500
+    );
+  }
+
+  const { data: conditions } = await supabaseAdmin
+    .from("automation_conditions")
+    .select("workflow_id,field,operator,value")
+    .in(
+      "workflow_id",
+      (workflows ?? []).map((w) => w.id)
+    );
+
+  const workflowConditions = new Map<string, typeof conditions>();
+  for (const condition of conditions ?? []) {
+    const list = workflowConditions.get(condition.workflow_id) ?? [];
+    list.push(condition);
+    workflowConditions.set(condition.workflow_id, list);
+  }
+
+  const { data: cronRow } = await supabaseAdmin
+    .from("cron_state")
+    .select("value")
+    .eq("key", "automations:last_processed_at")
+    .maybeSingle();
+  const lastProcessed =
+    (cronRow?.value as { last_processed_at?: string } | null)
+      ?.last_processed_at ?? null;
+
+  let reviewsQuery = supabaseAdmin
+    .from("google_reviews")
+    .select(
+      "id,review_id,review_name,location_id,rating,update_time,created_at,user_id,updated_at"
+    )
+    .order("updated_at", { ascending: true })
+    .limit(500);
+  if (lastProcessed) {
+    reviewsQuery = reviewsQuery.gt("updated_at", lastProcessed);
+  }
+
+  const { data: reviews, error: reviewsError } = await reviewsQuery;
+  if (reviewsError) {
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Failed to load reviews" },
+      500
+    );
+  }
+
+  let processed = 0;
+  let inserted = 0;
+  let latestTimestamp = lastProcessed ?? null;
+
+  for (const review of reviews ?? []) {
+    processed += 1;
+    if (review.updated_at && (!latestTimestamp || review.updated_at > latestTimestamp)) {
+      latestTimestamp = review.updated_at;
+    }
+    const reviewRating =
+      typeof review.rating === "number" ? review.rating : null;
+    const reviewId =
+      review.review_id ?? review.review_name ?? review.id;
+    if (!reviewId) continue;
+    if (!review.location_id) continue;
+
+    const workflowsForUser = (workflows ?? []).filter(
+      (wf) => wf.user_id === review.user_id
+    );
+
+    for (const workflow of workflowsForUser) {
+      const scopedIds = workflow.location_ids ?? [];
+      if (scopedIds.length > 0 && !scopedIds.includes(review.location_id)) {
+        continue;
+      }
+
+      const conditionsForWorkflow = workflowConditions.get(workflow.id) ?? [];
+      let matches = true;
+      for (const condition of conditionsForWorkflow) {
+        if (condition.field !== "rating") continue;
+        const target = Number(condition.value);
+        if (Number.isNaN(target) || reviewRating === null) {
+          matches = false;
+          break;
+        }
+        if (condition.operator === "gte" && !(reviewRating >= target)) {
+          matches = false;
+        }
+        if (condition.operator === "lte" && !(reviewRating <= target)) {
+          matches = false;
+        }
+        if (condition.operator === "eq" && !(reviewRating === target)) {
+          matches = false;
+        }
+        if (!matches) break;
+      }
+
+      if (!matches) continue;
+
+      const ruleCode = `AUTO_${workflow.id}`;
+      const alertPayload = {
+        message: `Condition automatique declenchee sur un nouvel avis.`,
+        rating: reviewRating,
+        review_id: reviewId
+      };
+
+      const { error: insertError } = await supabaseAdmin
+        .from("alerts")
+        .insert(
+          {
+            user_id: review.user_id,
+            establishment_id: review.location_id,
+            rule_code: ruleCode,
+            severity: "medium",
+            review_id: reviewId,
+            payload: alertPayload
+          },
+          { onConflict: "rule_code,review_id", ignoreDuplicates: true }
+        );
+
+      if (!insertError) {
+        inserted += 1;
+      }
+    }
+  }
+
+  if (latestTimestamp) {
+    await supabaseAdmin.from("cron_state").upsert({
+      key: "automations:last_processed_at",
+      value: { last_processed_at: latestTimestamp },
+      updated_at: new Date().toISOString()
+    });
+  }
+
+  return res.status(200).json({
+    ok: true,
+    processed,
+    inserted,
+    last_processed_at: latestTimestamp,
+    requestId
+  });
+};
+
 // Manual test plan:
 // 1) /competitors -> select location -> scan 1km -> list returns items.
 // 2) If coords missing, error message is actionable and no 500.
@@ -1377,6 +1592,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   if (route === "competitors-benchmark/pdf") {
     return handleCompetitorsBenchmarkPdf(req, res);
+  }
+  if (route === "automations/run") {
+    return handleAutomationsRun(req, res);
   }
   return res.status(404).json({ error: "Not found" });
 }
