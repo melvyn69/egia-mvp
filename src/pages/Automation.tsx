@@ -1,3 +1,9 @@
+// Checklist non-regression (/automation):
+// - "Créer manuellement" ouvre le builder
+// - Templates ouvrent le builder avec preset
+// - "Configurer" ouvre le builder pour l'ID
+// - Toggle ON/OFF persiste
+// - Aucun mock/localStorage
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";

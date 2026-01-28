@@ -9,11 +9,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
     VITE_SUPABASE_URL: supabaseUrl,
     VITE_SUPABASE_ANON_KEY: supabaseAnonKey
   });
+  throw new Error("Missing Supabase env vars");
 }
 
-export const supabase =
-  supabaseUrl && supabaseAnonKey
-    ? createClient<Database>(supabaseUrl, supabaseAnonKey)
-    : null;
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
 
 export { supabaseUrl, supabaseAnonKey };
