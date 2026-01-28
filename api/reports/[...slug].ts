@@ -1644,7 +1644,9 @@ const handleAutomationsRun = async (
 // 2) If coords missing, error message is actionable and no 500.
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const route = getRouteParts(req).join("/");
+  const slugParam = (req.query as Record<string, unknown>)?.slug;
+  const parts = Array.isArray(slugParam) ? slugParam : [slugParam];
+  const route = parts.filter(Boolean).join("/");
   if (route === "generate") {
     return handleGenerateClassic(req, res);
   }
@@ -1663,5 +1665,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (route === "automations/run") {
     return handleAutomationsRun(req, res);
   }
-  return res.status(404).json({ error: "Not found" });
+  return res.status(404).json({ error: "Unknown reports route", route });
 }
