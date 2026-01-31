@@ -1663,7 +1663,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (route === "competitors-benchmark/pdf") {
     return handleCompetitorsBenchmarkPdf(req, res);
   }
-  if (route === "automations/run") {
+  if (route === "automations/run" || route === "automations") {
     return handleAutomationsRun(req, res);
   }
   return res.status(404).json({ error: "Unknown reports route", route });
