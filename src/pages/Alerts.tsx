@@ -335,7 +335,11 @@ const Alerts = ({ session }: AlertsProps) => {
                     size="sm"
                     onClick={() =>
                       window.location.assign(
-                        `/inbox?review_id=${encodeURIComponent(alert.review_id)}`
+                        alert.review_id
+                          ? `/inbox?review_id=${encodeURIComponent(
+                              alert.review_id
+                            )}`
+                          : "/inbox"
                       )
                     }
                   >
