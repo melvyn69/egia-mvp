@@ -82,6 +82,14 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
   const [actions, setActions] = useState<ActionInput[]>([]);
   const [templateApplied, setTemplateApplied] = useState(false);
   const supabaseClient = supabase;
+  const [runNowLoading, setRunNowLoading] = useState(false);
+  const [runNowResult, setRunNowResult] = useState<{
+    processed?: number;
+    inserted?: number;
+    skippedCooldown?: number;
+    last_cursor?: string | null;
+  } | null>(null);
+  const [runNowError, setRunNowError] = useState<string | null>(null);
 
   const locationOptions = useMemo(
     () =>
@@ -433,6 +441,47 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
 
     setSaving(false);
     navigate("/automation");
+  };
+
+  const handleRunNow = async () => {
+    if (!supabaseClient) return;
+    setRunNowLoading(true);
+    setRunNowError(null);
+    setRunNowResult(null);
+    try {
+      const { data: sessionData } = await supabaseClient.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        setRunNowError("Session expirée. Reconnectez-vous.");
+        return;
+      }
+      const response = await fetch("/api/reports/automations", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || "Impossible d’exécuter l’automatisation.");
+      }
+      const payload = (await response.json()) as {
+        processed?: number;
+        inserted?: number;
+        skippedCooldown?: number;
+        last_cursor?: string | null;
+      };
+      setRunNowResult(payload);
+    } catch (err) {
+      setRunNowError(
+        err instanceof Error
+          ? err.message
+          : "Impossible d’exécuter l’automatisation."
+      );
+    } finally {
+      setRunNowLoading(false);
+    }
   };
 
   if (!supabaseClient) {
@@ -790,7 +839,46 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
             </Card>
           )}
 
+          {(runNowError || runNowResult) && (
+            <Card>
+              <CardContent className="pt-6 text-sm text-slate-700">
+                {runNowError ? (
+                  <p className="text-rose-600">{runNowError}</p>
+                ) : (
+                  <div className="space-y-1">
+                    <p className="font-semibold text-emerald-700">
+                      Automatisation exécutée.
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Traité: {runNowResult?.processed ?? 0} · Alertes:{" "}
+                      {runNowResult?.inserted ?? 0} · Cooldown:{" "}
+                      {runNowResult?.skippedCooldown ?? 0}
+                    </p>
+                    {runNowResult?.last_cursor && (
+                      <p className="text-xs text-slate-400">
+                        Dernier curseur: {runNowResult.last_cursor}
+                      </p>
+                    )}
+                    {runNowResult?.inserted && runNowResult.inserted > 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-2"
+                        onClick={() => navigate("/alerts")}
+                      >
+                        Ouvrir Alertes
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" onClick={handleRunNow} disabled={runNowLoading}>
+              {runNowLoading ? "Test en cours..." : "Tester maintenant"}
+            </Button>
             <Button onClick={handleSave} disabled={saving}>
               {saving ? "Sauvegarde..." : "Enregistrer"}
             </Button>
