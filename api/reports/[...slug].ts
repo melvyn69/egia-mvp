@@ -1373,7 +1373,6 @@ const handleAutomationsRun = async (
   res: VercelResponse
 ) => {
   const COOLDOWN_HOURS = 24;
-  const NO_REPLY_DELAY_HOURS = 6;
   const requestId = getRequestId(req);
   if (req.method !== "POST") {
     return sendError(
@@ -1461,7 +1460,7 @@ const handleAutomationsRun = async (
 
     const { data: conditions } = await supabaseAdmin
       .from("automation_conditions")
-      .select("workflow_id,field,operator,value")
+      .select("workflow_id,field,operator,value,value_jsonb,label")
       .in(
         "workflow_id",
         (workflows ?? []).map((w) => w.id)
@@ -1472,6 +1471,20 @@ const handleAutomationsRun = async (
       const list = workflowConditions.get(condition.workflow_id) ?? [];
       list.push(condition);
       workflowConditions.set(condition.workflow_id, list);
+    }
+
+    const { data: actions } = await supabaseAdmin
+      .from("automation_actions")
+      .select("workflow_id,action_type,params,config,type,label")
+      .in(
+        "workflow_id",
+        (workflows ?? []).map((w) => w.id)
+      );
+    const workflowActions = new Map<string, typeof actions>();
+    for (const action of actions ?? []) {
+      const list = workflowActions.get(action.workflow_id) ?? [];
+      list.push(action);
+      workflowActions.set(action.workflow_id, list);
     }
 
     const { data: cronRow } = await supabaseAdmin
@@ -1546,18 +1559,20 @@ const handleAutomationsRun = async (
       .in("review_id", reviewIds)
       .in("alert_type", ["LOW_RATING", "NO_REPLY", "NEGATIVE_SENTIMENT", "RATING_DROP"])
       .gte("last_notified_at", cooldownCutoff);
-    const recentAlertSet = new Set<string>();
+    const recentAlertMap = new Map<string, string>();
     for (const alert of recentAlerts ?? []) {
       if (alert.workflow_id && alert.review_id && alert.alert_type) {
-        recentAlertSet.add(
-          `${alert.workflow_id}|${alert.review_id}|${alert.alert_type}`
-        );
+        const key = `${alert.workflow_id}|${alert.review_id}|${alert.alert_type}`;
+        if (alert.last_notified_at) {
+          recentAlertMap.set(key, alert.last_notified_at);
+        }
       }
     }
 
     let processed = 0;
     let inserted = 0;
     let skippedCooldown = 0;
+    let skippedNoSentiment = 0;
     let latestTimestamp = lastProcessed ?? null;
 
     for (const review of reviews ?? []) {
@@ -1598,98 +1613,134 @@ const handleAutomationsRun = async (
         }
 
         const conditionsForWorkflow = workflowConditions.get(workflow.id) ?? [];
+        const actionsForWorkflow = workflowActions.get(workflow.id) ?? [];
         let matches = true;
+        let needsSentiment = false;
         for (const condition of conditionsForWorkflow) {
-          if (condition.field !== "rating") continue;
-          const target = Number(condition.value);
-          if (Number.isNaN(target) || reviewRating === null) {
-            matches = false;
-            break;
+          const rawValue =
+            (condition as { value_jsonb?: unknown }).value_jsonb ??
+            condition.value;
+          const valueStr =
+            rawValue !== undefined && rawValue !== null
+              ? String(rawValue)
+              : "";
+          if (condition.field === "rating") {
+            const target = Number(valueStr);
+            if (Number.isNaN(target) || reviewRating === null) {
+              matches = false;
+              break;
+            }
+            if (condition.operator === "gte" && !(reviewRating >= target)) {
+              matches = false;
+            }
+            if (condition.operator === "lte" && !(reviewRating <= target)) {
+              matches = false;
+            }
+            if (condition.operator === "eq" && !(reviewRating === target)) {
+              matches = false;
+            }
+            if (!matches) break;
           }
-          if (condition.operator === "gte" && !(reviewRating >= target)) {
-            matches = false;
+          if (condition.field === "no_reply_hours") {
+            const target = Number(valueStr);
+            if (Number.isNaN(target)) {
+              matches = false;
+              break;
+            }
+            const replyText = review.reply_text ?? review.owner_reply ?? null;
+            const reviewAgeHours =
+              reviewTimestamp
+                ? (Date.now() - new Date(reviewTimestamp).getTime()) /
+                  (1000 * 60 * 60)
+                : null;
+            if (replyText) {
+              matches = false;
+            }
+            if (reviewAgeHours === null || reviewAgeHours < target) {
+              matches = false;
+            }
+            if (!matches) break;
           }
-          if (condition.operator === "lte" && !(reviewRating <= target)) {
-            matches = false;
+          if (condition.field === "sentiment") {
+            needsSentiment = true;
+            const target = valueStr || "negative";
+            const insight = insightMap.get(reviewId);
+            const sentiment = insight?.sentiment ?? null;
+            if (!sentiment) {
+              matches = false;
+              break;
+            }
+            if (condition.operator === "eq" && sentiment !== target) {
+              matches = false;
+              break;
+            }
           }
-          if (condition.operator === "eq" && !(reviewRating === target)) {
-            matches = false;
-          }
-          if (!matches) break;
         }
 
-        if (!matches) continue;
+        if (!matches) {
+          if (needsSentiment) {
+            skippedNoSentiment += 1;
+          }
+          continue;
+        }
 
         const nowIso = new Date().toISOString();
-        const alertCandidates: Array<{
-          alert_type: string;
-          rule_code: string;
-          rule_label: string;
-          severity: "high" | "medium" | "low";
-        }> = [];
+        const alertPayload = {
+          author: review.author_name ?? null,
+          rating: reviewRating,
+          text: review.comment ?? null,
+          create_time: review.create_time ?? null,
+          update_time: review.update_time ?? null,
+          location_name: review.location_name ?? null,
+          review_id: reviewId,
+          review_name: review.review_name ?? null
+        };
+        const conditionLabel = (conditionsForWorkflow ?? [])
+          .map((condition) => condition.label)
+          .filter(Boolean)
+          .join(", ");
+        const fallbackLabel =
+          conditionLabel ||
+          (conditionsForWorkflow ?? [])
+            .map((condition) => {
+              if (condition.field === "rating") return "Note";
+              if (condition.field === "no_reply_hours") return "Sans reponse";
+              if (condition.field === "sentiment") return "Sentiment negatif";
+              return null;
+            })
+            .filter(Boolean)
+            .join(", ");
 
-        if (reviewRating !== null && reviewRating <= 3) {
-          alertCandidates.push({
-            alert_type: "LOW_RATING",
-            rule_code: "LOW_RATING",
-            rule_label: "Note basse",
-            severity: reviewRating <= 2 ? "high" : "medium"
-          });
-        }
-
-        const replyText = review.reply_text ?? review.owner_reply ?? null;
-        const reviewAgeHours =
-          reviewTimestamp ? (Date.now() - new Date(reviewTimestamp).getTime()) / (1000 * 60 * 60) : null;
-        if (
-          reviewRating !== null &&
-          reviewRating <= 4 &&
-          !replyText &&
-          (reviewAgeHours === null || reviewAgeHours >= NO_REPLY_DELAY_HOURS)
-        ) {
-          alertCandidates.push({
-            alert_type: "NO_REPLY",
-            rule_code: "NO_REPLY",
-            rule_label: "Aucun retour",
-            severity: "medium"
-          });
-        }
-
-        const insight = insightMap.get(reviewId);
-        const sentiment = insight?.sentiment ?? null;
-        const sentimentScore =
-          typeof insight?.sentiment_score === "number"
-            ? insight?.sentiment_score
-            : null;
-        if (
-          sentiment === "negative" ||
-          sentiment === "very_negative" ||
-          (sentimentScore !== null && sentimentScore <= -0.4)
-        ) {
-          alertCandidates.push({
-            alert_type: "NEGATIVE_SENTIMENT",
-            rule_code: "NEGATIVE_SENTIMENT",
-            rule_label: "Sentiment négatif",
-            severity: "high"
-          });
-        }
-
-        for (const candidate of alertCandidates) {
-          const cooldownKey = `${workflow.id}|${reviewId}|${candidate.alert_type}`;
-          if (recentAlertSet.has(cooldownKey)) {
-            skippedCooldown += 1;
-            continue;
-          }
-
-          const alertPayload = {
-            author: review.author_name ?? null,
-            rating: reviewRating,
-            text: review.comment ?? null,
-            create_time: review.create_time ?? null,
-            update_time: review.update_time ?? null,
-            location_name: review.location_name ?? null,
-            review_id: reviewId,
-            review_name: review.review_name ?? null
+        for (const action of actionsForWorkflow) {
+          const actionType =
+            (action as { action_type?: string }).action_type ??
+            (action as { type?: string }).type ??
+            "";
+          if (actionType !== "create_alert") continue;
+          const rawParams =
+            (action as { params?: unknown }).params ??
+            (action as { config?: unknown }).config ??
+            {};
+          const params = (rawParams ?? {}) as {
+            alert_type?: string;
+            severity?: "high" | "medium" | "low";
+            cooldown_hours?: number;
           };
+          const alertType = params.alert_type ?? "LOW_RATING";
+          const severity =
+            params.severity ?? (alertType === "LOW_RATING" ? "medium" : "high");
+          const cooldownHours = Number(params.cooldown_hours ?? COOLDOWN_HOURS);
+          const cooldownKey = `${workflow.id}|${reviewId}|${alertType}`;
+          const lastNotified = recentAlertMap.get(cooldownKey);
+          if (lastNotified) {
+            const cooldownCutoffDynamic = new Date(
+              Date.now() - cooldownHours * 60 * 60 * 1000
+            ).toISOString();
+            if (lastNotified >= cooldownCutoffDynamic) {
+              skippedCooldown += 1;
+              continue;
+            }
+          }
 
           const alertsTable = supabaseAdmin.from("alerts") as any;
           const { error: insertError } = await alertsTable.upsert(
@@ -1698,10 +1749,10 @@ const handleAutomationsRun = async (
               establishment_id: establishmentId,
               workflow_id: workflow.id,
               workflow_name: (workflow as any).name ?? null,
-              alert_type: candidate.alert_type,
-              rule_code: candidate.rule_code,
-              rule_label: candidate.rule_label,
-              severity: candidate.severity,
+              alert_type: alertType,
+              rule_code: alertType,
+              rule_label: fallbackLabel || null,
+              severity,
               review_id: reviewId,
               triggered_at: nowIso,
               last_notified_at: nowIso,
@@ -1728,12 +1779,19 @@ const handleAutomationsRun = async (
       });
     }
 
-    return { processed, inserted, last_cursor: latestTimestamp, skippedCooldown };
+    return {
+      processed,
+      inserted,
+      last_cursor: latestTimestamp,
+      skippedCooldown,
+      skippedNoSentiment
+    };
   };
 
   let processed = 0;
   let inserted = 0;
   let skippedCooldown = 0;
+  let skippedNoSentiment = 0;
   let lastCursor: string | null = null;
 
   for (const userId of userIds) {
@@ -1741,6 +1799,7 @@ const handleAutomationsRun = async (
     processed += result.processed;
     inserted += result.inserted;
     skippedCooldown += result.skippedCooldown ?? 0;
+    skippedNoSentiment += result.skippedNoSentiment ?? 0;
     if (result.last_cursor && (!lastCursor || result.last_cursor > lastCursor)) {
       lastCursor = result.last_cursor;
     }
@@ -1751,6 +1810,7 @@ const handleAutomationsRun = async (
     processed,
     inserted,
     skippedCooldown,
+    skippedNoSentiment,
     last_cursor: lastCursor
   });
 
@@ -1759,6 +1819,7 @@ const handleAutomationsRun = async (
     processed,
     inserted,
     skippedCooldown,
+    skippedNoSentiment,
     last_cursor: lastCursor,
     requestId
   });
