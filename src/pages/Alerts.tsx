@@ -285,7 +285,7 @@ const Alerts = ({ session }: AlertsProps) => {
                     <Badge className={severityClassMap[alert.severity]}>
                       {severityLabelMap[alert.severity]}
                     </Badge>
-                    <Badge variant="outline" className="border-slate-200 text-slate-600">
+                    <Badge className="border border-slate-200 text-slate-600">
                       {alertTypeLabelMap[alert.alert_type ?? ""] ?? "Type"}
                     </Badge>
                   </div>
