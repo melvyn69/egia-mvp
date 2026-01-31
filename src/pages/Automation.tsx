@@ -62,6 +62,14 @@ const Automation = ({ session, locations }: AutomationProps) => {
   const [workflows, setWorkflows] = useState<WorkflowRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const [runResult, setRunResult] = useState<{
+    processed?: number;
+    inserted?: number;
+    skippedCooldown?: number;
+    last_cursor?: string | null;
+  } | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!session) return;
@@ -115,6 +123,51 @@ const Automation = ({ session, locations }: AutomationProps) => {
     );
   };
 
+  const handleRunNow = async () => {
+    if (!supabase) {
+      setRunError("Client Supabase indisponible.");
+      return;
+    }
+    setRunning(true);
+    setRunError(null);
+    setRunResult(null);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        setRunError("Session expirée. Reconnectez-vous.");
+        return;
+      }
+      const response = await fetch("/api/reports/automations", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || "Impossible d’exécuter l’automatisation.");
+      }
+      const payload = (await response.json()) as {
+        processed?: number;
+        inserted?: number;
+        skippedCooldown?: number;
+        last_cursor?: string | null;
+      };
+      setRunResult(payload);
+      setRunError(null);
+    } catch (err) {
+      setRunError(
+        err instanceof Error
+          ? err.message
+          : "Impossible d’exécuter l’automatisation."
+      );
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const activeWorkflows = useMemo(
     () => workflows.filter((item) => item.enabled),
     [workflows]
@@ -141,14 +194,49 @@ const Automation = ({ session, locations }: AutomationProps) => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" disabled title="Bientôt disponible">
-            Actionner l’auto maintenant
+          <Button
+            variant="outline"
+            onClick={handleRunNow}
+            disabled={running}
+          >
+            {running ? "Exécution..." : "Actionner l’auto maintenant"}
           </Button>
           <Button onClick={() => navigate("/automation/builder")}>
             Créer manuellement
           </Button>
         </div>
       </div>
+      {(runError || runResult) && (
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+          {runError ? (
+            <p className="text-rose-600">{runError}</p>
+          ) : (
+            <div className="space-y-1">
+              <p className="font-semibold text-emerald-700">
+                Automatisation exécutée.
+              </p>
+              <p className="text-xs text-slate-500">
+                Traité: {runResult?.processed ?? 0} · Alertes:{" "}
+                {runResult?.inserted ?? 0} · Cooldown:{" "}
+                {runResult?.skippedCooldown ?? 0}
+              </p>
+              {runResult?.last_cursor && (
+                <p className="text-xs text-slate-400">
+                  Dernier curseur: {runResult.last_cursor}
+                </p>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                onClick={() => navigate("/alerts")}
+              >
+                Voir les alertes
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       <section className="space-y-4">
         <h2 className="text-sm font-semibold text-slate-700">
