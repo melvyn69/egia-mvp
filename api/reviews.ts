@@ -148,9 +148,24 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         return res.status(400).json({ error: "Missing alert_id" });
       }
       const nowIso = new Date().toISOString();
+      const updatePayload: Record<string, string> = { resolved_at: nowIso };
+      const { data: columns } = await supabaseAdmin
+        .from("information_schema.columns")
+        .select("column_name")
+        .eq("table_schema", "public")
+        .eq("table_name", "alerts");
+      const columnSet = new Set(
+        (columns ?? []).map((col: { column_name: string }) => col.column_name)
+      );
+      if (columnSet.has("handled_at")) {
+        updatePayload.handled_at = nowIso;
+      }
+      if (columnSet.has("handled_by")) {
+        updatePayload.handled_by = userId;
+      }
       const { data, error } = await supabaseAdmin
         .from("alerts")
-        .update({ resolved_at: nowIso })
+        .update(updatePayload)
         .eq("id", alertId)
         .eq("user_id", userId)
         .is("resolved_at", null)
