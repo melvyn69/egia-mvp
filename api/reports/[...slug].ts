@@ -1372,6 +1372,8 @@ const handleAutomationsRun = async (
   req: VercelRequest,
   res: VercelResponse
 ) => {
+  const COOLDOWN_HOURS = 24;
+  const NO_REPLY_DELAY_HOURS = 6;
   const requestId = getRequestId(req);
   if (req.method !== "POST") {
     return sendError(
@@ -1449,7 +1451,7 @@ const handleAutomationsRun = async (
   const runAutomationsForUser = async (userId: string) => {
     const { data: workflows, error: wfError } = await supabaseAdmin
       .from("automation_workflows")
-      .select("id,user_id,enabled,trigger,location_ids")
+      .select("id,user_id,enabled,trigger,location_ids,name")
       .eq("enabled", true)
       .eq("trigger", "new_review")
       .eq("user_id", userId);
@@ -1484,7 +1486,7 @@ const handleAutomationsRun = async (
     const { data: reviews, error: reviewsError } = await supabaseAdmin
       .from("google_reviews")
       .select(
-        "id,review_id,review_name,location_name,rating,update_time,create_time,user_id"
+        "id,review_id,review_name,location_id,location_name,author_name,comment,owner_reply,reply_text,replied_at,rating,update_time,create_time,user_id"
       )
       .eq("user_id", userId)
       .order("update_time", { ascending: true, nullsFirst: true })
@@ -1507,8 +1509,55 @@ const handleAutomationsRun = async (
       }
     }
 
+    const reviewIds = (reviews ?? [])
+      .map((review) => review.review_id ?? review.review_name ?? review.id)
+      .filter(Boolean);
+
+    const { data: insights } = await supabaseAdmin
+      .from("review_ai_insights")
+      .select("review_pk,sentiment,sentiment_score")
+      .eq("user_id", userId)
+      .in("review_pk", reviewIds);
+    const insightMap = new Map<
+      string,
+      { sentiment?: string | null; sentiment_score?: number | null }
+    >();
+    for (const insight of insights ?? []) {
+      if (insight.review_pk) {
+        insightMap.set(insight.review_pk, {
+          sentiment: insight.sentiment ?? null,
+          sentiment_score:
+            typeof insight.sentiment_score === "number"
+              ? insight.sentiment_score
+              : null
+        });
+      }
+    }
+
+    const cooldownCutoff = new Date(
+      Date.now() - COOLDOWN_HOURS * 60 * 60 * 1000
+    ).toISOString();
+    const workflowIds = (workflows ?? []).map((w) => w.id);
+    const { data: recentAlerts } = await supabaseAdmin
+      .from("alerts")
+      .select("workflow_id,review_id,alert_type,last_notified_at")
+      .eq("user_id", userId)
+      .in("workflow_id", workflowIds)
+      .in("review_id", reviewIds)
+      .in("alert_type", ["LOW_RATING", "NO_REPLY", "NEGATIVE_SENTIMENT", "RATING_DROP"])
+      .gte("last_notified_at", cooldownCutoff);
+    const recentAlertSet = new Set<string>();
+    for (const alert of recentAlerts ?? []) {
+      if (alert.workflow_id && alert.review_id && alert.alert_type) {
+        recentAlertSet.add(
+          `${alert.workflow_id}|${alert.review_id}|${alert.alert_type}`
+        );
+      }
+    }
+
     let processed = 0;
     let inserted = 0;
+    let skippedCooldown = 0;
     let latestTimestamp = lastProcessed ?? null;
 
     for (const review of reviews ?? []) {
@@ -1531,13 +1580,17 @@ const handleAutomationsRun = async (
       for (const workflow of workflows ?? []) {
         const scopedIds = workflow.location_ids ?? [];
         if (scopedIds.length > 0) {
-          if (!review.location_name) continue;
-          if (!scopedIds.includes(review.location_name)) {
+          const locationKey =
+            review.location_id ?? review.location_name ?? null;
+          if (!locationKey) continue;
+          if (!scopedIds.includes(locationKey) && !scopedIds.includes(review.location_name ?? "")) {
             continue;
           }
         }
 
-        const establishmentId = review.location_name
+        const establishmentId = review.location_id
+          ? locationMap.get(review.location_id) ?? null
+          : review.location_name
           ? locationMap.get(review.location_name) ?? null
           : null;
         if (!establishmentId) {
@@ -1567,34 +1620,102 @@ const handleAutomationsRun = async (
 
         if (!matches) continue;
 
-        const ruleCode = `AUTO_${workflow.id}`;
-        const alertType = "automation";
-        const alertPayload = {
-          message: "Condition automatique declenchee sur un nouvel avis.",
-          rating: reviewRating,
-          review_id: reviewId
-        };
+        const nowIso = new Date().toISOString();
+        const alertCandidates: Array<{
+          alert_type: string;
+          rule_code: string;
+          rule_label: string;
+          severity: "high" | "medium" | "low";
+        }> = [];
 
-        const { error: insertError } = await (supabaseAdmin
-          .from("alerts") as any).insert(
-          {
-            user_id: userId,
-            establishment_id: establishmentId,
-            workflow_id: workflow.id,
-            alert_type: alertType,
-            rule_code: ruleCode,
-            severity: "medium",
-            review_id: reviewId,
-            payload: alertPayload
-          },
-          {
-            onConflict: "workflow_id,review_id,alert_type",
-            ignoreDuplicates: true
+        if (reviewRating !== null && reviewRating <= 3) {
+          alertCandidates.push({
+            alert_type: "LOW_RATING",
+            rule_code: "LOW_RATING",
+            rule_label: "Note basse",
+            severity: reviewRating <= 2 ? "high" : "medium"
+          });
+        }
+
+        const replyText = review.reply_text ?? review.owner_reply ?? null;
+        const reviewAgeHours =
+          reviewTimestamp ? (Date.now() - new Date(reviewTimestamp).getTime()) / (1000 * 60 * 60) : null;
+        if (
+          reviewRating !== null &&
+          reviewRating <= 4 &&
+          !replyText &&
+          (reviewAgeHours === null || reviewAgeHours >= NO_REPLY_DELAY_HOURS)
+        ) {
+          alertCandidates.push({
+            alert_type: "NO_REPLY",
+            rule_code: "NO_REPLY",
+            rule_label: "Aucun retour",
+            severity: "medium"
+          });
+        }
+
+        const insight = insightMap.get(reviewId);
+        const sentiment = insight?.sentiment ?? null;
+        const sentimentScore =
+          typeof insight?.sentiment_score === "number"
+            ? insight?.sentiment_score
+            : null;
+        if (
+          sentiment === "negative" ||
+          sentiment === "very_negative" ||
+          (sentimentScore !== null && sentimentScore <= -0.4)
+        ) {
+          alertCandidates.push({
+            alert_type: "NEGATIVE_SENTIMENT",
+            rule_code: "NEGATIVE_SENTIMENT",
+            rule_label: "Sentiment négatif",
+            severity: "high"
+          });
+        }
+
+        for (const candidate of alertCandidates) {
+          const cooldownKey = `${workflow.id}|${reviewId}|${candidate.alert_type}`;
+          if (recentAlertSet.has(cooldownKey)) {
+            skippedCooldown += 1;
+            continue;
           }
-        );
 
-        if (!insertError) {
-          inserted += 1;
+          const alertPayload = {
+            author: review.author_name ?? null,
+            rating: reviewRating,
+            text: review.comment ?? null,
+            create_time: review.create_time ?? null,
+            update_time: review.update_time ?? null,
+            location_name: review.location_name ?? null,
+            review_id: reviewId,
+            review_name: review.review_name ?? null
+          };
+
+          const alertsTable = supabaseAdmin.from("alerts") as any;
+          const { error: insertError } = await alertsTable.upsert(
+            {
+              user_id: userId,
+              establishment_id: establishmentId,
+              workflow_id: workflow.id,
+              workflow_name: (workflow as any).name ?? null,
+              alert_type: candidate.alert_type,
+              rule_code: candidate.rule_code,
+              rule_label: candidate.rule_label,
+              severity: candidate.severity,
+              review_id: reviewId,
+              triggered_at: nowIso,
+              last_notified_at: nowIso,
+              source: "automations",
+              payload: alertPayload
+            },
+            {
+              onConflict: "workflow_id,review_id,alert_type"
+            }
+          );
+
+          if (!insertError) {
+            inserted += 1;
+          }
         }
       }
     }
@@ -1607,17 +1728,19 @@ const handleAutomationsRun = async (
       });
     }
 
-    return { processed, inserted, last_cursor: latestTimestamp };
+    return { processed, inserted, last_cursor: latestTimestamp, skippedCooldown };
   };
 
   let processed = 0;
   let inserted = 0;
+  let skippedCooldown = 0;
   let lastCursor: string | null = null;
 
   for (const userId of userIds) {
     const result = await runAutomationsForUser(userId);
     processed += result.processed;
     inserted += result.inserted;
+    skippedCooldown += result.skippedCooldown ?? 0;
     if (result.last_cursor && (!lastCursor || result.last_cursor > lastCursor)) {
       lastCursor = result.last_cursor;
     }
@@ -1627,6 +1750,7 @@ const handleAutomationsRun = async (
     users: userIds.length,
     processed,
     inserted,
+    skippedCooldown,
     last_cursor: lastCursor
   });
 
@@ -1634,6 +1758,7 @@ const handleAutomationsRun = async (
     ok: true,
     processed,
     inserted,
+    skippedCooldown,
     last_cursor: lastCursor,
     requestId
   });
