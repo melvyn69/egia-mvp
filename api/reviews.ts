@@ -169,7 +169,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         .eq("id", alertId)
         .eq("user_id", userId)
         .is("resolved_at", null)
-        .select("id")
+        .select(
+          "id, rule_code, severity, review_id, payload, triggered_at, resolved_at, alert_type, rule_label"
+        )
         .maybeSingle();
       if (error) {
         return res.status(500).json({ error: "Failed to resolve alert" });
@@ -177,7 +179,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       if (!data) {
         return res.status(404).json({ error: "Alert not found" });
       }
-      return res.status(200).json({ ok: true });
+      return res.status(200).json({ ok: true, alert: data });
     }
 
     if (req.method !== "GET") {
