@@ -17,6 +17,9 @@ type AlertRow = {
   review_id: string;
   triggered_at: string;
   payload?: Record<string, unknown> | null;
+  alert_type?: string | null;
+  rule_label?: string | null;
+  resolved_at?: string | null;
 };
 
 const ruleLabelMap: Record<string, string> = {
@@ -30,41 +33,34 @@ const ruleLabelMap: Record<string, string> = {
   AUTO_WEEKLY_SUMMARY: "Resume hebdomadaire"
 };
 
+const alertTypeLabelMap: Record<string, string> = {
+  LOW_RATING: "Note basse",
+  NO_REPLY: "Sans réponse",
+  NEGATIVE_SENTIMENT: "Sentiment négatif",
+  RATING_DROP: "Chute de note"
+};
+
 const severityLabelMap: Record<AlertRow["severity"], string> = {
   low: "Faible",
   medium: "Moyenne",
   high: "Haute"
 };
 
-const severityVariantMap: Record<AlertRow["severity"], "neutral" | "warning"> = {
-  low: "neutral",
-  medium: "warning",
-  high: "warning"
+const severityClassMap: Record<AlertRow["severity"], string> = {
+  low: "border-slate-200 bg-slate-50 text-slate-600",
+  medium: "border-amber-200 bg-amber-50 text-amber-700",
+  high: "border-rose-200 bg-rose-50 text-rose-700"
 };
 
-const buildSummary = (payload: Record<string, unknown> | null | undefined) => {
-  if (!payload) return "Une alerte prioritaire a ete detectee.";
-  if (typeof payload.message === "string") return payload.message;
-  const parts: string[] = [];
-  if (typeof payload.rating === "number") {
-    parts.push(`${payload.rating}★`);
-  }
-  if (typeof payload.hours_since === "number") {
-    parts.push(`${payload.hours_since}h sans reponse`);
-  }
-  if (typeof payload.drop === "number") {
-    parts.push(`baisse ${payload.drop}`);
-  }
-  if (typeof payload.negative_count_48h === "number") {
-    parts.push(`${payload.negative_count_48h} avis negatifs (48h)`);
-  }
-  if (typeof payload.snippet === "string") {
-    parts.push(`"${payload.snippet}"`);
-  }
-  return parts.length > 0
-    ? parts.join(" · ")
-    : "Une alerte prioritaire a ete detectee.";
-};
+const getPayloadString = (
+  payload: Record<string, unknown> | null | undefined,
+  key: string
+) => (typeof payload?.[key] === "string" ? payload[key] : null);
+
+const getPayloadNumber = (
+  payload: Record<string, unknown> | null | undefined,
+  key: string
+) => (typeof payload?.[key] === "number" ? payload[key] : null);
 
 const formatRelativeDate = (iso: string | null | undefined) => {
   if (!iso) return "Date inconnue";
@@ -143,23 +139,66 @@ const Alerts = ({ session }: AlertsProps) => {
   };
 
   const alerts = alertsQuery.data ?? [];
-  const formattedAlerts = useMemo(
-    () =>
-      alerts.map((alert) => ({
+  const formattedAlerts = useMemo(() => {
+    const sorted = alerts.slice().sort((a, b) => {
+      const aResolved = Boolean(a.resolved_at);
+      const bResolved = Boolean(b.resolved_at);
+      if (aResolved !== bResolved) {
+        return aResolved ? 1 : -1;
+      }
+      const severityRank = { high: 0, medium: 1, low: 2 };
+      const severityDiff =
+        severityRank[a.severity] - severityRank[b.severity];
+      if (severityDiff !== 0) return severityDiff;
+      const aTime = new Date(a.triggered_at).getTime();
+      const bTime = new Date(b.triggered_at).getTime();
+      return bTime - aTime;
+    });
+
+    return sorted.map((alert) => {
+      const payload = alert.payload ?? null;
+      const label =
+        alert.rule_label ??
+        alertTypeLabelMap[alert.alert_type ?? ""] ??
+        ruleLabelMap[alert.rule_code] ??
+        alert.rule_code;
+      const author = getPayloadString(payload, "author");
+      const locationName = getPayloadString(payload, "location_name");
+      const rating = getPayloadNumber(payload, "rating");
+      const text = getPayloadString(payload, "text") ?? getPayloadString(payload, "message");
+      const createTime =
+        getPayloadString(payload, "create_time") ??
+        getPayloadString(payload, "update_time");
+      const excerpt =
+        text && text.trim().length > 0
+          ? text.trim().slice(0, 160)
+          : "Aucun extrait disponible.";
+
+      return {
         ...alert,
-        label: ruleLabelMap[alert.rule_code] ?? alert.rule_code,
-        summary: buildSummary(alert.payload ?? null),
-        relativeDate: formatRelativeDate(alert.triggered_at),
-        dateLabel: alert.triggered_at
+        label,
+        author,
+        locationName,
+        rating,
+        excerpt,
+        dateSource: createTime ?? alert.triggered_at,
+        relativeDate: formatRelativeDate(createTime ?? alert.triggered_at),
+        dateLabel: createTime
+          ? new Date(createTime).toLocaleDateString("fr-FR", {
+              year: "numeric",
+              month: "short",
+              day: "numeric"
+            })
+          : alert.triggered_at
           ? new Date(alert.triggered_at).toLocaleDateString("fr-FR", {
               year: "numeric",
               month: "short",
               day: "numeric"
             })
           : "Date inconnue"
-      })),
-    [alerts]
-  );
+      };
+    });
+  }, [alerts]);
 
   const lastCheckedLabel =
     alertsQuery.dataUpdatedAt && alertsQuery.dataUpdatedAt > 0
@@ -243,22 +282,47 @@ const Alerts = ({ session }: AlertsProps) => {
                     <p className="text-sm font-semibold text-slate-900">
                       {alert.label}
                     </p>
-                    <Badge variant={severityVariantMap[alert.severity]}>
+                    <Badge className={severityClassMap[alert.severity]}>
                       {severityLabelMap[alert.severity]}
                     </Badge>
+                    <Badge variant="outline" className="border-slate-200 text-slate-600">
+                      {alertTypeLabelMap[alert.alert_type ?? ""] ?? "Type"}
+                    </Badge>
                   </div>
-                  <p className="text-xs text-slate-600">{alert.summary}</p>
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+                    {alert.locationName && (
+                      <span>{alert.locationName}</span>
+                    )}
+                    {alert.author && <span>• {alert.author}</span>}
+                    {typeof alert.rating === "number" && (
+                      <span>• {alert.rating.toFixed(1)}★</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-600">{alert.excerpt}</p>
                   <p className="text-xs text-slate-400" title={alert.dateLabel}>
                     {alert.relativeDate}
                   </p>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleResolve(alert)}
-                >
-                  Marquer comme traite
-                </Button>
+                <div className="flex flex-col gap-2 md:items-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      window.location.assign(
+                        `/inbox?review_id=${encodeURIComponent(alert.review_id)}`
+                      )
+                    }
+                  >
+                    Repondre maintenant
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleResolve(alert)}
+                  >
+                    Marquer comme traite
+                  </Button>
+                </div>
               </div>
             ))
           )}
