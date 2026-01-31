@@ -174,16 +174,30 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
       const loadedActions = (actionsRes.data ?? []).map((item) => {
         const rawParams = (item as { params?: unknown }).params;
         const fallbackConfig = (item as { config?: unknown }).config;
-        const params =
+        const baseParams =
           rawParams && typeof rawParams === "object"
-            ? (rawParams as ActionInput["params"])
+            ? (rawParams as Partial<ActionInput["params"]>)
             : fallbackConfig && typeof fallbackConfig === "object"
-              ? (fallbackConfig as ActionInput["params"])
-              : {
-                  alert_type: "LOW_RATING",
-                  severity: "medium",
-                  cooldown_hours: 24
-                };
+              ? (fallbackConfig as Partial<ActionInput["params"]>)
+              : {};
+        const params: ActionInput["params"] = {
+          alert_type:
+            baseParams.alert_type === "LOW_RATING" ||
+            baseParams.alert_type === "NO_REPLY" ||
+            baseParams.alert_type === "NEGATIVE_SENTIMENT"
+              ? baseParams.alert_type
+              : "LOW_RATING",
+          severity:
+            baseParams.severity === "high" ||
+            baseParams.severity === "medium" ||
+            baseParams.severity === "low"
+              ? baseParams.severity
+              : "medium",
+          cooldown_hours:
+            typeof baseParams.cooldown_hours === "number"
+              ? baseParams.cooldown_hours
+              : 24
+        };
         return {
           id: item.id,
           action_type: ((item as { action_type?: string }).action_type ??
