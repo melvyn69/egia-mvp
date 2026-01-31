@@ -17,46 +17,49 @@ type AutomationBuilderProps = {
 
 type ConditionInput = {
   id?: string;
-  field: "rating" | "source" | "comment";
-  operator: "eq" | "gte" | "lte" | "contains" | "not_contains";
+  field: "rating" | "no_reply_hours" | "sentiment";
+  operator: "eq" | "gte" | "lte";
   value: string;
 };
 
 type ActionInput = {
   id?: string;
-  type: "ai_draft" | "add_tag" | "monthly_report" | "autopilot" | "email_alert";
-  config: { tone?: string; tag?: string; report_id?: string };
+  action_type: "create_alert";
+  params: {
+    alert_type: "LOW_RATING" | "NO_REPLY" | "NEGATIVE_SENTIMENT";
+    severity: "high" | "medium" | "low";
+    cooldown_hours: number;
+  };
 };
 
 const triggerOptions = [{ id: "new_review", label: "Nouvel avis recu" }];
 
 const conditionFieldOptions = [
   { id: "rating", label: "Note" },
-  { id: "source", label: "Source" },
-  { id: "comment", label: "Commentaire" }
+  { id: "no_reply_hours", label: "Pas de reponse (heures)" },
+  { id: "sentiment", label: "Sentiment negatif" }
 ] as const;
 
 const operatorOptions = [
   { id: "eq", label: "Egal a" },
   { id: "gte", label: "Superieur ou egal" },
-  { id: "lte", label: "Inferieur ou egal" },
-  { id: "contains", label: "Contient" },
-  { id: "not_contains", label: "Ne contient pas" }
+  { id: "lte", label: "Inferieur ou egal" }
 ] as const;
 
 const actionOptions = [
-  { id: "ai_draft", label: "Brouillon IA", disabled: false },
-  { id: "add_tag", label: "Ajouter un tag", disabled: false },
-  { id: "monthly_report", label: "Rapport mensuel", disabled: false },
-  { id: "autopilot", label: "Autopilot (bientot)", disabled: true },
-  { id: "email_alert", label: "Email alert (bientot)", disabled: true }
+  { id: "create_alert", label: "Creer une alerte", disabled: false }
 ] as const;
 
-const toneOptions = [
-  { id: "professional", label: "Professionnel" },
-  { id: "enthusiastic", label: "Enthousiaste" },
-  { id: "empathic", label: "Empathique" },
-  { id: "apology", label: "Excusant" }
+const alertTypeOptions = [
+  { id: "LOW_RATING", label: "Note basse" },
+  { id: "NO_REPLY", label: "Sans reponse" },
+  { id: "NEGATIVE_SENTIMENT", label: "Sentiment negatif" }
+] as const;
+
+const severityOptions = [
+  { id: "high", label: "Elevee" },
+  { id: "medium", label: "Moyenne" },
+  { id: "low", label: "Faible" }
 ] as const;
 
 const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
@@ -151,27 +154,42 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
       if (actionsRes.error) {
         console.error("automation_actions load error:", actionsRes.error);
       }
-      const loadedConditions = (conditionsRes.data ?? []).map((item) => ({
-        id: item.id,
-        field: (item.field ?? "rating") as ConditionInput["field"],
-        operator: (item.operator ?? "eq") as ConditionInput["operator"],
-        value: (item.value ?? "").toString()
-      }));
-      const loadedActions = (actionsRes.data ?? []).map((item) => {
-        let config: ActionInput["config"] = {};
-        if (typeof item.config === "string") {
-          try {
-            config = JSON.parse(item.config) as ActionInput["config"];
-          } catch {
-            config = {};
-          }
-        } else if (item.config && typeof item.config === "object") {
-          config = item.config as ActionInput["config"];
-        }
+      const loadedConditions = (conditionsRes.data ?? []).map((item) => {
+        const rawValue = (item as { value_jsonb?: unknown; value?: unknown })
+          .value_jsonb;
+        const fallbackValue = (item as { value?: unknown }).value;
+        const value =
+          rawValue !== undefined && rawValue !== null
+            ? String(rawValue)
+            : fallbackValue !== undefined && fallbackValue !== null
+              ? String(fallbackValue)
+              : "";
         return {
           id: item.id,
-          type: (item.type ?? "ai_draft") as ActionInput["type"],
-          config
+          field: (item.field ?? "rating") as ConditionInput["field"],
+          operator: (item.operator ?? "eq") as ConditionInput["operator"],
+          value
+        };
+      });
+      const loadedActions = (actionsRes.data ?? []).map((item) => {
+        const rawParams = (item as { params?: unknown }).params;
+        const fallbackConfig = (item as { config?: unknown }).config;
+        const params =
+          rawParams && typeof rawParams === "object"
+            ? (rawParams as ActionInput["params"])
+            : fallbackConfig && typeof fallbackConfig === "object"
+              ? (fallbackConfig as ActionInput["params"])
+              : {
+                  alert_type: "LOW_RATING",
+                  severity: "medium",
+                  cooldown_hours: 24
+                };
+        return {
+          id: item.id,
+          action_type: ((item as { action_type?: string }).action_type ??
+            (item as { type?: string }).type ??
+            "create_alert") as ActionInput["action_type"],
+          params
         };
       });
       setConditions(loadedConditions);
@@ -193,22 +211,58 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
       vip: {
         name: "Fidélisation VIP",
         conditions: [{ field: "rating", operator: "eq", value: "5" }],
-        actions: [{ type: "ai_draft", config: { tone: "enthusiastic" } }]
+        actions: [
+          {
+            action_type: "create_alert",
+            params: {
+              alert_type: "LOW_RATING",
+              severity: "medium",
+              cooldown_hours: 24
+            }
+          }
+        ]
       },
       social: {
         name: "Social Booster 5★",
         conditions: [{ field: "rating", operator: "gte", value: "4.8" }],
-        actions: [{ type: "add_tag", config: { tag: "meilleur-avis" } }]
+        actions: [
+          {
+            action_type: "create_alert",
+            params: {
+              alert_type: "LOW_RATING",
+              severity: "low",
+              cooldown_hours: 24
+            }
+          }
+        ]
       },
       recovery: {
         name: "Récupération Client",
         conditions: [{ field: "rating", operator: "lte", value: "2" }],
-        actions: [{ type: "ai_draft", config: { tone: "apology" } }]
+        actions: [
+          {
+            action_type: "create_alert",
+            params: {
+              alert_type: "LOW_RATING",
+              severity: "high",
+              cooldown_hours: 12
+            }
+          }
+        ]
       },
       autopilot: {
         name: "Pilote Automatique",
         conditions: [{ field: "rating", operator: "gte", value: "4" }],
-        actions: [{ type: "autopilot", config: {} }]
+        actions: [
+          {
+            action_type: "create_alert",
+            params: {
+              alert_type: "NO_REPLY",
+              severity: "medium",
+              cooldown_hours: 24
+            }
+          }
+        ]
       }
     };
     const preset = presets[templateId];
@@ -223,14 +277,21 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
   const addCondition = () => {
     setConditions((prev) => [
       ...prev,
-      { field: "rating", operator: "gte", value: "4" }
+      { field: "rating", operator: "lte", value: "3" }
     ]);
   };
 
   const addAction = () => {
     setActions((prev) => [
       ...prev,
-      { type: "ai_draft", config: { tone: "professional" } }
+      {
+        action_type: "create_alert",
+        params: {
+          alert_type: "LOW_RATING",
+          severity: "high",
+          cooldown_hours: 24
+        }
+      }
     ]);
   };
 
@@ -316,7 +377,19 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
         user_id: session.user.id,
         field: condition.field,
         operator: condition.operator,
-        value: condition.value
+        value: condition.value,
+        value_jsonb:
+          condition.field === "sentiment"
+            ? condition.value
+            : Number.isFinite(Number(condition.value))
+              ? Number(condition.value)
+              : condition.value,
+        label:
+          condition.field === "rating"
+            ? "Note"
+            : condition.field === "no_reply_hours"
+              ? "Pas de reponse"
+              : "Sentiment negatif"
       }));
       const { error: insertConditionsError } = await supabaseClient
         .from("automation_conditions")
@@ -327,19 +400,15 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
     }
 
     if (actions.length > 0) {
-      const actionRows = actions
-      .filter(
-        (action) =>
-          action.type === "ai_draft" ||
-          action.type === "add_tag" ||
-          action.type === "monthly_report"
-      )
-        .map((action) => ({
-          workflow_id: savedId,
-          user_id: session.user.id,
-          type: action.type,
-          config: action.config
-        }));
+      const actionRows = actions.map((action) => ({
+        workflow_id: savedId,
+        user_id: session.user.id,
+        type: action.action_type,
+        config: action.params,
+        action_type: action.action_type,
+        params: action.params,
+        label: "Creer une alerte"
+      }));
       const { error: insertActionsError } = await supabaseClient
         .from("automation_actions")
         .insert(actionRows);
@@ -498,7 +567,19 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                     value={condition.field}
                     onChange={(event) =>
                       updateCondition(index, {
-                        field: event.target.value as ConditionInput["field"]
+                        field: event.target.value as ConditionInput["field"],
+                        operator:
+                          event.target.value === "sentiment"
+                            ? "eq"
+                            : event.target.value === "no_reply_hours"
+                              ? "gte"
+                              : condition.operator,
+                        value:
+                          event.target.value === "sentiment"
+                            ? "negative"
+                            : event.target.value === "no_reply_hours"
+                              ? "24"
+                              : condition.value
                       })
                     }
                   >
@@ -523,14 +604,28 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                       </option>
                     ))}
                   </select>
-                  <input
-                    className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
-                    value={condition.value}
-                    onChange={(event) =>
-                      updateCondition(index, { value: event.target.value })
-                    }
-                    placeholder="Valeur"
-                  />
+                  {condition.field === "sentiment" ? (
+                    <select
+                      className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                      value={condition.value || "negative"}
+                      onChange={(event) =>
+                        updateCondition(index, { value: event.target.value })
+                      }
+                    >
+                      <option value="negative">Negatif</option>
+                      <option value="very_negative">Tres negatif</option>
+                    </select>
+                  ) : (
+                    <input
+                      className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                      type="number"
+                      value={condition.value}
+                      onChange={(event) =>
+                        updateCondition(index, { value: event.target.value })
+                      }
+                      placeholder="Valeur"
+                    />
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -562,24 +657,21 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                   className="space-y-2 rounded-xl border border-slate-100 bg-white px-3 py-2"
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    <select
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
-                      value={action.type}
-                      onChange={(event) =>
-                        updateAction(index, {
-                          type: event.target.value as ActionInput["type"],
-                          config:
-                            event.target.value === "ai_draft"
-                              ? { tone: "professional" }
-                              : event.target.value === "add_tag"
-                                ? { tag: "" }
-                                : event.target.value === "monthly_report"
-                                  ? { report_id: "" }
-                                : {}
-                        })
-                      }
-                    >
-                      {actionOptions.map((option) => (
+                  <select
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                    value={action.action_type}
+                    onChange={(event) =>
+                      updateAction(index, {
+                        action_type: event.target.value as ActionInput["action_type"],
+                        params: {
+                          alert_type: "LOW_RATING",
+                          severity: "medium",
+                          cooldown_hours: 24
+                        }
+                      })
+                    }
+                  >
+                    {actionOptions.map((option) => (
                         <option
                           key={option.id}
                           value={option.id}
@@ -597,67 +689,76 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                       Supprimer
                     </Button>
                   </div>
-                  {action.type === "ai_draft" && (
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-semibold text-slate-500">
-                        Ton
-                      </label>
-                      <select
-                        className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
-                        value={action.config.tone ?? "professional"}
-                        onChange={(event) =>
-                          updateAction(index, {
-                            config: { tone: event.target.value }
-                          })
-                        }
-                      >
-                        {toneOptions.map((option) => (
-                          <option key={option.id} value={option.id}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
+                  {action.action_type === "create_alert" && (
+                    <div className="grid gap-2 md:grid-cols-3">
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs font-semibold text-slate-500">
+                          Type
+                        </label>
+                        <select
+                          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                          value={action.params.alert_type}
+                          onChange={(event) =>
+                            updateAction(index, {
+                              params: {
+                                ...action.params,
+                                alert_type: event.target
+                                  .value as ActionInput["params"]["alert_type"]
+                              }
+                            })
+                          }
+                        >
+                          {alertTypeOptions.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs font-semibold text-slate-500">
+                          Priorite
+                        </label>
+                        <select
+                          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                          value={action.params.severity}
+                          onChange={(event) =>
+                            updateAction(index, {
+                              params: {
+                                ...action.params,
+                                severity: event.target
+                                  .value as ActionInput["params"]["severity"]
+                              }
+                            })
+                          }
+                        >
+                          {severityOptions.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs font-semibold text-slate-500">
+                          Cooldown (h)
+                        </label>
+                        <input
+                          className="w-24 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                          type="number"
+                          min={1}
+                          value={action.params.cooldown_hours}
+                          onChange={(event) =>
+                            updateAction(index, {
+                              params: {
+                                ...action.params,
+                                cooldown_hours: Number(event.target.value || 0)
+                              }
+                            })
+                          }
+                        />
+                      </div>
                     </div>
-                  )}
-                  {action.type === "add_tag" && (
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-semibold text-slate-500">
-                        Tag
-                      </label>
-                      <input
-                        className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
-                        value={action.config.tag ?? ""}
-                        onChange={(event) =>
-                          updateAction(index, {
-                            config: { tag: event.target.value }
-                          })
-                        }
-                        placeholder="Ex: service"
-                      />
-                    </div>
-                  )}
-                  {action.type === "monthly_report" && (
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-semibold text-slate-500">
-                        Report ID
-                      </label>
-                      <input
-                        className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
-                        value={action.config.report_id ?? ""}
-                        onChange={(event) =>
-                          updateAction(index, {
-                            config: { report_id: event.target.value }
-                          })
-                        }
-                        placeholder="UUID du rapport"
-                      />
-                    </div>
-                  )}
-                  {(action.type === "autopilot" ||
-                    action.type === "email_alert") && (
-                    <p className="text-xs text-slate-400">
-                      Action indisponible dans le MVP.
-                    </p>
                   )}
                 </div>
               ))}
@@ -690,3 +791,9 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
 };
 
 export { AutomationBuilder };
+
+// Manual test plan:
+// 1) Ouvrir /automation?template=vip -> conditions/actions pre-remplies, nom auto si vide.
+// 2) Ajouter condition "Pas de reponse" + heures -> sauvegarder -> reload -> valeurs conservees.
+// 3) Ajouter action "Creer une alerte" + type/severite/cooldown -> sauvegarder -> reload -> valeurs conservees.
+// 4) Verifier que user_id est bien rempli (RLS OK) lors des inserts.
