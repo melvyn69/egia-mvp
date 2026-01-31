@@ -385,6 +385,8 @@ const Inbox = () => {
   const [batchGenerating, setBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [batchError, setBatchError] = useState<string | null>(null);
+  const [highlightReviewId, setHighlightReviewId] = useState<string | null>(null);
+  const pendingReviewIdRef = useRef<string | null>(null);
   const [importStatus, setImportStatus] = useState<ReviewCronStatus>({
     status: "idle"
   });
@@ -743,6 +745,14 @@ const Inbox = () => {
   }, [reviews, statusFilter, selectedLocation]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const targetReviewId = params.get("review_id");
+    if (targetReviewId) {
+      pendingReviewIdRef.current = targetReviewId;
+    }
+  }, []);
+
+  useEffect(() => {
     if (filteredReviews.length === 0) {
       setSelectedReviewId("");
       return;
@@ -754,6 +764,38 @@ const Inbox = () => {
       setSelectedReviewId(filteredReviews[0].id);
     }
   }, [filteredReviews, selectedReviewId]);
+
+  useEffect(() => {
+    if (!pendingReviewIdRef.current || reviews.length === 0) {
+      return;
+    }
+    const target = reviews.find(
+      (review: Review) =>
+        review.id === pendingReviewIdRef.current ||
+        review.reviewId === pendingReviewIdRef.current
+    );
+    if (!target) {
+      return;
+    }
+    setSelectedReviewId(target.id);
+    setHighlightReviewId(target.id);
+    const element = document.getElementById(`review-${target.id}`);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.delete("review_id");
+    window.history.replaceState({}, "", url.toString());
+    pendingReviewIdRef.current = null;
+  }, [reviews]);
+
+  useEffect(() => {
+    if (!highlightReviewId) return;
+    const timeoutId = setTimeout(() => {
+      setHighlightReviewId(null);
+    }, 2500);
+    return () => clearTimeout(timeoutId);
+  }, [highlightReviewId]);
 
   const selectedReview = useMemo(() => {
     return reviews.find((review: Review) => review.id === selectedReviewId) ?? null;
@@ -1724,10 +1766,15 @@ const Inbox = () => {
                       key={review.id}
                       type="button"
                       onClick={() => setSelectedReviewId(review.id)}
+                      id={`review-${review.id}`}
                       className={`w-full rounded-2xl border p-4 text-left transition hover:border-slate-300 ${
                         selectedReviewId === review.id
                           ? "border-slate-400 bg-slate-50"
                           : "border-slate-200"
+                      } ${
+                        highlightReviewId === review.id
+                          ? "ring-2 ring-emerald-400 ring-offset-2"
+                          : ""
                       }`}
                     >
                       <div className="flex items-start justify-between gap-3">
