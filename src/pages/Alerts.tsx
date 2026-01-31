@@ -20,6 +20,7 @@ type AlertRow = {
   alert_type?: string | null;
   rule_label?: string | null;
   resolved_at?: string | null;
+  workflow_name?: string | null;
 };
 
 const ruleLabelMap: Record<string, string> = {
@@ -33,11 +34,24 @@ const ruleLabelMap: Record<string, string> = {
   AUTO_WEEKLY_SUMMARY: "Resume hebdomadaire"
 };
 
-const alertTypeLabelMap: Record<string, string> = {
-  LOW_RATING: "Note basse",
+const alertTitleByType: Record<string, string> = {
+  LOW_RATING: "Nouvel avis avec note faible",
+  NO_REPLY: "Avis client sans réponse",
+  NEGATIVE_SENTIMENT: "Avis au ton négatif détecté"
+};
+
+const secondaryTextByType: Record<string, string> = {
+  LOW_RATING:
+    "Note faible détectée automatiquement par votre scénario d’automatisation.",
+  NO_REPLY: "Aucun retour n’a encore été publié pour cet avis.",
+  NEGATIVE_SENTIMENT:
+    "Le ton de cet avis a été identifié comme négatif par l’analyse automatique."
+};
+
+const alertBadgeByType: Record<string, string> = {
+  LOW_RATING: "Note faible",
   NO_REPLY: "Sans réponse",
-  NEGATIVE_SENTIMENT: "Sentiment négatif",
-  RATING_DROP: "Chute de note"
+  NEGATIVE_SENTIMENT: "Ton négatif"
 };
 
 const severityLabelMap: Record<AlertRow["severity"], string> = {
@@ -157,11 +171,14 @@ const Alerts = ({ session }: AlertsProps) => {
 
     return sorted.map((alert) => {
       const payload = alert.payload ?? null;
-      const label =
+      const title =
+        alertTitleByType[alert.alert_type ?? ""] ??
         alert.rule_label ??
-        alertTypeLabelMap[alert.alert_type ?? ""] ??
         ruleLabelMap[alert.rule_code] ??
         alert.rule_code;
+      const secondaryText =
+        secondaryTextByType[alert.alert_type ?? ""] ??
+        "Alerte détectée par votre scénario d’automatisation.";
       const author = getPayloadString(payload, "author");
       const locationName = getPayloadString(payload, "location_name");
       const rating = getPayloadNumber(payload, "rating");
@@ -176,7 +193,8 @@ const Alerts = ({ session }: AlertsProps) => {
 
       return {
         ...alert,
-        label,
+        label: title,
+        secondaryText,
         author,
         locationName,
         rating,
@@ -286,9 +304,17 @@ const Alerts = ({ session }: AlertsProps) => {
                       {severityLabelMap[alert.severity]}
                     </Badge>
                     <Badge className="border border-slate-200 text-slate-600">
-                      {alertTypeLabelMap[alert.alert_type ?? ""] ?? "Type"}
+                      {alertBadgeByType[alert.alert_type ?? ""] ?? "Type"}
                     </Badge>
                   </div>
+                  <p className="text-xs text-slate-600">
+                    {alert.secondaryText}
+                  </p>
+                  {alert.workflow_name && (
+                    <p className="text-xs text-slate-500">
+                      🔁 Générée par : {alert.workflow_name}
+                    </p>
+                  )}
                   <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
                     {alert.locationName && (
                       <span>{alert.locationName}</span>
