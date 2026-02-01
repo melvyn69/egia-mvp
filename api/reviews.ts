@@ -335,6 +335,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       to,
       timeZone
     );
+    const rangeFrom =
+      typeof range.from === "string" ? range.from : range.from.toISOString();
+    const rangeTo =
+      typeof range.to === "string" ? range.to : range.to.toISOString();
 
     const ratingMin = filters.rating_min ?? null;
     const ratingMax = filters.rating_max ?? null;
@@ -370,9 +374,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     }
 
     query = query.or(
-      `and(update_time.gte.${range.from},update_time.lte.${range.to}),` +
-        `and(update_time.is.null,create_time.gte.${range.from},create_time.lte.${range.to}),` +
-        `and(update_time.is.null,create_time.is.null,created_at.gte.${range.from},created_at.lte.${range.to})`
+      `and(update_time.gte.${rangeFrom},update_time.lte.${rangeTo}),` +
+        `and(update_time.is.null,create_time.gte.${rangeFrom},create_time.lte.${rangeTo}),` +
+        `and(update_time.is.null,create_time.is.null,created_at.gte.${rangeFrom},created_at.lte.${rangeTo})`
     );
 
     if (ratingMin !== null && Number.isFinite(ratingMin)) {
@@ -391,6 +395,32 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     };
     if (baseError) {
       throw baseError;
+    }
+    if (process.env.NODE_ENV !== "production") {
+      const countQuery = supabaseUser
+        .from("google_reviews")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId);
+      if (locationIds.length === 1) {
+        countQuery.eq("location_id", locationIds[0]);
+      } else {
+        countQuery.in("location_id", locationIds);
+      }
+      countQuery.or(
+        `and(update_time.gte.${rangeFrom},update_time.lte.${rangeTo}),` +
+          `and(update_time.is.null,create_time.gte.${rangeFrom},create_time.lte.${rangeTo}),` +
+          `and(update_time.is.null,create_time.is.null,created_at.gte.${rangeFrom},created_at.lte.${rangeTo})`
+      );
+      const { count } = await countQuery;
+      console.info("[reviews] filter", {
+        requestId,
+        userId,
+        preset,
+        tz: timeZone,
+        rangeFrom,
+        rangeTo,
+        count: count ?? 0
+      });
     }
     if (process.env.NODE_ENV !== "production") {
       console.info("[reviews] rows", {
