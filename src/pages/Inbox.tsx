@@ -347,8 +347,14 @@ const Inbox = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("new");
   const [selectedLocation, setSelectedLocation] = useState("all");
   const [datePreset, setDatePreset] = useState<
-    "this_week" | "this_month" | "this_quarter" | "this_year" | "last_year" | "custom"
-  >("this_month");
+    | "this_week"
+    | "this_month"
+    | "this_quarter"
+    | "this_year"
+    | "last_year"
+    | "all_time"
+    | "custom"
+  >("all_time");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [sentimentFilter, setSentimentFilter] = useState<
@@ -1651,6 +1657,7 @@ const Inbox = () => {
                   )
                 }
               >
+                <option value="all_time">Tout</option>
                 <option value="this_week">Cette semaine</option>
                 <option value="this_month">Ce mois</option>
                 <option value="this_quarter">Ce trimestre</option>
@@ -1748,6 +1755,21 @@ const Inbox = () => {
             ) : filteredReviews.length === 0 ? (
               <div className="space-y-1 text-sm text-slate-500">
                 <p>Aucun avis à afficher.</p>
+                {datePreset === "this_month" && (
+                  <div className="mt-2 space-y-2 text-xs text-slate-500">
+                    <p>
+                      Aucun avis pour ce mois. Essayez “30 derniers jours” ou “Tout”.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setDatePreset("all_time")}
+                    >
+                      Voir tous les avis
+                    </Button>
+                  </div>
+                )}
                 {selectedLocation !== "all" && (
                   <p>Aucun avis sur cette fiche.</p>
                 )}
