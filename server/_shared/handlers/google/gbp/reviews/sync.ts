@@ -591,6 +591,7 @@ const upsertImportStatus = async (
   await supabaseAdmin.from("cron_state").upsert({
     key: `import_status_v1:${userId}:${locationId}`,
     value,
+    user_id: userId,
     updated_at: new Date().toISOString()
   });
 };

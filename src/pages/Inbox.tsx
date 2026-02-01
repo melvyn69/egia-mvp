@@ -617,6 +617,7 @@ const Inbox = () => {
         .from("cron_state")
         .select("updated_at, value")
         .eq("key", CRON_CURSOR_KEY)
+        .eq("user_id", sessionUserId)
         .maybeSingle();
       const errorsCount = (data?.value as { errors_count?: number } | null)
         ?.errors_count;

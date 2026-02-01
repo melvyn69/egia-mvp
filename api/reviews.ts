@@ -231,11 +231,13 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           .from("cron_state")
           .select("value")
           .eq("key", importKey)
+          .eq("user_id", userId)
           .maybeSingle();
         const { data: aiState } = await supabaseAdmin
           .from("cron_state")
           .select("value")
           .eq("key", aiKey)
+          .eq("user_id", userId)
           .maybeSingle();
 
         const importStatus = toStatus(importState?.value ?? null);

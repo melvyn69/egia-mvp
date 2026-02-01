@@ -1491,6 +1491,7 @@ const handleAutomationsRun = async (
       .from("cron_state")
       .select("value")
       .eq("key", `automations_last_processed_at:${userId}`)
+      .eq("user_id", userId)
       .maybeSingle();
     const lastProcessed =
       (cronRow?.value as { last_processed_at?: string } | null)
@@ -1775,6 +1776,7 @@ const handleAutomationsRun = async (
       await supabaseAdmin.from("cron_state").upsert({
         key: `automations_last_processed_at:${userId}`,
         value: { last_processed_at: latestTimestamp },
+        user_id: userId,
         updated_at: new Date().toISOString()
       });
     }

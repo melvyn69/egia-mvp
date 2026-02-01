@@ -77,6 +77,7 @@ const loadCursor = async (): Promise<Cursor> => {
     .from("cron_state")
     .select("value")
     .eq("key", CURSOR_KEY)
+    .is("user_id", null)
     .maybeSingle();
   return (data?.value as Cursor) ?? { location_pk: null, page_token: null };
 };
@@ -87,6 +88,7 @@ const saveCursor = async (cursor: Cursor) => {
     .upsert({
       key: CURSOR_KEY,
       value: cursor,
+      user_id: null,
       updated_at: new Date().toISOString()
     });
 };

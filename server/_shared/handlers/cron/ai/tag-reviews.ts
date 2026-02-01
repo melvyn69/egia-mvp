@@ -62,6 +62,7 @@ const loadCursor = async (): Promise<Cursor> => {
     .from("cron_state")
     .select("value")
     .eq("key", CURSOR_KEY)
+    .is("user_id", null)
     .maybeSingle();
   return (data?.value as Cursor) ?? {
     last_source_time: "1970-01-01T00:00:00.000Z",
@@ -73,6 +74,7 @@ const saveCursor = async (cursor: Cursor) => {
   await supabaseAdmin.from("cron_state").upsert({
     key: CURSOR_KEY,
     value: cursor,
+    user_id: null,
     updated_at: new Date().toISOString()
   });
 };
@@ -94,6 +96,7 @@ const upsertAiStatus = async (
   await supabaseAdmin.from("cron_state").upsert({
     key: `ai_status_v1:${userId}:${locationId}`,
     value,
+    user_id: userId,
     updated_at: new Date().toISOString()
   });
 };
@@ -109,6 +112,7 @@ const acquireLock = async (
     .from("cron_state")
     .select("value")
     .eq("key", key)
+    .eq("user_id", userId)
     .maybeSingle();
   const lockedAt = (data?.value as { locked_at?: string } | null)?.locked_at;
   if (lockedAt) {
@@ -120,6 +124,7 @@ const acquireLock = async (
   await supabaseAdmin.from("cron_state").upsert({
     key,
     value: { locked_at: new Date().toISOString() },
+    user_id: userId,
     updated_at: new Date().toISOString()
   });
   return true;
@@ -127,7 +132,11 @@ const acquireLock = async (
 
 const releaseLock = async (userId: string, locationId: string) => {
   const key = `lock_ai_tag_v1:${userId}:${locationId}`;
-  await supabaseAdmin.from("cron_state").delete().eq("key", key);
+  await supabaseAdmin
+    .from("cron_state")
+    .delete()
+    .eq("key", key)
+    .eq("user_id", userId);
 };
 const getCronSecrets = (req: VercelRequest) => {
   const expected = String(cronSecret ?? "").trim();
