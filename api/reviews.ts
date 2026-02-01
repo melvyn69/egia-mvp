@@ -3,6 +3,8 @@ import { randomUUID } from "crypto";
 import { resolveDateRange } from "../server/_shared_dist/_date.js";
 import { parseFilters } from "../server/_shared_dist/_filters.js";
 import { requireUser } from "../server/_shared_dist/_auth.js";
+import { createClient } from "@supabase/supabase-js";
+import { getBearerToken } from "../server/_shared_dist/google/_utils.js";
 
 type Cursor = { source_time: string; id: string };
 
@@ -95,6 +97,20 @@ const getRequestId = (req: VercelRequest) => {
 const isMissingEnvError = (err: unknown) =>
   err instanceof Error && err.message === "Missing SUPABASE env vars";
 
+const createUserSupabase = (token: string | null) => {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !anonKey || !token) {
+    return null;
+  }
+  return createClient(supabaseUrl, anonKey, {
+    auth: { persistSession: false },
+    global: {
+      headers: { Authorization: `Bearer ${token}` }
+    }
+  });
+};
+
 const handler = async (req: VercelRequest, res: VercelResponse) => {
   const route = "/api/reviews";
   const requestId = getRequestId(req);
@@ -130,6 +146,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     }
     userId = auth.userId;
     const { supabaseAdmin } = auth;
+    const bearerToken = getBearerToken(req.headers);
+    const supabaseUser = createUserSupabase(bearerToken) ?? supabaseAdmin;
 
     if (!action && req.method === "POST") {
       const payload = parseBody(req);
@@ -334,7 +352,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       Array.isArray(cursorParam) ? cursorParam[0] : cursorParam
     );
 
-    let query = supabaseAdmin
+    let query = supabaseUser
       .from("google_reviews")
       .select(
         "id, review_id, location_id, author_name, rating, comment, create_time, update_time, created_at, status"
@@ -373,6 +391,12 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     };
     if (baseError) {
       throw baseError;
+    }
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[reviews] rows", {
+        requestId,
+        count: baseRows?.length ?? 0
+      });
     }
 
     const rows = (baseRows ?? []).filter((row) => {
@@ -481,3 +505,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 };
 
 export default handler;
+
+// Manual test plan:
+// 1) curl /api/reviews with Bearer token -> should return rows for user_id.
+// 2) Verify /api/reviews without token -> 401.
