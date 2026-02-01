@@ -610,7 +610,7 @@ const Inbox = () => {
   const cronStateQuery = useQuery({
     queryKey: ["inbox-cron-state", sessionUserId],
     queryFn: async () => {
-      if (!supabase) {
+      if (!supabase || !sessionUserId) {
         return { updatedAt: null, errorsCount: 0 };
       }
       const { data } = await supabase
