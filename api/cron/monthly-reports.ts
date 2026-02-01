@@ -233,6 +233,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return userId;
         })
         .filter(Boolean) as string[];
+      console.log("[monthly-report] users found:", users.length);
       if (users.length === 0) {
         return respondJson(res, 200, {
           ok: true,
@@ -314,6 +315,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
 
     const processReport = async (userId: string, reportId: string | null) => {
+      console.log("[monthly-report] processing user:", userId);
       let reportRow = null as Record<string, unknown> | null;
       if (reportId) {
         const { data } = await supabaseAdmin
@@ -392,6 +394,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let reportUrl: string | null = null;
       let reason: string | undefined;
 
+      console.log("[monthly-report] fetching data for period:", fromIso, toIso);
       if (!rendered || force) {
         const renderResult = await generatePremiumReport({
           supabaseAdmin,
@@ -412,9 +415,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const recipients = await getRecipients(userId);
       if (recipients.length === 0) {
         reason = "no_email";
+        console.log("[monthly-report] skipped email because:", reason);
       } else if (!emailed || force) {
         if (!resendApiKey || !emailFrom) {
           reason = "email_not_configured";
+          console.log("[monthly-report] skipped email because:", reason);
         } else {
           if (!reportUrl) {
             if (!storagePath) {
@@ -440,9 +445,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           if (!reportUrl) {
             reason = "no_report_url";
+            console.log("[monthly-report] skipped email because:", reason);
           } else {
             const attachmentContent = await fetchPdfAsBase64(reportUrl);
             for (const recipient of recipients) {
+              console.log("[monthly-report] sending email to:", recipient.email);
               const html = buildMonthlyReportEmailHtml({
                 firstName: recipient.firstName,
                 periodLabel
@@ -518,6 +525,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
       { total: 0, created: 0, skipped: 0, failed: 0 }
     );
+    console.log("[monthly-report] stats:", stats);
 
     const errors = results
       .filter((item) => item.status === "failed")
