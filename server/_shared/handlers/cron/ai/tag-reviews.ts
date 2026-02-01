@@ -58,8 +58,8 @@ type Cursor = {
 };
 
 const loadCursor = async (): Promise<Cursor> => {
-  const { data } = await supabaseAdmin
-    .from("cron_state")
+  const cronTable = supabaseAdmin.from("cron_state") as any;
+  const { data } = await cronTable
     .select("value")
     .eq("key", CURSOR_KEY)
     .is("user_id", null)
@@ -71,7 +71,8 @@ const loadCursor = async (): Promise<Cursor> => {
 };
 
 const saveCursor = async (cursor: Cursor) => {
-  await supabaseAdmin.from("cron_state").upsert({
+  const cronTable = supabaseAdmin.from("cron_state") as any;
+  await cronTable.upsert({
     key: CURSOR_KEY,
     value: cursor,
     user_id: null,
@@ -93,7 +94,8 @@ const upsertAiStatus = async (
     missing_insights_count?: number;
   }
 ) => {
-  await supabaseAdmin.from("cron_state").upsert({
+  const cronTable = supabaseAdmin.from("cron_state") as any;
+  await cronTable.upsert({
     key: `ai_status_v1:${userId}:${locationId}`,
     value,
     user_id: userId,
@@ -108,8 +110,8 @@ const acquireLock = async (
   locationId: string
 ): Promise<boolean> => {
   const key = `lock_ai_tag_v1:${userId}:${locationId}`;
-  const { data } = await supabaseAdmin
-    .from("cron_state")
+  const cronTable = supabaseAdmin.from("cron_state") as any;
+  const { data } = await cronTable
     .select("value")
     .eq("key", key)
     .eq("user_id", userId)
@@ -121,7 +123,7 @@ const acquireLock = async (
       return false;
     }
   }
-  await supabaseAdmin.from("cron_state").upsert({
+  await cronTable.upsert({
     key,
     value: { locked_at: new Date().toISOString() },
     user_id: userId,
@@ -132,11 +134,8 @@ const acquireLock = async (
 
 const releaseLock = async (userId: string, locationId: string) => {
   const key = `lock_ai_tag_v1:${userId}:${locationId}`;
-  await supabaseAdmin
-    .from("cron_state")
-    .delete()
-    .eq("key", key)
-    .eq("user_id", userId);
+  const cronTable = supabaseAdmin.from("cron_state") as any;
+  await cronTable.delete().eq("key", key).eq("user_id", userId);
 };
 const getCronSecrets = (req: VercelRequest) => {
   const expected = String(cronSecret ?? "").trim();
