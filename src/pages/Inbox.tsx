@@ -748,7 +748,7 @@ const Inbox = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const targetReviewId = params.get("review_id");
-    if (targetReviewId) {
+    if (targetReviewId !== null) {
       pendingReviewIdRef.current = targetReviewId;
     }
   }, []);
