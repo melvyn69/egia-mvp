@@ -279,21 +279,19 @@ const sendPendingAlerts = async (params: {
     return;
   }
 
-  const { data: userRow, error: userError } = await sb
-    .from("users")
-    .select("email")
-    .eq("id", params.userId)
-    .maybeSingle();
-  if (userError) {
-    console.error("[alerts] failed to load user email", userError);
-    return;
+  let recipient: string | null = null;
+  try {
+    const { data: profileRow } = await sb
+      .from("profiles")
+      .select("email")
+      .eq("id", params.userId)
+      .maybeSingle();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recipient = (profileRow as any)?.email ?? null;
+  } catch {
+    recipient = null;
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recipient = (userRow as any)?.email ?? null;
   if (!recipient) {
-    console.warn("[alerts] missing recipient email", {
-      userId: params.userId
-    });
     return;
   }
 
