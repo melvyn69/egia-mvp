@@ -301,7 +301,8 @@ const getAccessToken = async (
   return token;
 };
 
-const CRON_CURSOR_KEY = "google_sync_replies_cursor_v1";
+const CRON_CURSOR_KEY = "google_reviews_last_run";
+const CRON_ERROR_KEY = "google_reviews_last_error";
 
 const formatSinceMinutes = (iso: string | null): string => {
   if (!iso) {
@@ -659,6 +660,33 @@ const Inbox = () => {
 
   const lastCronSyncAt = cronStateQuery.data?.updatedAt ?? null;
   const cronErrors = cronStateQuery.data?.errorsCount ?? 0;
+
+  const cronErrorQuery = useQuery({
+    queryKey: ["inbox-cron-error", sessionUserId],
+    queryFn: async () => {
+      if (!supabase || !sessionUserId) {
+        return null as { code?: string | null; at?: string | null } | null;
+      }
+      const { data } = await supabase
+        .from("cron_state")
+        .select("value, updated_at")
+        .eq("key", CRON_ERROR_KEY)
+        .eq("user_id", sessionUserId)
+        .maybeSingle();
+      if (!data) {
+        return null;
+      }
+      const value = data.value as { code?: string; at?: string } | null;
+      return {
+        code: value?.code ?? null,
+        at: value?.at ?? data.updated_at ?? null
+      };
+    },
+    enabled: Boolean(supabase) && Boolean(sessionUserId),
+    staleTime: 60 * 1000
+  });
+
+  const reauthRequired = cronErrorQuery.data?.code === "reauth_required";
 
   const reviewsQuery = useInfiniteQuery({
     queryKey: [
@@ -1586,6 +1614,22 @@ const Inbox = () => {
           <span>Synchronisation automatique toutes les 5 minutes</span>
           <span>•</span>
           <span>Dernière synchronisation : {formatSinceMinutes(lastCronSyncAt)}</span>
+          {reauthRequired && (
+            <>
+              <span>•</span>
+              <Badge variant="warning">Reconnexion Google requise</Badge>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  window.location.href = "/settings?tab=locations";
+                }}
+              >
+                Relancer la connexion Google
+              </Button>
+            </>
+          )}
           {cronErrors > 0 && (
             <>
               <span>•</span>

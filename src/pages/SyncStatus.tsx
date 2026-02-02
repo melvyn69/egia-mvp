@@ -21,6 +21,11 @@ type JobRow = {
   updated_at: string | null;
 };
 
+type CronStateRow = {
+  value: unknown;
+  updated_at: string | null;
+};
+
 const formatTimestamp = (value: string | null) => {
   if (!value) return "—";
   const date = new Date(value);
@@ -34,6 +39,7 @@ const SyncStatus = ({ session }: SyncStatusProps) => {
   const supabaseClient = supabase;
   const [loading, setLoading] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [reauthRequired, setReauthRequired] = useState(false);
   const [locations, setLocations] = useState<LocationRow[]>([]);
   const [jobStats, setJobStats] = useState({
     queued: 0,
@@ -65,6 +71,20 @@ const SyncStatus = ({ session }: SyncStatusProps) => {
         .eq("provider", "google")
         .maybeSingle();
 
+      const { data: cronRun } = await supabaseClient
+        .from("cron_state")
+        .select("value, updated_at")
+        .eq("key", "google_reviews_last_run")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+
+      const { data: cronError } = await supabaseClient
+        .from("cron_state")
+        .select("value, updated_at")
+        .eq("key", "google_reviews_last_error")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+
       const { data: locationRows } = await supabaseClient
         .from("google_locations")
         .select("id, location_title, location_resource_name, last_synced_at")
@@ -85,7 +105,16 @@ const SyncStatus = ({ session }: SyncStatusProps) => {
         return;
       }
 
-      setLastSyncAt(connection?.last_synced_at ?? null);
+      const cronRunRow = cronRun as CronStateRow | null;
+      const cronRunAt =
+        (cronRunRow?.value as { at?: string } | null)?.at ??
+        cronRunRow?.updated_at ??
+        null;
+      setLastSyncAt(cronRunAt ?? connection?.last_synced_at ?? null);
+      const cronErrRow = cronError as CronStateRow | null;
+      const cronErrCode =
+        (cronErrRow?.value as { code?: string } | null)?.code ?? null;
+      setReauthRequired(cronErrCode === "reauth_required");
       setLocations(filteredLocations);
 
       const stats = { queued: 0, running: 0, failed: 0, lastError: null as string | null };
@@ -155,6 +184,22 @@ const SyncStatus = ({ session }: SyncStatusProps) => {
             </CardHeader>
             <CardContent className="text-sm text-slate-600">
               {formatTimestamp(lastSyncAt)}
+              {reauthRequired && (
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="text-rose-600">
+                    ⚠️ Reconnexion Google requise
+                  </span>
+                  <button
+                    type="button"
+                    className="text-xs font-semibold text-ink underline"
+                    onClick={() => {
+                      window.location.href = "/settings?tab=locations";
+                    }}
+                  >
+                    Relancer la connexion Google
+                  </button>
+                </div>
+              )}
             </CardContent>
           </Card>
 

@@ -1061,12 +1061,15 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     );
   }
 
+  let userId: string | null = null;
+  let locationId: string | null = null;
   try {
     const supabaseAdmin = createSupabaseAdmin();
-    const { userId } = await getUserFromRequest(
+    const userResult = await getUserFromRequest(
       { headers: req.headers as Record<string, string | undefined> },
       supabaseAdmin
     );
+    userId = userResult.userId ?? null;
 
     if (!userId) {
       return sendError(
@@ -1078,7 +1081,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     }
 
     const { params } = parseQuery(req);
-    let locationId = getParam(params, "location_id");
+    locationId = getParam(params, "location_id");
     if (!locationId) {
       let body = "";
       for await (const chunk of req) {
@@ -1110,6 +1113,21 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
   } catch (error: unknown) {
     const message = getErrorMessage(error);
     if (message === "reauth_required") {
+      if (userId) {
+        const supabaseAdmin = createSupabaseAdmin();
+        await (supabaseAdmin as any).from("cron_state").upsert({
+          key: "google_reviews_last_error",
+          user_id: userId,
+          value: {
+            at: new Date().toISOString(),
+            code: "reauth_required",
+            message: "reconnexion_google_requise",
+            location_pk: locationId ?? null
+          },
+          updated_at: new Date().toISOString()
+        });
+        console.log("[cron_state] upsert google_reviews_last_error", userId);
+      }
       return sendError(
         res,
         requestId,
