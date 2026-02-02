@@ -395,22 +395,31 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     if (baseError) {
       throw baseError;
     }
+    const countQuery = supabaseUser
+      .from("google_reviews")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId);
+    if (locationIds.length === 1) {
+      countQuery.eq("location_id", locationIds[0]);
+    } else {
+      countQuery.in("location_id", locationIds);
+    }
+    countQuery.or(
+      `and(update_time.gte.${rangeFrom},update_time.lte.${rangeTo}),` +
+        `and(update_time.is.null,create_time.gte.${rangeFrom},create_time.lte.${rangeTo}),` +
+        `and(update_time.is.null,create_time.is.null,created_at.gte.${rangeFrom},created_at.lte.${rangeTo})`
+    );
+    if (ratingMin !== null && Number.isFinite(ratingMin)) {
+      countQuery.gte("rating", ratingMin);
+    }
+    if (ratingMax !== null && Number.isFinite(ratingMax)) {
+      countQuery.lte("rating", ratingMax);
+    }
+    if (status) {
+      countQuery.eq("status", status);
+    }
+    const { count } = await countQuery;
     if (process.env.NODE_ENV !== "production") {
-      const countQuery = supabaseUser
-        .from("google_reviews")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId);
-      if (locationIds.length === 1) {
-        countQuery.eq("location_id", locationIds[0]);
-      } else {
-        countQuery.in("location_id", locationIds);
-      }
-      countQuery.or(
-        `and(update_time.gte.${rangeFrom},update_time.lte.${rangeTo}),` +
-          `and(update_time.is.null,create_time.gte.${rangeFrom},create_time.lte.${rangeTo}),` +
-          `and(update_time.is.null,create_time.is.null,created_at.gte.${rangeFrom},created_at.lte.${rangeTo})`
-      );
-      const { count } = await countQuery;
       console.info("[reviews] filter", {
         requestId,
         userId,
@@ -418,10 +427,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         tz: timeZone,
         rangeFrom,
         rangeTo,
-        count: count ?? 0
+        total: count ?? 0
       });
-    }
-    if (process.env.NODE_ENV !== "production") {
       console.info("[reviews] rows", {
         requestId,
         count: baseRows?.length ?? 0
@@ -509,7 +516,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         sentiment: sentimentMap.get(row.id) ?? null,
         tags: tagsByReview.get(row.id) ?? []
       })),
-      nextCursor
+      nextCursor,
+      total: count ?? 0
     });
   } catch (err) {
     const missingEnv = isMissingEnvError(err);

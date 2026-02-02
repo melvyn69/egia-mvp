@@ -723,7 +723,8 @@ const Inbox = () => {
       return {
         rows,
         insightsById,
-        nextCursor: payload.nextCursor ?? null
+        nextCursor: payload.nextCursor ?? null,
+        total: typeof payload.total === "number" ? payload.total : null
       };
     },
     enabled: Boolean(supabase) && Boolean(sessionUserId),
@@ -732,21 +733,6 @@ const Inbox = () => {
     placeholderData: (prev) => prev
   });
 
-  const totalReviewsQuery = useQuery({
-    queryKey: ["inbox-total-count", sessionUserId],
-    queryFn: async () => {
-      if (!supabase || !sessionUserId) {
-        return null;
-      }
-      const { count } = await supabase
-        .from("google_reviews")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", sessionUserId);
-      return typeof count === "number" ? count : null;
-    },
-    enabled: Boolean(supabase) && Boolean(sessionUserId),
-    staleTime: 60 * 1000
-  });
 
   const reviewsLoading = reviewsQuery.isLoading;
   const reviewsLoadingMore = reviewsQuery.isFetchingNextPage;
@@ -764,13 +750,21 @@ const Inbox = () => {
     }
     const pages = reviewsQuery.data?.pages ?? [];
     return pages.flatMap(
-      (page: { rows: ReviewRow[]; insightsById: Record<string, AiInsight> }) => {
+      (page: {
+        rows: ReviewRow[];
+        insightsById: Record<string, AiInsight>;
+        total?: number | null;
+      }) => {
       const base = mapReviewRows(page.rows, locationLabels, sessionUserId);
       return mergeAiInsights(base, page.insightsById);
     });
   }, [reviewsQuery.data, locationLabels, sessionUserId]);
 
-  const totalReviewsCount = totalReviewsQuery.data ?? null;
+  const totalReviewsCount = useMemo(() => {
+    const pages = reviewsQuery.data?.pages ?? [];
+    const first = pages[0] as { total?: number | null } | undefined;
+    return typeof first?.total === "number" ? first.total : null;
+  }, [reviewsQuery.data]);
 
   const locationReviewCounts = useMemo(() => {
     const counts: Record<string, number> = {};
