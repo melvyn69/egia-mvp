@@ -235,7 +235,8 @@ const App = () => {
         email,
         updated_at: new Date().toISOString()
       })
-      .then(({ error }) => {
+      .then((result: { error?: { message?: string } | null }) => {
+        const error = result?.error ?? null;
         if (error) {
           console.warn("user_profiles upsert failed:", error.message);
         }
