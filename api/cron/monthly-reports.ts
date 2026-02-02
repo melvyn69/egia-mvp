@@ -231,6 +231,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           requestId,
           period: { from: fromIso, to: toIso, key: periodKey },
           stats: { total: 0, created: 0, skipped: 1, failed: 0 },
+          usersTargeted: 0,
+          usersSent: 0,
+          usersSkippedReasons: { no_candidates: 1 },
           created: 0,
           skipped: 1,
           errors: [],
@@ -549,11 +552,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         error: item.error ?? "Unknown error"
       }));
 
+    const usersTargeted = results.length;
+    const usersSent = results.filter((item) => item.emailed).length;
+    const usersSkippedReasons = results.reduce<Record<string, number>>(
+      (acc, item) => {
+        if (!item.reason) return acc;
+        acc[item.reason] = (acc[item.reason] ?? 0) + 1;
+        return acc;
+      },
+      {}
+    );
+
     return respondJson(res, 200, {
       ok: true,
       requestId,
       period: { from: fromIso, to: toIso, key: periodKey },
       stats,
+      usersTargeted,
+      usersSent,
+      usersSkippedReasons,
       created: stats.created,
       skipped: stats.skipped,
       errors,
