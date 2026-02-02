@@ -228,7 +228,7 @@ const App = () => {
     if (!email) {
       return;
     }
-    supabase
+    (supabase as unknown as { from: (table: string) => any })
       .from("user_profiles")
       .upsert({
         user_id: session.user.id,
