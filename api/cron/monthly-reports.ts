@@ -202,12 +202,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const emailFrom = process.env.EMAIL_FROM ?? "";
 
     let users: string[] = [];
-    const businessNameByUser = new Map<string, string>();
 
     if (!runForReport) {
       let settingsQuery = supabaseAdmin
         .from("business_settings")
-        .select("user_id, business_name")
+        .select("user_id")
         .eq("monthly_report_enabled", true)
         .not("user_id", "is", null)
         .limit(batchSize);
@@ -223,15 +222,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       users = (enabledRows ?? [])
-        .map((row) => {
-          const userId = (row as { user_id?: string | null }).user_id ?? null;
-          const businessName = (row as { business_name?: string | null })
-            .business_name;
-          if (userId && businessName) {
-            businessNameByUser.set(userId, businessName);
-          }
-          return userId;
-        })
+        .map((row) => (row as { user_id?: string | null }).user_id ?? null)
         .filter(Boolean) as string[];
       console.log("[monthly-report] users found:", users.length);
       if (users.length === 0) {
@@ -305,9 +296,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (recipients.length === 0) {
-        const businessName = businessNameByUser.get(userId) ?? null;
-        if (isEmail(businessName)) {
-          recipients.push({ email: businessName as string, firstName: null });
+        const { data: connRow, error: connError } = await supabaseAdmin
+          .from("google_connections")
+          .select("email")
+          .eq("user_id", userId)
+          .not("email", "is", null)
+          .maybeSingle();
+        if (!connError) {
+          const connEmail = (connRow as { email?: string | null })?.email ?? null;
+          if (isEmail(connEmail)) {
+            recipients.push({ email: connEmail, firstName: null });
+          }
+        }
+      }
+
+      if (recipients.length === 0) {
+        const { data: profileRow, error: profileError } = await supabaseAdmin
+          .from("user_profiles")
+          .select("email")
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (!profileError) {
+          const profileEmail =
+            (profileRow as { email?: string | null })?.email ?? null;
+          if (isEmail(profileEmail)) {
+            recipients.push({ email: profileEmail, firstName: null });
+          }
         }
       }
 

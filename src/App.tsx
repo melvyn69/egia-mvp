@@ -220,6 +220,28 @@ const App = () => {
     };
   }, [session]);
 
+  useEffect(() => {
+    if (!supabase || !session?.user?.id) {
+      return;
+    }
+    const email = session.user.email ?? null;
+    if (!email) {
+      return;
+    }
+    supabase
+      .from("user_profiles")
+      .upsert({
+        user_id: session.user.id,
+        email,
+        updated_at: new Date().toISOString()
+      })
+      .then(({ error }) => {
+        if (error) {
+          console.warn("user_profiles upsert failed:", error.message);
+        }
+      });
+  }, [session]);
+
   const fetchLocations = async (userId: string) => {
     if (!supabase) {
       return;
