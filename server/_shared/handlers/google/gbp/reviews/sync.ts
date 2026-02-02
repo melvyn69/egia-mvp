@@ -1023,6 +1023,21 @@ export const syncGoogleReviewsForUser = async (
       .eq("provider", "google");
   }
 
+  // Persist last run status per user (cron_state is user-scoped now)
+  await (supabaseAdmin as any).from("cron_state").upsert({
+    key: "google_reviews_last_run",
+    user_id: userId,
+    value: {
+      at: new Date().toISOString(),
+      inserted: reviewsUpsertedCount,
+      updated: reviewsUpsertedCount,
+      processed: reviewsUpsertedCount,
+      locationsProcessed: locationList.length
+    },
+    updated_at: new Date().toISOString()
+  });
+  console.log("[cron_state] upsert google_reviews_last_run", userId);
+
   return {
     locationsCount: locationList.length,
     reviewsCount: reviewsUpsertedCount,

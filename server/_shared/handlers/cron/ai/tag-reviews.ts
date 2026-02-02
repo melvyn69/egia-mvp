@@ -888,6 +888,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // Persist last run status per user
+    const runAt = new Date().toISOString();
+    for (const userId of new Set(locationUserMap.values())) {
+      await (supabaseAdmin as any).from("cron_state").upsert({
+        key: "ai_tag_last_run",
+        user_id: userId,
+        value: {
+          at: runAt,
+          candidatesFound,
+          tagged: tagsUpserted
+        },
+        updated_at: runAt
+      });
+      console.log("[cron_state] upsert ai_tag_last_run", userId);
+    }
+
     if (reviewsProcessed === 0 && !skipReason) {
       skipReason = "short_circuit_removed";
     }

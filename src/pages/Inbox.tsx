@@ -625,10 +625,31 @@ const Inbox = () => {
         .eq("key", CRON_CURSOR_KEY)
         .eq("user_id", sessionUserId)
         .maybeSingle();
+      if (!data) {
+        const { data: fallback } = await supabase
+          .from("cron_state")
+          .select("updated_at, value")
+          .eq("key", CRON_CURSOR_KEY)
+          .is("user_id", null)
+          .maybeSingle();
+        if (fallback) {
+          const errorsCountFallback = (
+            fallback?.value as { errors_count?: number; at?: string } | null
+          )?.errors_count;
+          const atFallback = (
+            fallback?.value as { at?: string } | null
+          )?.at;
+          return {
+            updatedAt: atFallback ?? fallback.updated_at ?? null,
+            errorsCount: Number(errorsCountFallback ?? 0)
+          };
+        }
+      }
       const errorsCount = (data?.value as { errors_count?: number } | null)
         ?.errors_count;
+      const at = (data?.value as { at?: string } | null)?.at;
       return {
-        updatedAt: data?.updated_at ?? null,
+        updatedAt: at ?? data?.updated_at ?? null,
         errorsCount: Number(errorsCount ?? 0)
       };
     },
@@ -683,6 +704,22 @@ const Inbox = () => {
     placeholderData: (prev) => prev
   });
 
+  const totalReviewsQuery = useQuery({
+    queryKey: ["inbox-total-count", sessionUserId],
+    queryFn: async () => {
+      if (!supabase || !sessionUserId) {
+        return null;
+      }
+      const { count } = await supabase
+        .from("google_reviews")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", sessionUserId);
+      return typeof count === "number" ? count : null;
+    },
+    enabled: Boolean(supabase) && Boolean(sessionUserId),
+    staleTime: 60 * 1000
+  });
+
   const reviewsLoading = reviewsQuery.isLoading;
   const reviewsLoadingMore = reviewsQuery.isFetchingNextPage;
   const reviewsHasMore = Boolean(reviewsQuery.hasNextPage);
@@ -704,6 +741,8 @@ const Inbox = () => {
       return mergeAiInsights(base, page.insightsById);
     });
   }, [reviewsQuery.data, locationLabels, sessionUserId]);
+
+  const totalReviewsCount = totalReviewsQuery.data ?? null;
 
   const locationReviewCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -1573,6 +1612,10 @@ const Inbox = () => {
           <div className="mt-1 text-[11px] text-slate-500">
             Dernier run :{" "}
             {formatSinceMinutes(importStatus.last_run_at ?? null)}
+          </div>
+          <div className="mt-2 text-[11px] text-slate-500">
+            Avis affichés : {reviews.length} /{" "}
+            {totalReviewsCount ?? "—"}
           </div>
           <div className="mt-3 flex items-center justify-between">
             <span>Analyse IA</span>

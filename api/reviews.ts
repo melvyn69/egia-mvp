@@ -364,8 +364,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       .eq("user_id", userId)
       .order("update_time", { ascending: false, nullsFirst: false })
       .order("create_time", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false, nullsFirst: false })
-      .order("id", { ascending: false })
+      .order("review_id", { ascending: false })
       .limit(limit * 3);
     if (locationIds.length === 1) {
       query = query.eq("location_id", locationIds[0]);
