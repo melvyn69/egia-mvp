@@ -282,6 +282,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const getRecipients = async (userId: string) => {
       const recipients: Array<{ email: string; firstName?: string | null }> = [];
+      let missingEmail = false;
       const { data: teamRows } = await supabaseAdmin
         .from("team_members")
         .select("email, first_name, last_name, receive_monthly_reports, is_active")
@@ -324,11 +325,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             (profileRow as { email?: string | null })?.email ?? null;
           if (isEmail(profileEmail)) {
             recipients.push({ email: profileEmail, firstName: null });
+          } else {
+            missingEmail = true;
           }
         }
       }
 
-      return recipients;
+      return { recipients, missingEmail };
     };
 
     const processReport = async (userId: string, reportId: string | null) => {
@@ -429,9 +432,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .eq("id", reportIdResolved);
       }
 
-      const recipients = await getRecipients(userId);
+      const { recipients, missingEmail } = await getRecipients(userId);
       if (recipients.length === 0) {
-        reason = "no_email";
+        reason = missingEmail ? "missing_email" : "no_email";
         console.log("[monthly-report] skipped email because:", reason);
       } else if (!emailed || force) {
         if (!resendApiKey || !emailFrom) {
