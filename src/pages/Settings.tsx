@@ -767,7 +767,7 @@ const Settings = ({ session }: SettingsProps) => {
                   const name = member.first_name || "Collaborateur";
                   const email = member.email ?? "Non renseigne";
                   const role = roleLabel(member.role);
-                  const canToggle = Boolean(member.email);
+                  const canToggle = Boolean(member.email && member.email.trim());
                   return (
                     <div
                       key={member.id}
@@ -785,16 +785,32 @@ const Settings = ({ session }: SettingsProps) => {
                             {member.receive_monthly_reports && (
                               <Badge variant="success">Rapport mensuel</Badge>
                             )}
+                            {!canToggle && (
+                              <Badge variant="neutral">
+                                Aucun email configure
+                              </Badge>
+                            )}
                           </div>
                           <p className="text-xs text-slate-500">{email}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
-                        <label className="flex items-center gap-2 text-xs text-slate-600">
+                        <label
+                          className="flex items-center gap-2 text-xs text-slate-600"
+                          onClick={() => {
+                            if (!canToggle) {
+                              setToggleError(
+                                "Ajoutez un email a ce collaborateur pour activer l'envoi du rapport."
+                              );
+                            }
+                          }}
+                        >
                           <input
                             type="checkbox"
                             className="h-4 w-4 accent-ink"
-                            checked={Boolean(member.receive_monthly_reports)}
+                            checked={Boolean(
+                              member.receive_monthly_reports && canToggle
+                            )}
                             disabled={!canToggle}
                             onChange={(event) =>
                               handleMemberToggle(member, event.target.checked)
@@ -802,6 +818,11 @@ const Settings = ({ session }: SettingsProps) => {
                           />
                           Recevoir le rapport mensuel
                         </label>
+                        {!canToggle && (
+                          <span className="text-xs text-slate-400">
+                            Ajoutez un email pour activer.
+                          </span>
+                        )}
                         <Badge variant="neutral">{role}</Badge>
                       </div>
                     </div>
