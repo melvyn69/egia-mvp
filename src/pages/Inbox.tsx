@@ -724,7 +724,12 @@ const Inbox = () => {
         rows,
         insightsById,
         nextCursor: payload.nextCursor ?? null,
-        total: typeof payload.total === "number" ? payload.total : null
+        totalFiltered:
+          typeof payload.total_filtered === "number"
+            ? payload.total_filtered
+            : null,
+        totalAll:
+          typeof payload.total_all === "number" ? payload.total_all : null
       };
     },
     enabled: Boolean(supabase) && Boolean(sessionUserId),
@@ -753,17 +758,24 @@ const Inbox = () => {
       (page: {
         rows: ReviewRow[];
         insightsById: Record<string, AiInsight>;
-        total?: number | null;
+        totalFiltered?: number | null;
+        totalAll?: number | null;
       }) => {
       const base = mapReviewRows(page.rows, locationLabels, sessionUserId);
       return mergeAiInsights(base, page.insightsById);
     });
   }, [reviewsQuery.data, locationLabels, sessionUserId]);
 
-  const totalReviewsCount = useMemo(() => {
+  const totalFilteredCount = useMemo(() => {
     const pages = reviewsQuery.data?.pages ?? [];
-    const first = pages[0] as { total?: number | null } | undefined;
-    return typeof first?.total === "number" ? first.total : null;
+    const first = pages[0] as { totalFiltered?: number | null } | undefined;
+    return typeof first?.totalFiltered === "number" ? first.totalFiltered : null;
+  }, [reviewsQuery.data]);
+
+  const totalAllCount = useMemo(() => {
+    const pages = reviewsQuery.data?.pages ?? [];
+    const first = pages[0] as { totalAll?: number | null } | undefined;
+    return typeof first?.totalAll === "number" ? first.totalAll : null;
   }, [reviewsQuery.data]);
 
   const locationReviewCounts = useMemo(() => {
@@ -1653,7 +1665,7 @@ const Inbox = () => {
           </div>
           <div className="mt-2 text-[11px] text-slate-500">
             Avis affichés : {reviews.length} /{" "}
-            {totalReviewsCount ?? "—"}
+            {totalFilteredCount ?? "—"} • Total : {totalAllCount ?? "—"}
           </div>
           <div className="mt-3 flex items-center justify-between">
             <span>Analyse IA</span>
