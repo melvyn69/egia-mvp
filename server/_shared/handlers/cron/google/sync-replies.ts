@@ -326,6 +326,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let processedLocations = 0;
   let processedReviews = 0;
   let repliesUpserted = 0;
+  const isProd = process.env.NODE_ENV === "production";
 
   try {
     const { data: connections, error: connectionsError } = await supabaseAdmin
@@ -348,6 +349,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         refreshTokenByUser.set(conn.user_id, conn.refresh_token);
       }
     });
+
+    for (const userId of refreshTokenByUser.keys()) {
+      try {
+        const result = await syncGoogleReviewsForUser(
+          supabaseAdmin,
+          userId,
+          null
+        );
+        if (!isProd) {
+          console.log("[sync] reviews synced", {
+            requestId,
+            userId,
+            locations: result.locationsCount,
+            reviews: result.reviewsCount
+          });
+        } else {
+          console.log("[sync] reviews synced", { userId });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        if (message === "reauth_required") {
+          await (supabaseAdmin as any).from("cron_state").upsert({
+            key: "google_reviews_last_error",
+            user_id: userId,
+            value: {
+              at: new Date().toISOString(),
+              code: "reauth_required",
+              message: "reconnexion_google_requise",
+              location_pk: null
+            },
+            updated_at: new Date().toISOString()
+          });
+          console.warn("[sync] reviews reauth_required", { userId });
+          continue;
+        }
+        console.warn("[sync] reviews sync failed", { userId, message });
+      }
+    }
 
     const cursor = await loadCursor();
     const { data: locations, error: locationsError } = await supabaseAdmin
