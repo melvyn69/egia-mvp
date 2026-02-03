@@ -31,9 +31,6 @@ const isReviewStatus = (value: string | null | undefined): value is ReviewStatus
 const isAiSentiment = (value: unknown): value is AiSentiment =>
   value === "positive" || value === "neutral" || value === "negative";
 
-const asString = (value: unknown): string =>
-  typeof value === "string" ? value : "";
-
 const asNumber = (value: unknown): number =>
   typeof value === "number" ? value : 0;
 
