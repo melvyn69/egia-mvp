@@ -364,6 +364,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       .eq("user_id", userId)
       .order("update_time", { ascending: false, nullsFirst: false })
       .order("create_time", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false, nullsFirst: false })
       .order("review_id", { ascending: false })
       .limit(limit * 3);
     if (locationIds.length === 1) {
@@ -395,40 +396,30 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     if (baseError) {
       throw baseError;
     }
-    const countQueryFiltered = supabaseUser
+    const countQuery = supabaseUser
       .from("google_reviews")
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId);
     if (locationIds.length === 1) {
-      countQueryFiltered.eq("location_id", locationIds[0]);
+      countQuery.eq("location_id", locationIds[0]);
     } else {
-      countQueryFiltered.in("location_id", locationIds);
+      countQuery.in("location_id", locationIds);
     }
-    countQueryFiltered.or(
+    countQuery.or(
       `and(update_time.gte.${rangeFrom},update_time.lte.${rangeTo}),` +
         `and(update_time.is.null,create_time.gte.${rangeFrom},create_time.lte.${rangeTo}),` +
         `and(update_time.is.null,create_time.is.null,created_at.gte.${rangeFrom},created_at.lte.${rangeTo})`
     );
     if (ratingMin !== null && Number.isFinite(ratingMin)) {
-      countQueryFiltered.gte("rating", ratingMin);
+      countQuery.gte("rating", ratingMin);
     }
     if (ratingMax !== null && Number.isFinite(ratingMax)) {
-      countQueryFiltered.lte("rating", ratingMax);
+      countQuery.lte("rating", ratingMax);
     }
     if (status) {
-      countQueryFiltered.eq("status", status);
+      countQuery.eq("status", status);
     }
-    const { count: totalFiltered } = await countQueryFiltered;
-    const countQueryAll = supabaseUser
-      .from("google_reviews")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId);
-    if (locationIds.length === 1) {
-      countQueryAll.eq("location_id", locationIds[0]);
-    } else {
-      countQueryAll.in("location_id", locationIds);
-    }
-    const { count: totalAll } = await countQueryAll;
+    const { count: total } = await countQuery;
     if (process.env.NODE_ENV !== "production") {
       console.info("[reviews] filter", {
         requestId,
@@ -437,8 +428,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         tz: timeZone,
         rangeFrom,
         rangeTo,
-        total_filtered: totalFiltered ?? 0,
-        total_all: totalAll ?? 0
+        total: total ?? 0
       });
       console.info("[reviews] rows", {
         requestId,
@@ -522,14 +512,14 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         : null;
 
     return res.status(200).json({
-      rows: limited.map((row) => ({
+      ok: true,
+      items: limited.map((row) => ({
         ...row,
         sentiment: sentimentMap.get(row.id) ?? null,
         tags: tagsByReview.get(row.id) ?? []
       })),
       nextCursor,
-      total_filtered: totalFiltered ?? 0,
-      total_all: totalAll ?? 0
+      total: Number(total ?? 0)
     });
   } catch (err) {
     const missingEnv = isMissingEnvError(err);

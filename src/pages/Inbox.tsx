@@ -715,21 +715,16 @@ const Inbox = () => {
         }
       });
       const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.rows) {
+      if (!response.ok || !payload?.items) {
         throw new Error("Failed to load reviews");
       }
-      const rows = (payload.rows ?? []) as ReviewRow[];
+      const rows = (payload.items ?? []) as ReviewRow[];
       const insightsById = await fetchAiInsights(rows.map((row) => row.id));
       return {
         rows,
         insightsById,
         nextCursor: payload.nextCursor ?? null,
-        totalFiltered:
-          typeof payload.total_filtered === "number"
-            ? payload.total_filtered
-            : null,
-        totalAll:
-          typeof payload.total_all === "number" ? payload.total_all : null
+        total: typeof payload.total === "number" ? payload.total : null
       };
     },
     enabled: Boolean(supabase) && Boolean(sessionUserId),
@@ -758,24 +753,17 @@ const Inbox = () => {
       (page: {
         rows: ReviewRow[];
         insightsById: Record<string, AiInsight>;
-        totalFiltered?: number | null;
-        totalAll?: number | null;
+        total?: number | null;
       }) => {
       const base = mapReviewRows(page.rows, locationLabels, sessionUserId);
       return mergeAiInsights(base, page.insightsById);
     });
   }, [reviewsQuery.data, locationLabels, sessionUserId]);
 
-  const totalFilteredCount = useMemo(() => {
+  const totalReviewsCount = useMemo(() => {
     const pages = reviewsQuery.data?.pages ?? [];
-    const first = pages[0] as { totalFiltered?: number | null } | undefined;
-    return typeof first?.totalFiltered === "number" ? first.totalFiltered : null;
-  }, [reviewsQuery.data]);
-
-  const totalAllCount = useMemo(() => {
-    const pages = reviewsQuery.data?.pages ?? [];
-    const first = pages[0] as { totalAll?: number | null } | undefined;
-    return typeof first?.totalAll === "number" ? first.totalAll : null;
+    const first = pages[0] as { total?: number | null } | undefined;
+    return typeof first?.total === "number" ? first.total : null;
   }, [reviewsQuery.data]);
 
   const locationReviewCounts = useMemo(() => {
@@ -805,7 +793,7 @@ const Inbox = () => {
   }, [locationOptions, locationReviewCounts]);
 
   const filteredReviews = useMemo(() => {
-    const visible = reviews.filter((review: Review) => {
+    return reviews.filter((review: Review) => {
       const matchesStatus =
         statusFilter === "all" ? true : review.status === statusFilter;
       const matchesLocation =
@@ -813,14 +801,6 @@ const Inbox = () => {
           ? true
           : review.locationId === selectedLocation;
       return matchesStatus && matchesLocation;
-    });
-    return visible.sort((a: Review, b: Review) => {
-      if (b.aiPriorityScore !== a.aiPriorityScore) {
-        return b.aiPriorityScore - a.aiPriorityScore;
-      }
-      const bd = Date.parse(asString(b.createdAt));
-      const ad = Date.parse(asString(a.createdAt));
-      return (Number.isFinite(bd) ? bd : 0) - (Number.isFinite(ad) ? ad : 0);
     });
   }, [reviews, statusFilter, selectedLocation]);
 
@@ -1656,7 +1636,7 @@ const Inbox = () => {
             <span>Import avis Google</span>
             <span>
               {formatStatusIcon(importStatus.status)}{" "}
-              {importStatus.stats?.upserted ?? "—"} avis
+              {totalReviewsCount ?? reviews.length} avis
             </span>
           </div>
           <div className="mt-1 text-[11px] text-slate-500">
@@ -1665,7 +1645,7 @@ const Inbox = () => {
           </div>
           <div className="mt-2 text-[11px] text-slate-500">
             Avis affichés : {reviews.length} /{" "}
-            {totalFilteredCount ?? "—"} • Total : {totalAllCount ?? "—"}
+            {totalReviewsCount ?? reviews.length}
           </div>
           <div className="mt-3 flex items-center justify-between">
             <span>Analyse IA</span>
