@@ -557,18 +557,81 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const lastReviewPk = force
       ? "00000000-0000-0000-0000-000000000000"
       : cursor.last_review_pk ?? "00000000-0000-0000-0000-000000000000";
-    const { data: candidateSource, error: candidatesError } = await supabaseAdmin
-      .from("google_reviews")
-      .select(
-        "id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
-      )
-      .order("update_time", { ascending: false, nullsFirst: false })
-      .order("create_time", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false, nullsFirst: false })
-      .limit(MAX_REVIEWS * 6);
+    const loadCandidates = async (forceCursor: boolean) => {
+      const { data: candidateSource, error: candidatesError } =
+        await supabaseAdmin
+          .from("google_reviews")
+          .select(
+            "id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
+          )
+          .order("update_time", { ascending: false, nullsFirst: false })
+          .order("create_time", { ascending: false, nullsFirst: false })
+          .order("created_at", { ascending: false, nullsFirst: false })
+          .limit(MAX_REVIEWS * 6);
 
-    if (candidatesError) {
-      console.error("[ai-tag]", requestId, "candidates query failed", candidatesError);
+      if (candidatesError) {
+        console.error(
+          "[ai-tag]",
+          requestId,
+          "candidates query failed",
+          candidatesError
+        );
+        return { rows: [] as typeof candidateSource, error: candidatesError };
+      }
+
+      const reviewRows = (candidateSource ?? []).filter((review) => {
+        const text = getReviewText(review as { comment?: string | null });
+        if (!text) {
+          return false;
+        }
+        if (!forceCursor) {
+          const sourceTime =
+            (review as { update_time?: string | null }).update_time ??
+            (review as { create_time?: string | null }).create_time ??
+            (review as { created_at?: string | null }).created_at ??
+            null;
+          if (!sourceTime) {
+            return false;
+          }
+          if (sourceTime < lastSourceTime) {
+            return false;
+          }
+          if (sourceTime === lastSourceTime) {
+            const reviewId = String((review as { id?: string }).id ?? "");
+            if (reviewId <= lastReviewPk) {
+              return false;
+            }
+          }
+        }
+        return true;
+      });
+
+      const reviewIds = reviewRows
+        .map((row) => String((row as { id?: string }).id ?? ""))
+        .filter((id) => id.length > 0);
+      const taggedIds = new Set<string>();
+      if (reviewIds.length > 0) {
+        const { data: taggedRows } = await supabaseAdmin
+          .from("review_tags")
+          .select("review_id")
+          .in("review_id", reviewIds);
+        (taggedRows ?? []).forEach((row) => {
+          if (row.review_id) {
+            taggedIds.add(String(row.review_id));
+          }
+        });
+      }
+
+      const rows = reviewRows.filter((row) => {
+        const reviewId = String((row as { id?: string }).id ?? "");
+        return reviewId && !taggedIds.has(reviewId);
+      });
+
+      return { rows, error: null };
+    };
+
+    const initialCandidates = await loadCandidates(force);
+    if (initialCandidates.error) {
       return sendError(
         res,
         requestId,
@@ -577,54 +640,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
     }
 
-    const reviewRows = (candidateSource ?? []).filter((review) => {
-      const text = getReviewText(review as { comment?: string | null });
-      if (!text) {
-        return false;
-      }
-      if (!force) {
-        const sourceTime =
-          (review as { update_time?: string | null }).update_time ??
-          (review as { create_time?: string | null }).create_time ??
-          (review as { created_at?: string | null }).created_at ??
-          null;
-        if (!sourceTime) {
-          return false;
-        }
-        if (sourceTime < lastSourceTime) {
-          return false;
-        }
-        if (sourceTime === lastSourceTime) {
-          const reviewId = String((review as { id?: string }).id ?? "");
-          if (reviewId <= lastReviewPk) {
-            return false;
-          }
-        }
-      }
-      return true;
-    });
-
-    const reviewIds = reviewRows
-      .map((row) => String((row as { id?: string }).id ?? ""))
-      .filter((id) => id.length > 0);
-    const taggedIds = new Set<string>();
-    if (reviewIds.length > 0) {
-      const { data: taggedRows } = await supabaseAdmin
-        .from("review_tags")
-        .select("review_id")
-        .in("review_id", reviewIds);
-      (taggedRows ?? []).forEach((row) => {
-        if (row.review_id) {
-          taggedIds.add(String(row.review_id));
-        }
-      });
-    }
-
-    const candidateRows = reviewRows.filter((row) => {
-      const reviewId = String((row as { id?: string }).id ?? "");
-      return reviewId && !taggedIds.has(reviewId);
-    });
-
+    let candidateRows = initialCandidates.rows;
     candidatesFound = candidateRows.length;
     logInfo("[ai-tag]", requestId, "candidatesFound", candidatesFound);
 
@@ -671,8 +687,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })),
         candidateQueryMeta: {
           filter:
-            "comment not null and length(trim(comment))>0 and no existing insights",
-          order: "coalesce(update_time, create_time, created_at) asc, id asc",
+            "comment not null and length(trim(comment))>0 and no existing tags",
+          order: "coalesce(update_time, create_time, created_at) desc, id desc",
           limit: MAX_REVIEWS,
           force,
           since_time: lastSourceTime,
@@ -732,6 +748,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
     totalMissingInsights = totalMissing;
+
+    if (!force && totalMissingInsights > 0 && candidatesFound === 0) {
+      const fallbackCandidates = await loadCandidates(true);
+      candidateRows = fallbackCandidates.rows;
+      candidatesFound = candidateRows.length;
+      logInfo("[ai-tag]", requestId, "candidatesFound(fallback)", candidatesFound);
+      candidateRows.forEach((review) => {
+        const locationId = review.location_id ? String(review.location_id) : "";
+        const userId = review.user_id ? String(review.user_id) : "";
+        if (locationId && userId && !locationUserMap.has(locationId)) {
+          locationUserMap.set(locationId, userId);
+        }
+      });
+    }
 
     if (totalMissingInsights > 0 && candidatesFound === 0) {
       if (!debug) {
