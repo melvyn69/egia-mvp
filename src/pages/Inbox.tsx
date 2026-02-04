@@ -334,13 +334,6 @@ const formatStatusIcon = (status: ReviewCronStatus["status"]) => {
   }
 };
 
-const formatMissingInsights = (missing?: number | null): string => {
-  if (missing === null || missing === undefined) {
-    return "—";
-  }
-  return `${missing}`;
-};
-
 const Inbox = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("new");
   const [selectedLocation, setSelectedLocation] = useState("all");
@@ -864,6 +857,92 @@ const Inbox = () => {
     }
     return selectedReview?.locationId ?? reviews[0]?.locationId ?? "";
   }, [selectedLocation, selectedReview, reviews]);
+
+  const aiCronStatusQuery = useQuery({
+    queryKey: ["inbox-ai-cron-status", sessionUserId, activeLocationId],
+    queryFn: async () => {
+      if (!supabase || !sessionUserId || !activeLocationId) {
+        return null as
+          | {
+              updatedAt: string | null;
+              value: {
+                status?: string | null;
+                last_run_at?: string | null;
+                missing_insights_count?: number | null;
+              };
+            }
+          | null;
+      }
+      const key = `ai_status_v1:${sessionUserId}:${activeLocationId}`;
+      let { data } = await supabase
+        .from("cron_state")
+        .select("updated_at, value")
+        .eq("key", key)
+        .eq("user_id", sessionUserId)
+        .maybeSingle();
+      if (!data) {
+        const { data: fallback } = await supabase
+          .from("cron_state")
+          .select("updated_at, value")
+          .eq("key", key)
+          .is("user_id", null)
+          .maybeSingle();
+        data = fallback ?? null;
+      }
+      if (!data) {
+        return null;
+      }
+      const value = (data.value ?? {}) as {
+        status?: string | null;
+        last_run_at?: string | null;
+        missing_insights_count?: number | null;
+      };
+      return {
+        updatedAt: data.updated_at ?? null,
+        value
+      };
+    },
+    enabled: Boolean(supabase) && Boolean(sessionUserId) && Boolean(activeLocationId),
+    staleTime: 15000,
+    refetchInterval: 30000
+  });
+
+  const aiStatusDisplay = useMemo(() => {
+    const value = aiCronStatusQuery.data?.value ?? null;
+    const status =
+      (value?.status as ReviewCronStatus["status"] | undefined) ??
+      aiStatus.status ??
+      "idle";
+    const missing =
+      typeof value?.missing_insights_count === "number"
+        ? value?.missing_insights_count
+        : aiStatus.missing_insights_count ?? 0;
+    const lastRunAt =
+      value?.last_run_at ??
+      aiStatus.last_run_at ??
+      aiCronStatusQuery.data?.updatedAt ??
+      null;
+    return { status, missing, lastRunAt };
+  }, [aiCronStatusQuery.data, aiStatus]);
+
+  const aiStatusText = useMemo(() => {
+    if (aiStatusDisplay.status === "running") {
+      return "AI analysis in progress...";
+    }
+    if (aiStatusDisplay.status === "error") {
+      return "AI analysis error — check admin panel";
+    }
+    if (
+      aiStatusDisplay.status === "done" &&
+      (aiStatusDisplay.missing ?? 0) === 0
+    ) {
+      return "AI analysis complete";
+    }
+    if ((aiStatusDisplay.missing ?? 0) > 0) {
+      return `AI analysis pending (${aiStatusDisplay.missing} reviews left)`;
+    }
+    return "AI analysis pending";
+  }, [aiStatusDisplay]);
 
   useEffect(() => {
     if (!selectedReviewId) {
@@ -1647,13 +1726,12 @@ const Inbox = () => {
           <div className="mt-3 flex items-center justify-between">
             <span>Analyse IA</span>
             <span>
-              {formatStatusIcon(aiStatus.status)}{" "}
-              {formatMissingInsights(aiStatus.missing_insights_count)} en attente
+              {formatStatusIcon(aiStatusDisplay.status)} {aiStatusText}
             </span>
           </div>
           <div className="mt-1 text-[11px] text-slate-500">
             Dernière analyse :{" "}
-            {formatSinceMinutes(aiStatus.last_run_at ?? null)}
+            {formatSinceMinutes(aiStatusDisplay.lastRunAt ?? null)}
           </div>
         </div>
         {import.meta.env.DEV && (
