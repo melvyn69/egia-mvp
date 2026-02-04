@@ -615,29 +615,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           break;
         }
 
-        const reviewIds = reviewRows
-          .map((row) =>
-            String((row as { review_id?: string | null }).review_id ?? "")
-          )
+        const reviewPks = reviewRows
+          .map((row) => String((row as { id?: string | null }).id ?? ""))
           .filter((id) => id.length > 0);
-        const taggedIds = new Set<string>();
-        if (reviewIds.length > 0) {
-          const { data: taggedRows } = await supabaseAdmin
-            .from("review_tags")
-            .select("review_id")
-            .in("review_id", reviewIds);
-          (taggedRows ?? []).forEach((row) => {
-            if (row.review_id) {
-              taggedIds.add(String(row.review_id));
+        const insightIds = new Set<string>();
+        if (reviewPks.length > 0) {
+          const { data: insightRows } = await supabaseAdmin
+            .from("review_ai_insights")
+            .select("review_pk")
+            .in("review_pk", reviewPks);
+          (insightRows ?? []).forEach((row) => {
+            if (row.review_pk) {
+              insightIds.add(String(row.review_pk));
             }
           });
         }
 
         const rows = reviewRows.filter((row) => {
-          const reviewId = String(
-            (row as { review_id?: string | null }).review_id ?? ""
-          );
-          return reviewId && !taggedIds.has(reviewId);
+          const reviewPk = String((row as { id?: string | null }).id ?? "");
+          return reviewPk && !insightIds.has(reviewPk);
         });
 
         collected.push(...rows);
@@ -703,7 +699,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           })),
         candidateQueryMeta: {
           filter:
-            "comment not null and length(trim(comment))>0 and anti-join review_tags on review_id (text) via pagination backlog",
+            "comment not null and missing review_ai_insights (AI backlog)",
           order: "coalesce(update_time, create_time, created_at) asc, id asc",
           limit: MAX_REVIEWS,
           force,
@@ -728,43 +724,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (locationIds.length > 0) {
       const { data: textRows } = await supabaseAdmin
         .from("google_reviews")
-        .select("review_id, location_id, comment")
+        .select("id, review_id, location_id, comment")
         .in("location_id", locationIds)
         .not("comment", "is", null)
         .neq("comment", "")
         .not("review_id", "is", null);
-      const { data: taggedRows } = await supabaseAdmin
-        .from("review_tags")
-        .select("review_id, location_id")
-        .in("location_id", locationIds);
-
-      const taggedByLocation = new Map<string, Set<string>>();
-      (taggedRows ?? []).forEach((row) => {
-        const locationId = String(row.location_id ?? "");
-        const reviewId = String(row.review_id ?? "");
-        if (!locationId || !reviewId) return;
-        const set = taggedByLocation.get(locationId) ?? new Set<string>();
-        set.add(reviewId);
-        taggedByLocation.set(locationId, set);
+      const reviewPks = (textRows ?? [])
+        .map((row) => String((row as { id?: string | null }).id ?? ""))
+        .filter((id) => id.length > 0);
+      const { data: insightRows } = reviewPks.length
+        ? await supabaseAdmin
+            .from("review_ai_insights")
+            .select("review_pk, error, processed_at")
+            .in("review_pk", reviewPks)
+        : {
+            data: [] as Array<{
+              review_pk?: string | null;
+              error?: string | null;
+              processed_at?: string | null;
+            }>
+          };
+      const insightByPk = new Map<
+        string,
+        { error?: string | null; processed_at?: string | null }
+      >();
+      (insightRows ?? []).forEach((row) => {
+        const reviewPk = String(row.review_pk ?? "");
+        if (!reviewPk) return;
+        insightByPk.set(reviewPk, {
+          error: row.error ?? null,
+          processed_at: row.processed_at ?? null
+        });
       });
 
-      const textByLocation = new Map<string, string[]>();
+      const textByLocation = new Map<
+        string,
+        Array<{ review_pk: string }>
+      >();
       (textRows ?? []).forEach((row) => {
         const locationId = String(row.location_id ?? "");
-        const reviewId = String(row.review_id ?? "");
+        const reviewPk = String((row as { id?: string | null }).id ?? "");
         const text = getReviewText(row as { comment?: string | null });
-        if (!locationId || !reviewId || !text) return;
+        if (!locationId || !reviewPk || !text) return;
         const list = textByLocation.get(locationId) ?? [];
-        list.push(reviewId);
+        list.push({ review_pk: reviewPk });
         textByLocation.set(locationId, list);
       });
 
       for (const locationId of locationIds) {
         const textIds = textByLocation.get(locationId) ?? [];
-        const taggedIds = taggedByLocation.get(locationId) ?? new Set<string>();
         let missingInsights = 0;
-        for (const id of textIds) {
-          if (!taggedIds.has(id)) {
+        for (const row of textIds) {
+          const insight = insightByPk.get(row.review_pk);
+          if (!insight || insight.error || !insight.processed_at) {
             missingInsights += 1;
           }
         }
@@ -813,7 +825,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           candidatesSample: [],
           candidateQueryMeta: {
             filter:
-              "comment not null and length(trim(comment))>0 and anti-join review_tags on review_id (text) via pagination backlog",
+              "comment not null and missing review_ai_insights (AI backlog)",
             order: "coalesce(update_time, create_time, created_at) asc, id asc",
             limit: MAX_REVIEWS,
             force,
