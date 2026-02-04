@@ -558,8 +558,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? "00000000-0000-0000-0000-000000000000"
       : cursor.last_review_pk ?? "00000000-0000-0000-0000-000000000000";
     const loadCandidates = async () => {
-      const limit = MAX_REVIEWS * 6;
-      const maxPages = 5;
+      const target = MAX_REVIEWS;
+      const pageSize = 250;
+      const maxPages = 10;
       const collected: Array<{
         id: string;
         review_id: string | null;
@@ -572,9 +573,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         comment: string | null;
       }> = [];
 
-      for (let page = 0; page < maxPages && collected.length < limit; page += 1) {
-        const from = page * limit;
-        const to = from + limit - 1;
+      for (let page = 0; page < maxPages && collected.length < target; page += 1) {
+        const from = page * pageSize;
+        const to = from + pageSize - 1;
         const { data: candidateSource, error: candidatesError } =
           await supabaseAdmin
             .from("google_reviews")
@@ -587,9 +588,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .neq("review_id", "")
             .not("location_id", "is", null)
             .not("user_id", "is", null)
-            .order("update_time", { ascending: false, nullsFirst: false })
-            .order("create_time", { ascending: false, nullsFirst: false })
-            .order("created_at", { ascending: false, nullsFirst: false })
+            .order("update_time", { ascending: true, nullsFirst: false })
+            .order("create_time", { ascending: true, nullsFirst: false })
+            .order("created_at", { ascending: true, nullsFirst: false })
             .range(from, to);
 
         if (candidatesError) {
@@ -640,12 +641,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
 
         collected.push(...rows);
-        if (rows.length === 0) {
-          continue;
-        }
       }
 
-      return { rows: collected.slice(0, limit), error: null };
+      return { rows: collected.slice(0, target), error: null };
     };
 
     const initialCandidates = await loadCandidates();
@@ -705,8 +703,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           })),
         candidateQueryMeta: {
           filter:
-            "comment not null and length(trim(comment))>0 and anti-join review_tags on review_id (text)",
-          order: "coalesce(update_time, create_time, created_at) desc, id desc",
+            "comment not null and length(trim(comment))>0 and anti-join review_tags on review_id (text) via pagination backlog",
+          order: "coalesce(update_time, create_time, created_at) asc, id asc",
           limit: MAX_REVIEWS,
           force,
           since_time: lastSourceTime,
@@ -815,8 +813,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           candidatesSample: [],
           candidateQueryMeta: {
             filter:
-              "comment not null and length(trim(comment))>0 and anti-join review_tags on review_id (text)",
-            order: "coalesce(update_time, create_time, created_at) desc, id desc",
+              "comment not null and length(trim(comment))>0 and anti-join review_tags on review_id (text) via pagination backlog",
+            order: "coalesce(update_time, create_time, created_at) asc, id asc",
             limit: MAX_REVIEWS,
             force,
             since_time: lastSourceTime,
@@ -826,7 +824,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       debug.reason = force
         ? "Query returned 0 rows; data may not match filters (comment empty/blank or missing timestamps)."
-        : "Query returned 0 rows; cursor may be too advanced (try &force=1 or reset ai_tag_cursor_v2).";
+        : "Query returned 0 rows; pagination backlog reached without candidates.";
     }
 
     const candidateRowsByLock = candidateRows.filter((review) =>
