@@ -484,6 +484,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let totalWithText = 0;
   let totalMissingInsights = 0;
   let skipReason: string | null = null;
+  let runId: string | null = null;
   const errorsByLocation = new Map<string, number>();
   const processedByLocation = new Map<string, number>();
   const tagsByLocation = new Map<string, number>();
@@ -492,6 +493,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const errorByUser = new Map<string, { code: string; message: string; jobId?: string }>();
 
   try {
+    const runStart = new Date().toISOString();
+    const { data: runRow } = await (supabaseAdmin as any)
+      .from("ai_run_history")
+      .insert({
+        started_at: runStart,
+        processed: 0,
+        tags_upserted: 0,
+        errors_count: 0,
+        aborted: false,
+        skip_reason: null
+      })
+      .select("id")
+      .maybeSingle();
+    runId = runRow?.id ?? null;
+
     // Recover stale running statuses / locks (15 min)
     const staleCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
     const cronTable = supabaseAdmin.from("cron_state") as any;
@@ -1127,6 +1143,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error("[ai]", requestId, "fatal error", message);
+    if (runId) {
+      await (supabaseAdmin as any).from("ai_run_history").update({
+        finished_at: new Date().toISOString(),
+        processed: reviewsProcessed,
+        tags_upserted: tagsUpserted,
+        errors_count: errors.length + 1,
+        aborted: false,
+        skip_reason: "fatal_error"
+      }).eq("id", runId);
+    }
     if (locationUserMap.size > 0) {
       const nowIso = new Date().toISOString();
       for (const [locationId, userId] of locationUserMap.entries()) {
@@ -1149,5 +1175,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       { code: "INTERNAL", message },
       500
     );
+  } finally {
+    if (runId) {
+      await (supabaseAdmin as any).from("ai_run_history").update({
+        finished_at: new Date().toISOString(),
+        processed: reviewsProcessed,
+        tags_upserted: tagsUpserted,
+        errors_count: errors.length,
+        aborted: timeUp() || reviewsScanned >= MAX_REVIEWS,
+        skip_reason: skipReason
+      }).eq("id", runId);
+    }
   }
 }

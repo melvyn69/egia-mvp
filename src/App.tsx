@@ -20,6 +20,7 @@ import Invite from "./pages/Invite";
 import Alerts from "./pages/Alerts";
 import { Competitors } from "./pages/Competitors";
 import { SyncStatus } from "./pages/SyncStatus";
+import AIJobHealth from "./pages/AIJobHealth";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
 import { Button } from "./components/ui/button";
@@ -696,6 +697,10 @@ const App = () => {
                 <Route
                   path="/sync-status"
                   element={<SyncStatus session={session} />}
+                />
+                <Route
+                  path="/ai-job-health"
+                  element={<AIJobHealth session={session} />}
                 />
                 <Route
                   path="/google_oauth_callback"

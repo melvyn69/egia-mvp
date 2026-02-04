@@ -11,6 +11,7 @@ import {
   Mailbox,
   Radar,
   RefreshCw,
+  Activity,
   Settings,
   Sparkles,
   Users
@@ -273,6 +274,20 @@ const Sidebar = ({
         >
           <RefreshCw size={18} />
           Sync status
+        </NavLink>
+        <NavLink
+          to="/ai-job-health"
+          className={({ isActive }) =>
+            cn(
+              navLinkBase,
+              isActive
+                ? "bg-ink text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            )
+          }
+        >
+          <Activity size={18} />
+          AI Job Health
         </NavLink>
       </nav>
     </div>
