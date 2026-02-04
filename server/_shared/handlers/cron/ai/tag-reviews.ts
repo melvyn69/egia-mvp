@@ -558,57 +558,94 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? "00000000-0000-0000-0000-000000000000"
       : cursor.last_review_pk ?? "00000000-0000-0000-0000-000000000000";
     const loadCandidates = async () => {
-      const { data: candidateSource, error: candidatesError } =
-        await supabaseAdmin
-          .from("google_reviews")
-          .select(
-            "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
-          )
-          .order("update_time", { ascending: false, nullsFirst: false })
-          .order("create_time", { ascending: false, nullsFirst: false })
-          .order("created_at", { ascending: false, nullsFirst: false })
-          .limit(MAX_REVIEWS * 6);
+      const limit = MAX_REVIEWS * 6;
+      const maxPages = 5;
+      const collected: Array<{
+        id: string;
+        review_id: string | null;
+        update_time: string | null;
+        create_time: string | null;
+        created_at: string | null;
+        user_id: string | null;
+        location_id: string | null;
+        location_name: string | null;
+        comment: string | null;
+      }> = [];
 
-      if (candidatesError) {
-        console.error(
-          "[ai-tag]",
-          requestId,
-          "candidates query failed",
-          candidatesError
-        );
-        return { rows: [] as typeof candidateSource, error: candidatesError };
-      }
+      for (let page = 0; page < maxPages && collected.length < limit; page += 1) {
+        const from = page * limit;
+        const to = from + limit - 1;
+        const { data: candidateSource, error: candidatesError } =
+          await supabaseAdmin
+            .from("google_reviews")
+            .select(
+              "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
+            )
+            .not("comment", "is", null)
+            .neq("comment", "")
+            .not("review_id", "is", null)
+            .neq("review_id", "")
+            .not("location_id", "is", null)
+            .not("user_id", "is", null)
+            .order("update_time", { ascending: false, nullsFirst: false })
+            .order("create_time", { ascending: false, nullsFirst: false })
+            .order("created_at", { ascending: false, nullsFirst: false })
+            .range(from, to);
 
-      const reviewRows = (candidateSource ?? []).filter((review) => {
-        const text = getReviewText(review as { comment?: string | null });
-        if (!text) {
-          return false;
+        if (candidatesError) {
+          console.error(
+            "[ai-tag]",
+            requestId,
+            "candidates query failed",
+            candidatesError
+          );
+          return { rows: [] as typeof candidateSource, error: candidatesError };
         }
-        return true;
-      });
 
-      const reviewIds = reviewRows
-        .map((row) => String((row as { review_id?: string | null }).review_id ?? ""))
-        .filter((id) => id.length > 0);
-      const taggedIds = new Set<string>();
-      if (reviewIds.length > 0) {
-        const { data: taggedRows } = await supabaseAdmin
-          .from("review_tags")
-          .select("review_id")
-          .in("review_id", reviewIds);
-        (taggedRows ?? []).forEach((row) => {
-          if (row.review_id) {
-            taggedIds.add(String(row.review_id));
+        const reviewRows = (candidateSource ?? []).filter((review) => {
+          const text = getReviewText(review as { comment?: string | null });
+          if (!text) {
+            return false;
           }
+          return true;
         });
+
+        if (reviewRows.length === 0) {
+          break;
+        }
+
+        const reviewIds = reviewRows
+          .map((row) =>
+            String((row as { review_id?: string | null }).review_id ?? "")
+          )
+          .filter((id) => id.length > 0);
+        const taggedIds = new Set<string>();
+        if (reviewIds.length > 0) {
+          const { data: taggedRows } = await supabaseAdmin
+            .from("review_tags")
+            .select("review_id")
+            .in("review_id", reviewIds);
+          (taggedRows ?? []).forEach((row) => {
+            if (row.review_id) {
+              taggedIds.add(String(row.review_id));
+            }
+          });
+        }
+
+        const rows = reviewRows.filter((row) => {
+          const reviewId = String(
+            (row as { review_id?: string | null }).review_id ?? ""
+          );
+          return reviewId && !taggedIds.has(reviewId);
+        });
+
+        collected.push(...rows);
+        if (rows.length === 0) {
+          continue;
+        }
       }
 
-      const rows = reviewRows.filter((row) => {
-        const reviewId = String((row as { review_id?: string | null }).review_id ?? "");
-        return reviewId && !taggedIds.has(reviewId);
-      });
-
-      return { rows, error: null };
+      return { rows: collected.slice(0, limit), error: null };
     };
 
     const initialCandidates = await loadCandidates();
@@ -668,7 +705,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           })),
         candidateQueryMeta: {
           filter:
-            "comment not null and length(trim(comment))>0 and no existing tags (review_id)",
+            "comment not null and length(trim(comment))>0 and anti-join review_tags on review_id (text)",
           order: "coalesce(update_time, create_time, created_at) desc, id desc",
           limit: MAX_REVIEWS,
           force,
@@ -778,7 +815,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           candidatesSample: [],
           candidateQueryMeta: {
             filter:
-              "comment not null and length(trim(comment))>0 and no existing tags (review_id)",
+              "comment not null and length(trim(comment))>0 and anti-join review_tags on review_id (text)",
             order: "coalesce(update_time, create_time, created_at) desc, id desc",
             limit: MAX_REVIEWS,
             force,
