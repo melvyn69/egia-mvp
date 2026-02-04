@@ -537,6 +537,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .not("comment", "is", null)
       .neq("comment", "");
     totalWithText = totalWithTextQuery.count ?? 0;
+    const backlogBase = await supabaseAdmin
+      .from("google_reviews")
+      .select("id", { count: "exact", head: true })
+      .not("comment", "is", null)
+      .neq("comment", "");
+    const totalWithTextGlobal = backlogBase.count ?? 0;
+    const { data: backlogInsightRows } = await supabaseAdmin
+      .from("review_ai_insights")
+      .select("review_pk, error, processed_at");
+    const insightOk = new Set<string>();
+    const insightMissingOrFailed = new Set<string>();
+    (backlogInsightRows ?? []).forEach((row) => {
+      const pk = String(row.review_pk ?? "");
+      if (!pk) return;
+      if (row.error || !row.processed_at) {
+        insightMissingOrFailed.add(pk);
+      } else {
+        insightOk.add(pk);
+      }
+    });
+    totalMissingInsights = Math.max(
+      0,
+      totalWithTextGlobal - insightOk.size
+    );
 
     const { data: textLocations } = await supabaseAdmin
       .from("google_reviews")
@@ -724,11 +748,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (locationIds.length > 0) {
       const { data: textRows } = await supabaseAdmin
         .from("google_reviews")
-        .select("id, review_id, location_id, comment")
+        .select("id, location_id, comment")
         .in("location_id", locationIds)
         .not("comment", "is", null)
-        .neq("comment", "")
-        .not("review_id", "is", null);
+        .neq("comment", "");
       const reviewPks = (textRows ?? [])
         .map((row) => String((row as { id?: string | null }).id ?? ""))
         .filter((id) => id.length > 0);
