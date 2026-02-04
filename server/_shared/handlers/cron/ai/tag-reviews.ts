@@ -384,7 +384,7 @@ const analyzeReview = async (
 };
 
 const analyzeWithRetry = async (
-  review: { id: string; comment?: string | null },
+  review: { id: string; comment: string },
   requestId: string,
   debugInfo?: {
     openaiStatus?: number;
@@ -818,6 +818,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         typeof review === "object" && review !== null && "review_id" in review
           ? String((review as { review_id?: unknown }).review_id ?? "")
           : "";
+      const reviewText = getReviewText(review as { comment?: string | null });
       const effectiveUpdateTime =
         review.update_time ?? review.create_time ?? null;
       const locationId = review.location_id ?? null;
@@ -840,7 +841,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const analysis = await analyzeWithRetry(
           {
             id: reviewPk,
-            comment: review.comment
+            comment: reviewText
           },
           requestId,
           debug
@@ -883,10 +884,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             source_update_time: effectiveUpdateTime,
             error: insightError.message ?? "insight upsert failed"
           });
-          errors.push({ reviewId, message: insightError.message });
+          errors.push({ reviewId: reviewIdText || reviewPk, message: insightError.message });
           await saveCursor({
             last_source_time: effectiveUpdateTime,
-            last_review_pk: reviewId
+            last_review_pk: reviewPk
           });
           continue;
         }
@@ -912,7 +913,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           await supabaseAdmin
             .from("review_ai_tags")
             .upsert({
-              review_pk: reviewId,
+              review_pk: reviewPk,
               tag_id: tagRow.id,
               polarity: tag.polarity ?? null,
               confidence: tag.confidence ?? null,
