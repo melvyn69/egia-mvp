@@ -213,7 +213,7 @@ const normalizeTopics = (topics: AiTag[]) => {
 };
 
 const analyzeReview = async (
-  review: { id: string; comment: string },
+  review: { id: string; comment?: string },
   requestId: string,
   debugInfo?: {
     openaiStatus?: number;
@@ -282,7 +282,7 @@ const analyzeReview = async (
           content:
             "Analyse cet avis client et produis les champs demandés (sentiment, score, résumé, topics). " +
             "Base-toi uniquement sur le commentaire suivant:\n\n" +
-            review.comment
+            String(review.comment ?? "")
         }
       ]
     });
@@ -384,7 +384,7 @@ const analyzeReview = async (
 };
 
 const analyzeWithRetry = async (
-  review: { id: string; comment: string },
+  review: { id: string; comment?: string },
   requestId: string,
   debugInfo?: {
     openaiStatus?: number;
@@ -709,52 +709,68 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const lockedLocations = new Set<string>();
     const locationStats = new Map<string, { missingInsights: number }>();
     let totalMissing = 0;
-    for (const locationId of locationIds) {
+    if (locationIds.length > 0) {
       const { data: textRows } = await supabaseAdmin
         .from("google_reviews")
-        .select("review_id")
-        .eq("location_id", locationId)
+        .select("review_id, location_id")
+        .in("location_id", locationIds)
         .not("comment", "is", null)
-        .neq("comment", "");
+        .neq("comment", "")
+        .not("review_id", "is", null);
       const { data: taggedRows } = await supabaseAdmin
         .from("review_tags")
-        .select("review_id")
-        .eq("location_id", locationId);
-      const textIds = new Set(
-        (textRows ?? [])
-          .map((row) => String(row.review_id ?? ""))
-          .filter((id) => id.length > 0)
-      );
-      const taggedIds = new Set(
-        (taggedRows ?? [])
-          .map((row) => String(row.review_id ?? ""))
-          .filter((id) => id.length > 0)
-      );
-      let missingInsights = 0;
-      for (const id of textIds) {
-        if (!taggedIds.has(id)) {
-          missingInsights += 1;
+        .select("review_id, location_id")
+        .in("location_id", locationIds);
+
+      const taggedByLocation = new Map<string, Set<string>>();
+      (taggedRows ?? []).forEach((row) => {
+        const locationId = String(row.location_id ?? "");
+        const reviewId = String(row.review_id ?? "");
+        if (!locationId || !reviewId) return;
+        const set = taggedByLocation.get(locationId) ?? new Set<string>();
+        set.add(reviewId);
+        taggedByLocation.set(locationId, set);
+      });
+
+      const textByLocation = new Map<string, string[]>();
+      (textRows ?? []).forEach((row) => {
+        const locationId = String(row.location_id ?? "");
+        const reviewId = String(row.review_id ?? "");
+        if (!locationId || !reviewId) return;
+        const list = textByLocation.get(locationId) ?? [];
+        list.push(reviewId);
+        textByLocation.set(locationId, list);
+      });
+
+      for (const locationId of locationIds) {
+        const textIds = textByLocation.get(locationId) ?? [];
+        const taggedIds = taggedByLocation.get(locationId) ?? new Set<string>();
+        let missingInsights = 0;
+        for (const id of textIds) {
+          if (!taggedIds.has(id)) {
+            missingInsights += 1;
+          }
         }
-      }
-      totalMissing += missingInsights;
-      locationStats.set(locationId, { missingInsights });
-      const userIdForLocation = locationUserMap.get(locationId);
-      if (userIdForLocation) {
-        const locked = await acquireLock(userIdForLocation, locationId);
-        if (!locked) {
-          continue;
+        totalMissing += missingInsights;
+        locationStats.set(locationId, { missingInsights });
+        const userIdForLocation = locationUserMap.get(locationId);
+        if (userIdForLocation) {
+          const locked = await acquireLock(userIdForLocation, locationId);
+          if (!locked) {
+            continue;
+          }
+          lockedLocations.add(locationId);
+          await upsertAiStatus(userIdForLocation, locationId, {
+            status: "running",
+            last_run_at: nowIso,
+            aborted: false,
+            cursor,
+            stats: { processed: 0, tagsUpserted: 0 },
+            errors_count: 0,
+            last_error: null,
+            missing_insights_count: missingInsights
+          });
         }
-        lockedLocations.add(locationId);
-        await upsertAiStatus(userIdForLocation, locationId, {
-          status: "running",
-          last_run_at: nowIso,
-          aborted: false,
-          cursor,
-          stats: { processed: 0, tagsUpserted: 0 },
-          errors_count: 0,
-          last_error: null,
-          missing_insights_count: missingInsights
-        });
       }
     }
     totalMissingInsights = totalMissing;
