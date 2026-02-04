@@ -557,7 +557,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const lastReviewPk = force
       ? "00000000-0000-0000-0000-000000000000"
       : cursor.last_review_pk ?? "00000000-0000-0000-0000-000000000000";
-    const loadCandidates = async (forceCursor: boolean) => {
+    const loadCandidates = async () => {
       const { data: candidateSource, error: candidatesError } =
         await supabaseAdmin
           .from("google_reviews")
@@ -583,25 +583,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const text = getReviewText(review as { comment?: string | null });
         if (!text) {
           return false;
-        }
-        if (!forceCursor) {
-          const sourceTime =
-            (review as { update_time?: string | null }).update_time ??
-            (review as { create_time?: string | null }).create_time ??
-            (review as { created_at?: string | null }).created_at ??
-            null;
-          if (!sourceTime) {
-            return false;
-          }
-          if (sourceTime < lastSourceTime) {
-            return false;
-          }
-          if (sourceTime === lastSourceTime) {
-            const reviewId = String((review as { id?: string }).id ?? "");
-            if (reviewId <= lastReviewPk) {
-              return false;
-            }
-          }
         }
         return true;
       });
@@ -630,7 +611,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return { rows, error: null };
     };
 
-    const initialCandidates = await loadCandidates(force);
+    const initialCandidates = await loadCandidates();
     if (initialCandidates.error) {
       return sendError(
         res,
@@ -712,7 +693,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (locationIds.length > 0) {
       const { data: textRows } = await supabaseAdmin
         .from("google_reviews")
-        .select("review_id, location_id")
+        .select("review_id, location_id, comment")
         .in("location_id", locationIds)
         .not("comment", "is", null)
         .neq("comment", "")
@@ -736,7 +717,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       (textRows ?? []).forEach((row) => {
         const locationId = String(row.location_id ?? "");
         const reviewId = String(row.review_id ?? "");
-        if (!locationId || !reviewId) return;
+        const text = getReviewText(row as { comment?: string | null });
+        if (!locationId || !reviewId || !text) return;
         const list = textByLocation.get(locationId) ?? [];
         list.push(reviewId);
         textByLocation.set(locationId, list);
@@ -776,7 +758,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     totalMissingInsights = totalMissing;
 
     if (!force && totalMissingInsights > 0 && candidatesFound === 0) {
-      const fallbackCandidates = await loadCandidates(true);
+      const fallbackCandidates = await loadCandidates();
       candidateRows = fallbackCandidates.rows;
       candidatesFound = candidateRows.length;
       logInfo("[ai-tag]", requestId, "candidatesFound(fallback)", candidatesFound);
@@ -996,12 +978,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const errorsCount = errorsByLocation.get(locationId) ?? 0;
       const processedCount = processedByLocation.get(locationId) ?? 0;
       const tagsCount = tagsByLocation.get(locationId) ?? 0;
-      let status: "idle" | "running" | "done" | "error" = "running";
-      if (!aborted && errorsCount === 0 && missingInsights === 0) {
-        status = "done";
-      } else if (errorsCount > 0) {
-        status = "error";
-      }
+      const status: "idle" | "running" | "done" | "error" =
+        errorsCount > 0 ? "error" : "done";
       const userIdForLocation = locationUserMap.get(locationId);
       if (userIdForLocation) {
         await upsertAiStatus(userIdForLocation, locationId, {
