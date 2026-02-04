@@ -562,7 +562,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await supabaseAdmin
           .from("google_reviews")
           .select(
-            "id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
+            "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
           )
           .order("update_time", { ascending: false, nullsFirst: false })
           .order("create_time", { ascending: false, nullsFirst: false })
@@ -607,7 +607,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
 
       const reviewIds = reviewRows
-        .map((row) => String((row as { id?: string }).id ?? ""))
+        .map((row) => String((row as { review_id?: string | null }).review_id ?? ""))
         .filter((id) => id.length > 0);
       const taggedIds = new Set<string>();
       if (reviewIds.length > 0) {
@@ -623,7 +623,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const rows = reviewRows.filter((row) => {
-        const reviewId = String((row as { id?: string }).id ?? "");
+        const reviewId = String((row as { review_id?: string | null }).review_id ?? "");
         return reviewId && !taggedIds.has(reviewId);
       });
 
@@ -677,17 +677,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (debugEnabled) {
       debug = {
         cursorIn: cursor,
-        candidatesSample: candidateRows.slice(0, 5).map((review) => ({
-          id: review.id,
-          update_time: review.update_time ?? null,
-          create_time: review.create_time ?? null,
-          user_id: review.user_id ?? null,
-          location_id: review.location_id ?? null,
-          comment_len: review.comment?.length ?? 0
-        })),
+          candidatesSample: candidateRows.slice(0, 5).map((review) => ({
+            id: review.review_id ?? review.id,
+            update_time: review.update_time ?? null,
+            create_time: review.create_time ?? null,
+            user_id: review.user_id ?? null,
+            location_id: review.location_id ?? null,
+            comment_len: review.comment?.length ?? 0
+          })),
         candidateQueryMeta: {
           filter:
-            "comment not null and length(trim(comment))>0 and no existing tags",
+            "comment not null and length(trim(comment))>0 and no existing tags (review_id)",
           order: "coalesce(update_time, create_time, created_at) desc, id desc",
           limit: MAX_REVIEWS,
           force,
@@ -710,9 +710,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const locationStats = new Map<string, { missingInsights: number }>();
     let totalMissing = 0;
     for (const locationId of locationIds) {
-      const { count: countText } = await supabaseAdmin
+      const { data: textRows } = await supabaseAdmin
         .from("google_reviews")
-        .select("id", { count: "exact", head: true })
+        .select("review_id")
         .eq("location_id", locationId)
         .not("comment", "is", null)
         .neq("comment", "");
@@ -720,12 +720,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from("review_tags")
         .select("review_id")
         .eq("location_id", locationId);
-      const taggedDistinct = new Set(
+      const textIds = new Set(
+        (textRows ?? [])
+          .map((row) => String(row.review_id ?? ""))
+          .filter((id) => id.length > 0)
+      );
+      const taggedIds = new Set(
         (taggedRows ?? [])
           .map((row) => String(row.review_id ?? ""))
           .filter((id) => id.length > 0)
-      ).size;
-      const missingInsights = Math.max(0, (countText ?? 0) - taggedDistinct);
+      );
+      let missingInsights = 0;
+      for (const id of textIds) {
+        if (!taggedIds.has(id)) {
+          missingInsights += 1;
+        }
+      }
       totalMissing += missingInsights;
       locationStats.set(locationId, { missingInsights });
       const userIdForLocation = locationUserMap.get(locationId);
@@ -770,7 +780,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           candidatesSample: [],
           candidateQueryMeta: {
             filter:
-              "comment/text not null and length(trim(...))>0 and no existing tags",
+              "comment not null and length(trim(comment))>0 and no existing tags (review_id)",
             order: "coalesce(update_time, create_time, created_at) desc, id desc",
             limit: MAX_REVIEWS,
             force,
@@ -800,16 +810,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (timeUp() || reviewsScanned >= MAX_REVIEWS) {
         break;
       }
-      const reviewId =
+      const reviewPk =
         typeof review === "object" && review !== null && "id" in review
           ? String((review as { id?: unknown }).id ?? "")
+          : "";
+      const reviewIdText =
+        typeof review === "object" && review !== null && "review_id" in review
+          ? String((review as { review_id?: unknown }).review_id ?? "")
           : "";
       const effectiveUpdateTime =
         review.update_time ?? review.create_time ?? null;
       const locationId = review.location_id ?? null;
       if (!effectiveUpdateTime) {
-        errors.push({ reviewId, message: "Missing source_time" });
-        console.error("[ai-tag]", requestId, "missing source_time", reviewId);
+        errors.push({ reviewId: reviewIdText || reviewPk, message: "Missing source_time" });
+        console.error("[ai-tag]", requestId, "missing source_time", reviewIdText || reviewPk);
         if (locationId) {
           errorsByLocation.set(
             locationId,
@@ -825,7 +839,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         reviewsProcessed += 1;
         const analysis = await analyzeWithRetry(
           {
-            id: reviewId,
+            id: reviewPk,
             comment: review.comment
           },
           requestId,
@@ -836,7 +850,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { error: insightError } = await supabaseAdmin
           .from("review_ai_insights")
           .upsert({
-            review_pk: reviewId,
+            review_pk: reviewPk,
             user_id: review.user_id,
             location_resource_name: review.location_id ?? review.location_name,
             sentiment: analysis.sentiment,
@@ -862,7 +876,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             );
           }
           await supabaseAdmin.from("review_ai_insights").upsert({
-            review_pk: reviewId,
+            review_pk: reviewPk,
             user_id: review.user_id,
             location_resource_name: review.location_id ?? review.location_name,
             processed_at: nowIso,
@@ -889,7 +903,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           if (tagError || !tagRow?.id) {
             errors.push({
-              reviewId,
+              reviewId: reviewIdText || reviewPk,
               message: tagError?.message ?? "tag upsert failed"
             });
             continue;
@@ -904,10 +918,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               confidence: tag.confidence ?? null,
               evidence: tag.evidence ?? null
             });
-          if (review.user_id) {
+          if (review.user_id && reviewIdText) {
             await supabaseAdmin.from("review_tags").insert({
               user_id: review.user_id,
-              review_id: reviewId,
+              review_id: reviewIdText,
               location_id: review.location_id ?? null,
               tag: tag.name
             });
@@ -929,18 +943,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         await saveCursor({
           last_source_time: effectiveUpdateTime,
-          last_review_pk: reviewId
+          last_review_pk: reviewPk
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        errors.push({ reviewId, message });
+        errors.push({ reviewId: reviewIdText || reviewPk, message });
         console.error("[ai]", requestId, "review failed", message);
         if (message === "OpenAI request timeout") {
           if (review.user_id) {
             errorByUser.set(String(review.user_id), {
               code: "openai_timeout",
               message: "openai_timeout",
-              jobId: reviewId
+              jobId: reviewPk
             });
           }
         }
@@ -953,23 +967,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         await saveCursor({
           last_source_time: effectiveUpdateTime ?? lastSourceTime,
-          last_review_pk: reviewId
+          last_review_pk: reviewPk
         });
       }
     }
 
     const aborted = timeUp() || reviewsScanned >= MAX_REVIEWS;
 
-    const forceDoneNoCandidates = skipReason === "no_candidates";
     for (const locationId of lockedLocations) {
-      const missingInsights = forceDoneNoCandidates
-        ? 0
-        : (locationStats.get(locationId)?.missingInsights ?? 0);
+      const missingInsights = locationStats.get(locationId)?.missingInsights ?? 0;
       const errorsCount = errorsByLocation.get(locationId) ?? 0;
       const processedCount = processedByLocation.get(locationId) ?? 0;
       const tagsCount = tagsByLocation.get(locationId) ?? 0;
-      let status: "idle" | "running" | "done" | "error" =
-        forceDoneNoCandidates ? "done" : "running";
+      let status: "idle" | "running" | "done" | "error" = "running";
       if (!aborted && errorsCount === 0 && missingInsights === 0) {
         status = "done";
       } else if (errorsCount > 0) {
