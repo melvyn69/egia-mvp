@@ -3,6 +3,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
+import { Button } from "../components/ui/button";
 
 type AIJobHealthProps = {
   session: Session | null;
@@ -62,6 +63,8 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
   const [locations, setLocations] = useState<LocationRow[]>([]);
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [runLoading, setRunLoading] = useState(false);
+  const [runMessage, setRunMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabaseClient || !session) return;
@@ -111,6 +114,31 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
     };
   }, [session, supabaseClient]);
 
+  const triggerRun = async () => {
+    if (!session || runLoading) return;
+    setRunLoading(true);
+    setRunMessage(null);
+    const token = session.access_token;
+    try {
+      const res = await fetch("/api/cron/ai/tag-reviews", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        setRunMessage("Impossible de lancer l’analyse.");
+      } else {
+        setRunMessage("AI analysis started");
+        window.setTimeout(() => {
+          window.location.reload();
+        }, 5000);
+      }
+    } catch {
+      setRunMessage("Erreur réseau.");
+    } finally {
+      setRunLoading(false);
+    }
+  };
+
   const locationById = useMemo(() => {
     const map = new Map<string, LocationRow>();
     locations.forEach((loc) => map.set(loc.id, loc));
@@ -153,9 +181,22 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold text-slate-900">
-          AI Job Health
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-900">
+              AI Job Health
+            </h2>
+            <p className="text-sm text-slate-500">
+              Suivi interne des traitements IA par établissement.
+            </p>
+          </div>
+          <Button onClick={triggerRun} disabled={runLoading}>
+            {runLoading ? "Lancement..." : "Run AI Analysis Now"}
+          </Button>
+        </div>
+        {runMessage && (
+          <p className="mt-2 text-sm text-slate-600">{runMessage}</p>
+        )}
         <p className="text-sm text-slate-500">
           Suivi interne des traitements IA par établissement.
         </p>

@@ -150,6 +150,11 @@ const getCronSecrets = (req: VercelRequest) => {
   return { expected, provided };
 };
 
+const getBearerToken = (req: VercelRequest) => {
+  const auth = (req.headers.authorization as string | undefined) ?? "";
+  return auth.toLowerCase().startsWith("bearer ") ? auth.slice(7) : "";
+};
+
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
@@ -457,14 +462,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const { expected, provided } = getCronSecrets(req);
+  const bearerToken = getBearerToken(req);
   if (!expected || !provided || provided !== expected) {
-    console.error("[ai]", requestId, "invalid cron secret");
-    return sendError(
-      res,
-      requestId,
-      { code: "FORBIDDEN", message: "Unauthorized" },
-      403
-    );
+    if (!bearerToken) {
+      console.error("[ai]", requestId, "invalid cron secret");
+      return sendError(
+        res,
+        requestId,
+        { code: "FORBIDDEN", message: "Unauthorized" },
+        403
+      );
+    }
+    try {
+      const { data: authData, error: authError } =
+        await supabaseAdmin.auth.getUser(bearerToken);
+      if (authError || !authData?.user?.id) {
+        return sendError(
+          res,
+          requestId,
+          { code: "FORBIDDEN", message: "Unauthorized" },
+          403
+        );
+      }
+      const { data: roleRow } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", authData.user.id)
+        .maybeSingle();
+      if (roleRow?.role !== "admin") {
+        return sendError(
+          res,
+          requestId,
+          { code: "FORBIDDEN", message: "Admin only" },
+          403
+        );
+      }
+    } catch (error) {
+      console.error("[ai]", requestId, "admin auth failed", error);
+      return sendError(
+        res,
+        requestId,
+        { code: "FORBIDDEN", message: "Unauthorized" },
+        403
+      );
+    }
   }
 
   if (method === "GET") {
