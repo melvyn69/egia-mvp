@@ -84,7 +84,8 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
         .like("key", `ai_status_v1:${userId}:%`)
         .eq("user_id", userId);
 
-      const { data: runRows } = await supabaseClient
+      const sbAny = supabaseClient as unknown as any;
+      const { data: runRows } = await sbAny
         .from("ai_run_history")
         .select(
           "id, started_at, finished_at, processed, tags_upserted, errors_count, aborted, skip_reason"
@@ -102,7 +103,7 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
       }
       setLocations((locationRows ?? []) as LocationRow[]);
       setRows((cronRows ?? []) as CronStateRow[]);
-      setRuns((runRows ?? []) as RunRow[]);
+      setRuns((runRows ?? []) as unknown as RunRow[]);
       setLoading(false);
     };
 
