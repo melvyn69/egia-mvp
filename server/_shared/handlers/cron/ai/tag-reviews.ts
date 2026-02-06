@@ -530,7 +530,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let cursor: Cursor | null = null;
   let force = false;
   let debugEnabled = false;
-  let debug: TagCronDebugInfo | null = null;
+  let debug: Record<string, unknown> | null = null;
   const errorsByLocation = new Map<string, number>();
   const processedByLocation = new Map<string, number>();
   const tagsByLocation = new Map<string, number>();

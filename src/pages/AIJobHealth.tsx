@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -56,6 +56,26 @@ const formatTimestamp = (value?: string | null) => {
   return date.toLocaleString();
 };
 
+const formatDurationSeconds = (
+  startedAt?: string | null,
+  finishedAt?: string | null
+) => {
+  if (!startedAt || !finishedAt) return "—";
+  const start = new Date(startedAt).getTime();
+  const end = new Date(finishedAt).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return "—";
+  }
+  return `${Math.round((end - start) / 1000)}s`;
+};
+
+const formatSkipReason = (value?: string | null) => {
+  if (!value) return "—";
+  if (value === "no_candidates") return "Aucune tâche";
+  if (value === "locked") return "Verrouillé";
+  return value;
+};
+
 const AIJobHealth = ({ session }: AIJobHealthProps) => {
   const supabaseClient = supabase;
   const [loading, setLoading] = useState(false);
@@ -65,55 +85,61 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
   const [error, setError] = useState<string | null>(null);
   const [runLoading, setRunLoading] = useState(false);
   const [runMessage, setRunMessage] = useState<string | null>(null);
+  const [showErrorsOnly, setShowErrorsOnly] = useState(false);
+  const [showRecentOnly, setShowRecentOnly] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  const load = useCallback(async () => {
+    if (!supabaseClient || !session) return;
+    setLoading(true);
+    setError(null);
+    const userId = session.user.id;
+    const { data: locationRows, error: locationsError } = await supabaseClient
+      .from("google_locations")
+      .select("id, location_title, location_resource_name")
+      .eq("user_id", userId)
+      .order("location_title", { ascending: true });
+    const { data: cronRows, error: cronError } = await supabaseClient
+      .from("cron_state")
+      .select("key, value, updated_at")
+      .like("key", `ai_status_v1:${userId}:%`)
+      .eq("user_id", userId);
+
+    const sbAny = supabaseClient as unknown as any;
+    const { data: runRows } = await sbAny
+      .from("ai_run_history")
+      .select(
+        "id, started_at, finished_at, processed, tags_upserted, errors_count, aborted, skip_reason"
+      )
+      .order("started_at", { ascending: false })
+      .limit(50);
+
+    if (locationsError || cronError) {
+      setError(
+        locationsError?.message ?? cronError?.message ?? "Erreur de chargement"
+      );
+      setLoading(false);
+      return;
+    }
+    setLocations((locationRows ?? []) as LocationRow[]);
+    setRows((cronRows ?? []) as CronStateRow[]);
+    setRuns((runRows ?? []) as unknown as RunRow[]);
+    setLoading(false);
+  }, [session, supabaseClient]);
 
   useEffect(() => {
-    if (!supabaseClient || !session) return;
     let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      const userId = session.user.id;
-      const { data: locationRows, error: locationsError } = await supabaseClient
-        .from("google_locations")
-        .select("id, location_title, location_resource_name")
-        .eq("user_id", userId)
-        .order("location_title", { ascending: true });
-      const { data: cronRows, error: cronError } = await supabaseClient
-        .from("cron_state")
-        .select("key, value, updated_at")
-        .like("key", `ai_status_v1:${userId}:%`)
-        .eq("user_id", userId);
-
-      const sbAny = supabaseClient as unknown as any;
-      const { data: runRows } = await sbAny
-        .from("ai_run_history")
-        .select(
-          "id, started_at, finished_at, processed, tags_upserted, errors_count, aborted, skip_reason"
-        )
-        .order("started_at", { ascending: false })
-        .limit(5);
-
+    const runLoad = async () => {
       if (cancelled) return;
-      if (locationsError || cronError) {
-        setError(
-          locationsError?.message ?? cronError?.message ?? "Erreur de chargement"
-        );
-        setLoading(false);
-        return;
-      }
-      setLocations((locationRows ?? []) as LocationRow[]);
-      setRows((cronRows ?? []) as CronStateRow[]);
-      setRuns((runRows ?? []) as unknown as RunRow[]);
-      setLoading(false);
+      await load();
     };
-
-    void load();
+    void runLoad();
     const timer = window.setInterval(load, 30_000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [session, supabaseClient]);
+  }, [load, refreshTick]);
 
   const triggerRun = async () => {
     if (!session || runLoading) return;
@@ -172,12 +198,41 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
       if (status === "done") return 2;
       return 3;
     };
-    return normalized.sort((a, b) => {
+    const sorted = normalized.sort((a, b) => {
       const statusDiff = statusRank(a.status) - statusRank(b.status);
       if (statusDiff !== 0) return statusDiff;
       return (b.missing ?? 0) - (a.missing ?? 0);
     });
-  }, [rows, locationById]);
+    const now = Date.now();
+    return sorted.filter((item) => {
+      if (showErrorsOnly && item.status !== "error" && item.errors === 0) {
+        return false;
+      }
+      if (showRecentOnly) {
+        const ts = item.lastRunAt ? new Date(item.lastRunAt).getTime() : 0;
+        if (!ts || now - ts > 24 * 60 * 60 * 1000) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [rows, locationById, showErrorsOnly, showRecentOnly]);
+
+  const filteredRuns = useMemo(() => {
+    const now = Date.now();
+    return runs.filter((run) => {
+      if (showErrorsOnly && (run.errors_count ?? 0) === 0) {
+        return false;
+      }
+      if (showRecentOnly) {
+        const ts = run.started_at ? new Date(run.started_at).getTime() : 0;
+        if (!ts || now - ts > 24 * 60 * 60 * 1000) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [runs, showErrorsOnly, showRecentOnly]);
 
   return (
     <div className="space-y-6">
@@ -191,16 +246,41 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
               Suivi interne des traitements IA par établissement.
             </p>
           </div>
-          <Button onClick={triggerRun} disabled={runLoading}>
-            {runLoading ? "Lancement..." : "Run AI Analysis Now"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() => setRefreshTick((value) => value + 1)}
+              variant="outline"
+            >
+              Rafraîchir
+            </Button>
+            <Button onClick={triggerRun} disabled={runLoading}>
+              {runLoading ? "Lancement..." : "Run AI Analysis Now"}
+            </Button>
+          </div>
         </div>
         {runMessage && (
           <p className="mt-2 text-sm text-slate-600">{runMessage}</p>
         )}
-        <p className="text-sm text-slate-500">
-          Suivi interne des traitements IA par établissement.
-        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-600">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-300"
+              checked={showErrorsOnly}
+              onChange={(event) => setShowErrorsOnly(event.target.checked)}
+            />
+            Afficher seulement erreurs
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-300"
+              checked={showRecentOnly}
+              onChange={(event) => setShowRecentOnly(event.target.checked)}
+            />
+            Afficher seulement runs récents (24h)
+          </label>
+        </div>
       </div>
 
       {loading ? (
@@ -252,18 +332,26 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
                 <div>Processed</div>
                 <div>Tags</div>
                 <div>Errors</div>
-                <div>Aborted</div>
+                <div>Durée</div>
                 <div>Skip Reason</div>
               </div>
               <div className="divide-y divide-slate-100">
-                {runs.map((run) => (
+                {filteredRuns.map((run) => (
                   <div key={run.id} className="grid grid-cols-6 gap-2 py-2">
                     <div>{formatTimestamp(run.started_at)}</div>
                     <div>{run.processed ?? 0}</div>
                     <div>{run.tags_upserted ?? 0}</div>
                     <div>{run.errors_count ?? 0}</div>
-                    <div>{run.aborted ? "yes" : "no"}</div>
-                    <div>{run.skip_reason ?? "—"}</div>
+                    <div>
+                      {run.finished_at
+                        ? formatDurationSeconds(run.started_at, run.finished_at)
+                        : "—"}
+                    </div>
+                    <div>
+                      <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                        {formatSkipReason(run.skip_reason)}
+                      </span>
+                    </div>
                   </div>
                 ))}
               </div>
