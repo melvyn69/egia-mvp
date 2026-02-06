@@ -574,7 +574,7 @@ const Inbox = () => {
   });
 
   const sessionUserId = sessionQuery.data?.user?.id ?? null;
-  const adminEmails = (import.meta.env.VITE_ADMIN_EMAILS ?? "")
+  const adminEmails = String(import.meta.env.VITE_ADMIN_EMAILS ?? "")
     .split(",")
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean);
