@@ -538,12 +538,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: runRow } = await (supabaseAdmin as any)
       .from("ai_run_history")
       .insert({
+        user_id: null,
         started_at: runStart,
         processed: 0,
         tags_upserted: 0,
         errors_count: 0,
         aborted: false,
-        skip_reason: null
+        skip_reason: null,
+        last_error: null,
+        meta: { requestId }
       })
       .select("id")
       .maybeSingle();
@@ -1191,7 +1194,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         tags_upserted: tagsUpserted,
         errors_count: errors.length + 1,
         aborted: false,
-        skip_reason: "fatal_error"
+        skip_reason: "fatal_error",
+        last_error: message,
+        meta: { requestId }
       }).eq("id", runId);
     }
     if (locationUserMap.size > 0) {
@@ -1224,7 +1229,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         tags_upserted: tagsUpserted,
         errors_count: errors.length,
         aborted: timeUp() || reviewsScanned >= MAX_REVIEWS,
-        skip_reason: skipReason
+        skip_reason: skipReason,
+        last_error: errors[0]?.message ?? null,
+        meta: { requestId }
       }).eq("id", runId);
     }
   }
