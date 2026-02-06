@@ -543,9 +543,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     cursor = await loadCursor();
     const locationParam = req.query?.location_id;
-    targetLocationId = Array.isArray(locationParam)
-      ? locationParam[0] ?? null
-      : locationParam ?? null;
+    const normalizeLocationId = (value: unknown): string | null => {
+      if (value === null || value === undefined) {
+        return null;
+      }
+      const raw = Array.isArray(value) ? value[0] : value;
+      if (raw === null || raw === undefined) {
+        return null;
+      }
+      let str = String(raw).trim();
+      if (!str) {
+        return null;
+      }
+      try {
+        str = decodeURIComponent(str);
+      } catch {
+        // keep raw if decode fails
+      }
+      str = str.trim();
+      if (!str || str.toLowerCase() === "all") {
+        return null;
+      }
+      return str;
+    };
+    targetLocationId = normalizeLocationId(locationParam);
     const forceParam = req.query?.force;
     force =
       forceParam === "1" || (Array.isArray(forceParam) && forceParam[0] === "1");
@@ -579,7 +600,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           force,
           debug,
           cursor_in: cursor ?? null,
-          location_id: targetLocationId
+          ...(targetLocationId ? { location_id: targetLocationId } : {})
         }
       })
       .select("id")
@@ -1250,7 +1271,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           force,
           debug,
           cursor_in: cursor ?? null,
-          location_id: targetLocationId
+          ...(targetLocationId ? { location_id: targetLocationId } : {})
         }
       }).eq("id", runId);
       runCompleted = true;
@@ -1289,8 +1310,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aborted: timeUp() || reviewsScanned >= MAX_REVIEWS,
         skip_reason: skipReason,
         last_error: errors[0]?.message ?? null,
-        meta: { request_id: requestId, location_id: targetLocationId }
+        meta: {
+          request_id: requestId,
+          ...(targetLocationId ? { location_id: targetLocationId } : {})
+        }
       }).eq("id", runId);
     }
   }
 }
+
+// Manual test plan:
+// 1) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews?location_id=%2Faccounts%2F123%2Flocations%2F456&debug=1" -H "x-cron-secret: <secret>"
+// 2) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews?location_id=all" -H "x-cron-secret: <secret>"
