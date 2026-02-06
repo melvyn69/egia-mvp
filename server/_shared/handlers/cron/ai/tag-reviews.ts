@@ -533,6 +533,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let debugEnabled = false;
   let debug: Record<string, unknown> | null = null;
   let targetLocationId: string | null = null;
+  let runMetaBase: Record<string, unknown> = { request_id: requestId };
   const errorsByLocation = new Map<string, number>();
   const processedByLocation = new Map<string, number>();
   const tagsByLocation = new Map<string, number>();
@@ -584,7 +585,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const runStart = new Date().toISOString();
     runStartMs = Date.now();
-    const runMetaBase: Record<string, unknown> = {
+    runMetaBase = {
       request_id: requestId,
       force,
       debug,
