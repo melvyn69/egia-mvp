@@ -526,6 +526,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let totalMissingInsights = 0;
   let skipReason: string | null = null;
   let runId: string | null = null;
+  let runCompleted = false;
   const errorsByLocation = new Map<string, number>();
   const processedByLocation = new Map<string, number>();
   const tagsByLocation = new Map<string, number>();
@@ -546,7 +547,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aborted: false,
         skip_reason: null,
         last_error: null,
-        meta: { requestId }
+        meta: {
+          requestId,
+          force,
+          debug,
+          cursorIn: cursor ?? null
+        }
       })
       .select("id")
       .maybeSingle();
@@ -1169,6 +1175,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (reviewsProcessed === 0 && !skipReason) {
       skipReason = "short_circuit_removed";
     }
+    if (runId) {
+      await (supabaseAdmin as any).from("ai_run_history").update({
+        finished_at: new Date().toISOString(),
+        processed: reviewsProcessed,
+        tags_upserted: tagsUpserted,
+        errors_count: errors.length,
+        aborted,
+        skip_reason: skipReason,
+        last_error: errors.length > 0 ? errors[0]?.message ?? null : null,
+        meta: {
+          requestId,
+          force,
+          debug,
+          cursorIn: cursor ?? null,
+          stats: {
+            totalWithText,
+            totalMissingInsights,
+            candidatesFound
+          }
+        }
+      }).eq("id", runId);
+      runCompleted = true;
+    }
+
     return res.status(200).json({
       ok: true,
       requestId,
@@ -1196,8 +1226,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aborted: false,
         skip_reason: "fatal_error",
         last_error: message,
-        meta: { requestId }
+        meta: {
+          requestId,
+          force,
+          debug,
+          cursorIn: cursor ?? null
+        }
       }).eq("id", runId);
+      runCompleted = true;
     }
     if (locationUserMap.size > 0) {
       const nowIso = new Date().toISOString();
@@ -1222,7 +1258,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       500
     );
   } finally {
-    if (runId) {
+    if (runId && !runCompleted) {
       await (supabaseAdmin as any).from("ai_run_history").update({
         finished_at: new Date().toISOString(),
         processed: reviewsProcessed,
