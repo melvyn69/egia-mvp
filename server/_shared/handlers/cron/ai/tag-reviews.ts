@@ -533,7 +533,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let debugEnabled = false;
   let debug: Record<string, unknown> | null = null;
   let targetLocationId: string | null = null;
-  let runMetaBase: Record<string, unknown> = { request_id: requestId };
+  let runMetaBase: Record<string, unknown> = {
+    request_id: requestId,
+    location_id: "all"
+  };
   const errorsByLocation = new Map<string, number>();
   const processedByLocation = new Map<string, number>();
   const tagsByLocation = new Map<string, number>();
@@ -568,6 +571,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return str;
     };
     targetLocationId = normalizeLocationId(locationParam);
+    const locationIdForMeta = targetLocationId ?? "all";
     const forceParam = req.query?.force;
     force =
       forceParam === "1" || (Array.isArray(forceParam) && forceParam[0] === "1");
@@ -590,7 +594,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       force,
       debug,
       cursor_in: cursor ?? null,
-      ...(targetLocationId ? { location_id: targetLocationId } : {})
+      location_id: locationIdForMeta
     };
     const { data: runRow } = await (supabaseAdmin as any)
       .from("ai_run_history")
@@ -1226,6 +1230,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         last_error: errors.length > 0 ? errors[0]?.message ?? null : null,
         meta: {
           ...runMetaBase,
+          location_id:
+            (runMetaBase.location_id as string | undefined) ?? "all",
           stats: {
             totalWithText,
             totalMissingInsights,
@@ -1265,7 +1271,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aborted: false,
         skip_reason: "fatal_error",
         last_error: message,
-        meta: runMetaBase
+        meta: {
+          ...runMetaBase,
+          location_id:
+            (runMetaBase.location_id as string | undefined) ?? "all"
+        }
       }).eq("id", runId);
       runCompleted = true;
     }
@@ -1303,7 +1313,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aborted: timeUp() || reviewsScanned >= MAX_REVIEWS,
         skip_reason: skipReason,
         last_error: errors[0]?.message ?? null,
-        meta: runMetaBase
+        meta: {
+          ...runMetaBase,
+          location_id:
+            (runMetaBase.location_id as string | undefined) ?? "all"
+        }
       }).eq("id", runId);
     }
   }
