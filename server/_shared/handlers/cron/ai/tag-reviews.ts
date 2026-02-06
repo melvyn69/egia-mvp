@@ -527,6 +527,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let skipReason: string | null = null;
   let runId: string | null = null;
   let runCompleted = false;
+  let cursor: Cursor | null = null;
+  let force = false;
+  let debugEnabled = false;
+  let debug: TagCronDebugInfo | null = null;
   const errorsByLocation = new Map<string, number>();
   const processedByLocation = new Map<string, number>();
   const tagsByLocation = new Map<string, number>();
@@ -535,6 +539,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const errorByUser = new Map<string, { code: string; message: string; jobId?: string }>();
 
   try {
+    cursor = await loadCursor();
+    const forceParam = req.query?.force;
+    force =
+      forceParam === "1" || (Array.isArray(forceParam) && forceParam[0] === "1");
+    debugEnabled =
+      req.query?.debug === "1" ||
+      (Array.isArray(req.query?.debug) && req.query?.debug[0] === "1");
+    if (debugEnabled) {
+      debug = {
+        requestId,
+        force,
+        cursor,
+        now: new Date().toISOString()
+      };
+    }
+
     const runStart = new Date().toISOString();
     const { data: runRow } = await (supabaseAdmin as any)
       .from("ai_run_history")
@@ -591,11 +611,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const cursor = await loadCursor();
     logInfo("[ai-tag]", requestId, "cursor", cursor);
-    const forceParam = req.query?.force;
-    const force =
-      forceParam === "1" || (Array.isArray(forceParam) && forceParam[0] === "1");
 
     const totalWithTextQuery = await supabaseAdmin
       .from("google_reviews")
@@ -745,36 +761,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let candidateRows = initialCandidates.rows;
     candidatesFound = candidateRows.length;
     logInfo("[ai-tag]", requestId, "candidatesFound", candidatesFound);
-
-    const debugEnabled =
-      req.query?.debug === "1" ||
-      (Array.isArray(req.query?.debug) && req.query?.debug[0] === "1");
-    let debug:
-      | {
-          cursorIn: Cursor;
-          candidatesSample: Array<{
-            id: string;
-            update_time: string | null;
-            create_time: string | null;
-            user_id: string | null;
-            location_id: string | null;
-            comment_len: number;
-          }>;
-          candidateQueryMeta: {
-            filter: string;
-            order: string;
-            limit: number;
-            force: boolean;
-            since_time: string;
-            since_id: string;
-          };
-          openaiStatus?: number;
-          openaiId?: string | null;
-          outputTextPreview?: string;
-          parsedKeys?: string[];
-          reason?: string;
-        }
-      | undefined;
 
     if (debugEnabled) {
       debug = {
