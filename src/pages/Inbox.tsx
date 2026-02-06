@@ -334,6 +334,9 @@ const formatStatusIcon = (status: ReviewCronStatus["status"]) => {
   }
 };
 
+const truncateText = (value: string, maxLength = 80) =>
+  value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
+
 const Inbox = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("new");
   const [selectedLocation, setSelectedLocation] = useState("all");
@@ -896,6 +899,7 @@ const Inbox = () => {
         status?: string | null;
         last_run_at?: string | null;
         missing_insights_count?: number | null;
+        last_error?: string | null;
       };
       return {
         updatedAt: data.updated_at ?? null,
@@ -925,24 +929,47 @@ const Inbox = () => {
     return { status, missing, lastRunAt };
   }, [aiCronStatusQuery.data, aiStatus]);
 
-  const aiStatusText = useMemo(() => {
+  const aiStatusUi = useMemo(() => {
+    const missing = aiStatusDisplay.missing ?? 0;
+    const lastError =
+      (aiCronStatusQuery.data?.value as { last_error?: string | null } | null)
+        ?.last_error ?? (aiStatus as { last_error?: string | null }).last_error;
     if (aiStatusDisplay.status === "running") {
-      return "AI analysis in progress...";
+      return {
+        label: "En cours",
+        showSpinner: true,
+        badgeClass: "bg-amber-100 text-amber-700"
+      };
     }
     if (aiStatusDisplay.status === "error") {
-      return "AI analysis error — check admin panel";
+      return {
+        label: "Erreur",
+        showSpinner: false,
+        badgeClass: "bg-rose-100 text-rose-700",
+        errorText: lastError ? truncateText(lastError) : null
+      };
     }
-    if (
-      aiStatusDisplay.status === "done" &&
-      (aiStatusDisplay.missing ?? 0) === 0
-    ) {
-      return "AI analysis complete";
+    if (aiStatusDisplay.status === "done" && missing === 0) {
+      return {
+        label: "À jour",
+        showSpinner: false,
+        badgeClass: "bg-emerald-100 text-emerald-700"
+      };
     }
-    if ((aiStatusDisplay.missing ?? 0) > 0) {
-      return `AI analysis pending (${aiStatusDisplay.missing} reviews left)`;
+    if (missing > 0) {
+      return {
+        label: "En attente",
+        showSpinner: false,
+        badgeClass: "bg-slate-100 text-slate-700",
+        countText: `${missing}`
+      };
     }
-    return "AI analysis pending";
-  }, [aiStatusDisplay]);
+    return {
+      label: "En attente",
+      showSpinner: false,
+      badgeClass: "bg-slate-100 text-slate-700"
+    };
+  }, [aiStatusDisplay, aiCronStatusQuery.data, aiStatus]);
 
   useEffect(() => {
     if (!selectedReviewId) {
@@ -1726,12 +1753,27 @@ const Inbox = () => {
           <div className="mt-3 flex items-center justify-between">
             <span>Analyse IA</span>
             <span>
-              {formatStatusIcon(aiStatusDisplay.status)} {aiStatusText}
+              <span
+                className={`inline-flex items-center gap-2 rounded-full px-2 py-0.5 text-[11px] font-semibold ${aiStatusUi.badgeClass}`}
+              >
+                {aiStatusUi.showSpinner && (
+                  <span className="inline-flex h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+                )}
+                {aiStatusUi.label}
+                {aiStatusUi.countText ? ` · ${aiStatusUi.countText}` : ""}
+              </span>
             </span>
           </div>
           <div className="mt-1 text-[11px] text-slate-500">
             Dernière analyse :{" "}
-            {formatSinceMinutes(aiStatusDisplay.lastRunAt ?? null)}
+            {aiStatusDisplay.lastRunAt
+              ? formatSinceMinutes(aiStatusDisplay.lastRunAt)
+              : "Jamais"}
+          </div>
+          {aiStatusUi.errorText && (
+            <div className="mt-1 text-[11px] text-rose-600">
+              {aiStatusUi.errorText}
+            </div>
           </div>
         </div>
         {import.meta.env.DEV && (

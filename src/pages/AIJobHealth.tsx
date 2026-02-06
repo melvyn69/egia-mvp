@@ -25,6 +25,7 @@ type RunRow = {
   id: string;
   started_at: string | null;
   finished_at: string | null;
+  duration_ms?: number | null;
   processed: number | null;
   tags_upserted: number | null;
   errors_count: number | null;
@@ -58,8 +59,12 @@ const formatTimestamp = (value?: string | null) => {
 
 const formatDurationSeconds = (
   startedAt?: string | null,
-  finishedAt?: string | null
+  finishedAt?: string | null,
+  durationMs?: number | null
 ) => {
+  if (typeof durationMs === "number" && Number.isFinite(durationMs)) {
+    return `${Math.round(durationMs / 1000)}s`;
+  }
   if (!startedAt || !finishedAt) return "—";
   const start = new Date(startedAt).getTime();
   const end = new Date(finishedAt).getTime();
@@ -85,6 +90,13 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
   const [error, setError] = useState<string | null>(null);
   const [runLoading, setRunLoading] = useState(false);
   const [runMessage, setRunMessage] = useState<string | null>(null);
+  const [runResult, setRunResult] = useState<{
+    ok?: boolean;
+    processed?: number;
+    tagsUpserted?: number;
+    errors?: number;
+    skipReason?: string | null;
+  } | null>(null);
   const [showErrorsOnly, setShowErrorsOnly] = useState(false);
   const [showRecentOnly, setShowRecentOnly] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -107,12 +119,12 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
 
     const sbAny = supabaseClient as unknown as any;
     const { data: runRows } = await sbAny
-      .from("ai_run_history")
-      .select(
-        "id, started_at, finished_at, processed, tags_upserted, errors_count, aborted, skip_reason"
-      )
-      .order("started_at", { ascending: false })
-      .limit(50);
+        .from("ai_run_history")
+        .select(
+          "id, started_at, finished_at, duration_ms, processed, tags_upserted, errors_count, aborted, skip_reason"
+        )
+        .order("started_at", { ascending: false })
+        .limit(50);
 
     if (locationsError || cronError) {
       setError(
@@ -145,20 +157,34 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
     if (!session || runLoading) return;
     setRunLoading(true);
     setRunMessage(null);
+    setRunResult(null);
     const token = session.access_token;
     try {
       const res = await fetch("/api/cron/ai/tag-reviews", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (!res.ok) {
-        setRunMessage("Impossible de lancer l’analyse.");
-      } else {
-        setRunMessage("AI analysis started");
-        window.setTimeout(() => {
-          window.location.reload();
-        }, 5000);
+      if (res.status === 401 || res.status === 403) {
+        setRunMessage("Accès refusé (admin requis)");
+        return;
       }
+      if (!res.ok) {
+        setRunMessage(`Erreur: ${res.status}`);
+        return;
+      }
+      const payload = await res.json().catch(() => null);
+      setRunResult({
+        ok: payload?.ok ?? true,
+        processed: payload?.stats?.reviewsProcessed ?? payload?.processed ?? 0,
+        tagsUpserted: payload?.stats?.tagsUpserted ?? payload?.tagsUpserted ?? 0,
+        errors: payload?.stats?.errors?.length ?? payload?.errors ?? 0,
+        skipReason: payload?.skipReason ?? null
+      });
+      setRunMessage("Analyse lancée");
+      await load();
+      window.setTimeout(() => {
+        setRefreshTick((value) => value + 1);
+      }, 5000);
     } catch {
       setRunMessage("Erreur réseau.");
     } finally {
@@ -261,6 +287,15 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
         {runMessage && (
           <p className="mt-2 text-sm text-slate-600">{runMessage}</p>
         )}
+        {runResult && (
+          <div className="mt-2 text-xs text-slate-500">
+            {runResult.ok ? "OK" : "Échec"} •{" "}
+            {runResult.processed ?? 0} traités •{" "}
+            {runResult.tagsUpserted ?? 0} tags •{" "}
+            {runResult.errors ?? 0} erreurs
+            {runResult.skipReason ? ` • ${runResult.skipReason}` : ""}
+          </div>
+        )}
         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-600">
           <label className="flex items-center gap-2">
             <input
@@ -343,9 +378,11 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
                     <div>{run.tags_upserted ?? 0}</div>
                     <div>{run.errors_count ?? 0}</div>
                     <div>
-                      {run.finished_at
-                        ? formatDurationSeconds(run.started_at, run.finished_at)
-                        : "—"}
+                      {formatDurationSeconds(
+                        run.started_at,
+                        run.finished_at,
+                        run.duration_ms ?? null
+                      )}
                     </div>
                     <div>
                       <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">

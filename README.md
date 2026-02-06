@@ -78,6 +78,12 @@ Champs typiques :
 Stocke brouillons et réponses envoyées.
 - `review_id` (référence `google_reviews.id`)
 - `reply_text`
+
+---
+
+## Maintenance
+- `npm run clean:weirdfiles -- --dry-run` (prévisualise les fichiers “-X/-H” à la racine)
+- `npm run clean:weirdfiles` (supprime ces fichiers à la racine)
 - `status`: `draft | sent`
 - `created_at`, `sent_at`
 
@@ -175,4 +181,3 @@ Objectif : stabilité fonctionnelle et surface API minimale
 team_members.first_name stocke le nom complet
 last_name volontairement non utilisé (colonne absente)
 Endpoint unique /api/settings pour limiter les fonctions Vercel et garder un contrat stable
-

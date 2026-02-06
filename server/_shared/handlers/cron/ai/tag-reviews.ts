@@ -556,6 +556,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const runStart = new Date().toISOString();
+    const runStartMs = Date.now();
     const { data: runRow } = await (supabaseAdmin as any)
       .from("ai_run_history")
       .insert({
@@ -568,10 +569,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         skip_reason: null,
         last_error: null,
         meta: {
-          requestId,
+          request_id: requestId,
           force,
           debug,
-          cursorIn: cursor ?? null
+          cursor_in: cursor ?? null
         }
       })
       .select("id")
@@ -1162,8 +1163,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       skipReason = "short_circuit_removed";
     }
     if (runId) {
+      const finishedAt = new Date().toISOString();
       await (supabaseAdmin as any).from("ai_run_history").update({
-        finished_at: new Date().toISOString(),
+        finished_at: finishedAt,
+        duration_ms: Date.now() - runStartMs,
         processed: reviewsProcessed,
         tags_upserted: tagsUpserted,
         errors_count: errors.length,
@@ -1171,10 +1174,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         skip_reason: skipReason,
         last_error: errors.length > 0 ? errors[0]?.message ?? null : null,
         meta: {
-          requestId,
+          request_id: requestId,
           force,
           debug,
-          cursorIn: cursor ?? null,
+          cursor_in: cursor ?? null,
           stats: {
             totalWithText,
             totalMissingInsights,
@@ -1204,8 +1207,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error("[ai]", requestId, "fatal error", message);
     if (runId) {
+      const finishedAt = new Date().toISOString();
       await (supabaseAdmin as any).from("ai_run_history").update({
-        finished_at: new Date().toISOString(),
+        finished_at: finishedAt,
+        duration_ms: Date.now() - runStartMs,
         processed: reviewsProcessed,
         tags_upserted: tagsUpserted,
         errors_count: errors.length + 1,
@@ -1213,10 +1218,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         skip_reason: "fatal_error",
         last_error: message,
         meta: {
-          requestId,
+          request_id: requestId,
           force,
           debug,
-          cursorIn: cursor ?? null
+          cursor_in: cursor ?? null
         }
       }).eq("id", runId);
       runCompleted = true;
@@ -1245,15 +1250,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
   } finally {
     if (runId && !runCompleted) {
+      const finishedAt = new Date().toISOString();
       await (supabaseAdmin as any).from("ai_run_history").update({
-        finished_at: new Date().toISOString(),
+        finished_at: finishedAt,
+        duration_ms: Date.now() - runStartMs,
         processed: reviewsProcessed,
         tags_upserted: tagsUpserted,
         errors_count: errors.length,
         aborted: timeUp() || reviewsScanned >= MAX_REVIEWS,
         skip_reason: skipReason,
         last_error: errors[0]?.message ?? null,
-        meta: { requestId }
+        meta: { request_id: requestId }
       }).eq("id", runId);
     }
   }

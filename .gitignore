@@ -25,4 +25,5 @@ dist-ssr
 .vercel
 message
 server/_shared_dist/
+/-*
 server/_shared_dist__bak/
