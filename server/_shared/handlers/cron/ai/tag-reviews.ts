@@ -527,6 +527,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let skipReason: string | null = null;
   let runId: string | null = null;
   let runCompleted = false;
+  let runStartMs = 0;
   let cursor: Cursor | null = null;
   let force = false;
   let debugEnabled = false;
@@ -556,7 +557,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const runStart = new Date().toISOString();
-    const runStartMs = Date.now();
+    runStartMs = Date.now();
     const { data: runRow } = await (supabaseAdmin as any)
       .from("ai_run_history")
       .insert({

@@ -1774,7 +1774,7 @@ const Inbox = () => {
             <div className="mt-1 text-[11px] text-rose-600">
               {aiStatusUi.errorText}
             </div>
-          </div>
+          )}
         </div>
         {import.meta.env.DEV && (
           <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
@@ -1800,7 +1800,7 @@ const Inbox = () => {
                 >
                   {tab.label}
                 </Button>
-                ))}
+              ))}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button
