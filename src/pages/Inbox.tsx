@@ -401,6 +401,12 @@ const Inbox = () => {
     errors?: number;
     skipReason?: string | null;
   } | null>(null);
+  const [aiRunLocationLoading, setAiRunLocationLoading] = useState<string | null>(
+    null
+  );
+  const [aiRunLocationResult, setAiRunLocationResult] = useState<
+    Record<string, string>
+  >({});
   const queryClient = useQueryClient();
 
   const isSupabaseAvailable = Boolean(supabase);
@@ -1028,6 +1034,51 @@ const Inbox = () => {
       setAiRunMessage("Erreur réseau.");
     } finally {
       setAiRunLoading(false);
+    }
+  };
+
+  const handleRunAiForSpecificLocation = async (locationId: string) => {
+    if (!supabase || !locationId || aiRunLocationLoading) {
+      return;
+    }
+    setAiRunLocationLoading(locationId);
+    setAiRunLocationResult((prev) => ({ ...prev, [locationId]: "" }));
+    try {
+      const token = await getAccessToken(supabase);
+      const response = await fetch(
+        `/api/cron/ai/tag-reviews?force=1&location_id=${encodeURIComponent(locationId)}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setAiRunLocationResult((prev) => ({
+          ...prev,
+          [locationId]: `Erreur: ${response.status}`
+        }));
+        return;
+      }
+      const processed =
+        payload?.stats?.reviewsProcessed ?? payload?.processed ?? 0;
+      const tags = payload?.stats?.tagsUpserted ?? payload?.tagsUpserted ?? 0;
+      const errorsCount = payload?.stats?.errors?.length ?? payload?.errors ?? 0;
+      const skip = payload?.skipReason ?? null;
+      const msg = `OK • ${processed} traités • ${tags} tags • ${errorsCount} erreurs${
+        skip ? ` • ${skip}` : ""
+      }`;
+      setAiRunLocationResult((prev) => ({ ...prev, [locationId]: msg }));
+      await queryClient.invalidateQueries({
+        queryKey: ["inbox-ai-cron-status", sessionUserId, locationId]
+      });
+    } catch {
+      setAiRunLocationResult((prev) => ({
+        ...prev,
+        [locationId]: "Erreur réseau."
+      }));
+    } finally {
+      setAiRunLocationLoading(null);
     }
   };
 
@@ -1915,6 +1966,38 @@ const Inbox = () => {
                   </option>
                 ))}
               </select>
+              {isAdmin && locationOptions.length > 0 && (
+                <div className="mt-3 space-y-2 text-xs text-slate-600">
+                  {locationOptions.map((location) => (
+                    <div
+                      key={location.id}
+                      className="flex flex-wrap items-center justify-between gap-2"
+                    >
+                      <span className="font-medium">{location.label}</span>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={aiRunLocationLoading === location.id}
+                          onClick={() =>
+                            handleRunAiForSpecificLocation(location.id)
+                          }
+                        >
+                          {aiRunLocationLoading === location.id
+                            ? "Lancement..."
+                            : "Lancer analyse IA (ce lieu)"}
+                        </Button>
+                      </div>
+                      {aiRunLocationResult[location.id] && (
+                        <span className="w-full text-[11px] text-slate-500">
+                          {aiRunLocationResult[location.id]}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <label className="text-xs font-semibold text-slate-500">
