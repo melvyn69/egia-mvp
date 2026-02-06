@@ -393,6 +393,14 @@ const Inbox = () => {
   const [aiStatus, setAiStatus] = useState<ReviewCronStatus>({
     status: "idle"
   });
+  const [aiRunLoading, setAiRunLoading] = useState(false);
+  const [aiRunMessage, setAiRunMessage] = useState<string | null>(null);
+  const [aiRunStats, setAiRunStats] = useState<{
+    processed?: number;
+    tagsUpserted?: number;
+    errors?: number;
+    skipReason?: string | null;
+  } | null>(null);
   const queryClient = useQueryClient();
 
   const isSupabaseAvailable = Boolean(supabase);
@@ -566,6 +574,14 @@ const Inbox = () => {
   });
 
   const sessionUserId = sessionQuery.data?.user?.id ?? null;
+  const adminEmails = (import.meta.env.VITE_ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  const isAdmin =
+    adminEmails.length > 0 &&
+    Boolean(sessionQuery.data?.user?.email) &&
+    adminEmails.includes(String(sessionQuery.data?.user?.email).toLowerCase());
 
   const locationsQuery = useQuery({
     queryKey: ["inbox-locations", sessionUserId],
@@ -970,6 +986,50 @@ const Inbox = () => {
       badgeClass: "bg-slate-100 text-slate-700"
     };
   }, [aiStatusDisplay, aiCronStatusQuery.data, aiStatus]);
+
+  const handleRunAiForLocation = async () => {
+    if (!supabase || !activeLocationId || aiRunLoading) {
+      return;
+    }
+    setAiRunLoading(true);
+    setAiRunMessage(null);
+    setAiRunStats(null);
+    try {
+      const token = await getAccessToken(supabase);
+      const response = await fetch(
+        `/api/cron/ai/tag-reviews?location_id=${encodeURIComponent(activeLocationId)}`,
+        { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (response.status === 401 || response.status === 403) {
+        setAiRunMessage("Accès refusé (admin requis)");
+        return;
+      }
+      if (!response.ok) {
+        setAiRunMessage(`Erreur: ${response.status}`);
+        return;
+      }
+      const payload = await response.json().catch(() => null);
+      setAiRunStats({
+        processed: payload?.stats?.reviewsProcessed ?? 0,
+        tagsUpserted: payload?.stats?.tagsUpserted ?? 0,
+        errors: payload?.stats?.errors?.length ?? 0,
+        skipReason: payload?.skipReason ?? null
+      });
+      setAiRunMessage("Analyse IA lancée");
+      queryClient.invalidateQueries({
+        queryKey: ["inbox-ai-cron-status", sessionUserId, activeLocationId]
+      });
+      window.setTimeout(() => {
+        queryClient.invalidateQueries({
+          queryKey: ["inbox-ai-cron-status", sessionUserId, activeLocationId]
+        });
+      }, 5000);
+    } catch {
+      setAiRunMessage("Erreur réseau.");
+    } finally {
+      setAiRunLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!selectedReviewId) {
@@ -1773,6 +1833,28 @@ const Inbox = () => {
           {aiStatusUi.errorText && (
             <div className="mt-1 text-[11px] text-rose-600">
               {aiStatusUi.errorText}
+            </div>
+          )}
+          {isAdmin && activeLocationId && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleRunAiForLocation}
+                disabled={aiRunLoading}
+              >
+                {aiRunLoading ? "Lancement..." : "Lancer analyse IA"}
+              </Button>
+              {aiRunMessage && <span>{aiRunMessage}</span>}
+              {aiRunStats && (
+                <span>
+                  {aiRunStats.processed ?? 0} traités •{" "}
+                  {aiRunStats.tagsUpserted ?? 0} tags •{" "}
+                  {aiRunStats.errors ?? 0} erreurs
+                  {aiRunStats.skipReason ? ` • ${aiRunStats.skipReason}` : ""}
+                </span>
+              )}
             </div>
           )}
         </div>

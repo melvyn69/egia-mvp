@@ -532,6 +532,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let force = false;
   let debugEnabled = false;
   let debug: Record<string, unknown> | null = null;
+  let targetLocationId: string | null = null;
   const errorsByLocation = new Map<string, number>();
   const processedByLocation = new Map<string, number>();
   const tagsByLocation = new Map<string, number>();
@@ -541,6 +542,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     cursor = await loadCursor();
+    const locationParam = req.query?.location_id;
+    targetLocationId = Array.isArray(locationParam)
+      ? locationParam[0] ?? null
+      : locationParam ?? null;
     const forceParam = req.query?.force;
     force =
       forceParam === "1" || (Array.isArray(forceParam) && forceParam[0] === "1");
@@ -573,7 +578,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           request_id: requestId,
           force,
           debug,
-          cursor_in: cursor ?? null
+          cursor_in: cursor ?? null,
+          location_id: targetLocationId
         }
       })
       .select("id")
@@ -615,18 +621,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     logInfo("[ai-tag]", requestId, "cursor", cursor);
 
-    const totalWithTextQuery = await supabaseAdmin
+    let totalWithTextQuery = supabaseAdmin
       .from("google_reviews")
       .select("id", { count: "exact", head: true })
       .not("comment", "is", null)
       .neq("comment", "");
-    totalWithText = totalWithTextQuery.count ?? 0;
-    const backlogBase = await supabaseAdmin
+    if (targetLocationId) {
+      totalWithTextQuery = totalWithTextQuery.eq("location_id", targetLocationId);
+    }
+    const totalWithTextQueryResult = await totalWithTextQuery;
+    totalWithText = totalWithTextQueryResult.count ?? 0;
+    let backlogBase = supabaseAdmin
       .from("google_reviews")
       .select("id", { count: "exact", head: true })
       .not("comment", "is", null)
       .neq("comment", "");
-    const totalWithTextGlobal = backlogBase.count ?? 0;
+    if (targetLocationId) {
+      backlogBase = backlogBase.eq("location_id", targetLocationId);
+    }
+    const backlogBaseResult = await backlogBase;
+    const totalWithTextGlobal = backlogBaseResult.count ?? 0;
     const { data: backlogInsightRows } = await supabaseAdmin
       .from("review_ai_insights")
       .select("review_pk, error, processed_at");
@@ -646,13 +660,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       totalWithTextGlobal - insightOk.size
     );
 
-    const { data: textLocations } = await supabaseAdmin
+    let textLocationsQuery = supabaseAdmin
       .from("google_reviews")
       .select("user_id, location_id")
       .not("comment", "is", null)
       .neq("comment", "")
       .not("location_id", "is", null)
       .limit(2000);
+    if (targetLocationId) {
+      textLocationsQuery = textLocationsQuery.eq("location_id", targetLocationId);
+    }
+    const { data: textLocations } = await textLocationsQuery;
     (textLocations ?? []).forEach((row) => {
       if (row.user_id && row.location_id) {
         locationUserMap.set(String(row.location_id), String(row.user_id));
@@ -684,22 +702,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       for (let page = 0; page < maxPages && collected.length < target; page += 1) {
         const from = page * pageSize;
         const to = from + pageSize - 1;
+        let candidatesQuery = supabaseAdmin
+          .from("google_reviews")
+          .select(
+            "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
+          )
+          .not("comment", "is", null)
+          .neq("comment", "")
+          .not("review_id", "is", null)
+          .neq("review_id", "")
+          .not("location_id", "is", null)
+          .not("user_id", "is", null)
+          .order("update_time", { ascending: true, nullsFirst: false })
+          .order("create_time", { ascending: true, nullsFirst: false })
+          .order("created_at", { ascending: true, nullsFirst: false })
+          .range(from, to);
+        if (targetLocationId) {
+          candidatesQuery = candidatesQuery.eq("location_id", targetLocationId);
+        }
         const { data: candidateSource, error: candidatesError } =
-          await supabaseAdmin
-            .from("google_reviews")
-            .select(
-              "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
-            )
-            .not("comment", "is", null)
-            .neq("comment", "")
-            .not("review_id", "is", null)
-            .neq("review_id", "")
-            .not("location_id", "is", null)
-            .not("user_id", "is", null)
-            .order("update_time", { ascending: true, nullsFirst: false })
-            .order("create_time", { ascending: true, nullsFirst: false })
-            .order("created_at", { ascending: true, nullsFirst: false })
-            .range(from, to);
+          await candidatesQuery;
 
         if (candidatesError) {
           console.error(
@@ -782,7 +804,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           limit: MAX_REVIEWS,
           force,
           since_time: lastSourceTime,
-          since_id: lastReviewPk
+          since_id: lastReviewPk,
+          location_id: targetLocationId ?? "all"
         }
       };
     }
@@ -800,12 +823,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const locationStats = new Map<string, { missingInsights: number }>();
     let totalMissing = 0;
     if (locationIds.length > 0) {
-      const { data: textRows } = await supabaseAdmin
+      let textRowsQuery = supabaseAdmin
         .from("google_reviews")
         .select("id, location_id, comment")
         .in("location_id", locationIds)
         .not("comment", "is", null)
         .neq("comment", "");
+      if (targetLocationId) {
+        textRowsQuery = textRowsQuery.eq("location_id", targetLocationId);
+      }
+      const { data: textRows } = await textRowsQuery;
       const reviewPks = (textRows ?? [])
         .map((row) => String((row as { id?: string | null }).id ?? ""))
         .filter((id) => id.length > 0);
@@ -1222,7 +1249,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           request_id: requestId,
           force,
           debug,
-          cursor_in: cursor ?? null
+          cursor_in: cursor ?? null,
+          location_id: targetLocationId
         }
       }).eq("id", runId);
       runCompleted = true;
@@ -1261,7 +1289,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aborted: timeUp() || reviewsScanned >= MAX_REVIEWS,
         skip_reason: skipReason,
         last_error: errors[0]?.message ?? null,
-        meta: { request_id: requestId }
+        meta: { request_id: requestId, location_id: targetLocationId }
       }).eq("id", runId);
     }
   }

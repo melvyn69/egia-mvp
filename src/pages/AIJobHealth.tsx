@@ -31,6 +31,7 @@ type RunRow = {
   errors_count: number | null;
   aborted: boolean | null;
   skip_reason: string | null;
+  meta?: { location_id?: string | null } | null;
 };
 
 type StatusValue = {
@@ -97,6 +98,12 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
     errors?: number;
     skipReason?: string | null;
   } | null>(null);
+  const [runLocationLoading, setRunLocationLoading] = useState<string | null>(
+    null
+  );
+  const [runLocationMessage, setRunLocationMessage] = useState<
+    Record<string, string>
+  >({});
   const [showErrorsOnly, setShowErrorsOnly] = useState(false);
   const [showRecentOnly, setShowRecentOnly] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -121,7 +128,7 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
     const { data: runRows } = await sbAny
         .from("ai_run_history")
         .select(
-          "id, started_at, finished_at, duration_ms, processed, tags_upserted, errors_count, aborted, skip_reason"
+          "id, started_at, finished_at, duration_ms, processed, tags_upserted, errors_count, aborted, skip_reason, meta"
         )
         .order("started_at", { ascending: false })
         .limit(50);
@@ -189,6 +196,53 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
       setRunMessage("Erreur réseau.");
     } finally {
       setRunLoading(false);
+    }
+  };
+
+  const triggerRunForLocation = async (locationId: string) => {
+    if (!session || runLocationLoading) return;
+    setRunLocationLoading(locationId);
+    setRunLocationMessage((prev) => ({ ...prev, [locationId]: "" }));
+    const token = session.access_token;
+    try {
+      const res = await fetch(
+        `/api/cron/ai/tag-reviews?location_id=${encodeURIComponent(locationId)}`,
+        { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.status === 401 || res.status === 403) {
+        setRunLocationMessage((prev) => ({
+          ...prev,
+          [locationId]: "Accès refusé (admin requis)"
+        }));
+        return;
+      }
+      if (!res.ok) {
+        setRunLocationMessage((prev) => ({
+          ...prev,
+          [locationId]: `Erreur: ${res.status}`
+        }));
+        return;
+      }
+      const payload = await res.json().catch(() => null);
+      const processed = payload?.stats?.reviewsProcessed ?? payload?.processed ?? 0;
+      const tags = payload?.stats?.tagsUpserted ?? payload?.tagsUpserted ?? 0;
+      const errorsCount = payload?.stats?.errors?.length ?? payload?.errors ?? 0;
+      const skip = payload?.skipReason ?? null;
+      const msg = `OK • ${processed} traités • ${tags} tags • ${errorsCount} erreurs${
+        skip ? ` • ${skip}` : ""
+      }`;
+      setRunLocationMessage((prev) => ({ ...prev, [locationId]: msg }));
+      await load();
+      window.setTimeout(() => {
+        setRefreshTick((value) => value + 1);
+      }, 5000);
+    } catch {
+      setRunLocationMessage((prev) => ({
+        ...prev,
+        [locationId]: "Erreur réseau."
+      }));
+    } finally {
+      setRunLocationLoading(null);
     }
   };
 
@@ -352,6 +406,23 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
                       Dernière erreur : {item.lastError}
                     </div>
                   )}
+                  <div className="pt-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={runLocationLoading === item.locationId}
+                      onClick={() => triggerRunForLocation(item.locationId)}
+                    >
+                      {runLocationLoading === item.locationId
+                        ? "Lancement..."
+                        : "Run (location)"}
+                    </Button>
+                  </div>
+                  {runLocationMessage[item.locationId] && (
+                    <div className="text-xs text-slate-500">
+                      {runLocationMessage[item.locationId]}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))}
@@ -362,8 +433,9 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
               <CardTitle>Last 5 AI Runs</CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-slate-600">
-              <div className="grid grid-cols-6 gap-2 border-b border-slate-200 pb-2 text-xs font-semibold uppercase text-slate-500">
+              <div className="grid grid-cols-7 gap-2 border-b border-slate-200 pb-2 text-xs font-semibold uppercase text-slate-500">
                 <div>Time</div>
+                <div>Location</div>
                 <div>Processed</div>
                 <div>Tags</div>
                 <div>Errors</div>
@@ -372,8 +444,9 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
               </div>
               <div className="divide-y divide-slate-100">
                 {filteredRuns.map((run) => (
-                  <div key={run.id} className="grid grid-cols-6 gap-2 py-2">
+                  <div key={run.id} className="grid grid-cols-7 gap-2 py-2">
                     <div>{formatTimestamp(run.started_at)}</div>
+                    <div>{run.meta?.location_id ?? "—"}</div>
                     <div>{run.processed ?? 0}</div>
                     <div>{run.tags_upserted ?? 0}</div>
                     <div>{run.errors_count ?? 0}</div>
