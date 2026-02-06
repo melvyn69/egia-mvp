@@ -584,6 +584,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const runStart = new Date().toISOString();
     runStartMs = Date.now();
+    const runMetaBase: Record<string, unknown> = {
+      request_id: requestId,
+      force,
+      debug,
+      cursor_in: cursor ?? null,
+      ...(targetLocationId ? { location_id: targetLocationId } : {})
+    };
     const { data: runRow } = await (supabaseAdmin as any)
       .from("ai_run_history")
       .insert({
@@ -595,13 +602,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aborted: false,
         skip_reason: null,
         last_error: null,
-        meta: {
-          request_id: requestId,
-          force,
-          debug,
-          cursor_in: cursor ?? null,
-          ...(targetLocationId ? { location_id: targetLocationId } : {})
-        }
+        meta: runMetaBase
       })
       .select("id")
       .maybeSingle();
@@ -1223,10 +1224,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         skip_reason: skipReason,
         last_error: errors.length > 0 ? errors[0]?.message ?? null : null,
         meta: {
-          request_id: requestId,
-          force,
-          debug,
-          cursor_in: cursor ?? null,
+          ...runMetaBase,
           stats: {
             totalWithText,
             totalMissingInsights,
@@ -1266,13 +1264,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aborted: false,
         skip_reason: "fatal_error",
         last_error: message,
-        meta: {
-          request_id: requestId,
-          force,
-          debug,
-          cursor_in: cursor ?? null,
-          ...(targetLocationId ? { location_id: targetLocationId } : {})
-        }
+        meta: runMetaBase
       }).eq("id", runId);
       runCompleted = true;
     }
@@ -1310,14 +1302,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aborted: timeUp() || reviewsScanned >= MAX_REVIEWS,
         skip_reason: skipReason,
         last_error: errors[0]?.message ?? null,
-        meta: {
-          request_id: requestId,
-          ...(targetLocationId ? { location_id: targetLocationId } : {})
-        }
+        meta: runMetaBase
       }).eq("id", runId);
     }
   }
 }
+
+// SQL check:
+// select started_at, meta->>'location_id' from public.ai_run_history
+// where meta->>'location_id' is not null order by started_at desc limit 20;
 
 // Manual test plan:
 // 1) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews?location_id=%2Faccounts%2F123%2Flocations%2F456&debug=1" -H "x-cron-secret: <secret>"
