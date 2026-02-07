@@ -993,7 +993,10 @@ const Inbox = () => {
     };
   }, [aiStatusDisplay, aiCronStatusQuery.data, aiStatus]);
 
-  const handleRunAiForLocation = async () => {
+  const handleRunAiForLocation = async (
+    mode?: "recent" | "retry_errors",
+    limit?: number
+  ) => {
     if (!supabase || !activeLocationId || aiRunLoading) {
       return;
     }
@@ -1002,8 +1005,17 @@ const Inbox = () => {
     setAiRunStats(null);
     try {
       const token = await getAccessToken(supabase);
+      const params = new URLSearchParams({
+        location_id: activeLocationId
+      });
+      if (mode) {
+        params.set("mode", mode);
+      }
+      if (typeof limit === "number" && Number.isFinite(limit)) {
+        params.set("limit", String(Math.max(1, Math.floor(limit))));
+      }
       const response = await fetch(
-        `/api/cron/ai/tag-reviews?location_id=${encodeURIComponent(activeLocationId)}`,
+        `/api/cron/ai/tag-reviews?${params.toString()}`,
         { method: "POST", headers: { Authorization: `Bearer ${token}` } }
       );
       if (response.status === 401 || response.status === 403) {
@@ -1888,15 +1900,38 @@ const Inbox = () => {
           )}
           {isAdmin && activeLocationId && (
             <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handleRunAiForLocation}
-                disabled={aiRunLoading}
-              >
-                {aiRunLoading ? "Lancement..." : "Lancer analyse IA"}
-              </Button>
+              {aiStatusDisplay.missing === 0 ? (
+                <>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleRunAiForLocation("recent", 20)}
+                    disabled={aiRunLoading}
+                  >
+                    {aiRunLoading ? "Lancement..." : "Ré-analyser les 20 derniers avis"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleRunAiForLocation("retry_errors", 50)}
+                    disabled={aiRunLoading}
+                  >
+                    {aiRunLoading ? "Lancement..." : "Ré-analyser avis en erreur"}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleRunAiForLocation()}
+                  disabled={aiRunLoading}
+                >
+                  {aiRunLoading ? "Lancement..." : "Lancer analyse IA"}
+                </Button>
+              )}
               {aiRunMessage && <span>{aiRunMessage}</span>}
               {aiRunStats && (
                 <span>

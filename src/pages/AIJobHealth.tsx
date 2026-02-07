@@ -31,7 +31,7 @@ type RunRow = {
   errors_count: number | null;
   aborted: boolean | null;
   skip_reason: string | null;
-  meta?: { location_id?: string | null } | null;
+  meta?: { location_id?: string | null; debug?: unknown } | null;
 };
 
 type StatusValue = {
@@ -106,6 +106,11 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
   >({});
   const [showErrorsOnly, setShowErrorsOnly] = useState(false);
   const [showRecentOnly, setShowRecentOnly] = useState(false);
+  const [runsFilter, setRunsFilter] = useState<"all" | "location" | "errors">(
+    "all"
+  );
+  const [selectedRun, setSelectedRun] = useState<RunRow | null>(null);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
 
   const load = useCallback(async () => {
@@ -248,7 +253,25 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
 
   const locationById = useMemo(() => {
     const map = new Map<string, LocationRow>();
-    locations.forEach((loc) => map.set(loc.id, loc));
+    locations.forEach((loc) => {
+      map.set(loc.id, loc);
+      if (loc.location_resource_name) {
+        map.set(loc.location_resource_name, loc);
+      }
+    });
+    return map;
+  }, [locations]);
+
+  const locationLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    locations.forEach((loc) => {
+      const label =
+        loc.location_title ?? loc.location_resource_name ?? loc.id;
+      map.set(loc.id, label);
+      if (loc.location_resource_name) {
+        map.set(loc.location_resource_name, label);
+      }
+    });
     return map;
   }, [locations]);
 
@@ -300,19 +323,39 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
 
   const filteredRuns = useMemo(() => {
     const now = Date.now();
-    return runs.filter((run) => {
-      if (showErrorsOnly && (run.errors_count ?? 0) === 0) {
-        return false;
-      }
-      if (showRecentOnly) {
-        const ts = run.started_at ? new Date(run.started_at).getTime() : 0;
-        if (!ts || now - ts > 24 * 60 * 60 * 1000) {
+    return runs
+      .filter((run) => {
+        if (runsFilter === "errors" && (run.errors_count ?? 0) === 0) {
           return false;
         }
-      }
-      return true;
-    });
-  }, [runs, showErrorsOnly, showRecentOnly]);
+        if (runsFilter === "location" && !run.meta?.location_id) {
+          return false;
+        }
+        if (showErrorsOnly && (run.errors_count ?? 0) === 0) {
+          return false;
+        }
+        if (showRecentOnly) {
+          const ts = run.started_at ? new Date(run.started_at).getTime() : 0;
+          if (!ts || now - ts > 24 * 60 * 60 * 1000) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .slice(0, 20);
+  }, [runs, runsFilter, showErrorsOnly, showRecentOnly]);
+
+  const handleCopyMeta = async (meta?: RunRow["meta"]) => {
+    if (!meta) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(meta, null, 2));
+      setCopyStatus("Copié");
+      window.setTimeout(() => setCopyStatus(null), 1500);
+    } catch {
+      setCopyStatus("Échec");
+      window.setTimeout(() => setCopyStatus(null), 1500);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -369,6 +412,22 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
             />
             Afficher seulement runs récents (24h)
           </label>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold uppercase text-slate-400">
+              Filtre runs
+            </span>
+            <select
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+              value={runsFilter}
+              onChange={(event) =>
+                setRunsFilter(event.target.value as typeof runsFilter)
+              }
+            >
+              <option value="all">Tous</option>
+              <option value="location">Par location</option>
+              <option value="errors">Erreurs only</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -430,9 +489,14 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
 
           <Card>
             <CardHeader>
-              <CardTitle>Last 5 AI Runs</CardTitle>
+              <CardTitle>Last 20 AI Runs</CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-slate-600">
+              {filteredRuns.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">
+                  Aucun run enregistré.
+                </div>
+              ) : (
               <div className="grid grid-cols-7 gap-2 border-b border-slate-200 pb-2 text-xs font-semibold uppercase text-slate-500">
                 <div>Time</div>
                 <div>Location</div>
@@ -444,9 +508,19 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
               </div>
               <div className="divide-y divide-slate-100">
                 {filteredRuns.map((run) => (
-                  <div key={run.id} className="grid grid-cols-7 gap-2 py-2">
+                  <button
+                    type="button"
+                    key={run.id}
+                    onClick={() => setSelectedRun(run)}
+                    className="grid w-full grid-cols-7 gap-2 py-2 text-left hover:bg-slate-50"
+                  >
                     <div>{formatTimestamp(run.started_at)}</div>
-                    <div>{run.meta?.location_id ?? "—"}</div>
+                    <div>
+                      {run.meta?.location_id
+                        ? locationLabelById.get(run.meta.location_id) ??
+                          run.meta.location_id
+                        : "—"}
+                    </div>
                     <div>{run.processed ?? 0}</div>
                     <div>{run.tags_upserted ?? 0}</div>
                     <div>{run.errors_count ?? 0}</div>
@@ -462,11 +536,66 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
                         {formatSkipReason(run.skip_reason)}
                       </span>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
+              )}
             </CardContent>
           </Card>
+        </div>
+      )}
+      {selectedRun && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-slate-900">
+                Run details
+              </h3>
+              <Button variant="outline" size="sm" onClick={() => setSelectedRun(null)}>
+                Fermer
+              </Button>
+            </div>
+            <div className="mt-3 space-y-2 text-sm text-slate-700">
+              <div>
+                <span className="font-semibold">Location:</span>{" "}
+                {selectedRun.meta?.location_id
+                  ? locationLabelById.get(selectedRun.meta.location_id) ??
+                    selectedRun.meta.location_id
+                  : "all"}
+                <span className="ml-2 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                  {selectedRun.meta?.location_id ? "specific" : "all"}
+                </span>
+              </div>
+              <div>
+                <span className="font-semibold">Last error:</span>{" "}
+                {selectedRun.skip_reason
+                  ? `${formatSkipReason(selectedRun.skip_reason)}`
+                  : "—"}
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold">Meta</span>
+                  <div className="flex items-center gap-2">
+                    {copyStatus && (
+                      <span className="text-[11px] text-slate-500">
+                        {copyStatus}
+                      </span>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleCopyMeta(selectedRun.meta)}
+                    >
+                      Copy JSON
+                    </Button>
+                  </div>
+                </div>
+                <pre className="mt-2 max-h-64 overflow-auto text-[11px] leading-relaxed">
+                  {JSON.stringify(selectedRun.meta ?? {}, null, 2)}
+                </pre>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

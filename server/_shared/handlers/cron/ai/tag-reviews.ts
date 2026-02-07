@@ -533,6 +533,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let debugEnabled = false;
   let debug: Record<string, unknown> | null = null;
   let targetLocationId: string | null = null;
+  let runMode: "backlog" | "recent" | "retry_errors" = "backlog";
+  let runLimit = 0;
   let locationIdForMeta = "all";
   let runMetaBase: Record<string, unknown> = {
     request_id: requestId,
@@ -579,6 +581,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
     targetLocationId = normalizeLocationId(locationParam);
     locationIdForMeta = targetLocationId ?? "all";
+    const modeParam = req.query?.mode;
+    const modeValue = Array.isArray(modeParam) ? modeParam[0] : modeParam;
+    if (modeValue === "recent" || modeValue === "retry_errors") {
+      runMode = modeValue;
+    }
+    const limitParam = req.query?.limit;
+    const limitValue = Array.isArray(limitParam) ? limitParam[0] : limitParam;
+    const parsedLimit = Number(limitValue);
+    runLimit = Number.isFinite(parsedLimit) ? Math.max(1, Math.floor(parsedLimit)) : 0;
     const forceParam = req.query?.force;
     force =
       forceParam === "1" || (Array.isArray(forceParam) && forceParam[0] === "1");
@@ -601,7 +612,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       force,
       debug,
       cursor_in: cursor ?? null,
-      location_id: locationIdForMeta
+      location_id: locationIdForMeta,
+      mode: runMode,
+      limit: runLimit || undefined
     };
     const { data: runRow } = await (supabaseAdmin as any)
       .from("ai_run_history")
@@ -718,6 +731,76 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? "00000000-0000-0000-0000-000000000000"
       : cursor.last_review_pk ?? "00000000-0000-0000-0000-000000000000";
     const loadCandidates = async () => {
+      if (runMode === "recent") {
+        let recentQuery = supabaseAdmin
+          .from("google_reviews")
+          .select(
+            "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
+          )
+          .not("comment", "is", null)
+          .neq("comment", "")
+          .not("review_id", "is", null)
+          .neq("review_id", "")
+          .not("location_id", "is", null)
+          .not("user_id", "is", null)
+          .order("update_time", { ascending: false, nullsFirst: false })
+          .order("create_time", { ascending: false, nullsFirst: false })
+          .order("created_at", { ascending: false, nullsFirst: false })
+          .limit(runLimit > 0 ? runLimit : 20);
+        if (targetLocationId) {
+          recentQuery = recentQuery.eq("location_id", targetLocationId);
+        }
+        const { data: recentRows, error: recentError } = await recentQuery;
+        if (recentError) {
+          console.error("[ai-tag]", requestId, "recent query failed", recentError);
+          return { rows: [] as typeof recentRows, error: recentError };
+        }
+        return { rows: recentRows ?? [], error: null };
+      }
+
+      if (runMode === "retry_errors") {
+        let retryQuery = supabaseAdmin
+          .from("review_ai_insights")
+          .select("review_pk, error, processed_at")
+          .or("error.not.is.null,processed_at.is.null")
+          .limit(runLimit > 0 ? runLimit : 50);
+        const { data: retryRows, error: retryError } = await retryQuery;
+        if (retryError) {
+          console.error("[ai-tag]", requestId, "retry query failed", retryError);
+          return { rows: [] as Array<Record<string, unknown>>, error: retryError };
+        }
+        const retryIds = (retryRows ?? [])
+          .map((row) => String((row as { review_pk?: string | null }).review_pk ?? ""))
+          .filter((id) => id.length > 0);
+        if (retryIds.length === 0) {
+          return { rows: [] as Array<Record<string, unknown>>, error: null };
+        }
+        let reviewQuery = supabaseAdmin
+          .from("google_reviews")
+          .select(
+            "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
+          )
+          .in("id", retryIds)
+          .not("comment", "is", null)
+          .neq("comment", "")
+          .not("review_id", "is", null)
+          .neq("review_id", "")
+          .not("location_id", "is", null)
+          .not("user_id", "is", null)
+          .order("update_time", { ascending: false, nullsFirst: false })
+          .order("create_time", { ascending: false, nullsFirst: false })
+          .order("created_at", { ascending: false, nullsFirst: false });
+        if (targetLocationId) {
+          reviewQuery = reviewQuery.eq("location_id", targetLocationId);
+        }
+        const { data: retryReviews, error: retryReviewsError } = await reviewQuery;
+        if (retryReviewsError) {
+          console.error("[ai-tag]", requestId, "retry reviews fetch failed", retryReviewsError);
+          return { rows: [] as typeof retryReviews, error: retryReviewsError };
+        }
+        return { rows: retryReviews ?? [], error: null };
+      }
+
       const target = MAX_REVIEWS;
       const pageSize = 250;
       const maxPages = 10;
@@ -835,7 +918,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           filter:
             "comment not null and missing review_ai_insights (AI backlog)",
           order: "coalesce(update_time, create_time, created_at) asc, id asc",
-          limit: MAX_REVIEWS,
+          limit: runMode === "recent" ? runLimit || 20 : runMode === "retry_errors" ? runLimit || 50 : MAX_REVIEWS,
+          mode: runMode,
           force,
           since_time: lastSourceTime,
           since_id: lastReviewPk,
@@ -859,7 +943,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (locationIds.length > 0) {
       let textRowsQuery = supabaseAdmin
         .from("google_reviews")
-        .select("id, location_id, comment")
+        .select("id, location_id, comment, review_id")
         .in("location_id", locationIds)
         .not("comment", "is", null)
         .neq("comment", "");
@@ -897,25 +981,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const textByLocation = new Map<
         string,
-        Array<{ review_pk: string }>
+        Array<{ review_pk: string; review_id?: string | null }>
       >();
       (textRows ?? []).forEach((row) => {
         const locationId = String(row.location_id ?? "");
         const reviewPk = String((row as { id?: string | null }).id ?? "");
+        const reviewId = String(
+          (row as { review_id?: string | null }).review_id ?? ""
+        );
         const text = getReviewText(row as { comment?: string | null });
         if (!locationId || !reviewPk || !text) return;
         const list = textByLocation.get(locationId) ?? [];
-        list.push({ review_pk: reviewPk });
+        list.push({ review_pk: reviewPk, review_id: reviewId || null });
         textByLocation.set(locationId, list);
       });
 
       for (const locationId of locationIds) {
         const textIds = textByLocation.get(locationId) ?? [];
+        let withTextCount = 0;
+        let insightsOkCount = 0;
         let missingInsights = 0;
+        const missingSample: string[] = [];
         for (const row of textIds) {
+          withTextCount += 1;
           const insight = insightByPk.get(row.review_pk);
-          if (!insight || insight.error || !insight.processed_at) {
+          const ok = Boolean(insight && !insight.error && insight.processed_at);
+          if (ok) {
+            insightsOkCount += 1;
+          } else {
             missingInsights += 1;
+            if (missingSample.length < 5) {
+              missingSample.push(
+                row.review_id || row.review_pk || ""
+              );
+            }
           }
         }
         totalMissing += missingInsights;
@@ -927,12 +1026,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             continue;
           }
           lockedLocations.add(locationId);
+          if (debugEnabled && missingSample.length > 0) {
+            debug = {
+              ...(debug ?? {}),
+              missingSamplesByLocation: {
+                ...(debug as Record<string, unknown>)?.missingSamplesByLocation,
+                [locationId]: missingSample
+              }
+            };
+          }
           await upsertAiStatus(userIdForLocation, locationId, {
             status: "running",
             last_run_at: nowIso,
             aborted: false,
             cursor,
-            stats: { processed: 0, tagsUpserted: 0 },
+            stats: {
+              processed: 0,
+              tagsUpserted: 0,
+              withTextCount,
+              insightsOkCount
+            },
             errors_count: 0,
             last_error: null,
             missing_insights_count: missingInsights
@@ -1322,6 +1435,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 // SQL check:
 // select started_at, meta->>'location_id' from public.ai_run_history
 // where meta->>'location_id' is not null order by started_at desc limit 20;
+// Backlog verifier (per location):
+// select r.location_id,
+//   count(*) filter (where nullif(trim(r.comment),'') is not null and r.review_id is not null) as with_text_count,
+//   count(*) filter (where i.processed_at is not null and i.error is null) as insights_ok_count
+// from public.google_reviews r
+// left join public.review_ai_insights i on i.review_pk = r.id
+// where r.location_id = '<location_id>'
+// group by r.location_id;
 
 // Manual test plan:
 // 1) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews?location_id=%2Faccounts%2F123%2Flocations%2F456&debug=1" -H "x-cron-secret: <secret>"
