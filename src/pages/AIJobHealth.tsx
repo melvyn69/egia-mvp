@@ -497,48 +497,50 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
                   Aucun run enregistré.
                 </div>
               ) : (
-              <div className="grid grid-cols-7 gap-2 border-b border-slate-200 pb-2 text-xs font-semibold uppercase text-slate-500">
-                <div>Time</div>
-                <div>Location</div>
-                <div>Processed</div>
-                <div>Tags</div>
-                <div>Errors</div>
-                <div>Durée</div>
-                <div>Skip Reason</div>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {filteredRuns.map((run) => (
-                  <button
-                    type="button"
-                    key={run.id}
-                    onClick={() => setSelectedRun(run)}
-                    className="grid w-full grid-cols-7 gap-2 py-2 text-left hover:bg-slate-50"
-                  >
-                    <div>{formatTimestamp(run.started_at)}</div>
-                    <div>
-                      {run.meta?.location_id
-                        ? locationLabelById.get(run.meta.location_id) ??
-                          run.meta.location_id
-                        : "—"}
-                    </div>
-                    <div>{run.processed ?? 0}</div>
-                    <div>{run.tags_upserted ?? 0}</div>
-                    <div>{run.errors_count ?? 0}</div>
-                    <div>
-                      {formatDurationSeconds(
-                        run.started_at,
-                        run.finished_at,
-                        run.duration_ms ?? null
-                      )}
-                    </div>
-                    <div>
-                      <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                        {formatSkipReason(run.skip_reason)}
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
+                <>
+                  <div className="grid grid-cols-7 gap-2 border-b border-slate-200 pb-2 text-xs font-semibold uppercase text-slate-500">
+                    <div>Time</div>
+                    <div>Location</div>
+                    <div>Processed</div>
+                    <div>Tags</div>
+                    <div>Errors</div>
+                    <div>Durée</div>
+                    <div>Skip Reason</div>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {filteredRuns.map((run) => (
+                      <button
+                        type="button"
+                        key={run.id}
+                        onClick={() => setSelectedRun(run)}
+                        className="grid w-full grid-cols-7 gap-2 py-2 text-left hover:bg-slate-50"
+                      >
+                        <div>{formatTimestamp(run.started_at)}</div>
+                        <div>
+                          {run.meta?.location_id
+                            ? locationLabelById.get(run.meta.location_id) ??
+                              run.meta.location_id
+                            : "—"}
+                        </div>
+                        <div>{run.processed ?? 0}</div>
+                        <div>{run.tags_upserted ?? 0}</div>
+                        <div>{run.errors_count ?? 0}</div>
+                        <div>
+                          {formatDurationSeconds(
+                            run.started_at,
+                            run.finished_at,
+                            run.duration_ms ?? null
+                          )}
+                        </div>
+                        <div>
+                          <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                            {formatSkipReason(run.skip_reason)}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
