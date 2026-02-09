@@ -66,9 +66,21 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
       .like("key", `ai_status_v1:${userId}:%`)
       .eq("user_id", userId);
 
-    const sbAny = supabaseClient as unknown as any;
-    const { data: runRows } = await sbAny
-      .from("ai_run_history")
+    const runQuery = (supabaseClient as unknown as {
+      from: (table: string) => {
+        select: (columns: string) => {
+          order: (
+            column: string,
+            options?: { ascending?: boolean }
+          ) => {
+            limit: (
+              count: number
+            ) => Promise<{ data?: unknown[] | null; error?: { message?: string } | null }>;
+          };
+        };
+      };
+    }).from("ai_run_history");
+    const { data: runRows } = await runQuery
       .select(
         "id, started_at, finished_at, duration_ms, processed, tags_upserted, errors_count, aborted, skip_reason, meta"
       )
@@ -351,7 +363,12 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
             <select
               className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
               value={runsFilter}
-              onChange={(e) => setRunsFilter(e.target.value as any)}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === "all" || value === "location" || value === "errors") {
+                  setRunsFilter(value);
+                }
+              }}
             >
               <option value="all">Tous</option>
               <option value="location">Par location</option>

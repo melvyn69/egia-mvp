@@ -1024,7 +1024,14 @@ export const syncGoogleReviewsForUser = async (
   }
 
   // Persist last run status per user (cron_state is user-scoped now)
-  await (supabaseAdmin as any).from("cron_state").upsert({
+  const cronTable = (supabaseAdmin as unknown as {
+    from: (table: string) => {
+      upsert: (values: Record<string, unknown>) => Promise<{
+        error?: { message?: string } | null;
+      }>;
+    };
+  }).from("cron_state");
+  await cronTable.upsert({
     key: "google_reviews_last_run",
     user_id: userId,
     value: {
@@ -1115,7 +1122,14 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     if (message === "reauth_required") {
       if (userId) {
         const supabaseAdmin = createSupabaseAdmin();
-        await (supabaseAdmin as any).from("cron_state").upsert({
+        const cronTable = (supabaseAdmin as unknown as {
+          from: (table: string) => {
+            upsert: (values: Record<string, unknown>) => Promise<{
+              error?: { message?: string } | null;
+            }>;
+          };
+        }).from("cron_state");
+        await cronTable.upsert({
           key: "google_reviews_last_error",
           user_id: userId,
           value: {

@@ -199,12 +199,17 @@ export const formatRelativeDate = (iso: string): string => {
 // though it depends on supabase client which is passed in? 
 // In original code it took supabaseClient as arg.
 export const getAccessToken = async (
-    supabaseClient: any
+    supabaseClient: unknown
 ): Promise<string> => {
     if (!supabaseClient) {
         throw new Error("No supabase client");
     }
-    const { data } = await supabaseClient.auth.getSession();
+    const client = supabaseClient as {
+        auth: {
+            getSession: () => Promise<{ data: { session?: { access_token?: string | null } } }>;
+        };
+    };
+    const { data } = await client.auth.getSession();
     const token = data.session?.access_token ?? null;
     if (!token) {
         throw new Error("No session / not authenticated");

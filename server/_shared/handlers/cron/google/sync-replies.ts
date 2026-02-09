@@ -370,7 +370,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
         if (message === "reauth_required") {
-          await (supabaseAdmin as any).from("cron_state").upsert({
+          const cronTable = (supabaseAdmin as unknown as {
+            from: (table: string) => {
+              upsert: (values: Record<string, unknown>) => Promise<{
+                error?: { message?: string } | null;
+              }>;
+            };
+          }).from("cron_state");
+          await cronTable.upsert({
             key: "google_reviews_last_error",
             user_id: userId,
             value: {

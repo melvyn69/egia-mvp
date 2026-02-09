@@ -139,7 +139,12 @@ export function ReviewDetail({
                             <select
                                 className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                                 value={tonePreset}
-                                onChange={(e) => setTonePreset(e.target.value as any)}
+                                onChange={(e) => {
+                                  const nextTone = toneOptions.find((opt) => opt.id === e.target.value)?.id;
+                                  if (nextTone) {
+                                    setTonePreset(nextTone);
+                                  }
+                                }}
                             >
                                 {toneOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
                             </select>
@@ -149,7 +154,12 @@ export function ReviewDetail({
                             <select
                                 className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                                 value={lengthPreset}
-                                onChange={(e) => setLengthPreset(e.target.value as any)}
+                                onChange={(e) => {
+                                  const nextLength = lengthOptions.find((opt) => opt.id === e.target.value)?.id;
+                                  if (nextLength) {
+                                    setLengthPreset(nextLength);
+                                  }
+                                }}
                             >
                                 {lengthOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
                             </select>

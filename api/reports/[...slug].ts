@@ -36,15 +36,6 @@ const createSupabaseAdmin = () => {
   return createClient<Database>(url, key, { auth: { persistSession: false } });
 };
 
-const getRouteParts = (req: VercelRequest) => {
-  const raw =
-    (req.query as Record<string, unknown>)?.["...slug"] ??
-    (req.query as Record<string, unknown>)?.slug ??
-    (req.query as Record<string, unknown>)?.["slug[]"];
-  const parts = Array.isArray(raw) ? raw : raw ? [raw] : [];
-  return parts.map(String);
-};
-
 const haversine = (lat1: number, lng1: number, lat2: number, lng2: number) => {
   const toRad = (value: number) => (value * Math.PI) / 180;
   const r = 6371000;
@@ -1429,7 +1420,7 @@ const handleAutomationsRun = async (
     let authUser;
     try {
       authUser = await requireUser(req, res);
-    } catch (error) {
+    } catch {
       return sendError(
         res,
         requestId,

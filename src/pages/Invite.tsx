@@ -21,8 +21,7 @@ const Invite = ({ session }: InviteProps) => {
   const hasSession = Boolean(session?.access_token);
 
   const inviteUrl = useMemo(() => {
-    const base = window.location.origin;
-    return `${base}/invite?token=${encodeURIComponent(token)}`;
+    return `${window.location.origin}/invite?token=${encodeURIComponent(token)}`;
   }, [token]);
 
   const handleLogin = async () => {
