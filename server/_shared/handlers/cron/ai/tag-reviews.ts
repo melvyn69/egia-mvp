@@ -1473,11 +1473,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               businessSettingsCache.set(reviewUserId, businessSettings);
             }
 
+            const brandVoiceForReply = brandVoice
+              ? {
+                  ...brandVoice,
+                  language_level:
+                    brandVoice.language_level === "tutoiement" ||
+                    brandVoice.language_level === "vouvoiement"
+                      ? brandVoice.language_level
+                      : "vouvoiement"
+                }
+              : null;
+
             try {
               const replyText = await generateAiReply({
                 reviewText,
                 rating: typeof reviewRow.rating === "number" ? reviewRow.rating : null,
-                brandVoice: brandVoice,
+                brandVoice: (brandVoiceForReply as unknown as {
+                  enabled: boolean | null;
+                  tone: string | null;
+                  language_level: "tutoiement" | "vouvoiement";
+                  context: string | null;
+                  use_emojis: boolean | null;
+                  forbidden_words: string[] | null;
+                }) ?? null,
                 overrideTone: null,
                 businessTone: businessSettings?.default_tone ?? null,
                 signature: businessSettings?.signature ?? null,
