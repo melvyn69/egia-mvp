@@ -530,6 +530,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let candidatesFound = 0;
   let totalWithText = 0;
   let totalMissingInsights = 0;
+  let jobsProcessed = 0;
+  let jobsErrors = 0;
   let skipReason: string | null = null;
   let runId: string | null = null;
   let runCompleted = false;
@@ -539,7 +541,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let debugEnabled = false;
   let debug: Record<string, unknown> | null = null;
   let targetLocationId: string | null = null;
-  let runMode: "backlog" | "recent" | "retry_errors" = "backlog";
+  let runMode: "backlog" | "recent" | "retry_errors" | "queue" = "backlog";
   let runLimit = 0;
   let locationIdForMeta = "all";
   let runMetaBase: Record<string, unknown> = {
@@ -737,6 +739,73 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? "00000000-0000-0000-0000-000000000000"
       : cursor.last_review_pk ?? "00000000-0000-0000-0000-000000000000";
     const loadCandidates = async () => {
+      const queueBatch = runLimit > 0 ? runLimit : 20;
+      const { data: pendingJobs, error: pendingError } = await (supabaseAdmin as any)
+        .from("ai_jobs")
+        .select("id, payload, created_at")
+        .eq("status", "pending")
+        .order("created_at", { ascending: true })
+        .limit(queueBatch);
+      if (pendingError) {
+        console.error("[ai-tag]", requestId, "ai_jobs pending query failed", pendingError);
+      }
+
+      const queueReviewIds = (pendingJobs ?? [])
+        .map((job: { payload?: { review_id?: string } }) =>
+          String(job?.payload?.review_id ?? "")
+        )
+        .filter((id) => id.length > 0);
+
+      if (queueReviewIds.length > 0) {
+        runMode = "queue";
+        runMetaBase = {
+          ...runMetaBase,
+          mode: runMode,
+          limit: queueBatch
+        };
+
+        const jobIds = (pendingJobs ?? []).map((job: { id: string }) => job.id);
+        await (supabaseAdmin as any)
+          .from("ai_jobs")
+          .update({
+            status: "processing",
+            started_at: new Date().toISOString()
+          })
+          .in("id", jobIds)
+          .eq("status", "pending");
+
+        let queueQuery = supabaseAdmin
+          .from("google_reviews")
+          .select(
+            "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
+          )
+          .in("id", queueReviewIds)
+          .not("comment", "is", null)
+          .neq("comment", "")
+          .not("location_id", "is", null)
+          .not("user_id", "is", null)
+          .order("update_time", { ascending: false, nullsFirst: false })
+          .order("create_time", { ascending: false, nullsFirst: false })
+          .order("created_at", { ascending: false, nullsFirst: false });
+        if (targetLocationId) {
+          queueQuery = queueQuery.eq("location_id", targetLocationId);
+        }
+        const { data: queueRows, error: queueError } = await queueQuery;
+        if (queueError) {
+          console.error("[ai-tag]", requestId, "queue reviews fetch failed", queueError);
+          return {
+            rows: [] as Array<Record<string, unknown>>,
+            error: queueError,
+            queueJobs: pendingJobs ?? []
+          };
+        }
+        return {
+          rows: queueRows ?? [],
+          error: null,
+          queueJobs: pendingJobs ?? []
+        };
+      }
+
       if (runMode === "recent") {
         let recentQuery = supabaseAdmin
           .from("google_reviews")
@@ -761,7 +830,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           console.error("[ai-tag]", requestId, "recent query failed", recentError);
           return { rows: [] as typeof recentRows, error: recentError };
         }
-        return { rows: recentRows ?? [], error: null };
+        return {
+          rows: recentRows ?? [],
+          error: null,
+          queueJobs: [] as Array<Record<string, unknown>>
+        };
       }
 
       if (runMode === "retry_errors") {
@@ -804,7 +877,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           console.error("[ai-tag]", requestId, "retry reviews fetch failed", retryReviewsError);
           return { rows: [] as typeof retryReviews, error: retryReviewsError };
         }
-        return { rows: retryReviews ?? [], error: null };
+        return {
+          rows: retryReviews ?? [],
+          error: null,
+          queueJobs: [] as Array<Record<string, unknown>>
+        };
       }
 
       const target = MAX_REVIEWS;
@@ -892,7 +969,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         collected.push(...rows);
       }
 
-      return { rows: collected.slice(0, target), error: null };
+      return {
+        rows: collected.slice(0, target),
+        error: null,
+        queueJobs: [] as Array<Record<string, unknown>>
+      };
     };
 
     const initialCandidates = await loadCandidates();
@@ -903,6 +984,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         { code: "INTERNAL", message: "Failed to load candidates" },
         500
       );
+    }
+
+    const queueJobs = (initialCandidates.queueJobs ?? []) as Array<{
+      id: string;
+      payload?: { review_id?: string };
+    }>;
+    const queueJobMap = new Map<string, string>();
+    const queueJobUpdated = new Set<string>();
+    for (const job of queueJobs) {
+      const reviewPk = String(job?.payload?.review_id ?? "");
+      if (reviewPk) {
+        queueJobMap.set(reviewPk, job.id);
+      }
     }
 
     let candidateRows = initialCandidates.rows;
@@ -922,9 +1016,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           })),
         candidateQueryMeta: {
           filter:
-            "comment not null and missing review_ai_insights (AI backlog)",
+            runMode === "queue"
+              ? "ai_jobs pending queue"
+              : "comment not null and missing review_ai_insights (AI backlog)",
           order: "coalesce(update_time, create_time, created_at) asc, id asc",
-          limit: runMode === "recent" ? runLimit || 20 : runMode === "retry_errors" ? runLimit || 50 : MAX_REVIEWS,
+          limit:
+            runMode === "queue"
+              ? runLimit || 20
+              : runMode === "recent"
+                ? runLimit || 20
+                : runMode === "retry_errors"
+                  ? runLimit || 50
+                  : MAX_REVIEWS,
           mode: runMode,
           force,
           since_time: lastSourceTime,
@@ -1094,6 +1197,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : "Query returned 0 rows; pagination backlog reached without candidates.";
     }
 
+    const markJobError = async (reviewPk: string, message: string) => {
+      if (runMode !== "queue") return;
+      const jobId = queueJobMap.get(reviewPk);
+      if (!jobId || queueJobUpdated.has(jobId)) return;
+      jobsErrors += 1;
+      queueJobUpdated.add(jobId);
+      await (supabaseAdmin as any)
+        .from("ai_jobs")
+        .update({
+          status: "error",
+          finished_at: new Date().toISOString(),
+          error: String(message ?? "error").slice(0, 500)
+        })
+        .eq("id", jobId);
+    };
+
+    const markJobDone = async (reviewPk: string) => {
+      if (runMode !== "queue") return;
+      const jobId = queueJobMap.get(reviewPk);
+      if (!jobId || queueJobUpdated.has(jobId)) return;
+      queueJobUpdated.add(jobId);
+      await (supabaseAdmin as any)
+        .from("ai_jobs")
+        .update({
+          status: "done",
+          finished_at: new Date().toISOString(),
+          error: null
+        })
+        .eq("id", jobId);
+    };
+
     const candidateRowsByLock = candidateRows.filter((review) =>
       review.location_id ? lockedLocations.has(review.location_id) : false
     );
@@ -1153,6 +1287,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       reviewsScanned += 1;
       try {
         reviewsProcessed += 1;
+        if (runMode === "queue") {
+          jobsProcessed += 1;
+        }
         const analysis = await analyzeWithRetry(
           {
             id: reviewPk,
@@ -1191,6 +1328,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               insightError.message ?? "insight upsert failed"
             );
           }
+          await markJobError(reviewPk, insightError.message ?? "insight upsert failed");
           await (supabaseAdmin as any).from("review_ai_insights").upsert({
             review_pk: reviewPk,
             user_id: reviewUserId,
@@ -1222,6 +1360,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               reviewId: reviewIdText || reviewPk,
               message: tagError?.message ?? "tag upsert failed"
             });
+            await markJobError(reviewPk, tagError?.message ?? "tag upsert failed");
             continue;
           }
 
@@ -1257,6 +1396,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             (processedByLocation.get(reviewLocationId) ?? 0) + 1
           );
         }
+        await markJobDone(reviewPk);
         await saveCursor({
           last_source_time: effectiveUpdateTime,
           last_review_pk: reviewPk
@@ -1281,6 +1421,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           );
           lastErrorByLocation.set(reviewLocationId, message);
         }
+        await markJobError(reviewPk, message);
         await saveCursor({
           last_source_time: effectiveUpdateTime ?? lastSourceTime,
           last_review_pk: reviewPk
@@ -1289,6 +1430,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const aborted = timeUp() || reviewsScanned >= MAX_REVIEWS;
+    if (runMode === "queue" && queueJobMap.size > 0) {
+      const remainingJobIds: string[] = [];
+      for (const jobId of queueJobMap.values()) {
+        if (!queueJobUpdated.has(jobId)) {
+          remainingJobIds.push(jobId);
+        }
+      }
+      if (remainingJobIds.length > 0) {
+        await (supabaseAdmin as any)
+          .from("ai_jobs")
+          .update({
+            status: aborted ? "pending" : "error",
+            finished_at: new Date().toISOString(),
+            error: aborted ? "aborted" : "review_not_found"
+          })
+          .in("id", remainingJobIds);
+      }
+    }
 
     for (const locationId of lockedLocations) {
       const missingInsights = locationStats.get(locationId)?.missingInsights ?? 0;
@@ -1376,6 +1535,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
       }).eq("id", runId);
       runCompleted = true;
+    }
+
+    if (debugEnabled) {
+      const pendingCount =
+        (
+          await supabaseAdmin
+            .from("ai_jobs")
+            .select("id", { count: "exact", head: true })
+            .eq("status", "pending")
+        ).count ?? 0;
+      const processingCount =
+        (
+          await supabaseAdmin
+            .from("ai_jobs")
+            .select("id", { count: "exact", head: true })
+            .eq("status", "processing")
+        ).count ?? 0;
+      const errorCount =
+        (
+          await supabaseAdmin
+            .from("ai_jobs")
+            .select("id", { count: "exact", head: true })
+            .eq("status", "error")
+        ).count ?? 0;
+      const { data: oldestPending } = await supabaseAdmin
+        .from("ai_jobs")
+        .select("created_at")
+        .eq("status", "pending")
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      debug = {
+        ...(debug ?? {}),
+        queue_status: {
+          pending_count: pendingCount,
+          processing_count: processingCount,
+          error_count: errorCount,
+          oldest_pending: oldestPending?.created_at ?? null
+        }
+      };
     }
 
     return res.status(200).json({
@@ -1467,3 +1666,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 // 1) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews?location_id=%2Faccounts%2F123%2Flocations%2F456&debug=1" -H "x-cron-secret: <secret>"
 // 2) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews?location_id=all" -H "x-cron-secret: <secret>"
 // 3) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews" -H "Authorization: Bearer <token>" (admin email) -> 200
+// 4) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews?debug=1" -H "x-cron-secret: <secret>" (queue mode)
+// Queue SQL checks:
+// select status, count(*) from public.ai_jobs group by status;
+// select * from public.ai_jobs order by created_at desc limit 5;
