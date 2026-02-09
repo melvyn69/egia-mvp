@@ -542,6 +542,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let runId: string | null = null;
   let runCompleted = false;
   let runStartMs = 0;
+  let effectiveRunMode: "backlog" | "recent" | "retry_errors" | "queue" = "backlog";
   let cursor: Cursor | null = null;
   let force = false;
   let debugEnabled = false;
@@ -982,8 +983,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
 
     const initialCandidates = await loadCandidates();
-    const effectiveRunMode =
-      runMode as "backlog" | "recent" | "retry_errors" | "queue";
+    effectiveRunMode = runMode as "backlog" | "recent" | "retry_errors" | "queue";
     if (initialCandidates.error) {
       return sendError(
         res,
@@ -1442,7 +1442,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 .select("enabled, tone, language_level, context, use_emojis, forbidden_words")
                 .eq("user_id", reviewUserId)
                 .maybeSingle();
-              brandVoice = voiceRow ?? null;
+              if (voiceRow) {
+                const languageLevel =
+                  voiceRow.language_level === "tutoiement" ||
+                  voiceRow.language_level === "vouvoiement"
+                    ? voiceRow.language_level
+                    : "vouvoiement";
+                brandVoice = {
+                  enabled: Boolean(voiceRow.enabled),
+                  tone: voiceRow.tone,
+                  language_level: languageLevel,
+                  context: voiceRow.context,
+                  use_emojis: voiceRow.use_emojis,
+                  forbidden_words: voiceRow.forbidden_words ?? []
+                } as unknown as typeof brandVoice;
+              } else {
+                brandVoice = null;
+              }
               brandVoiceCache.set(reviewUserId, brandVoice);
             }
 
