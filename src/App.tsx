@@ -25,6 +25,8 @@ import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
+import { AppShell } from "./components/layout/AppShell";
+import { FLAGS } from "./lib/featureFlags";
 
 type SessionDebugInfo = {
   userId: string | null;
@@ -229,6 +231,7 @@ const App = () => {
     if (!email) {
       return;
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase as unknown as { from: (table: string) => any })
       .from("user_profiles")
       .upsert({
@@ -538,6 +541,184 @@ const App = () => {
     </div>
   );
 
+  const routesContent = (
+    <>
+      {envMissing && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+          Variables d&apos;env Supabase manquantes. Ajoutez VITE_SUPABASE_URL et
+          VITE_SUPABASE_ANON_KEY dans .env.local.
+        </div>
+      )}
+      {googleError && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+          {googleError}
+        </div>
+      )}
+      {(debugInfo || debugError) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Debug session</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm text-slate-600">
+            {debugError && <p>{debugError}</p>}
+            {debugInfo && (
+              <>
+                <p>
+                  <span className="font-semibold text-slate-700">
+                    expires_at:
+                  </span>{" "}
+                  {debugExpiresAtLabel}
+                </p>
+                <p>
+                  <span className="font-semibold text-slate-700">user.id:</span>{" "}
+                  {debugInfo.userId ?? "—"}
+                </p>
+                <p>
+                  <span className="font-semibold text-slate-700">
+                    google_connection:
+                  </span>{" "}
+                  {debugInfo.googleConnected ? "connected" : "missing"}
+                </p>
+                {import.meta.env.DEV && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCopyAccessToken}
+                  >
+                    Copier access_token (dev)
+                  </Button>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {!session && !isCallbackPath ? (
+        authPanel
+      ) : (
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <Dashboard
+                session={session}
+                googleConnected={googleConnected}
+                onConnect={handleConnectGoogle}
+                onSyncLocations={handleSyncLocations}
+                syncDisabled={googleReauthRequired}
+                locations={locations}
+                locationsLoading={locationsLoading}
+                locationsError={locationsError}
+                syncing={syncingLocations}
+              />
+            }
+          />
+          <Route
+            path="/analytics"
+            element={
+              <Analytics
+                session={session}
+                locations={locations}
+                locationsLoading={locationsLoading}
+                locationsError={locationsError}
+              />
+            }
+          />
+          <Route
+            path="/connect"
+            element={
+              <Connect
+                onConnect={handleConnectGoogle}
+                onSync={handleSyncAll}
+                syncDisabled={googleReauthRequired}
+                syncLoading={syncAllLoading}
+                syncMessage={syncAllMessage}
+                lastLogStatus={lastLogStatus}
+                lastLogMessage={lastLogMessage}
+              />
+            }
+          />
+          <Route path="/inbox" element={<Inbox />} />
+          <Route
+            path="/automation"
+            element={
+              <Automation
+                session={session}
+                locations={locations}
+                locationsLoading={locationsLoading}
+                locationsError={locationsError}
+              />
+            }
+          />
+          <Route
+            path="/automation/builder"
+            element={
+              <AutomationBuilder session={session} locations={locations} />
+            }
+          />
+          <Route
+            path="/settings/brand-voice"
+            element={<BrandVoice session={session} />}
+          />
+          <Route
+            path="/settings/test-lab"
+            element={<TestLab session={session} />}
+          />
+          <Route path="/settings" element={<Settings session={session} />} />
+          <Route path="/invite" element={<Invite session={session} />} />
+          <Route path="/alerts" element={<Alerts session={session} />} />
+          <Route
+            path="/competitors"
+            element={<Competitors session={session} />}
+          />
+          <Route
+            path="/reports"
+            element={<Reports session={session} locations={locations} />}
+          />
+          <Route
+            path="/team"
+            element={<TeamRanking session={session} />}
+          />
+          <Route
+            path="/sync-status"
+            element={<SyncStatus session={session} />}
+          />
+          <Route
+            path="/ai-job-health"
+            element={<AIJobHealth session={session} />}
+          />
+          <Route
+            path="/google_oauth_callback"
+            element={<OAuthCallback />}
+          />
+          <Route path="/auth/callback" element={<AuthCallback />} />
+        </Routes>
+      )}
+    </>
+  );
+
+  if (FLAGS.UI_V2) {
+    return (
+      <AppShell
+        topbar={
+          <Topbar
+            title={pageMeta.title}
+            subtitle={pageMeta.subtitle}
+            userEmail={session?.user.email}
+            session={session}
+            onSignOut={session ? handleSignOut : undefined}
+            onDebugSession={session ? handleDebugSession : undefined}
+            onToggleMenu={() => setMobileMenuOpen((prev) => !prev)}
+            isMenuOpen={mobileMenuOpen}
+          />
+        }
+      >
+        {routesContent}
+      </AppShell>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-sand">
       <div className="flex">
@@ -555,160 +736,7 @@ const App = () => {
           />
 
           <main className="flex-1 space-y-6 bg-gradient-to-br from-sand via-white to-clay px-4 py-6 md:px-6 md:py-8">
-            {envMissing && (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
-                Variables d&apos;env Supabase manquantes. Ajoutez
-                VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env.local.
-              </div>
-            )}
-            {googleError && (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
-                {googleError}
-              </div>
-            )}
-            {(debugInfo || debugError) && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Debug session</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm text-slate-600">
-                  {debugError && <p>{debugError}</p>}
-                  {debugInfo && (
-                    <>
-                      <p>
-                        <span className="font-semibold text-slate-700">
-                          expires_at:
-                        </span>{" "}
-                        {debugExpiresAtLabel}
-                      </p>
-                      <p>
-                        <span className="font-semibold text-slate-700">
-                          user.id:
-                        </span>{" "}
-                        {debugInfo.userId ?? "—"}
-                      </p>
-                      <p>
-                        <span className="font-semibold text-slate-700">
-                          google_connection:
-                        </span>{" "}
-                        {debugInfo.googleConnected ? "connected" : "missing"}
-                      </p>
-                      {import.meta.env.DEV && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleCopyAccessToken}
-                        >
-                          Copier access_token (dev)
-                        </Button>
-                      )}
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {!session && !isCallbackPath ? (
-              authPanel
-            ) : (
-              <Routes>
-                <Route
-                  path="/"
-                  element={
-                    <Dashboard
-                      session={session}
-                      googleConnected={googleConnected}
-                      onConnect={handleConnectGoogle}
-                      onSyncLocations={handleSyncLocations}
-                      syncDisabled={googleReauthRequired}
-                      locations={locations}
-                      locationsLoading={locationsLoading}
-                      locationsError={locationsError}
-                      syncing={syncingLocations}
-                    />
-                  }
-                />
-                <Route
-                  path="/analytics"
-                  element={
-                    <Analytics
-                      session={session}
-                      locations={locations}
-                      locationsLoading={locationsLoading}
-                      locationsError={locationsError}
-                    />
-                  }
-                />
-                <Route
-                  path="/connect"
-                  element={
-                    <Connect
-                      onConnect={handleConnectGoogle}
-                      onSync={handleSyncAll}
-                      syncDisabled={googleReauthRequired}
-                      syncLoading={syncAllLoading}
-                      syncMessage={syncAllMessage}
-                      lastLogStatus={lastLogStatus}
-                      lastLogMessage={lastLogMessage}
-                    />
-                  }
-                />
-                <Route path="/inbox" element={<Inbox />} />
-                <Route
-                  path="/automation"
-                  element={
-                    <Automation
-                      session={session}
-                      locations={locations}
-                      locationsLoading={locationsLoading}
-                      locationsError={locationsError}
-                    />
-                  }
-                />
-                <Route
-                  path="/automation/builder"
-                  element={
-                    <AutomationBuilder session={session} locations={locations} />
-                  }
-                />
-                <Route
-                  path="/settings/brand-voice"
-                  element={<BrandVoice session={session} />}
-                />
-                <Route
-                  path="/settings/test-lab"
-                  element={<TestLab session={session} />}
-                />
-                <Route path="/settings" element={<Settings session={session} />} />
-                <Route path="/invite" element={<Invite session={session} />} />
-                <Route path="/alerts" element={<Alerts session={session} />} />
-                <Route
-                  path="/competitors"
-                  element={<Competitors session={session} />}
-                />
-                <Route
-                  path="/reports"
-                  element={<Reports session={session} locations={locations} />}
-                />
-                <Route
-                  path="/team"
-                  element={<TeamRanking session={session} />}
-                />
-                <Route
-                  path="/sync-status"
-                  element={<SyncStatus session={session} />}
-                />
-                <Route
-                  path="/ai-job-health"
-                  element={<AIJobHealth session={session} />}
-                />
-                <Route
-                  path="/google_oauth_callback"
-                  element={<OAuthCallback />}
-                />
-                <Route path="/auth/callback" element={<AuthCallback />} />
-              </Routes>
-            )}
+            {routesContent}
           </main>
         </div>
       </div>
