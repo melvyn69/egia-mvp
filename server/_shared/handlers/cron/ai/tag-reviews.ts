@@ -738,10 +738,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const lastReviewPk = force
       ? "00000000-0000-0000-0000-000000000000"
       : cursor.last_review_pk ?? "00000000-0000-0000-0000-000000000000";
+    const jobsTable = (supabaseAdmin as any).from("ai_jobs");
     const loadCandidates = async () => {
       const queueBatch = runLimit > 0 ? runLimit : 20;
-      const { data: pendingJobs, error: pendingError } = await (supabaseAdmin as any)
-        .from("ai_jobs")
+      const { data: pendingJobs, error: pendingError } = await jobsTable
         .select("id, payload, created_at")
         .eq("status", "pending")
         .order("created_at", { ascending: true })
@@ -765,8 +765,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         };
 
         const jobIds = (pendingJobs ?? []).map((job: { id: string }) => job.id);
-        await (supabaseAdmin as any)
-          .from("ai_jobs")
+        await jobsTable
           .update({
             status: "processing",
             started_at: new Date().toISOString()
@@ -977,6 +976,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
 
     const initialCandidates = await loadCandidates();
+    const effectiveRunMode =
+      runMode as "backlog" | "recent" | "retry_errors" | "queue";
     if (initialCandidates.error) {
       return sendError(
         res,
@@ -1016,19 +1017,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           })),
         candidateQueryMeta: {
           filter:
-            runMode === "queue"
+            effectiveRunMode === "queue"
               ? "ai_jobs pending queue"
               : "comment not null and missing review_ai_insights (AI backlog)",
           order: "coalesce(update_time, create_time, created_at) asc, id asc",
           limit:
-            runMode === "queue"
+            effectiveRunMode === "queue"
               ? runLimit || 20
-              : runMode === "recent"
+              : effectiveRunMode === "recent"
                 ? runLimit || 20
-                : runMode === "retry_errors"
+                : effectiveRunMode === "retry_errors"
                   ? runLimit || 50
                   : MAX_REVIEWS,
-          mode: runMode,
+          mode: effectiveRunMode,
           force,
           since_time: lastSourceTime,
           since_id: lastReviewPk,
@@ -1203,8 +1204,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!jobId || queueJobUpdated.has(jobId)) return;
       jobsErrors += 1;
       queueJobUpdated.add(jobId);
-      await (supabaseAdmin as any)
-        .from("ai_jobs")
+      await jobsTable
         .update({
           status: "error",
           finished_at: new Date().toISOString(),
@@ -1218,8 +1218,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const jobId = queueJobMap.get(reviewPk);
       if (!jobId || queueJobUpdated.has(jobId)) return;
       queueJobUpdated.add(jobId);
-      await (supabaseAdmin as any)
-        .from("ai_jobs")
+      await jobsTable
         .update({
           status: "done",
           finished_at: new Date().toISOString(),
@@ -1287,7 +1286,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       reviewsScanned += 1;
       try {
         reviewsProcessed += 1;
-        if (runMode === "queue") {
+        if (effectiveRunMode === "queue") {
           jobsProcessed += 1;
         }
         const analysis = await analyzeWithRetry(
@@ -1430,7 +1429,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const aborted = timeUp() || reviewsScanned >= MAX_REVIEWS;
-    if (runMode === "queue" && queueJobMap.size > 0) {
+    if (effectiveRunMode === "queue" && queueJobMap.size > 0) {
       const remainingJobIds: string[] = [];
       for (const jobId of queueJobMap.values()) {
         if (!queueJobUpdated.has(jobId)) {
@@ -1438,8 +1437,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
       if (remainingJobIds.length > 0) {
-        await (supabaseAdmin as any)
-          .from("ai_jobs")
+        await jobsTable
           .update({
             status: aborted ? "pending" : "error",
             finished_at: new Date().toISOString(),
@@ -1540,27 +1538,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (debugEnabled) {
       const pendingCount =
         (
-          await supabaseAdmin
-            .from("ai_jobs")
+          await jobsTable
             .select("id", { count: "exact", head: true })
             .eq("status", "pending")
         ).count ?? 0;
       const processingCount =
         (
-          await supabaseAdmin
-            .from("ai_jobs")
+          await jobsTable
             .select("id", { count: "exact", head: true })
             .eq("status", "processing")
         ).count ?? 0;
       const errorCount =
         (
-          await supabaseAdmin
-            .from("ai_jobs")
+          await jobsTable
             .select("id", { count: "exact", head: true })
             .eq("status", "error")
         ).count ?? 0;
-      const { data: oldestPending } = await supabaseAdmin
-        .from("ai_jobs")
+      const { data: oldestPending } = await jobsTable
         .select("created_at")
         .eq("status", "pending")
         .order("created_at", { ascending: true })
