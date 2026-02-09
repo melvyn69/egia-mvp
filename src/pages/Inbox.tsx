@@ -1018,15 +1018,20 @@ const Inbox = () => {
         `/api/cron/ai/tag-reviews?${params.toString()}`,
         { method: "POST", headers: { Authorization: `Bearer ${token}` } }
       );
-      if (response.status === 401 || response.status === 403) {
-        setAiRunMessage("Accès refusé (admin requis)");
+      const payload = await response.json().catch(() => null);
+      const requestId = payload?.requestId ? ` (requestId: ${payload.requestId})` : "";
+      if (response.status === 401) {
+        setAiRunMessage(`Non connecté${requestId}`);
+        return;
+      }
+      if (response.status === 403) {
+        setAiRunMessage(`Accès admin requis${requestId}`);
         return;
       }
       if (!response.ok) {
-        setAiRunMessage(`Erreur: ${response.status}`);
+        setAiRunMessage(`Erreur: ${response.status}${requestId}`);
         return;
       }
-      const payload = await response.json().catch(() => null);
       setAiRunStats({
         processed: payload?.stats?.reviewsProcessed ?? 0,
         tagsUpserted: payload?.stats?.tagsUpserted ?? 0,
@@ -1065,10 +1070,25 @@ const Inbox = () => {
         }
       );
       const payload = await response.json().catch(() => null);
+      const requestId = payload?.requestId ? ` (requestId: ${payload.requestId})` : "";
       if (!response.ok) {
+        if (response.status === 401) {
+          setAiRunLocationResult((prev) => ({
+            ...prev,
+            [locationId]: `Non connecté${requestId}`
+          }));
+          return;
+        }
+        if (response.status === 403) {
+          setAiRunLocationResult((prev) => ({
+            ...prev,
+            [locationId]: `Accès admin requis${requestId}`
+          }));
+          return;
+        }
         setAiRunLocationResult((prev) => ({
           ...prev,
-          [locationId]: `Erreur: ${response.status}`
+          [locationId]: `Erreur: ${response.status}${requestId}`
         }));
         return;
       }

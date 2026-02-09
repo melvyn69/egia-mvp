@@ -176,15 +176,20 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (res.status === 401 || res.status === 403) {
-        setRunMessage("Accès refusé (admin requis)");
+      const payload = await res.json().catch(() => null);
+      const requestId = payload?.requestId ? ` (requestId: ${payload.requestId})` : "";
+      if (res.status === 401) {
+        setRunMessage(`Non connecté${requestId}`);
+        return;
+      }
+      if (res.status === 403) {
+        setRunMessage(`Accès admin requis${requestId}`);
         return;
       }
       if (!res.ok) {
-        setRunMessage(`Erreur: ${res.status}`);
+        setRunMessage(`Erreur: ${res.status}${requestId}`);
         return;
       }
-      const payload = await res.json().catch(() => null);
       setRunResult({
         ok: payload?.ok ?? true,
         processed: payload?.stats?.reviewsProcessed ?? payload?.processed ?? 0,
@@ -214,21 +219,29 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
         `/api/cron/ai/tag-reviews?location_id=${encodeURIComponent(locationId)}`,
         { method: "POST", headers: { Authorization: `Bearer ${token}` } }
       );
-      if (res.status === 401 || res.status === 403) {
+      const payload = await res.json().catch(() => null);
+      const requestId = payload?.requestId ? ` (requestId: ${payload.requestId})` : "";
+      if (res.status === 401) {
         setRunLocationMessage((prev) => ({
           ...prev,
-          [locationId]: "Accès refusé (admin requis)"
+          [locationId]: `Non connecté${requestId}`
+        }));
+        return;
+      }
+      if (res.status === 403) {
+        setRunLocationMessage((prev) => ({
+          ...prev,
+          [locationId]: `Accès admin requis${requestId}`
         }));
         return;
       }
       if (!res.ok) {
         setRunLocationMessage((prev) => ({
           ...prev,
-          [locationId]: `Erreur: ${res.status}`
+          [locationId]: `Erreur: ${res.status}${requestId}`
         }));
         return;
       }
-      const payload = await res.json().catch(() => null);
       const processed = payload?.stats?.reviewsProcessed ?? payload?.processed ?? 0;
       const tags = payload?.stats?.tagsUpserted ?? payload?.tagsUpserted ?? 0;
       const errorsCount = payload?.stats?.errors?.length ?? payload?.errors ?? 0;
