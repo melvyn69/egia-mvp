@@ -1027,10 +1027,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
           lockedLocations.add(locationId);
           if (debugEnabled && missingSample.length > 0) {
+            const existingSamples =
+              (debug as { missingSamplesByLocation?: Record<string, unknown> })
+                ?.missingSamplesByLocation ?? {};
             debug = {
               ...(debug ?? {}),
               missingSamplesByLocation: {
-                ...(debug as Record<string, unknown>)?.missingSamplesByLocation,
+                ...existingSamples,
                 [locationId]: missingSample
               }
             };
@@ -1040,12 +1043,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             last_run_at: nowIso,
             aborted: false,
             cursor,
-            stats: {
-              processed: 0,
-              tagsUpserted: 0,
-              withTextCount,
-              insightsOkCount
-            },
+            stats: { processed: 0, tagsUpserted: 0 },
             errors_count: 0,
             last_error: null,
             missing_insights_count: missingInsights
@@ -1114,19 +1112,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         typeof review === "object" && review !== null && "review_id" in review
           ? String((review as { review_id?: unknown }).review_id ?? "")
           : "";
-      const reviewText = getReviewText(review as { comment?: string | null });
+      const reviewRow = review as {
+        comment?: string | null;
+        update_time?: string | null;
+        create_time?: string | null;
+        user_id?: string | null;
+        location_id?: string | null;
+        location_name?: string | null;
+      };
+      const reviewText = getReviewText(reviewRow);
       const effectiveUpdateTime =
-        review.update_time ?? review.create_time ?? null;
-      const locationId = review.location_id ?? null;
+        reviewRow.update_time ?? reviewRow.create_time ?? null;
+      const reviewUserId =
+        typeof reviewRow.user_id === "string" ? reviewRow.user_id : null;
+      const reviewLocationId =
+        typeof reviewRow.location_id === "string" ? reviewRow.location_id : null;
+      const reviewLocationName =
+        typeof reviewRow.location_name === "string"
+          ? reviewRow.location_name
+          : null;
       if (!effectiveUpdateTime) {
         errors.push({ reviewId: reviewIdText || reviewPk, message: "Missing source_time" });
         console.error("[ai-tag]", requestId, "missing source_time", reviewIdText || reviewPk);
-        if (locationId) {
+        if (reviewLocationId) {
           errorsByLocation.set(
-            locationId,
-            (errorsByLocation.get(locationId) ?? 0) + 1
+            reviewLocationId,
+            (errorsByLocation.get(reviewLocationId) ?? 0) + 1
           );
-          lastErrorByLocation.set(locationId, "Missing source_time");
+          lastErrorByLocation.set(reviewLocationId, "Missing source_time");
         }
         continue;
       }
@@ -1144,12 +1157,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
 
         const nowIso = new Date().toISOString();
-        const { error: insightError } = await supabaseAdmin
+        const { error: insightError } = await (supabaseAdmin as any)
           .from("review_ai_insights")
           .upsert({
             review_pk: reviewPk,
-            user_id: review.user_id,
-            location_resource_name: review.location_id ?? review.location_name,
+            user_id: reviewUserId,
+            location_resource_name: reviewLocationId ?? reviewLocationName,
             sentiment: analysis.sentiment,
             sentiment_score: analysis.sentiment_score,
             summary: analysis.summary,
@@ -1162,20 +1175,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (insightError) {
           console.error("[ai]", requestId, "insight upsert failed", insightError);
-          if (review.location_id) {
+          if (reviewLocationId) {
             errorsByLocation.set(
-              review.location_id,
-              (errorsByLocation.get(review.location_id) ?? 0) + 1
+              reviewLocationId,
+              (errorsByLocation.get(reviewLocationId) ?? 0) + 1
             );
             lastErrorByLocation.set(
-              review.location_id,
+              reviewLocationId,
               insightError.message ?? "insight upsert failed"
             );
           }
-          await supabaseAdmin.from("review_ai_insights").upsert({
+          await (supabaseAdmin as any).from("review_ai_insights").upsert({
             review_pk: reviewPk,
-            user_id: review.user_id,
-            location_resource_name: review.location_id ?? review.location_name,
+            user_id: reviewUserId,
+            location_resource_name: reviewLocationId ?? reviewLocationName,
             processed_at: nowIso,
             source_update_time: effectiveUpdateTime,
             error: insightError.message ?? "insight upsert failed"
@@ -1189,7 +1202,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         for (const tag of analysis.topics ?? []) {
-          const { data: tagRow, error: tagError } = await supabaseAdmin
+          const { data: tagRow, error: tagError } = await (supabaseAdmin as any)
             .from("ai_tags")
             .upsert(
               { tag: tag.name, category: tag.category ?? null },
@@ -1206,7 +1219,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             continue;
           }
 
-          await supabaseAdmin
+          await (supabaseAdmin as any)
             .from("review_ai_tags")
             .upsert({
               review_pk: reviewPk,
@@ -1215,27 +1228,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               confidence: tag.confidence ?? null,
               evidence: tag.evidence ?? null
             });
-          if (review.user_id && reviewIdText) {
-            await supabaseAdmin.from("review_tags").insert({
-              user_id: review.user_id,
+          if (reviewUserId && reviewIdText) {
+            await (supabaseAdmin as any).from("review_tags").insert({
+              user_id: reviewUserId,
               review_id: reviewIdText,
-              location_id: review.location_id ?? null,
+              location_id: reviewLocationId ?? null,
               tag: tag.name
             });
           }
           tagsUpserted += 1;
-          if (locationId) {
+          if (reviewLocationId) {
             tagsByLocation.set(
-              locationId,
-              (tagsByLocation.get(locationId) ?? 0) + 1
+              reviewLocationId,
+              (tagsByLocation.get(reviewLocationId) ?? 0) + 1
             );
           }
         }
 
-        if (locationId) {
+        if (reviewLocationId) {
           processedByLocation.set(
-            locationId,
-            (processedByLocation.get(locationId) ?? 0) + 1
+            reviewLocationId,
+            (processedByLocation.get(reviewLocationId) ?? 0) + 1
           );
         }
         await saveCursor({
@@ -1247,20 +1260,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         errors.push({ reviewId: reviewIdText || reviewPk, message });
         console.error("[ai]", requestId, "review failed", message);
         if (message === "OpenAI request timeout") {
-          if (review.user_id) {
-            errorByUser.set(String(review.user_id), {
+          if (reviewUserId) {
+            errorByUser.set(String(reviewUserId), {
               code: "openai_timeout",
               message: "openai_timeout",
               jobId: reviewPk
             });
           }
         }
-        if (review.location_id) {
+        if (reviewLocationId) {
           errorsByLocation.set(
-            review.location_id,
-            (errorsByLocation.get(review.location_id) ?? 0) + 1
+            reviewLocationId,
+            (errorsByLocation.get(reviewLocationId) ?? 0) + 1
           );
-          lastErrorByLocation.set(review.location_id, message);
+          lastErrorByLocation.set(reviewLocationId, message);
         }
         await saveCursor({
           last_source_time: effectiveUpdateTime ?? lastSourceTime,
