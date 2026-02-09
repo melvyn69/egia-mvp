@@ -1474,28 +1474,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             const brandVoiceForReply = brandVoice
-              ? {
+              ? ({
                   ...brandVoice,
+                  tone:
+                    brandVoice.tone === "professional" ||
+                    brandVoice.tone === "friendly" ||
+                    brandVoice.tone === "warm" ||
+                    brandVoice.tone === "formal"
+                      ? brandVoice.tone
+                      : "professional",
                   language_level:
                     brandVoice.language_level === "tutoiement" ||
                     brandVoice.language_level === "vouvoiement"
                       ? brandVoice.language_level
                       : "vouvoiement"
-                }
+                } as {
+                  enabled: boolean | null;
+                  tone: "professional" | "friendly" | "warm" | "formal";
+                  language_level: "tutoiement" | "vouvoiement";
+                  context: string | null;
+                  use_emojis: boolean | null;
+                  forbidden_words: string[] | null;
+                })
               : null;
 
             try {
               const replyText = await generateAiReply({
                 reviewText,
                 rating: typeof reviewRow.rating === "number" ? reviewRow.rating : null,
-                brandVoice: (brandVoiceForReply as unknown as {
-                  enabled: boolean | null;
-                  tone: string | null;
-                  language_level: "tutoiement" | "vouvoiement";
-                  context: string | null;
-                  use_emojis: boolean | null;
-                  forbidden_words: string[] | null;
-                }) ?? null,
+                brandVoice: brandVoiceForReply,
                 overrideTone: null,
                 businessTone: businessSettings?.default_tone ?? null,
                 signature: businessSettings?.signature ?? null,
