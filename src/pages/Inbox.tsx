@@ -364,6 +364,11 @@ const Inbox = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [replyTab, setReplyTab] = useState<"reply" | "activity">("reply");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [aiSuggestion, setAiSuggestion] = useState<{
+    text: string;
+    status: string | null;
+  } | null>(null);
+  const [aiSuggestionError, setAiSuggestionError] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
@@ -1255,6 +1260,54 @@ const Inbox = () => {
     };
 
     void loadReplies();
+  }, [selectedReview, selectedReviewId]);
+
+  useEffect(() => {
+    const supabaseClient = supabase;
+    if (!selectedReview || !supabaseClient) {
+      setAiSuggestion(null);
+      setAiSuggestionError(null);
+      return;
+    }
+    let mounted = true;
+    const loadAiSuggestion = async () => {
+      setAiSuggestion(null);
+      setAiSuggestionError(null);
+      const sbAny = supabaseClient as unknown as {
+        from: (table: string) => {
+          select: (columns: string) => {
+            eq: (column: string, value: string) => {
+              maybeSingle: () => Promise<{
+                data?: { draft_text?: string | null; status?: string | null } | null;
+                error?: { message?: string | null } | null;
+              }>;
+            };
+          };
+        };
+      };
+      const { data, error } = await sbAny
+        .from("review_ai_replies")
+        .select("draft_text, status")
+        .eq("review_id", selectedReview.id)
+        .maybeSingle();
+      if (!mounted) {
+        return;
+      }
+      if (error) {
+        setAiSuggestionError("Impossible de charger la suggestion IA.");
+        return;
+      }
+      const draftText = data?.draft_text ? String(data.draft_text).trim() : "";
+      if (!draftText) {
+        setAiSuggestion(null);
+        return;
+      }
+      setAiSuggestion({ text: draftText, status: data?.status ?? null });
+    };
+    void loadAiSuggestion();
+    return () => {
+      mounted = false;
+    };
   }, [selectedReview, selectedReviewId]);
 
   useEffect(() => {
@@ -2510,6 +2563,59 @@ const Inbox = () => {
                     ))}
                   </div>
                 </div>
+
+                {aiSuggestionError && (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+                    {aiSuggestionError}
+                  </div>
+                )}
+                {aiSuggestion && (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                          Suggestion IA
+                        </p>
+                        {aiSuggestion.status && (
+                          <p className="mt-1 text-xs text-slate-500">
+                            Statut: {aiSuggestion.status}
+                          </p>
+                        )}
+                      </div>
+                      <Badge variant="neutral">Suggestion</Badge>
+                    </div>
+                    <p className="mt-3 text-sm text-slate-700">{aiSuggestion.text}</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => {
+                          setReplyText(aiSuggestion.text);
+                          if (selectedReview) {
+                            setDrafts((prev) => ({
+                              ...prev,
+                              [selectedReview.id]: aiSuggestion.text
+                            }));
+                          }
+                        }}
+                      >
+                        Utiliser la suggestion
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          if (navigator?.clipboard) {
+                            void navigator.clipboard.writeText(aiSuggestion.text);
+                          }
+                        }}
+                      >
+                        Copier
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <textarea
