@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../../../database.types.js";
+import { generateAiReply } from "../../../ai_reply.js";
 import {
   getRequestId,
   sendError,
@@ -532,6 +533,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let totalMissingInsights = 0;
   let jobsProcessed = 0;
   let jobsErrors = 0;
+  let repliesGenerated = 0;
+  let repliesSkippedManual = 0;
+  let repliesSkippedExisting = 0;
+  let repliesSkippedNoUser = 0;
+  let repliesErrors = 0;
   let skipReason: string | null = null;
   let runId: string | null = null;
   let runCompleted = false;
@@ -776,7 +782,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let queueQuery = supabaseAdmin
           .from("google_reviews")
           .select(
-            "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
+            "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment, reply_text, owner_reply"
           )
           .in("id", queueReviewIds)
           .not("comment", "is", null)
@@ -809,7 +815,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let recentQuery = supabaseAdmin
           .from("google_reviews")
           .select(
-            "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
+            "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment, reply_text, owner_reply"
           )
           .not("comment", "is", null)
           .neq("comment", "")
@@ -856,7 +862,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let reviewQuery = supabaseAdmin
           .from("google_reviews")
           .select(
-            "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
+            "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment, reply_text, owner_reply"
           )
           .in("id", retryIds)
           .not("comment", "is", null)
@@ -904,7 +910,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let candidatesQuery = supabaseAdmin
           .from("google_reviews")
           .select(
-            "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment"
+            "id, review_id, update_time, create_time, created_at, user_id, location_id, location_name, comment, reply_text, owner_reply"
           )
           .not("comment", "is", null)
           .neq("comment", "")
@@ -1047,6 +1053,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     });
     const locationIds = Array.from(locationUserMap.keys());
+    const brandVoiceCache = new Map<string, {
+      enabled: boolean | null;
+      tone: string | null;
+      language_level: string | null;
+      context: string | null;
+      use_emojis: boolean | null;
+      forbidden_words: string[] | null;
+    }>();
+    const businessSettingsCache = new Map<string, {
+      default_tone: string | null;
+      signature: string | null;
+    }>();
     const lockedLocations = new Set<string>();
     const locationStats = new Map<string, { missingInsights: number }>();
     let totalMissing = 0;
@@ -1258,6 +1276,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         user_id?: string | null;
         location_id?: string | null;
         location_name?: string | null;
+        reply_text?: string | null;
+        owner_reply?: string | null;
+        rating?: number | null;
       };
       const reviewText = getReviewText(reviewRow);
       const effectiveUpdateTime =
@@ -1282,6 +1303,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         continue;
       }
+
+      const hasManualReply = Boolean(
+        (reviewRow.reply_text && reviewRow.reply_text.trim()) ||
+          (reviewRow.owner_reply && reviewRow.owner_reply.trim())
+      );
 
       reviewsScanned += 1;
       try {
@@ -1386,6 +1412,91 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               reviewLocationId,
               (tagsByLocation.get(reviewLocationId) ?? 0) + 1
             );
+          }
+        }
+
+        if (!reviewUserId) {
+          repliesSkippedNoUser += 1;
+        } else if (hasManualReply) {
+          repliesSkippedManual += 1;
+        } else {
+          const { data: existingDraft } = await (supabaseAdmin as any)
+            .from("review_ai_replies")
+            .select("status, draft_text")
+            .eq("review_id", reviewPk)
+            .maybeSingle();
+
+          const existingStatus = existingDraft?.status ?? null;
+          const existingText = existingDraft?.draft_text ?? "";
+          if (
+            existingStatus === "edited" ||
+            existingStatus === "sent" ||
+            (existingStatus === "draft" && String(existingText).trim())
+          ) {
+            repliesSkippedExisting += 1;
+          } else {
+            let brandVoice = brandVoiceCache.get(reviewUserId) ?? null;
+            if (!brandVoiceCache.has(reviewUserId)) {
+              const { data: voiceRow } = await supabaseAdmin
+                .from("brand_voice")
+                .select("enabled, tone, language_level, context, use_emojis, forbidden_words")
+                .eq("user_id", reviewUserId)
+                .maybeSingle();
+              brandVoice = voiceRow ?? null;
+              brandVoiceCache.set(reviewUserId, brandVoice);
+            }
+
+            let businessSettings = businessSettingsCache.get(reviewUserId) ?? null;
+            if (!businessSettingsCache.has(reviewUserId)) {
+              const { data: settingsRow } = await supabaseAdmin
+                .from("business_settings")
+                .select("default_tone, signature")
+                .eq("user_id", reviewUserId)
+                .maybeSingle();
+              businessSettings = settingsRow ?? null;
+              businessSettingsCache.set(reviewUserId, businessSettings);
+            }
+
+            try {
+              const replyText = await generateAiReply({
+                reviewText,
+                rating: typeof reviewRow.rating === "number" ? reviewRow.rating : null,
+                brandVoice: brandVoice,
+                overrideTone: null,
+                businessTone: businessSettings?.default_tone ?? null,
+                signature: businessSettings?.signature ?? null,
+                insights: {
+                  sentiment: analysis.sentiment,
+                  score: analysis.sentiment_score,
+                  summary: analysis.summary,
+                  tags: (analysis.topics ?? []).map((topic) => topic.name)
+                },
+                openaiApiKey: process.env.OPENAI_API_KEY ?? "",
+                model:
+                  process.env.OPENAI_REPLY_MODEL ??
+                  process.env.OPENAI_MODEL ??
+                  "gpt-4o-mini",
+                requestId
+              });
+              if (replyText) {
+                await (supabaseAdmin as any).from("review_ai_replies").upsert({
+                  review_id: reviewPk,
+                  user_id: reviewUserId,
+                  location_id: reviewLocationId ?? null,
+                  draft_text: replyText,
+                  tone: "professional",
+                  length: "short",
+                  status: "draft",
+                  updated_at: new Date().toISOString()
+                });
+                repliesGenerated += 1;
+              }
+            } catch (replyError) {
+              repliesErrors += 1;
+              if (debugEnabled) {
+                console.error("[ai-tag]", requestId, "reply generation failed", replyError);
+              }
+            }
           }
         }
 
@@ -1525,6 +1636,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         skip_reason: skipReason,
         last_error: errors.length > 0 ? errors[0]?.message ?? null : null,
         meta: buildRunMeta({
+          queue: effectiveRunMode === "queue"
+            ? { jobs_processed: jobsProcessed, jobs_errors: jobsErrors }
+            : undefined,
+          replies: {
+            generated: repliesGenerated,
+            skipped_manual: repliesSkippedManual,
+            skipped_existing: repliesSkippedExisting,
+            skipped_no_user: repliesSkippedNoUser,
+            errors: repliesErrors
+          },
           stats: {
             totalWithText,
             totalMissingInsights,
@@ -1583,6 +1704,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         reviewsProcessed,
         tagsUpserted,
         candidatesFound,
+        repliesGenerated,
+        repliesSkipped: {
+          manual: repliesSkippedManual,
+          existing: repliesSkippedExisting,
+          noUser: repliesSkippedNoUser,
+          errors: repliesErrors
+        },
+        jobsProcessed,
+        jobsErrors,
         errors
       }
     });
@@ -1600,7 +1730,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aborted: false,
         skip_reason: "fatal_error",
         last_error: message,
-        meta: buildRunMeta()
+        meta: buildRunMeta({
+          queue: effectiveRunMode === "queue"
+            ? { jobs_processed: jobsProcessed, jobs_errors: jobsErrors }
+            : undefined,
+          replies: {
+            generated: repliesGenerated,
+            skipped_manual: repliesSkippedManual,
+            skipped_existing: repliesSkippedExisting,
+            skipped_no_user: repliesSkippedNoUser,
+            errors: repliesErrors
+          }
+        })
       }).eq("id", runId);
       runCompleted = true;
     }
@@ -1638,7 +1779,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aborted: timeUp() || reviewsScanned >= MAX_REVIEWS,
         skip_reason: skipReason,
         last_error: errors[0]?.message ?? null,
-        meta: buildRunMeta()
+        meta: buildRunMeta({
+          queue: effectiveRunMode === "queue"
+            ? { jobs_processed: jobsProcessed, jobs_errors: jobsErrors }
+            : undefined,
+          replies: {
+            generated: repliesGenerated,
+            skipped_manual: repliesSkippedManual,
+            skipped_existing: repliesSkippedExisting,
+            skipped_no_user: repliesSkippedNoUser,
+            errors: repliesErrors
+          }
+        })
       }).eq("id", runId);
     }
   }
