@@ -13,6 +13,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
+import { Switch } from "../components/ui/switch";
 import {
   type AppNotificationBase,
   type AppNotification,
@@ -100,20 +101,20 @@ type AiInsightRow = {
   create_time: string | null;
   location_id: string | null;
   review_ai_insights?:
-    | {
-        sentiment?: string | null;
-        sentiment_score?: number | null;
-      }
-    | Array<{
-        sentiment?: string | null;
-        sentiment_score?: number | null;
-      }>
-    | null;
+  | {
+    sentiment?: string | null;
+    sentiment_score?: number | null;
+  }
+  | Array<{
+    sentiment?: string | null;
+    sentiment_score?: number | null;
+  }>
+  | null;
   review_ai_tags?:
-    | Array<{
-        ai_tags?: { tag?: string | null } | null;
-      }>
-    | null;
+  | Array<{
+    ai_tags?: { tag?: string | null } | null;
+  }>
+  | null;
 };
 
 type AiTagRow = {
@@ -392,8 +393,8 @@ const createNotification = (
     typeof rawMessage === "string" ? rawMessage.trim().toLowerCase() : "";
   const message =
     normalizedMessage === "" ||
-    normalizedMessage === "undefined" ||
-    normalizedMessage === "null"
+      normalizedMessage === "undefined" ||
+      normalizedMessage === "null"
       ? "Une erreur est survenue"
       : (rawMessage as string);
 
@@ -1057,8 +1058,8 @@ const Dashboard = ({
           Tags dominants:{" "}
           {kpiData?.top_tags?.length
             ? kpiData.top_tags
-                .map((tag) => `${tag.tag} (${tag.count})`)
-                .join(", ")
+              .map((tag) => `${tag.tag} (${tag.count})`)
+              .join(", ")
             : "—"}
         </div>
       </section>
@@ -1229,12 +1230,13 @@ const Dashboard = ({
 
       <section id="locations-section">
         <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-semibold text-slate-900">
-            Lieux connectes
+          <h2 className="text-xl font-semibold text-slate-900">
+            Lieux connectés
           </h2>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
+              size="sm"
               onClick={saveActiveLocations}
               disabled={activeLocationsSaving || locationsLoading}
             >
@@ -1242,15 +1244,16 @@ const Dashboard = ({
             </Button>
             <Button
               variant="outline"
+              size="sm"
               onClick={onSyncLocations}
               disabled={syncing || syncDisabled}
             >
-              {syncing ? "Synchronisation..." : "Synchroniser les lieux"}
+              {syncing ? "Synchro..." : "Synchroniser"}
             </Button>
           </div>
         </div>
         {locationsError && (
-          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
             {locationsError}
           </div>
         )}
@@ -1265,36 +1268,48 @@ const Dashboard = ({
               </Card>
             ))}
           {!locationsLoading && locations.length === 0 && (
-            <Card>
-              <CardContent className="space-y-2 pt-6 text-sm text-slate-500">
-                <p>Aucun lieu synchronise pour le moment.</p>
+            <Card className="col-span-full border-dashed">
+              <CardContent className="flex flex-col items-center justify-center py-12 text-center text-sm text-slate-500">
+                <MapPin className="mb-3 h-10 w-10 opacity-20" />
+                <p>Aucun lieu synchronisé pour le moment.</p>
                 <p>Utilisez le bouton de synchronisation pour charger vos lieux.</p>
               </CardContent>
             </Card>
           )}
           {!locationsLoading &&
             locations.map((location) => (
-              <Card key={location.id}>
-                <CardContent className="flex items-center justify-between gap-4 pt-6">
-                  <div>
-                    <p className="text-lg font-semibold text-slate-900">
+              <Card key={location.id} className="transition-shadow hover:shadow-md">
+                <CardContent className="flex items-start justify-between gap-4 p-5">
+                  <div className="space-y-1">
+                    <p className="font-medium text-slate-900">
                       {location.location_title ??
                         location.location_resource_name}
                     </p>
                     {location.phone && (
-                      <div className="mt-2 flex items-center gap-2 text-sm text-slate-500">
-                        <MapPin size={14} />
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <MapPin size={12} />
                         {location.phone}
                       </div>
                     )}
+                    {location.website_uri && (
+                      <a
+                        href={location.website_uri}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block text-xs text-slate-400 hover:text-slate-600 hover:underline"
+                      >
+                        {location.website_uri.replace(/^https?:\/\//, '')}
+                      </a>
+                    )}
                   </div>
-                  <div className="text-right">
-                    <label className="flex items-center justify-end gap-2 text-sm font-semibold text-slate-900">
-                      <input
-                        type="checkbox"
+                  <div className="flex flex-col items-end gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-slate-600">
+                        {selectedActiveIds.includes(location.id) ? "Actif" : "Inactif"}
+                      </span>
+                      <Switch
                         checked={selectedActiveIds.includes(location.id)}
-                        onChange={(event) => {
-                          const checked = event.target.checked;
+                        onCheckedChange={(checked) => {
                           setSelectedActiveIds((prev) =>
                             checked
                               ? [...prev, location.id]
@@ -1302,13 +1317,7 @@ const Dashboard = ({
                           );
                         }}
                       />
-                      {selectedActiveIds.includes(location.id) ? "Actif" : "Inactif"}
-                    </label>
-                    {location.website_uri && (
-                      <p className="text-xs text-slate-500">
-                        {location.website_uri}
-                      </p>
-                    )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -1317,76 +1326,84 @@ const Dashboard = ({
       </section>
 
       <section className="grid gap-6 lg:grid-cols-2">
-        <Card>
+        <Card className="flex flex-col">
           <CardHeader>
-            <CardTitle>À traiter maintenant</CardTitle>
+            <CardTitle className="text-base text-slate-900">À traiter maintenant</CardTitle>
             <p className="text-sm text-slate-500">
               Les actions prioritaires du moment.
             </p>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="flex flex-1 flex-col justify-between gap-4">
             {urgentActionsCount === 0 ? (
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-slate-900">
-                  Tout est sous contrôle.
-                </p>
-                <p className="text-xs text-slate-500">
-                  Aucun avis urgent à traiter.
-                </p>
+              <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-slate-100 bg-slate-50 py-8 text-center">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-900">
+                    Tout est sous contrôle
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Aucun avis urgent à traiter.
+                  </p>
+                </div>
               </div>
             ) : (
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-slate-900">
-                  {urgentActionsCount} action
-                  {urgentActionsCount > 1 ? "s" : ""} urgente
-                  {urgentActionsCount > 1 ? "s" : ""}.
-                </p>
-                <p className="text-xs text-slate-500">
-                  Priorité aux avis négatifs sans réponse.
-                </p>
+              <div className="flex flex-1 items-center justify-center rounded-lg border border-amber-100 bg-amber-50 py-8 text-center text-amber-900">
+                <div className="space-y-1">
+                  <p className="text-lg font-bold">
+                    {urgentActionsCount}
+                  </p>
+                  <p className="text-sm font-medium">
+                    Action{urgentActionsCount > 1 ? "s" : ""} urgente{urgentActionsCount > 1 ? "s" : ""}
+                  </p>
+                  <p className="text-xs opacity-80">
+                    Avis négatifs sans réponse
+                  </p>
+                </div>
               </div>
             )}
-            <Button onClick={handleOpenInbox}>Aller à la boîte de réception</Button>
+            <Button onClick={handleOpenInbox} className="w-full">
+              Aller à la boîte de réception
+            </Button>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="flex flex-col">
           <CardHeader>
-            <CardTitle>Activité récente</CardTitle>
-            <p className="text-sm text-slate-500">
-              Derniers événements utiles (max 5).
-            </p>
+            <CardTitle className="text-base text-slate-900">Activité récente</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="flex-1">
             {recentActivities.length === 0 ? (
-              <p className="text-sm text-slate-500">Aucune activité récente.</p>
+              <div className="flex h-full items-center justify-center py-8 text-sm text-slate-500">
+                Aucune activité récente.
+              </div>
             ) : (
-              recentActivities.map((notif) => (
-                <div
-                  key={notif.id}
-                  className="flex items-start gap-3 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0"
-                >
-                  <div className="mt-0.5">
-                    {getNotificationIcon(notif.kind, notif.severity)}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-slate-900">
-                      {notif.title || "Événement"}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {notif.message || "—"}
-                    </p>
-                    <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
-                      <span>
-                        {notif.locationId
-                          ? `Lieu : ${getLocationName(notif.locationId)}`
-                          : "Tous les lieux"}
-                      </span>
-                      <span>{formatRelativeTime(notif.createdAt)}</span>
+              <div className="space-y-4">
+                {recentActivities.map((notif) => (
+                  <div
+                    key={notif.id}
+                    className="flex items-start gap-3 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0"
+                  >
+                    <div className="mt-0.5 rounded-full bg-slate-50 p-1.5">
+                      {getNotificationIcon(notif.kind, notif.severity)}
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-slate-900">
+                        {notif.title || "Événement"}
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-600 line-clamp-2">
+                        {notif.message || "—"}
+                      </p>
+                      <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] text-slate-400">
+                        <span>
+                          {notif.locationId
+                            ? getLocationName(notif.locationId)
+                            : "Général"}
+                        </span>
+                        <span>{formatRelativeTime(notif.createdAt)}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))
+                ))}
+              </div>
             )}
           </CardContent>
         </Card>

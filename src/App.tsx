@@ -7,6 +7,7 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { Topbar } from "./components/layout/Topbar";
 import { Dashboard } from "./pages/Dashboard";
 import { Inbox } from "./pages/Inbox";
+import InboxLayout from "./pages/Inbox/InboxLayout";
 import { Connect } from "./pages/Connect";
 import { Analytics } from "./pages/Analytics";
 import { BrandVoice } from "./pages/BrandVoice";
@@ -639,7 +640,10 @@ const App = () => {
               />
             }
           />
-          <Route path="/inbox" element={<Inbox />} />
+          <Route
+            path="/inbox"
+            element={FLAGS.UI_V2 ? <InboxLayout /> : <Inbox />}
+          />
           <Route
             path="/automation"
             element={
