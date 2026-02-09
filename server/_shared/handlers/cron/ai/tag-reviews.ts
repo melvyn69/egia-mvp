@@ -57,26 +57,54 @@ const supabaseAdmin = createClient<Database>(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false }
 });
 
+type SupabaseQuery = {
+  select: (...args: unknown[]) => SupabaseQuery;
+  eq: (...args: unknown[]) => SupabaseQuery;
+  is: (...args: unknown[]) => SupabaseQuery;
+  in: (...args: unknown[]) => SupabaseQuery;
+  not: (...args: unknown[]) => SupabaseQuery;
+  neq: (...args: unknown[]) => SupabaseQuery;
+  like: (...args: unknown[]) => SupabaseQuery;
+  lt: (...args: unknown[]) => SupabaseQuery;
+  or: (...args: unknown[]) => SupabaseQuery;
+  order: (...args: unknown[]) => SupabaseQuery;
+  limit: (...args: unknown[]) => SupabaseQuery;
+  update: (...args: unknown[]) => SupabaseQuery;
+  upsert: (...args: unknown[]) => SupabaseQuery;
+  insert: (...args: unknown[]) => SupabaseQuery;
+  delete: (...args: unknown[]) => SupabaseQuery;
+  maybeSingle: (...args: unknown[]) => Promise<{ data?: unknown; error?: { message?: string } | null }>;
+  then: (
+    onfulfilled: (value: { data?: unknown; error?: { message?: string } | null; count?: number | null }) => unknown,
+    onrejected?: (reason: unknown) => unknown
+  ) => unknown;
+};
+
+const fromAdmin = (table: string) =>
+  (supabaseAdmin as unknown as { from: (table: string) => SupabaseQuery }).from(
+    table
+  );
+
 type Cursor = {
   last_source_time: string | null;
   last_review_pk: string | null;
 };
 
 const loadCursor = async (): Promise<Cursor> => {
-  const cronTable = supabaseAdmin.from("cron_state") as any;
-  const { data } = await cronTable
+  const cronTable = fromAdmin("cron_state");
+  const { data } = (await cronTable
     .select("value")
     .eq("key", CURSOR_KEY)
     .is("user_id", null)
-    .maybeSingle();
-  return (data?.value as Cursor) ?? {
+    .maybeSingle()) as { data?: { value?: Cursor } | null };
+  return data?.value ?? {
     last_source_time: "1970-01-01T00:00:00.000Z",
     last_review_pk: "00000000-0000-0000-0000-000000000000"
   };
 };
 
 const saveCursor = async (cursor: Cursor) => {
-  const cronTable = supabaseAdmin.from("cron_state") as any;
+  const cronTable = fromAdmin("cron_state");
   await cronTable.upsert({
     key: CURSOR_KEY,
     value: cursor,
@@ -99,7 +127,7 @@ const upsertAiStatus = async (
     missing_insights_count?: number;
   }
 ) => {
-  const cronTable = supabaseAdmin.from("cron_state") as any;
+  const cronTable = fromAdmin("cron_state");
   await cronTable.upsert({
     key: `ai_status_v1:${userId}:${locationId}`,
     value,
@@ -115,13 +143,13 @@ const acquireLock = async (
   locationId: string
 ): Promise<boolean> => {
   const key = `lock_ai_tag_v1:${userId}:${locationId}`;
-  const cronTable = supabaseAdmin.from("cron_state") as any;
-  const { data } = await cronTable
+  const cronTable = fromAdmin("cron_state");
+  const { data } = (await cronTable
     .select("value")
     .eq("key", key)
     .eq("user_id", userId)
-    .maybeSingle();
-  const lockedAt = (data?.value as { locked_at?: string } | null)?.locked_at;
+    .maybeSingle()) as { data?: { value?: { locked_at?: string } } | null };
+  const lockedAt = data?.value?.locked_at;
   if (lockedAt) {
     const age = Date.now() - new Date(lockedAt).getTime();
     if (Number.isFinite(age) && age < LOCK_TTL_MS) {
@@ -139,7 +167,7 @@ const acquireLock = async (
 
 const releaseLock = async (userId: string, locationId: string) => {
   const key = `lock_ai_tag_v1:${userId}:${locationId}`;
-  const cronTable = supabaseAdmin.from("cron_state") as any;
+  const cronTable = fromAdmin("cron_state");
   await cronTable.delete().eq("key", key).eq("user_id", userId);
 };
 const getCronSecrets = (req: VercelRequest) => {
@@ -493,7 +521,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         auth: { persistSession: false },
         global: { headers: { Authorization: `Bearer ${bearerToken}` } }
       });
-      const { data: isAdminViaRls } = await (userClient as any).rpc("is_admin");
+      const { data: isAdminViaRls } = await (userClient as unknown as {
+        rpc: (fn: string) => Promise<{ data?: unknown; error?: { message?: string } | null }>;
+      }).rpc("is_admin");
       const isAdmin =
         Boolean(isAdminViaRls) ||
         (adminEmails.length > 0 && userEmail && adminEmails.includes(userEmail));
@@ -631,8 +661,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       mode: runMode,
       limit: runLimit || undefined
     };
-    const { data: runRow } = await (supabaseAdmin as any)
-      .from("ai_run_history")
+    const { data: runRow } = (await fromAdmin("ai_run_history")
       .insert({
         user_id: null,
         started_at: runStart,
@@ -645,16 +674,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         meta: runMetaBase
       })
       .select("id")
-      .maybeSingle();
+      .maybeSingle()) as { data?: { id?: string | null } | null };
     runId = runRow?.id ?? null;
 
     // Recover stale running statuses / locks (15 min)
     const staleCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-    const cronTable = supabaseAdmin.from("cron_state") as any;
-    const { data: staleStatusRows } = await cronTable
+    const cronTable = fromAdmin("cron_state");
+    const { data: staleStatusRows } = (await cronTable
       .select("key, user_id, value")
       .like("key", "ai_status_v1:%")
-      .lt("updated_at", staleCutoff);
+      .lt("updated_at", staleCutoff)) as {
+      data?: Array<{ key?: string | null; user_id?: string | null; value?: unknown }> | null;
+    };
     for (const row of staleStatusRows ?? []) {
       const value = row?.value as { status?: string } | null;
       if (value?.status === "running" && row?.user_id) {
@@ -671,10 +702,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .eq("user_id", row.user_id);
       }
     }
-    const { data: staleLocks } = await cronTable
+    const { data: staleLocks } = (await cronTable
       .select("key, user_id")
       .like("key", "lock_ai_tag_v1:%")
-      .lt("updated_at", staleCutoff);
+      .lt("updated_at", staleCutoff)) as {
+      data?: Array<{ key?: string | null; user_id?: string | null }> | null;
+    };
     for (const row of staleLocks ?? []) {
       if (row?.key && row?.user_id) {
         await cronTable.delete().eq("key", row.key).eq("user_id", row.user_id);
@@ -745,22 +778,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const lastReviewPk = force
       ? "00000000-0000-0000-0000-000000000000"
       : cursor.last_review_pk ?? "00000000-0000-0000-0000-000000000000";
-    const jobsTable = (supabaseAdmin as any).from("ai_jobs");
+    const jobsTable = fromAdmin("ai_jobs");
     const loadCandidates = async () => {
       const queueBatch = runLimit > 0 ? runLimit : 20;
-      const { data: pendingJobs, error: pendingError } = await jobsTable
+      const { data: pendingJobs, error: pendingError } = (await jobsTable
         .select("id, payload, created_at")
         .eq("status", "pending")
         .order("created_at", { ascending: true })
-        .limit(queueBatch);
+        .limit(queueBatch)) as {
+        data?: Array<{ id: string; payload?: { review_id?: string } }> | null;
+        error?: { message?: string } | null;
+      };
       if (pendingError) {
         console.error("[ai-tag]", requestId, "ai_jobs pending query failed", pendingError);
       }
 
       const queueReviewIds = (pendingJobs ?? [])
-        .map((job: { payload?: { review_id?: string } }) =>
-          String(job?.payload?.review_id ?? "")
-        )
+        .map((job) => String(job?.payload?.review_id ?? ""))
         .filter((id) => id.length > 0);
 
       if (queueReviewIds.length > 0) {
@@ -771,7 +805,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           limit: queueBatch
         };
 
-        const jobIds = (pendingJobs ?? []).map((job: { id: string }) => job.id);
+        const jobIds = (pendingJobs ?? []).map((job) => job.id);
         await jobsTable
           .update({
             status: "processing",
@@ -844,7 +878,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (runMode === "retry_errors") {
-        let retryQuery = supabaseAdmin
+        const retryQuery = supabaseAdmin
           .from("review_ai_insights")
           .select("review_pk, error, processed_at")
           .or("error.not.is.null,processed_at.is.null")
@@ -1126,17 +1160,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       for (const locationId of locationIds) {
         const textIds = textByLocation.get(locationId) ?? [];
-        let withTextCount = 0;
-        let insightsOkCount = 0;
         let missingInsights = 0;
         const missingSample: string[] = [];
         for (const row of textIds) {
-          withTextCount += 1;
           const insight = insightByPk.get(row.review_pk);
           const ok = Boolean(insight && !insight.error && insight.processed_at);
-          if (ok) {
-            insightsOkCount += 1;
-          } else {
+          if (!ok) {
             missingInsights += 1;
             if (missingSample.length < 5) {
               missingSample.push(
@@ -1325,8 +1354,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
 
         const nowIso = new Date().toISOString();
-        const { error: insightError } = await (supabaseAdmin as any)
-          .from("review_ai_insights")
+        const { error: insightError } = await fromAdmin("review_ai_insights")
           .upsert({
             review_pk: reviewPk,
             user_id: reviewUserId,
@@ -1354,7 +1382,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             );
           }
           await markJobError(reviewPk, insightError.message ?? "insight upsert failed");
-          await (supabaseAdmin as any).from("review_ai_insights").upsert({
+          await fromAdmin("review_ai_insights").upsert({
             review_pk: reviewPk,
             user_id: reviewUserId,
             location_resource_name: reviewLocationId ?? reviewLocationName,
@@ -1371,8 +1399,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         for (const tag of analysis.topics ?? []) {
-          const { data: tagRow, error: tagError } = await (supabaseAdmin as any)
-            .from("ai_tags")
+          const { data: tagRow, error: tagError } = await fromAdmin("ai_tags")
             .upsert(
               { tag: tag.name, category: tag.category ?? null },
               { onConflict: "tag" }
@@ -1380,7 +1407,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .select("id")
             .maybeSingle();
 
-          if (tagError || !tagRow?.id) {
+          const tagRowData = tagRow as { id?: string | null } | null;
+          if (tagError || !tagRowData?.id) {
             errors.push({
               reviewId: reviewIdText || reviewPk,
               message: tagError?.message ?? "tag upsert failed"
@@ -1389,17 +1417,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             continue;
           }
 
-          await (supabaseAdmin as any)
-            .from("review_ai_tags")
+          await fromAdmin("review_ai_tags")
             .upsert({
               review_pk: reviewPk,
-              tag_id: tagRow.id,
+              tag_id: tagRowData.id,
               polarity: tag.polarity ?? null,
               confidence: tag.confidence ?? null,
               evidence: tag.evidence ?? null
             });
           if (reviewUserId && reviewIdText) {
-            await (supabaseAdmin as any).from("review_tags").insert({
+            await fromAdmin("review_tags").insert({
               user_id: reviewUserId,
               review_id: reviewIdText,
               location_id: reviewLocationId ?? null,
@@ -1420,14 +1447,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } else if (hasManualReply) {
           repliesSkippedManual += 1;
         } else {
-          const { data: existingDraft } = await (supabaseAdmin as any)
-            .from("review_ai_replies")
+          const { data: existingDraft } = await fromAdmin("review_ai_replies")
             .select("status, draft_text")
             .eq("review_id", reviewPk)
             .maybeSingle();
 
-          const existingStatus = existingDraft?.status ?? null;
-          const existingText = existingDraft?.draft_text ?? "";
+          const draftRow =
+            (existingDraft as { status?: string | null; draft_text?: string | null } | null) ??
+            null;
+          const existingStatus = draftRow?.status ?? null;
+          const existingText = draftRow?.draft_text ?? "";
           if (
             existingStatus === "edited" ||
             existingStatus === "sent" ||
@@ -1520,7 +1549,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 requestId
               });
               if (replyText) {
-                await (supabaseAdmin as any).from("review_ai_replies").upsert({
+                await fromAdmin("review_ai_replies").upsert({
                   review_id: reviewPk,
                   user_id: reviewUserId,
                   location_id: reviewLocationId ?? null,
@@ -1625,7 +1654,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Persist last run status per user
     const runAt = new Date().toISOString();
     for (const userId of new Set(locationUserMap.values())) {
-      await (supabaseAdmin as any).from("cron_state").upsert({
+      await fromAdmin("cron_state").upsert({
         key: "ai_tag_last_run",
         user_id: userId,
         value: {
@@ -1648,7 +1677,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const lastError = errorByUser.get(userId);
       if (lastError) {
-        await (supabaseAdmin as any).from("cron_state").upsert({
+        await fromAdmin("cron_state").upsert({
           key: "ai_tag_last_error",
           user_id: userId,
           value: {
@@ -1667,7 +1696,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (runId) {
       const finishedAt = new Date().toISOString();
-      await (supabaseAdmin as any).from("ai_run_history").update({
+      await fromAdmin("ai_run_history").update({
         finished_at: finishedAt,
         duration_ms: Date.now() - runStartMs,
         processed: reviewsProcessed,
@@ -1716,12 +1745,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .select("id", { count: "exact", head: true })
             .eq("status", "error")
         ).count ?? 0;
-      const { data: oldestPending } = await jobsTable
+      const { data: oldestPending } = (await jobsTable
         .select("created_at")
         .eq("status", "pending")
         .order("created_at", { ascending: true })
         .limit(1)
-        .maybeSingle();
+        .maybeSingle()) as {
+        data?: { created_at?: string | null } | null;
+      };
       debug = {
         ...(debug ?? {}),
         queue_status: {
@@ -1762,7 +1793,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error("[ai]", requestId, "fatal error", message);
     if (runId) {
       const finishedAt = new Date().toISOString();
-      await (supabaseAdmin as any).from("ai_run_history").update({
+      await fromAdmin("ai_run_history").update({
         finished_at: finishedAt,
         duration_ms: Date.now() - runStartMs,
         processed: reviewsProcessed,
@@ -1811,7 +1842,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } finally {
     if (runId && !runCompleted) {
       const finishedAt = new Date().toISOString();
-      await (supabaseAdmin as any).from("ai_run_history").update({
+      await fromAdmin("ai_run_history").update({
         finished_at: finishedAt,
         duration_ms: Date.now() - runStartMs,
         processed: reviewsProcessed,
