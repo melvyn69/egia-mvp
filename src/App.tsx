@@ -719,6 +719,11 @@ const App = () => {
         }
       >
         {routesContent}
+        {(import.meta.env.DEV || new URLSearchParams(window.location.search).get("debugFlags") === "1") && (
+          <div className="fixed bottom-2 right-2 z-50 rounded-full bg-black/80 px-3 py-1 text-[10px] font-mono text-white shadow-lg pointer-events-none">
+            UI_V2={FLAGS.UI_V2 ? "ON" : "OFF"} | {window.location.origin}
+          </div>
+        )}
       </AppShell>
     );
   }
@@ -741,6 +746,11 @@ const App = () => {
 
           <main className="flex-1 space-y-6 bg-gradient-to-br from-sand via-white to-clay px-4 py-6 md:px-6 md:py-8">
             {routesContent}
+            {(import.meta.env.DEV || new URLSearchParams(window.location.search).get("debugFlags") === "1") && (
+              <div className="fixed bottom-2 right-2 z-50 rounded-full bg-black/80 px-3 py-1 text-[10px] font-mono text-white shadow-lg pointer-events-none">
+                UI_V2={FLAGS.UI_V2 ? "ON" : "OFF"} | {window.location.origin}
+              </div>
+            )}
           </main>
         </div>
       </div>
