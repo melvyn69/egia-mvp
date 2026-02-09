@@ -39,6 +39,10 @@ const getEnv = (keys: string[]) => {
 const supabaseUrl = getEnv(["SUPABASE_URL", "VITE_SUPABASE_URL"]);
 const serviceRoleKey = getEnv(["SUPABASE_SERVICE_ROLE_KEY"]);
 const cronSecret = getEnv(["CRON_SECRET"]);
+const adminEmails = (process.env.ADMIN_EMAILS ?? "")
+  .split(",")
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
 
 const getMissingEnv = () => {
   const missing = [];
@@ -465,12 +469,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const bearerToken = getBearerToken(req);
   if (!expected || !provided || provided !== expected) {
     if (!bearerToken) {
-      console.error("[ai]", requestId, "invalid cron secret");
       return sendError(
         res,
         requestId,
-        { code: "FORBIDDEN", message: "Unauthorized" },
-        403
+        { code: "UNAUTHORIZED", message: "Unauthorized" },
+        401
       );
     }
     try {
@@ -480,16 +483,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return sendError(
           res,
           requestId,
-          { code: "FORBIDDEN", message: "Unauthorized" },
-          403
+          { code: "UNAUTHORIZED", message: "Unauthorized" },
+          401
         );
       }
-      const { data: roleRow } = await supabaseAdmin
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", authData.user.id)
-        .maybeSingle();
-      if (roleRow?.role !== "admin") {
+      const userEmail = authData.user.email?.toLowerCase() ?? "";
+      const userClient = createClient<Database>(supabaseUrl, serviceRoleKey, {
+        auth: { persistSession: false },
+        global: { headers: { Authorization: `Bearer ${bearerToken}` } }
+      });
+      const { data: isAdminViaRls } = await (userClient as any).rpc("is_admin");
+      const isAdmin =
+        Boolean(isAdminViaRls) ||
+        (adminEmails.length > 0 && userEmail && adminEmails.includes(userEmail));
+      if (!isAdmin) {
         return sendError(
           res,
           requestId,
@@ -497,13 +504,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           403
         );
       }
-    } catch (error) {
-      console.error("[ai]", requestId, "admin auth failed", error);
+    } catch {
       return sendError(
         res,
         requestId,
-        { code: "FORBIDDEN", message: "Unauthorized" },
-        403
+        { code: "UNAUTHORIZED", message: "Unauthorized" },
+        401
       );
     }
   }
@@ -1460,3 +1466,4 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 // Manual test plan:
 // 1) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews?location_id=%2Faccounts%2F123%2Flocations%2F456&debug=1" -H "x-cron-secret: <secret>"
 // 2) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews?location_id=all" -H "x-cron-secret: <secret>"
+// 3) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews" -H "Authorization: Bearer <token>" (admin email) -> 200
