@@ -51,7 +51,8 @@ export function ReviewDetail({
     handleSave,
     setSelectedReviewId,
     replySaving,
-    replySending
+    replySending,
+    replyHistory
 }: ReviewDetailProps) {
 
     if (!selectedReview) {
@@ -140,10 +141,10 @@ export function ReviewDetail({
                                 className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                                 value={tonePreset}
                                 onChange={(e) => {
-                                  const nextTone = toneOptions.find((opt) => opt.id === e.target.value)?.id;
-                                  if (nextTone) {
-                                    setTonePreset(nextTone);
-                                  }
+                                    const nextTone = toneOptions.find((opt) => opt.id === e.target.value)?.id;
+                                    if (nextTone) {
+                                        setTonePreset(nextTone);
+                                    }
                                 }}
                             >
                                 {toneOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
@@ -155,10 +156,10 @@ export function ReviewDetail({
                                 className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                                 value={lengthPreset}
                                 onChange={(e) => {
-                                  const nextLength = lengthOptions.find((opt) => opt.id === e.target.value)?.id;
-                                  if (nextLength) {
-                                    setLengthPreset(nextLength);
-                                  }
+                                    const nextLength = lengthOptions.find((opt) => opt.id === e.target.value)?.id;
+                                    if (nextLength) {
+                                        setLengthPreset(nextLength);
+                                    }
                                 }}
                             >
                                 {lengthOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
@@ -198,6 +199,31 @@ export function ReviewDetail({
                         >
                             {replySending ? "Envoi..." : <><Send className="mr-2 h-4 w-4" /> Envoyer</>}
                         </Button>
+                    </div>
+                </div>
+
+                {/* Activity Timeline */}
+                <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-200">
+                    <h3 className="font-semibold text-slate-900 mb-4">Activité</h3>
+                    <div className="space-y-4">
+                        {replyHistory.length === 0 ? (
+                            <p className="text-sm text-slate-400">Aucune activité enregistrée.</p>
+                        ) : (
+                            replyHistory.map((reply) => (
+                                <div key={reply.id} className="relative pl-4 border-l-2 border-slate-100 last:border-l-0">
+                                    <div className={`absolute -left-[5px] top-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${reply.status === "sent" ? "bg-emerald-500" : "bg-slate-300"
+                                        }`} />
+                                    <div className="text-xs text-slate-400 mb-1">
+                                        {formatDate(reply.created_at)}
+                                        {reply.status === "draft" && " (Brouillon)"}
+                                        {reply.status === "sent" && " (Envoyé)"}
+                                    </div>
+                                    <div className="text-sm text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                        {reply.reply_text}
+                                    </div>
+                                </div>
+                            ))
+                        )}
                     </div>
                 </div>
             </div>

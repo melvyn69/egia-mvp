@@ -24,6 +24,19 @@ export default function InboxLayout() {
                     fetchMoreReviews={actions.fetchMoreReviews}
                     highlightReviewId={state.highlightReviewId}
                     draftByReview={state.draftByReview}
+                    selectedLocation={state.selectedLocation}
+                    datePreset={state.datePreset}
+                    sentimentFilter={state.sentimentFilter}
+                    ratingMin={state.ratingMin}
+                    ratingMax={state.ratingMax}
+                    tagFilter={state.tagFilter}
+                    locations={state.locations}
+                    setSelectedLocation={actions.setSelectedLocation}
+                    setDatePreset={actions.setDatePreset}
+                    setSentimentFilter={actions.setSentimentFilter}
+                    setRatingMin={actions.setRatingMin}
+                    setRatingMax={actions.setRatingMax}
+                    setTagFilter={actions.setTagFilter}
                 />
             </div>
 
