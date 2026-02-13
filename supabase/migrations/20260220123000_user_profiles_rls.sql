@@ -20,3 +20,11 @@ for update
 to authenticated
 using (user_id = auth.uid())
 with check (user_id = auth.uid());
+
+-- Insert own profile
+drop policy if exists "user_profiles_insert_own" on public.user_profiles;
+create policy "user_profiles_insert_own"
+on public.user_profiles
+for insert
+to authenticated
+with check (auth.uid() = user_id);
