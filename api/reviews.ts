@@ -212,15 +212,6 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       if (!reviewId) {
         return res.status(400).json({ error: "Missing review_id" });
       }
-      const { data: adminRow } = await supabaseAdmin
-        .from("user_roles")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("role", "admin")
-        .maybeSingle();
-      if (!adminRow) {
-        return res.status(403).json({ error: "Admin only" });
-      }
 
       const { data: existingDraft } = await supabaseAdmin
         .from("review_ai_replies")
