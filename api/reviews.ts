@@ -200,6 +200,231 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       return res.status(200).json({ ok: true, alert: data });
     }
 
+    if (action === "ensure_draft") {
+      if (req.method !== "POST") {
+        return res.status(405).json({ error: "Method not allowed" });
+      }
+      const payload = parseBody(req);
+      const reviewId = String(payload?.review_id ?? "").trim();
+      const locationId = payload?.location_id
+        ? String(payload.location_id).trim()
+        : null;
+      if (!reviewId) {
+        return res.status(400).json({ error: "Missing review_id" });
+      }
+
+      const { data: existingDraft } = await supabaseAdmin
+        .from("review_ai_replies")
+        .select("status, draft_text")
+        .eq("review_id", reviewId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      const existingText = existingDraft?.draft_text
+        ? String(existingDraft.draft_text).trim()
+        : "";
+      if (existingText) {
+        return res.status(200).json({ ok: true, status: "exists" });
+      }
+
+      const jobsTable = supabaseAdmin as unknown as {
+        from: (table: string) => {
+          select: (columns: string) => {
+            filter: (column: string, operator: string, value: string) => {
+              in: (column: string, values: string[]) => {
+                maybeSingle: () => Promise<{
+                  data?: { id?: string | null } | null;
+                  error?: { message?: string | null } | null;
+                }>;
+              };
+            };
+          };
+          insert: (values: Record<string, unknown>) => Promise<{
+            error?: { message?: string | null; code?: string | null } | null;
+          }>;
+        };
+      };
+
+      const { data: existingJob } = await jobsTable
+        .from("ai_jobs")
+        .select("id")
+        .filter("payload->>review_id", "eq", reviewId)
+        .in("status", ["pending", "processing"])
+        .maybeSingle();
+      if (existingJob?.id) {
+        return res
+          .status(200)
+          .json({ ok: true, status: "already_running" });
+      }
+
+      const { error: enqueueError } = await jobsTable.from("ai_jobs").insert({
+        type: "review_analyze",
+        payload: { review_id: reviewId, location_id: locationId },
+        status: "pending"
+      });
+      if (enqueueError) {
+        if (enqueueError.code === "23505") {
+          return res
+            .status(200)
+            .json({ ok: true, status: "already_running" });
+        }
+        return res.status(500).json({ error: "Failed to enqueue draft" });
+      }
+      return res.status(200).json({ ok: true, status: "enqueued" });
+    }
+
+    if (action === "prepare_drafts") {
+      if (req.method !== "POST") {
+        return res.status(405).json({ error: "Method not allowed" });
+      }
+      const payload = parseBody(req);
+      const locationId = String(payload?.location_id ?? "").trim();
+      if (!locationId) {
+        return res.status(400).json({ error: "Missing location_id" });
+      }
+      const limitRaw = payload?.limit ?? 10;
+      const limit = Math.min(
+        25,
+        Math.max(1, Number.parseInt(String(limitRaw), 10) || 10)
+      );
+
+      const activeIds = await fetchActiveLocationIds(supabaseAdmin, userId);
+      if (activeIds && !activeIds.has(locationId)) {
+        const { data: locationRow } = await supabaseAdmin
+          .from("google_locations")
+          .select("id")
+          .eq("id", locationId)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (!locationRow) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+      }
+
+      const cooldownMs = 15 * 60 * 1000;
+      const { data: lastRun } = await supabaseAdmin
+        .from("ai_draft_runs")
+        .select("created_at")
+        .eq("user_id", userId)
+        .eq("location_id", locationId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const now = Date.now();
+      const lastRunAt = lastRun?.created_at
+        ? new Date(lastRun.created_at).getTime()
+        : 0;
+      if (lastRunAt && now - lastRunAt < cooldownMs) {
+        await supabaseAdmin.from("ai_draft_runs").insert({
+          user_id: userId,
+          location_id: locationId,
+          requested_limit: limit,
+          generated_count: 0
+        });
+        return res.status(200).json({
+          ok: true,
+          queued: 0,
+          skipped: 0,
+          cooldown: true,
+          limit
+        });
+      }
+
+      const candidateLimit = Math.max(limit * 5, limit);
+      const { data: inboxRows, error: inboxError } = await supabaseAdmin
+        .from("inbox_reviews")
+        .select(
+          "id, location_id, status, replied_at, needs_reply, update_time, create_time, created_at, comment"
+        )
+        .eq("user_id", userId)
+        .eq("location_id", locationId)
+        .not("comment", "is", null)
+        .neq("comment", "")
+        .or("replied_at.is.null,needs_reply.eq.true")
+        .order("update_time", { ascending: false, nullsFirst: false })
+        .order("create_time", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false, nullsFirst: false })
+        .limit(candidateLimit);
+      if (inboxError) {
+        return res.status(500).json({ error: "Failed to load inbox" });
+      }
+
+      const candidateIds = (inboxRows ?? [])
+        .map((row) => (row.id ? String(row.id) : ""))
+        .filter((id) => id.length > 0);
+      if (candidateIds.length === 0) {
+        await supabaseAdmin.from("ai_draft_runs").insert({
+          user_id: userId,
+          location_id: locationId,
+          requested_limit: limit,
+          generated_count: 0
+        });
+        return res.status(200).json({ ok: true, queued: 0, skipped: 0, limit });
+      }
+
+      const { data: existingDrafts } = await supabaseAdmin
+        .from("review_ai_replies")
+        .select("review_id")
+        .eq("user_id", userId)
+        .in("review_id", candidateIds);
+      const draftSet = new Set(
+        (existingDrafts ?? [])
+          .map((row) => (row.review_id ? String(row.review_id) : ""))
+          .filter((id) => id.length > 0)
+      );
+
+      let queued = 0;
+      let skipped = 0;
+      const jobsTable = supabaseAdmin as unknown as {
+        from: (table: string) => {
+          insert: (values: Record<string, unknown>) => Promise<{
+            error?: { message?: string | null; code?: string | null } | null;
+          }>;
+        };
+      };
+
+      for (const row of inboxRows ?? []) {
+        if (queued >= limit) {
+          break;
+        }
+        const reviewId = row.id ? String(row.id) : "";
+        if (!reviewId) {
+          continue;
+        }
+        if (draftSet.has(reviewId)) {
+          skipped += 1;
+          continue;
+        }
+        const { error: enqueueError } = await jobsTable.from("ai_jobs").insert({
+          type: "review_analyze",
+          payload: { review_id: reviewId, location_id: locationId },
+          status: "pending"
+        });
+        if (enqueueError) {
+          if (enqueueError.code === "23505") {
+            skipped += 1;
+            continue;
+          }
+          return res.status(500).json({ error: "Failed to enqueue" });
+        }
+        queued += 1;
+      }
+
+      await supabaseAdmin.from("ai_draft_runs").insert({
+        user_id: userId,
+        location_id: locationId,
+        requested_limit: limit,
+        generated_count: queued
+      });
+
+      return res.status(200).json({
+        ok: true,
+        queued,
+        skipped,
+        cooldown: false,
+        limit
+      });
+    }
+
     if (req.method !== "GET") {
       return res.status(405).json({ error: "Method not allowed" });
     }

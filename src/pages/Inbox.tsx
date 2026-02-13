@@ -161,7 +161,6 @@ const initialActivityEvents = [
     label: "Réponse automatique enregistrée",
     timestamp: "Il y a 12 min"
   },
-  { id: "a2", label: "Avis assigné à Lucie", timestamp: "Il y a 1 h" },
   { id: "a3", label: "Tag “Service” ajouté", timestamp: "Hier" }
 ];
 
@@ -361,6 +360,9 @@ const Inbox = () => {
   const [lengthPreset, setLengthPreset] = useState<LengthPreset>("moyen");
   const [tonePreset, setTonePreset] = useState<TonePreset>("professionnel");
   const [replyText, setReplyText] = useState("");
+  const [replyDirtyByReview, setReplyDirtyByReview] = useState<
+    Record<string, boolean>
+  >({});
   const [isGenerating, setIsGenerating] = useState(false);
   const [replyTab, setReplyTab] = useState<"reply" | "activity">("reply");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -368,6 +370,9 @@ const Inbox = () => {
     text: string;
     status: string | null;
   } | null>(null);
+  const [aiSuggestionLoadedByReview, setAiSuggestionLoadedByReview] = useState<
+    Record<string, boolean>
+  >({});
   const [aiSuggestionError, setAiSuggestionError] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
@@ -387,11 +392,15 @@ const Inbox = () => {
   const [replySaving, setReplySaving] = useState(false);
   const [replySending, setReplySending] = useState(false);
   const [draftByReview, setDraftByReview] = useState<Record<string, boolean>>({});
+  const [autoDraftStatusByReview, setAutoDraftStatusByReview] = useState<
+    Record<string, "idle" | "loading" | "ready" | "error">
+  >({});
   const [batchGenerating, setBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [batchError, setBatchError] = useState<string | null>(null);
   const [highlightReviewId, setHighlightReviewId] = useState<string | null>(null);
   const pendingReviewIdRef = useRef<string | null>(null);
+  const autoDraftRequestedRef = useRef<Record<string, boolean>>({});
   const [importStatus, setImportStatus] = useState<ReviewCronStatus>({
     status: "idle"
   });
@@ -406,6 +415,12 @@ const Inbox = () => {
     errors?: number;
     skipReason?: string | null;
   } | null>(null);
+  const [prepareDraftLoading, setPrepareDraftLoading] = useState(false);
+  const [prepareDraftMessage, setPrepareDraftMessage] = useState<string | null>(
+    null
+  );
+  const prepareDraftCooldownRef = useRef<Record<string, number>>({});
+  const prepareDraftLastCallRef = useRef<Record<string, number>>({});
   const [aiRunLocationLoading, setAiRunLocationLoading] = useState<string | null>(
     null
   );
@@ -888,6 +903,10 @@ const Inbox = () => {
     return selectedReview?.locationId ?? reviews[0]?.locationId ?? "";
   }, [selectedLocation, selectedReview, reviews]);
 
+  const autoDraftStatus = selectedReviewId
+    ? autoDraftStatusByReview[selectedReviewId] ?? "idle"
+    : "idle";
+
   const aiCronStatusQuery = useQuery({
     queryKey: ["inbox-ai-cron-status", sessionUserId, activeLocationId],
     queryFn: async () => {
@@ -1059,6 +1078,75 @@ const Inbox = () => {
     }
   };
 
+  const handlePrepareDrafts = useCallback(
+    async (locationId: string) => {
+      if (!supabase || !locationId || prepareDraftLoading) {
+        return;
+      }
+      setPrepareDraftLoading(true);
+      setPrepareDraftMessage(null);
+      try {
+        const token = await getAccessToken(supabase);
+        const response = await fetch("/api/reviews?action=prepare_drafts", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ location_id: locationId, limit: 10 })
+        });
+        const payload = await response.json().catch(() => null);
+        if (response.status === 401) {
+          setPrepareDraftMessage("Non connecté.");
+          return;
+        }
+        if (response.status === 403) {
+          setPrepareDraftMessage("Accès refusé.");
+          return;
+        }
+        if (!response.ok) {
+          setPrepareDraftMessage("Erreur lors de la préparation.");
+          return;
+        }
+        if (payload?.cooldown) {
+          setPrepareDraftMessage("Préparation en cooldown.");
+          prepareDraftCooldownRef.current[locationId] = Date.now() + 15 * 60 * 1000;
+        } else if ((payload?.queued ?? 0) > 0) {
+          setPrepareDraftMessage(`${payload.queued} brouillons en préparation.`);
+        } else {
+          setPrepareDraftMessage("Aucun brouillon à préparer.");
+        }
+      } catch {
+        setPrepareDraftMessage("Erreur réseau.");
+      } finally {
+        prepareDraftLastCallRef.current[locationId] = Date.now();
+        setPrepareDraftLoading(false);
+      }
+    },
+    [prepareDraftLoading, supabase]
+  );
+
+  useEffect(() => {
+    if (!activeLocationId || !supabase) {
+      return;
+    }
+    const now = Date.now();
+    const lastCall = prepareDraftLastCallRef.current[activeLocationId] ?? 0;
+    if (now - lastCall < 30000) {
+      return;
+    }
+    const cooldownUntil = prepareDraftCooldownRef.current[activeLocationId] ?? 0;
+    if (cooldownUntil && now < cooldownUntil) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      void handlePrepareDrafts(activeLocationId);
+    }, 800);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [activeLocationId, handlePrepareDrafts, supabase]);
+
   const handleRunAiForSpecificLocation = async (locationId: string) => {
     if (!supabase || !locationId || aiRunLocationLoading) {
       return;
@@ -1124,8 +1212,17 @@ const Inbox = () => {
       setReplyText("");
       return;
     }
-    setReplyText(drafts[selectedReviewId] ?? "");
-  }, [drafts, selectedReviewId]);
+    const nextDraft = drafts[selectedReviewId] ?? "";
+    setReplyText((current) => {
+      if (replyDirtyByReview[selectedReviewId]) {
+        return current;
+      }
+      if (current.trim()) {
+        return current;
+      }
+      return nextDraft;
+    });
+  }, [drafts, selectedReviewId, replyDirtyByReview]);
 
   const loadReviewStatuses = useCallback(async () => {
     if (!supabase || !activeLocationId) {
@@ -1273,6 +1370,10 @@ const Inbox = () => {
     const loadAiSuggestion = async () => {
       setAiSuggestion(null);
       setAiSuggestionError(null);
+      setAiSuggestionLoadedByReview((prev) => ({
+        ...prev,
+        [selectedReview.id]: false
+      }));
       const sbAny = supabaseClient as unknown as {
         from: (table: string) => {
           select: (columns: string) => {
@@ -1295,20 +1396,174 @@ const Inbox = () => {
       }
       if (error) {
         setAiSuggestionError("Impossible de charger la suggestion IA.");
+        setAiSuggestionLoadedByReview((prev) => ({
+          ...prev,
+          [selectedReview.id]: true
+        }));
         return;
       }
       const draftText = data?.draft_text ? String(data.draft_text).trim() : "";
       if (!draftText) {
         setAiSuggestion(null);
+        setAiSuggestionLoadedByReview((prev) => ({
+          ...prev,
+          [selectedReview.id]: true
+        }));
         return;
       }
       setAiSuggestion({ text: draftText, status: data?.status ?? null });
+      setAiSuggestionLoadedByReview((prev) => ({
+        ...prev,
+        [selectedReview.id]: true
+      }));
     };
     void loadAiSuggestion();
     return () => {
       mounted = false;
     };
   }, [selectedReview, selectedReviewId]);
+
+  useEffect(() => {
+    if (!selectedReview || !supabase) {
+      return;
+    }
+    const reviewId = selectedReview.id;
+    const suggestionText = aiSuggestion?.text?.trim() ?? "";
+
+    if (suggestionText) {
+      setAutoDraftStatusByReview((prev) => ({
+        ...prev,
+        [reviewId]: "ready"
+      }));
+      if (!replyDirtyByReview[reviewId]) {
+        setDrafts((prev) => ({
+          ...prev,
+          [reviewId]: suggestionText
+        }));
+      }
+      return;
+    }
+
+    if (!aiSuggestionLoadedByReview[reviewId]) {
+      return;
+    }
+
+    if (autoDraftRequestedRef.current[reviewId]) {
+      return;
+    }
+    autoDraftRequestedRef.current[reviewId] = true;
+    setAutoDraftStatusByReview((prev) => ({
+      ...prev,
+      [reviewId]: "loading"
+    }));
+
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const fetchDraft = async () => {
+      const sbAny = supabase as unknown as {
+        from: (table: string) => {
+          select: (columns: string) => {
+            eq: (column: string, value: string) => {
+              maybeSingle: () => Promise<{
+                data?: { draft_text?: string | null; status?: string | null } | null;
+                error?: { message?: string | null } | null;
+              }>;
+            };
+          };
+        };
+      };
+      const { data, error } = await sbAny
+        .from("review_ai_replies")
+        .select("draft_text, status")
+        .eq("review_id", reviewId)
+        .maybeSingle();
+      if (error) {
+        return "";
+      }
+      return data?.draft_text ? String(data.draft_text).trim() : "";
+    };
+
+    const intervalMs = 2000;
+    const maxAttempts = 15;
+    let attempts = 0;
+
+    const poll = async () => {
+      if (cancelled) {
+        return;
+      }
+      const draftText = await fetchDraft();
+      if (cancelled) {
+        return;
+      }
+      if (draftText) {
+        setAiSuggestion({ text: draftText, status: "draft" });
+        setAutoDraftStatusByReview((prev) => ({
+          ...prev,
+          [reviewId]: "ready"
+        }));
+        return;
+      }
+      attempts += 1;
+      if (attempts >= maxAttempts) {
+        setAutoDraftStatusByReview((prev) => ({
+          ...prev,
+          [reviewId]: "error"
+        }));
+        return;
+      }
+      timeoutId = setTimeout(poll, intervalMs);
+    };
+
+    const ensureDraft = async () => {
+      try {
+        const token = await getAccessToken(supabase);
+        const response = await fetch("/api/reviews?action=ensure_draft", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            review_id: reviewId,
+            location_id: selectedReview.locationId,
+            tone: tonePreset,
+            length: lengthPreset
+          })
+        });
+        if (!response.ok) {
+          setAutoDraftStatusByReview((prev) => ({
+            ...prev,
+            [reviewId]: "error"
+          }));
+          return;
+        }
+        void poll();
+      } catch {
+        setAutoDraftStatusByReview((prev) => ({
+          ...prev,
+          [reviewId]: "error"
+        }));
+      }
+    };
+
+    void ensureDraft();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [
+    aiSuggestion?.text,
+    aiSuggestionLoadedByReview,
+    lengthPreset,
+    replyDirtyByReview,
+    selectedReview,
+    selectedReviewId,
+    tonePreset
+  ]);
 
   useEffect(() => {
     const supabaseClient = supabase;
@@ -1966,6 +2221,11 @@ const Inbox = () => {
               ? formatSinceMinutes(aiStatusDisplay.lastRunAt)
               : "Jamais"}
           </div>
+          {(prepareDraftLoading || prepareDraftMessage) && (
+            <div className="mt-1 text-[11px] text-slate-500">
+              {prepareDraftLoading ? "Préparation des brouillons…" : prepareDraftMessage}
+            </div>
+          )}
           {aiStatusUi.errorText && (
             <div className="mt-1 text-[11px] text-rose-600">
               {aiStatusUi.errorText}
@@ -2616,6 +2876,16 @@ const Inbox = () => {
                     </div>
                   </div>
                 )}
+                {autoDraftStatus === "loading" && (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                    Génération en cours…
+                  </div>
+                )}
+                {autoDraftStatus === "error" && (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+                    Impossible de générer un brouillon pour le moment.
+                  </div>
+                )}
 
                 <div>
                   <textarea
@@ -2627,6 +2897,10 @@ const Inbox = () => {
                       setReplyText(next);
                       if (selectedReview) {
                         setDrafts((prev) => ({ ...prev, [selectedReview.id]: next }));
+                        setReplyDirtyByReview((prev) => ({
+                          ...prev,
+                          [selectedReview.id]: true
+                        }));
                       }
                     }}
                   />
