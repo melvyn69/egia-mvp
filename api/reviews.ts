@@ -258,7 +258,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
       const { error: enqueueError } = await jobsTable.from("ai_jobs").insert({
         type: "review_analyze",
-        payload: { review_id: reviewId, location_id: locationId },
+        payload: { review_id: reviewId, location_id: locationId, user_id: userId },
         status: "pending"
       });
       if (enqueueError) {
@@ -282,9 +282,14 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         return res.status(400).json({ error: "Missing location_id" });
       }
       const limitRaw = payload?.limit ?? 10;
+      const cooldownRaw = payload?.cooldownMinutes ?? 15;
       const limit = Math.min(
         25,
         Math.max(1, Number.parseInt(String(limitRaw), 10) || 10)
+      );
+      const cooldownMinutes = Math.min(
+        120,
+        Math.max(1, Number.parseInt(String(cooldownRaw), 10) || 15)
       );
 
       const activeIds = await fetchActiveLocationIds(supabaseAdmin, userId);
@@ -300,26 +305,30 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         }
       }
 
-      const cooldownMs = 15 * 60 * 1000;
+      const cooldownMs = cooldownMinutes * 60 * 1000;
       const { data: lastRun } = await supabaseAdmin
         .from("ai_draft_runs")
-        .select("created_at")
+        .select("last_run_at")
         .eq("user_id", userId)
         .eq("location_id", locationId)
-        .order("created_at", { ascending: false })
+        .order("last_run_at", { ascending: false })
         .limit(1)
         .maybeSingle();
       const now = Date.now();
-      const lastRunAt = lastRun?.created_at
-        ? new Date(lastRun.created_at).getTime()
+      const lastRunAt = lastRun?.last_run_at
+        ? new Date(lastRun.last_run_at).getTime()
         : 0;
       if (lastRunAt && now - lastRunAt < cooldownMs) {
-        await supabaseAdmin.from("ai_draft_runs").insert({
-          user_id: userId,
-          location_id: locationId,
-          requested_limit: limit,
-          generated_count: 0
-        });
+        await supabaseAdmin.from("ai_draft_runs").upsert(
+          {
+            user_id: userId,
+            location_id: locationId,
+            last_run_at: new Date().toISOString(),
+            requested_limit: limit,
+            generated_count: 0
+          },
+          { onConflict: "user_id,location_id" }
+        );
         return res.status(200).json({
           ok: true,
           queued: 0,
@@ -352,12 +361,16 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         .map((row) => (row.id ? String(row.id) : ""))
         .filter((id) => id.length > 0);
       if (candidateIds.length === 0) {
-        await supabaseAdmin.from("ai_draft_runs").insert({
-          user_id: userId,
-          location_id: locationId,
-          requested_limit: limit,
-          generated_count: 0
-        });
+        await supabaseAdmin.from("ai_draft_runs").upsert(
+          {
+            user_id: userId,
+            location_id: locationId,
+            last_run_at: new Date().toISOString(),
+            requested_limit: limit,
+            generated_count: 0
+          },
+          { onConflict: "user_id,location_id" }
+        );
         return res.status(200).json({ ok: true, queued: 0, skipped: 0, limit });
       }
 
@@ -396,7 +409,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         }
         const { error: enqueueError } = await jobsTable.from("ai_jobs").insert({
           type: "review_analyze",
-          payload: { review_id: reviewId, location_id: locationId },
+          payload: { review_id: reviewId, location_id: locationId, user_id: userId },
           status: "pending"
         });
         if (enqueueError) {
@@ -409,12 +422,16 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         queued += 1;
       }
 
-      await supabaseAdmin.from("ai_draft_runs").insert({
-        user_id: userId,
-        location_id: locationId,
-        requested_limit: limit,
-        generated_count: queued
-      });
+      await supabaseAdmin.from("ai_draft_runs").upsert(
+        {
+          user_id: userId,
+          location_id: locationId,
+          last_run_at: new Date().toISOString(),
+          requested_limit: limit,
+          generated_count: queued
+        },
+        { onConflict: "user_id,location_id" }
+      );
 
       return res.status(200).json({
         ok: true,

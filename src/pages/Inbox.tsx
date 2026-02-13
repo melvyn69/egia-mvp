@@ -1610,16 +1610,6 @@ const Inbox = () => {
       });
   }, []);
 
-  useEffect(() => {
-    if (!supabase) {
-      return;
-    }
-    supabase.auth.getSession().then(({ data }) => {
-      console.log("SESSION =", data.session);
-      console.log("ACCESS_TOKEN =", data.session?.access_token);
-    });
-  }, []);
-
   const handleInvalidJwt = async () => {
     setGenerationError("Session expirée, reconnecte-toi");
     const supabaseClient = supabase;
