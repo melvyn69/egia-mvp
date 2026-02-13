@@ -200,6 +200,87 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       return res.status(200).json({ ok: true, alert: data });
     }
 
+    if (action === "ensure_draft") {
+      if (req.method !== "POST") {
+        return res.status(405).json({ error: "Method not allowed" });
+      }
+      const payload = parseBody(req);
+      const reviewId = String(payload?.review_id ?? "").trim();
+      const locationId = payload?.location_id
+        ? String(payload.location_id).trim()
+        : null;
+      if (!reviewId) {
+        return res.status(400).json({ error: "Missing review_id" });
+      }
+      const { data: adminRow } = await supabaseAdmin
+        .from("user_roles")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("role", "admin")
+        .maybeSingle();
+      if (!adminRow) {
+        return res.status(403).json({ error: "Admin only" });
+      }
+
+      const { data: existingDraft } = await supabaseAdmin
+        .from("review_ai_replies")
+        .select("status, draft_text")
+        .eq("review_id", reviewId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      const existingText = existingDraft?.draft_text
+        ? String(existingDraft.draft_text).trim()
+        : "";
+      if (existingText) {
+        return res.status(200).json({ ok: true, status: "exists" });
+      }
+
+      const jobsTable = supabaseAdmin as unknown as {
+        from: (table: string) => {
+          select: (columns: string) => {
+            filter: (column: string, operator: string, value: string) => {
+              in: (column: string, values: string[]) => {
+                maybeSingle: () => Promise<{
+                  data?: { id?: string | null } | null;
+                  error?: { message?: string | null } | null;
+                }>;
+              };
+            };
+          };
+          insert: (values: Record<string, unknown>) => Promise<{
+            error?: { message?: string | null; code?: string | null } | null;
+          }>;
+        };
+      };
+
+      const { data: existingJob } = await jobsTable
+        .from("ai_jobs")
+        .select("id")
+        .filter("payload->>review_id", "eq", reviewId)
+        .in("status", ["pending", "processing"])
+        .maybeSingle();
+      if (existingJob?.id) {
+        return res
+          .status(200)
+          .json({ ok: true, status: "already_running" });
+      }
+
+      const { error: enqueueError } = await jobsTable.from("ai_jobs").insert({
+        type: "review_analyze",
+        payload: { review_id: reviewId, location_id: locationId },
+        status: "pending"
+      });
+      if (enqueueError) {
+        if (enqueueError.code === "23505") {
+          return res
+            .status(200)
+            .json({ ok: true, status: "already_running" });
+        }
+        return res.status(500).json({ error: "Failed to enqueue draft" });
+      }
+      return res.status(200).json({ ok: true, status: "enqueued" });
+    }
+
     if (req.method !== "GET") {
       return res.status(405).json({ error: "Method not allowed" });
     }
