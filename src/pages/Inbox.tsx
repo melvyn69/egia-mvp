@@ -415,6 +415,12 @@ const Inbox = () => {
     errors?: number;
     skipReason?: string | null;
   } | null>(null);
+  const [prepareDraftLoading, setPrepareDraftLoading] = useState(false);
+  const [prepareDraftMessage, setPrepareDraftMessage] = useState<string | null>(
+    null
+  );
+  const prepareDraftCooldownRef = useRef<Record<string, number>>({});
+  const prepareDraftLastCallRef = useRef<Record<string, number>>({});
   const [aiRunLocationLoading, setAiRunLocationLoading] = useState<string | null>(
     null
   );
@@ -1071,6 +1077,75 @@ const Inbox = () => {
       setAiRunLoading(false);
     }
   };
+
+  const handlePrepareDrafts = useCallback(
+    async (locationId: string) => {
+      if (!supabase || !locationId || prepareDraftLoading) {
+        return;
+      }
+      setPrepareDraftLoading(true);
+      setPrepareDraftMessage(null);
+      try {
+        const token = await getAccessToken(supabase);
+        const response = await fetch("/api/reviews?action=prepare_drafts", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ location_id: locationId, limit: 10 })
+        });
+        const payload = await response.json().catch(() => null);
+        if (response.status === 401) {
+          setPrepareDraftMessage("Non connecté.");
+          return;
+        }
+        if (response.status === 403) {
+          setPrepareDraftMessage("Accès refusé.");
+          return;
+        }
+        if (!response.ok) {
+          setPrepareDraftMessage("Erreur lors de la préparation.");
+          return;
+        }
+        if (payload?.cooldown) {
+          setPrepareDraftMessage("Préparation en cooldown.");
+          prepareDraftCooldownRef.current[locationId] = Date.now() + 15 * 60 * 1000;
+        } else if ((payload?.queued ?? 0) > 0) {
+          setPrepareDraftMessage(`${payload.queued} brouillons en préparation.`);
+        } else {
+          setPrepareDraftMessage("Aucun brouillon à préparer.");
+        }
+      } catch {
+        setPrepareDraftMessage("Erreur réseau.");
+      } finally {
+        prepareDraftLastCallRef.current[locationId] = Date.now();
+        setPrepareDraftLoading(false);
+      }
+    },
+    [prepareDraftLoading, supabase]
+  );
+
+  useEffect(() => {
+    if (!activeLocationId || !supabase) {
+      return;
+    }
+    const now = Date.now();
+    const lastCall = prepareDraftLastCallRef.current[activeLocationId] ?? 0;
+    if (now - lastCall < 30000) {
+      return;
+    }
+    const cooldownUntil = prepareDraftCooldownRef.current[activeLocationId] ?? 0;
+    if (cooldownUntil && now < cooldownUntil) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      void handlePrepareDrafts(activeLocationId);
+    }, 800);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [activeLocationId, handlePrepareDrafts, supabase]);
 
   const handleRunAiForSpecificLocation = async (locationId: string) => {
     if (!supabase || !locationId || aiRunLocationLoading) {
@@ -2146,6 +2221,11 @@ const Inbox = () => {
               ? formatSinceMinutes(aiStatusDisplay.lastRunAt)
               : "Jamais"}
           </div>
+          {(prepareDraftLoading || prepareDraftMessage) && (
+            <div className="mt-1 text-[11px] text-slate-500">
+              {prepareDraftLoading ? "Préparation des brouillons…" : prepareDraftMessage}
+            </div>
+          )}
           {aiStatusUi.errorText && (
             <div className="mt-1 text-[11px] text-rose-600">
               {aiStatusUi.errorText}
