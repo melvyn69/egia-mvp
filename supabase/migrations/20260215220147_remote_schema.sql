@@ -282,33 +282,26 @@ AS $function$
 $function$
 ;
 
-grant delete on table "public"."ai_jobs" to "anon";
+DO $$
+BEGIN
+  IF to_regclass('public.ai_jobs') IS NOT NULL THEN
+    EXECUTE 'grant delete on table "public"."ai_jobs" to "anon"';
+    EXECUTE 'grant insert on table "public"."ai_jobs" to "anon"';
+    EXECUTE 'grant references on table "public"."ai_jobs" to "anon"';
+    EXECUTE 'grant select on table "public"."ai_jobs" to "anon"';
+    EXECUTE 'grant trigger on table "public"."ai_jobs" to "anon"';
+    EXECUTE 'grant truncate on table "public"."ai_jobs" to "anon"';
+    EXECUTE 'grant update on table "public"."ai_jobs" to "anon"';
 
-grant insert on table "public"."ai_jobs" to "anon";
-
-grant references on table "public"."ai_jobs" to "anon";
-
-grant select on table "public"."ai_jobs" to "anon";
-
-grant trigger on table "public"."ai_jobs" to "anon";
-
-grant truncate on table "public"."ai_jobs" to "anon";
-
-grant update on table "public"."ai_jobs" to "anon";
-
-grant delete on table "public"."ai_jobs" to "authenticated";
-
-grant insert on table "public"."ai_jobs" to "authenticated";
-
-grant references on table "public"."ai_jobs" to "authenticated";
-
-grant select on table "public"."ai_jobs" to "authenticated";
-
-grant trigger on table "public"."ai_jobs" to "authenticated";
-
-grant truncate on table "public"."ai_jobs" to "authenticated";
-
-grant update on table "public"."ai_jobs" to "authenticated";
+    EXECUTE 'grant delete on table "public"."ai_jobs" to "authenticated"';
+    EXECUTE 'grant insert on table "public"."ai_jobs" to "authenticated"';
+    EXECUTE 'grant references on table "public"."ai_jobs" to "authenticated"';
+    EXECUTE 'grant select on table "public"."ai_jobs" to "authenticated"';
+    EXECUTE 'grant trigger on table "public"."ai_jobs" to "authenticated"';
+    EXECUTE 'grant truncate on table "public"."ai_jobs" to "authenticated"';
+    EXECUTE 'grant update on table "public"."ai_jobs" to "authenticated"';
+  END IF;
+END $$;
 
 grant delete on table "public"."cron_state" to "authenticated";
 
@@ -730,4 +723,3 @@ using ((bucket_id = 'brand-assets'::text));
 CREATE TRIGGER protect_buckets_delete BEFORE DELETE ON storage.buckets FOR EACH STATEMENT EXECUTE FUNCTION storage.protect_delete();
 
 CREATE TRIGGER protect_objects_delete BEFORE DELETE ON storage.objects FOR EACH STATEMENT EXECUTE FUNCTION storage.protect_delete();
-
