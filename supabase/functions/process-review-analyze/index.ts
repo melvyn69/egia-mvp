@@ -18,8 +18,15 @@ const getSupabaseAdmin = () => {
   if (!supabaseUrl || !serviceRoleKey) {
     throw new Error("Missing Supabase env vars");
   }
+  const looksLikeJwt = serviceRoleKey.split(".").length === 3;
+  if (!looksLikeJwt) {
+    throw new Error("SERVICE_ROLE_KEY missing/invalid format");
+  }
   return createClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false }
+    auth: { persistSession: false },
+    global: {
+      headers: { apikey: serviceRoleKey }
+    }
   });
 };
 
