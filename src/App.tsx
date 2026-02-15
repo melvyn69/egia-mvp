@@ -231,11 +231,14 @@ const App = () => {
     }
     (supabase as unknown as { from: (table: string) => any })
       .from("user_profiles")
-      .upsert({
-        user_id: session.user.id,
-        email,
-        updated_at: new Date().toISOString()
-      })
+      .upsert(
+        {
+          user_id: session.user.id,
+          email,
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: "user_id" }
+      )
       .then((result: { error?: { message?: string } | null }) => {
         const error = result?.error ?? null;
         if (error) {
