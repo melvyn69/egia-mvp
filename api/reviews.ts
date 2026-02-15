@@ -296,12 +296,15 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       if (activeIds && !activeIds.has(locationId)) {
         const { data: locationRow } = await supabaseAdmin
           .from("google_locations")
-          .select("id")
-          .eq("id", locationId)
+          .select("id, location_resource_name")
           .eq("user_id", userId)
+          .or(`id.eq.${locationId},location_resource_name.eq.${locationId}`)
           .maybeSingle();
         if (!locationRow) {
-          return res.status(403).json({ error: "Forbidden" });
+          console.warn("[reviews] prepare_drafts location access not confirmed", {
+            userId,
+            locationId
+          });
         }
       }
 

@@ -363,10 +363,12 @@ const Inbox = () => {
   const [replyDirtyByReview, setReplyDirtyByReview] = useState<
     Record<string, boolean>
   >({});
+  const lastSelectedReviewIdRef = useRef<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [replyTab, setReplyTab] = useState<"reply" | "activity">("reply");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [aiSuggestion, setAiSuggestion] = useState<{
+    reviewId: string;
     text: string;
     status: string | null;
   } | null>(null);
@@ -1210,18 +1212,25 @@ const Inbox = () => {
   useEffect(() => {
     if (!selectedReviewId) {
       setReplyText("");
+      lastSelectedReviewIdRef.current = null;
       return;
     }
     const nextDraft = drafts[selectedReviewId] ?? "";
+    const isDirty = Boolean(replyDirtyByReview[selectedReviewId]);
+    const isSameReview = lastSelectedReviewIdRef.current === selectedReviewId;
     setReplyText((current) => {
-      if (replyDirtyByReview[selectedReviewId]) {
+      if (isDirty) {
         return current;
+      }
+      if (!isSameReview) {
+        return nextDraft;
       }
       if (current.trim()) {
         return current;
       }
       return nextDraft;
     });
+    lastSelectedReviewIdRef.current = selectedReviewId;
   }, [drafts, selectedReviewId, replyDirtyByReview]);
 
   const loadReviewStatuses = useCallback(async () => {
@@ -1411,7 +1420,11 @@ const Inbox = () => {
         }));
         return;
       }
-      setAiSuggestion({ text: draftText, status: data?.status ?? null });
+      setAiSuggestion({
+        reviewId: selectedReview.id,
+        text: draftText,
+        status: data?.status ?? null
+      });
       setAiSuggestionLoadedByReview((prev) => ({
         ...prev,
         [selectedReview.id]: true
@@ -1428,7 +1441,8 @@ const Inbox = () => {
       return;
     }
     const reviewId = selectedReview.id;
-    const suggestionText = aiSuggestion?.text?.trim() ?? "";
+    const suggestionText =
+      aiSuggestion?.reviewId === reviewId ? aiSuggestion.text.trim() : "";
 
     if (suggestionText) {
       setAutoDraftStatusByReview((prev) => ({
@@ -1497,7 +1511,7 @@ const Inbox = () => {
         return;
       }
       if (draftText) {
-        setAiSuggestion({ text: draftText, status: "draft" });
+        setAiSuggestion({ reviewId, text: draftText, status: "draft" });
         setAutoDraftStatusByReview((prev) => ({
           ...prev,
           [reviewId]: "ready"
@@ -2819,7 +2833,9 @@ const Inbox = () => {
                     {aiSuggestionError}
                   </div>
                 )}
-                {aiSuggestion && (
+                {aiSuggestion &&
+                  selectedReview &&
+                  aiSuggestion.reviewId === selectedReview.id && (
                   <div className="rounded-2xl border border-slate-200 bg-white p-4">
                     <div className="flex items-center justify-between">
                       <div>
