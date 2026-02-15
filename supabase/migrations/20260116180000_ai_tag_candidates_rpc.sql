@@ -65,3 +65,6 @@ language sql stable as $$
     and (p_user_id is null or gr.user_id = p_user_id)
     and (p_location_id is null or gr.location_id = p_location_id);
 $$;
+-- Ensure column exists for replayable migrations (shadow DB / new env)
+alter table public.google_reviews
+  add column if not exists location_name text;
