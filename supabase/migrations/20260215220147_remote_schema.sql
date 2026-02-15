@@ -1,6 +1,11 @@
 drop extension if exists "pg_net";
 
-drop policy "ai_run_history_select" on "public"."ai_run_history";
+DO $$
+BEGIN
+  IF to_regclass('public.ai_run_history') IS NOT NULL THEN
+    EXECUTE 'drop policy "ai_run_history_select" on "public"."ai_run_history"';
+  END IF;
+END $$;
 
 drop policy "delete_own_google_connections" on "public"."google_connections";
 
@@ -725,5 +730,4 @@ using ((bucket_id = 'brand-assets'::text));
 CREATE TRIGGER protect_buckets_delete BEFORE DELETE ON storage.buckets FOR EACH STATEMENT EXECUTE FUNCTION storage.protect_delete();
 
 CREATE TRIGGER protect_objects_delete BEFORE DELETE ON storage.objects FOR EACH STATEMENT EXECUTE FUNCTION storage.protect_delete();
-
 
