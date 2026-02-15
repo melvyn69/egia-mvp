@@ -3,8 +3,29 @@
 -- ===============================
 
 -- 1) Passer les vues en SECURITY INVOKER (respecte le RLS)
-alter view public.business_memory_effective set (security_invoker = true);
-alter view public.inbox_reviews set (security_invoker = true);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_views
+    WHERE schemaname = 'public'
+      AND viewname = 'business_memory_effective'
+  ) THEN
+    EXECUTE 'alter view public.business_memory_effective set (security_invoker = true)';
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_views
+    WHERE schemaname = 'public'
+      AND viewname = 'inbox_reviews'
+  ) THEN
+    EXECUTE 'alter view public.inbox_reviews set (security_invoker = true)';
+  END IF;
+END $$;
 
 -- 2) Retirer TOUS les droits publics
 revoke all on public.business_memory_effective from anon, authenticated;
