@@ -65,5 +65,10 @@ alter table public.google_oauth_states enable row level security;
 revoke all on public.google_oauth_states from anon, authenticated;
 
 -- cron_state (background jobs)
-alter table public.cron_state enable row level security;
-revoke all on public.cron_state from anon, authenticated;
+DO $$
+BEGIN
+  IF to_regclass('public.cron_state') IS NOT NULL THEN
+    EXECUTE 'alter table public.cron_state enable row level security';
+    EXECUTE 'revoke all on public.cron_state from anon, authenticated';
+  END IF;
+END $$;
