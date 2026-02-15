@@ -13,6 +13,47 @@ BEGIN
   END IF;
 END $$;
 
+-- Ensure google_reviews.created_at exists (needed by ai_tag_candidates)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'google_reviews'
+      AND column_name = 'created_at'
+  ) THEN
+    ALTER TABLE public.google_reviews
+      ADD COLUMN created_at timestamptz;
+  END IF;
+END $$;
+
+-- Optional: ensure update_time/create_time columns exist
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'google_reviews'
+      AND column_name = 'update_time'
+  ) THEN
+    ALTER TABLE public.google_reviews
+      ADD COLUMN update_time timestamptz;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'google_reviews'
+      AND column_name = 'create_time'
+  ) THEN
+    ALTER TABLE public.google_reviews
+      ADD COLUMN create_time timestamptz;
+  END IF;
+END $$;
+
 create or replace function public.ai_tag_candidates(
   p_user_id uuid default null,
   p_location_id text default null,
@@ -39,7 +80,7 @@ language sql stable as $$
          gr.comment,
          gr.update_time,
          gr.create_time,
-         gr.created_at
+         COALESCE(gr.created_at, now()) as created_at
   from public.google_reviews gr
   where gr.comment is not null
     and length(btrim(gr.comment)) > 0
