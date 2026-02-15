@@ -53,6 +53,19 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const raw = Deno.env.get("SERVICE_ROLE_KEY") ?? "";
+    const key = raw.trim();
+    const looksLikeJwt = key.split(".").length === 3;
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        debug: {
+          present: Boolean(key),
+          looksLikeJwt
+        }
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
     const processSecret = Deno.env.get("PROCESS_REVIEW_ANALYZE_SECRET");
     if (processSecret) {
       const header = req.headers.get("x-process-secret");
