@@ -70,7 +70,19 @@ Deno.serve(async (req) => {
       }
     );
     if (claimError) {
-      return json(500, { ok: false, error: "Failed to claim jobs" });
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: "Failed to claim jobs",
+          details: {
+            message: claimError.message,
+            code: (claimError as unknown as { code?: string }).code,
+            hint: (claimError as unknown as { hint?: string }).hint,
+            details: (claimError as unknown as { details?: string }).details
+          }
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
     }
 
     const claimed = (jobs ?? []) as Array<{ id: string; payload: Record<string, unknown> }>;
