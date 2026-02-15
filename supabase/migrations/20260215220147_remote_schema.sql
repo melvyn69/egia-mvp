@@ -720,6 +720,19 @@ drop policy "brand_assets_objects_update_own" on "storage"."objects";
 using ((bucket_id = 'brand-assets'::text));
 
 
-CREATE TRIGGER protect_buckets_delete BEFORE DELETE ON storage.buckets FOR EACH STATEMENT EXECUTE FUNCTION storage.protect_delete();
-
-CREATE TRIGGER protect_objects_delete BEFORE DELETE ON storage.objects FOR EACH STATEMENT EXECUTE FUNCTION storage.protect_delete();
+DO $$
+BEGIN
+  IF to_regclass('storage.buckets') IS NOT NULL
+     AND to_regclass('storage.objects') IS NOT NULL
+     AND EXISTS (
+       SELECT 1
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'storage'
+         AND p.proname = 'protect_delete'
+     )
+  THEN
+    EXECUTE 'CREATE TRIGGER protect_buckets_delete BEFORE DELETE ON storage.buckets FOR EACH STATEMENT EXECUTE FUNCTION storage.protect_delete()';
+    EXECUTE 'CREATE TRIGGER protect_objects_delete BEFORE DELETE ON storage.objects FOR EACH STATEMENT EXECUTE FUNCTION storage.protect_delete()';
+  END IF;
+END $$;
