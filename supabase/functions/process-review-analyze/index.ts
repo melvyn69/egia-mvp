@@ -53,25 +53,25 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const raw = Deno.env.get("SERVICE_ROLE_KEY") ?? "";
-    const key = raw.trim();
-    const looksLikeJwt = key.split(".").length === 3;
-    return new Response(
-      JSON.stringify({
-        ok: false,
-        debug: {
-          present: Boolean(key),
-          looksLikeJwt
-        }
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
     const processSecret = Deno.env.get("PROCESS_REVIEW_ANALYZE_SECRET");
     if (processSecret) {
       const header = req.headers.get("x-process-secret");
       if (header !== processSecret) {
         return json(401, { ok: false, error: "Unauthorized" });
       }
+    }
+    const key = (Deno.env.get("SERVICE_ROLE_KEY") ?? "").trim();
+    const present = Boolean(key);
+    const looksLikeJwt = key.split(".").length === 3;
+    if (!present || !looksLikeJwt) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: "SERVICE_ROLE_KEY missing/invalid format",
+          debug: { present, looksLikeJwt }
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
     }
     const supabaseAdmin = getSupabaseAdmin();
     const payload = req.method === "POST" ? await req.json().catch(() => ({})) : {};
