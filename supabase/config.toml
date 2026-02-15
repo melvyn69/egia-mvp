@@ -392,3 +392,6 @@ verify_jwt = true
 
 [functions.google_gbp_sync_all]
 verify_jwt = true
+
+[functions.process-review-analyze]
+verify_jwt = false
