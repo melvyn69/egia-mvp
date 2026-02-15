@@ -1,3 +1,18 @@
+-- Ensure google_reviews.location_name exists (needed by ai_tag_candidates)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'google_reviews'
+      AND column_name = 'location_name'
+  ) THEN
+    ALTER TABLE public.google_reviews
+      ADD COLUMN location_name text;
+  END IF;
+END $$;
+
 create or replace function public.ai_tag_candidates(
   p_user_id uuid default null,
   p_location_id text default null,
@@ -20,7 +35,7 @@ language sql stable as $$
   select gr.id,
          gr.user_id,
          gr.location_id,
-         gr.location_name,
+         COALESCE(gr.location_name, '') as location_name,
          gr.comment,
          gr.update_time,
          gr.create_time,
@@ -65,6 +80,3 @@ language sql stable as $$
     and (p_user_id is null or gr.user_id = p_user_id)
     and (p_location_id is null or gr.location_id = p_location_id);
 $$;
--- Ensure column exists for replayable migrations (shadow DB / new env)
-alter table public.google_reviews
-  add column if not exists location_name text;
