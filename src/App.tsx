@@ -221,31 +221,7 @@ const App = () => {
     };
   }, [session]);
 
-  useEffect(() => {
-    if (!supabase || !session?.user?.id) {
-      return;
-    }
-    const email = session.user.email ?? null;
-    if (!email) {
-      return;
-    }
-    (supabase as unknown as { from: (table: string) => any })
-      .from("user_profiles")
-      .upsert(
-        {
-          user_id: session.user.id,
-          email,
-          updated_at: new Date().toISOString()
-        },
-        { onConflict: "user_id" }
-      )
-      .then((result: { error?: { message?: string } | null }) => {
-        const error = result?.error ?? null;
-        if (error) {
-          console.warn("user_profiles upsert failed:", error.message);
-        }
-      });
-  }, [session]);
+  // user_profiles is now created via DB trigger; no client writes.
 
   const fetchLocations = async (userId: string) => {
     if (!supabase) {
