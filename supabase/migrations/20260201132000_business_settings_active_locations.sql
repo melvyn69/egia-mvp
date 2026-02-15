@@ -1,3 +1,17 @@
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema='public'
+      AND table_name='business_settings'
+      AND column_name='user_id'
+  ) THEN
+    ALTER TABLE public.business_settings
+      ADD COLUMN user_id uuid;
+  END IF;
+END $$;
+
 alter table public.business_settings
   add column if not exists active_location_ids uuid[] null,
   add column if not exists created_at timestamptz default now();
