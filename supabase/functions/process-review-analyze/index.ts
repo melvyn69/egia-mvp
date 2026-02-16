@@ -131,33 +131,45 @@ Deno.serve(async (req) => {
       }
 
       try {
-        const { data: reviewRow } = await supabaseAdmin
+        const { data: reviewRow, error: reviewError } = await supabaseAdmin
           .from("google_reviews")
           .select("id, user_id, location_id, author_name, rating, comment, location_name")
           .eq("id", reviewId)
           .eq("user_id", jobUserId)
           .maybeSingle();
+        if (reviewError) {
+          throw new Error(reviewError.message || "Failed to load review");
+        }
         if (!reviewRow) {
           throw new Error("Review not found");
         }
 
-        const { data: existingDraft } = await supabaseAdmin
+        const { data: existingDraft, error: existingDraftError } = await supabaseAdmin
           .from("review_ai_replies")
           .select("draft_text")
           .eq("review_id", reviewId)
           .eq("user_id", jobUserId)
           .maybeSingle();
+        if (existingDraftError) {
+          throw new Error(existingDraftError.message || "Failed to load existing draft");
+        }
         const existingText = existingDraft?.draft_text
           ? String(existingDraft.draft_text).trim()
           : "";
 
         if (!existingText) {
           const draftText = buildFallbackDraft(reviewRow);
-          await supabaseAdmin
+          const computedReviewIdForInsert = reviewId;
+          console.log("[process-review-analyze] draft upsert", {
+            job_id: jobId,
+            payload_review_id: reviewId,
+            computed_review_id_used_for_insert: computedReviewIdForInsert
+          });
+          const { error: upsertError } = await supabaseAdmin
             .from("review_ai_replies")
             .upsert(
               {
-                review_id: reviewId,
+                review_id: computedReviewIdForInsert,
                 user_id: jobUserId,
                 location_id: jobLocationId ?? reviewRow.location_id ?? null,
                 draft_text: draftText,
@@ -166,19 +178,31 @@ Deno.serve(async (req) => {
               },
               { onConflict: "review_id" }
             );
+          if (upsertError) {
+            throw new Error(upsertError.message || "Failed to upsert draft");
+          }
         }
 
-        await supabaseAdmin
+        const { error: doneError } = await supabaseAdmin
           .from("ai_jobs")
           .update({ status: "done", finished_at: new Date().toISOString(), error: null })
           .eq("id", jobId);
+        if (doneError) {
+          throw new Error(doneError.message || "Failed to mark job done");
+        }
         done += 1;
       } catch (err) {
         const message = err instanceof Error ? err.message : "Job failed";
-        await supabaseAdmin
+        const { error: markError } = await supabaseAdmin
           .from("ai_jobs")
           .update({ status: "error", finished_at: new Date().toISOString(), error: message })
           .eq("id", jobId);
+        if (markError) {
+          console.error("[process-review-analyze] failed to mark job error", {
+            job_id: jobId,
+            message: markError.message
+          });
+        }
         errors += 1;
       }
     }
