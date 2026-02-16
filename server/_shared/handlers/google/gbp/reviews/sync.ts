@@ -12,6 +12,7 @@ import {
   getParam,
   logRequest
 } from "../../../../api_utils";
+import { withRetry } from "../../../../utils/withRetry";
 
 type GoogleReview = {
   reviewId?: string;
@@ -120,6 +121,22 @@ type LocationSyncResult = {
 
 const MAX_REVIEWS_PAGES = 20;
 const MAX_REVIEWS_RETRIES = 3;
+const SUPABASE_RETRY_TRIES = 4;
+const SUPABASE_RETRY_BASE_MS = 300;
+const REVIEWS_SYNC_PATH = "/api/google/gbp/reviews/sync";
+
+const withSupabaseRetry = async <T>(
+  operation: () => PromiseLike<T> | T,
+  params: { requestId?: string; label: string }
+) =>
+  withRetry(() => operation(), {
+    tries: SUPABASE_RETRY_TRIES,
+    baseMs: SUPABASE_RETRY_BASE_MS,
+    requestId: params.requestId,
+    method: "POST",
+    path: REVIEWS_SYNC_PATH,
+    label: params.label
+  });
 
 const getErrorMessage = (err: unknown): string =>
   err instanceof Error
@@ -262,16 +279,24 @@ const computeLocationMetrics = async (
   supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
   userId: string,
   locationResourceName: string,
-  now: Date
+  now: Date,
+  requestId?: string
 ): Promise<LocationAlertMetrics> => {
   const since30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const since30Iso = since30d.toISOString();
-  const { data } = await supabaseAdmin
-    .from("google_reviews")
-    .select("rating, create_time")
-    .eq("user_id", userId)
-    .eq("location_id", locationResourceName)
-    .gte("create_time", since30Iso);
+  const { data } = await withSupabaseRetry(
+    () =>
+      supabaseAdmin
+        .from("google_reviews")
+        .select("rating, create_time")
+        .eq("user_id", userId)
+        .eq("location_id", locationResourceName)
+        .gte("create_time", since30Iso),
+    {
+      requestId,
+      label: "google_reviews.compute_metrics"
+    }
+  );
 
   let sum7d = 0;
   let count7d = 0;
@@ -393,6 +418,7 @@ const sendPendingAlerts = async (params: {
   supabaseAdmin: ReturnType<typeof createSupabaseAdmin>;
   userId: string;
   establishmentId: string;
+  requestId?: string;
 }) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb: any = params.supabaseAdmin;
@@ -405,11 +431,18 @@ const sendPendingAlerts = async (params: {
 
   let recipient: string | null = null;
   try {
-    const { data: profileRow } = await sb
-      .from("profiles")
-      .select("email")
-      .eq("id", params.userId)
-      .maybeSingle();
+    const { data: profileRow } = await withSupabaseRetry(
+      () =>
+        sb
+          .from("profiles")
+          .select("email")
+          .eq("id", params.userId)
+          .maybeSingle(),
+      {
+        requestId: params.requestId,
+        label: "alerts.load_profile"
+      }
+    );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     recipient = (profileRow as any)?.email ?? null;
   } catch {
@@ -419,17 +452,24 @@ const sendPendingAlerts = async (params: {
     return;
   }
 
-  const { data: alerts, error: alertsError } = await sb
-    .from("alerts")
-    .select(
-      "id, user_id, establishment_id, rule_code, severity, review_id, payload, triggered_at, last_notified_at"
-    )
-    .eq("user_id", params.userId)
-    .eq("establishment_id", params.establishmentId)
-    .is("resolved_at", null)
-    .is("last_notified_at", null)
-    .order("triggered_at", { ascending: true })
-      .limit(25);
+  const { data: alerts, error: alertsError } = await withSupabaseRetry(
+    () =>
+      sb
+        .from("alerts")
+        .select(
+          "id, user_id, establishment_id, rule_code, severity, review_id, payload, triggered_at, last_notified_at"
+        )
+        .eq("user_id", params.userId)
+        .eq("establishment_id", params.establishmentId)
+        .is("resolved_at", null)
+        .is("last_notified_at", null)
+        .order("triggered_at", { ascending: true })
+        .limit(25),
+    {
+      requestId: params.requestId,
+      label: "alerts.load_pending"
+    }
+  );
   if (alertsError) {
     console.error("[alerts] load pending failed", alertsError);
     return;
@@ -450,11 +490,18 @@ const sendPendingAlerts = async (params: {
         subject: "EGIA — Alerte intelligente",
         html: buildAlertEmailHtml({ title, summary, ctaUrl })
       });
-      await sb
-        .from("alerts")
-        .update({ last_notified_at: nowIso })
-        .eq("id", (alert as PendingAlertRow).id)
-        .is("last_notified_at", null);
+      await withSupabaseRetry(
+        () =>
+          sb
+            .from("alerts")
+            .update({ last_notified_at: nowIso })
+            .eq("id", (alert as PendingAlertRow).id)
+            .is("last_notified_at", null),
+        {
+          requestId: params.requestId,
+          label: "alerts.mark_notified"
+        }
+      );
     } catch (error) {
       console.error("[alerts] send failed", {
         alertId: (alert as PendingAlertRow).id,
@@ -759,20 +806,28 @@ const createSyncRun = async (
     userId: string;
     locationId: string;
     meta?: Record<string, unknown>;
+    requestId?: string;
   }
 ) => {
   const runId = randomUUID();
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabaseAdmin as any).from("google_sync_runs").insert({
-      id: runId,
-      user_id: payload.userId,
-      location_id: payload.locationId,
-      run_type: "reviews_sync",
-      status: "running",
-      started_at: new Date().toISOString(),
-      meta: payload.meta ?? {}
-    });
+    await withSupabaseRetry(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () =>
+        (supabaseAdmin as any).from("google_sync_runs").insert({
+          id: runId,
+          user_id: payload.userId,
+          location_id: payload.locationId,
+          run_type: "reviews_sync",
+          status: "running",
+          started_at: new Date().toISOString(),
+          meta: payload.meta ?? {}
+        }),
+      {
+        requestId: payload.requestId,
+        label: "google_sync_runs.insert"
+      }
+    );
   } catch (error) {
     console.error("google_sync_runs insert failed:", getErrorMessage(error));
   }
@@ -786,19 +841,27 @@ const finishSyncRun = async (
     status: SyncRunStatus;
     error?: string | null;
     meta?: Record<string, unknown>;
+    requestId?: string;
   }
 ) => {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabaseAdmin as any)
-      .from("google_sync_runs")
-      .update({
-        status: payload.status,
-        finished_at: new Date().toISOString(),
-        error: payload.error ?? null,
-        meta: payload.meta ?? {}
-      })
-      .eq("id", payload.runId);
+    await withSupabaseRetry(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () =>
+        (supabaseAdmin as any)
+          .from("google_sync_runs")
+          .update({
+            status: payload.status,
+            finished_at: new Date().toISOString(),
+            error: payload.error ?? null,
+            meta: payload.meta ?? {}
+          })
+          .eq("id", payload.runId),
+      {
+        requestId: payload.requestId,
+        label: "google_sync_runs.update"
+      }
+    );
   } catch (error) {
     console.error("google_sync_runs update failed:", getErrorMessage(error));
   }
@@ -817,14 +880,26 @@ const upsertImportStatus = async (
     stats?: { scanned?: number; upserted?: number };
     errors_count?: number;
     last_error?: string | null;
-  }
+  },
+  requestId?: string
 ) => {
-  await supabaseAdmin.from("cron_state").upsert({
-    key: `import_status_v1:${userId}:${locationId}`,
-    value,
-    user_id: userId,
-    updated_at: new Date().toISOString()
-  });
+  try {
+    await withSupabaseRetry(
+      () =>
+        supabaseAdmin.from("cron_state").upsert({
+          key: `import_status_v1:${userId}:${locationId}`,
+          value,
+          user_id: userId,
+          updated_at: new Date().toISOString()
+        }),
+      {
+        requestId,
+        label: "cron_state.upsert_import_status"
+      }
+    );
+  } catch (error) {
+    console.error("import status upsert failed:", getErrorMessage(error));
+  }
 };
 
 export const syncGoogleReviewsForUser = async (
@@ -833,12 +908,19 @@ export const syncGoogleReviewsForUser = async (
   locationId: string | null,
   requestId?: string
 ) => {
-  const { data: connection, error: connectionError } = await supabaseAdmin
-    .from("google_connections")
-    .select("access_token,refresh_token,expires_at")
-    .eq("user_id", userId)
-    .eq("provider", "google")
-    .maybeSingle();
+  const { data: connection, error: connectionError } = await withSupabaseRetry(
+    () =>
+      supabaseAdmin
+        .from("google_connections")
+        .select("access_token,refresh_token,expires_at")
+        .eq("user_id", userId)
+        .eq("provider", "google")
+        .maybeSingle(),
+    {
+      requestId,
+      label: "google_connections.load"
+    }
+  );
 
   if (connectionError || !connection) {
     throw new Error("google_not_connected");
@@ -874,16 +956,23 @@ export const syncGoogleReviewsForUser = async (
         ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
         : null;
 
-    const { error: refreshError } = await supabaseAdmin
-      .from("google_connections")
-      .update({
-        access_token: accessToken,
-        expires_at: newExpiresAt,
-        scope: refreshed.scope ?? null,
-        token_type: refreshed.token_type ?? null
-      })
-      .eq("user_id", userId)
-      .eq("provider", "google");
+    const { error: refreshError } = await withSupabaseRetry(
+      () =>
+        supabaseAdmin
+          .from("google_connections")
+          .update({
+            access_token: accessToken,
+            expires_at: newExpiresAt,
+            scope: refreshed.scope ?? null,
+            token_type: refreshed.token_type ?? null
+          })
+          .eq("user_id", userId)
+          .eq("provider", "google"),
+      {
+        requestId,
+        label: "google_connections.refresh_update"
+      }
+    );
 
     if (refreshError) {
       console.error("google token refresh update failed:", refreshError);
@@ -899,7 +988,13 @@ export const syncGoogleReviewsForUser = async (
     locationQuery = locationQuery.eq("location_resource_name", locationId);
   }
 
-  const { data: locations, error: locationsError } = await locationQuery;
+  const { data: locations, error: locationsError } = await withSupabaseRetry(
+    () => locationQuery,
+    {
+      requestId,
+      label: "google_locations.load"
+    }
+  );
 
   if (locationsError) {
     throw new Error("locations_load_failed");
@@ -933,7 +1028,8 @@ export const syncGoogleReviewsForUser = async (
       locationId: location.location_resource_name,
       meta: {
         location_title: location.location_title ?? null
-      }
+      },
+      requestId
     });
 
     await upsertImportStatus(
@@ -948,7 +1044,8 @@ export const syncGoogleReviewsForUser = async (
         pages_exhausted: false,
         stats: { scanned: 0, upserted: 0 },
         errors_count: 0
-      }
+      },
+      requestId
     );
     const displayName =
       (location as { location_title?: string }).location_title ??
@@ -986,7 +1083,8 @@ export const syncGoogleReviewsForUser = async (
             stats: { scanned: 0, upserted: 0 },
             errors_count: 1,
             last_error: notFoundMessage
-          }
+          },
+          requestId
         );
         await finishSyncRun(supabaseAdmin, {
           runId,
@@ -1000,7 +1098,8 @@ export const syncGoogleReviewsForUser = async (
             pages,
             pages_exhausted: pagesExhausted,
             http_statuses: httpStatuses
-          }
+          },
+          requestId
         });
         locationResults.push({
           location_id: location.location_resource_name,
@@ -1020,11 +1119,18 @@ export const syncGoogleReviewsForUser = async (
 
       const nowIso = new Date().toISOString();
       if (reviews.length === 0) {
-        await supabaseAdmin
-          .from("google_locations")
-          .update({ last_synced_at: nowIso })
-          .eq("user_id", userId)
-          .eq("location_resource_name", location.location_resource_name);
+        await withSupabaseRetry(
+          () =>
+            supabaseAdmin
+              .from("google_locations")
+              .update({ last_synced_at: nowIso })
+              .eq("user_id", userId)
+              .eq("location_resource_name", location.location_resource_name),
+          {
+            requestId,
+            label: "google_locations.update_last_synced_empty"
+          }
+        );
         await upsertImportStatus(
           supabaseAdmin,
           userId,
@@ -1037,7 +1143,8 @@ export const syncGoogleReviewsForUser = async (
             pages_exhausted: pagesExhausted,
             stats: { scanned: 0, upserted: 0 },
             errors_count: 0
-          }
+          },
+          requestId
         );
         await finishSyncRun(supabaseAdmin, {
           runId,
@@ -1049,7 +1156,8 @@ export const syncGoogleReviewsForUser = async (
             pages,
             pages_exhausted: pagesExhausted,
             http_statuses: httpStatuses
-          }
+          },
+          requestId
         });
         locationResults.push({
           location_id: location.location_resource_name,
@@ -1149,12 +1257,19 @@ export const syncGoogleReviewsForUser = async (
       const reviewNames = dedupedRows.map((row) => row.review_name);
       const existingByReviewName = new Map<string, ExistingReviewRow>();
       if (reviewNames.length > 0) {
-        const { data: existingRows, error: existingRowsError } = await supabaseAdmin
-          .from("google_reviews")
-          .select("review_name, rating, comment, update_time, reply_text, replied_at")
-          .eq("user_id", userId)
-          .eq("location_id", location.location_resource_name)
-          .in("review_name", reviewNames);
+        const { data: existingRows, error: existingRowsError } = await withSupabaseRetry(
+          () =>
+            supabaseAdmin
+              .from("google_reviews")
+              .select("review_name, rating, comment, update_time, reply_text, replied_at")
+              .eq("user_id", userId)
+              .eq("location_id", location.location_resource_name)
+              .in("review_name", reviewNames),
+          {
+            requestId,
+            label: "google_reviews.load_existing"
+          }
+        );
         if (existingRowsError) {
           throw new Error(existingRowsError.message ?? "Existing reviews query failed.");
         }
@@ -1183,12 +1298,17 @@ export const syncGoogleReviewsForUser = async (
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error: upsertError } = await (supabaseAdmin as any)
-        .from("google_reviews")
+      const { error: upsertError } = await withSupabaseRetry(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .upsert(dedupedRows as any, {
-          onConflict: conflictKey
-        });
+        () =>
+          (supabaseAdmin as any).from("google_reviews").upsert(dedupedRows as any, {
+            onConflict: conflictKey
+          }),
+        {
+          requestId,
+          label: "google_reviews.upsert"
+        }
+      );
 
       if (upsertError) {
         throw new Error(upsertError.message ?? "Upsert failed.");
@@ -1211,7 +1331,8 @@ export const syncGoogleReviewsForUser = async (
           supabaseAdmin,
           userId,
           location.location_resource_name,
-          now
+          now,
+          requestId
         );
         const alertsToInsert = changedReviews.flatMap((review) =>
           evaluateRules({
@@ -1225,13 +1346,18 @@ export const syncGoogleReviewsForUser = async (
         );
         insertedAlerts = alertsToInsert.length;
         if (alertsToInsert.length > 0) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { error: alertError } = await (supabaseAdmin as any)
-            .from("alerts")
-            .insert(alertsToInsert, {
-              onConflict: "rule_code,review_id",
-              ignoreDuplicates: true
-            });
+          const { error: alertError } = await withSupabaseRetry(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            () =>
+              (supabaseAdmin as any).from("alerts").insert(alertsToInsert, {
+                onConflict: "rule_code,review_id",
+                ignoreDuplicates: true
+              }),
+            {
+              requestId,
+              label: "alerts.insert_changed_reviews"
+            }
+          );
           if (alertError) {
             console.error("[alerts] insert failed", alertError);
           }
@@ -1246,19 +1372,27 @@ export const syncGoogleReviewsForUser = async (
             supabaseAdmin,
             userId,
             location.location_resource_name,
-            now
+            now,
+            requestId
           );
         }
-        const { data: backfillRows, error: backfillError } = await supabaseAdmin
-          .from("google_reviews")
-          .select(
-            "review_id, rating, comment, create_time, update_time, reply_text, replied_at, owner_reply, author_name"
-          )
-          .eq("user_id", userId)
-          .eq("location_id", location.location_resource_name)
-          .lte("rating", 2)
-          .order("create_time", { ascending: false })
-          .limit(20);
+        const { data: backfillRows, error: backfillError } = await withSupabaseRetry(
+          () =>
+            supabaseAdmin
+              .from("google_reviews")
+              .select(
+                "review_id, rating, comment, create_time, update_time, reply_text, replied_at, owner_reply, author_name"
+              )
+              .eq("user_id", userId)
+              .eq("location_id", location.location_resource_name)
+              .lte("rating", 2)
+              .order("create_time", { ascending: false })
+              .limit(20),
+          {
+            requestId,
+            label: "google_reviews.load_backfill_candidates"
+          }
+        );
 
         if (backfillError) {
           console.error("[alerts] backfill load failed", backfillError);
@@ -1277,13 +1411,18 @@ export const syncGoogleReviewsForUser = async (
             })
           );
           if (backfillAlerts.length > 0) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { error: backfillInsertError } = await (supabaseAdmin as any)
-              .from("alerts")
-              .insert(backfillAlerts, {
-                onConflict: "rule_code,review_id",
-                ignoreDuplicates: true
-              });
+            const { error: backfillInsertError } = await withSupabaseRetry(
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              () =>
+                (supabaseAdmin as any).from("alerts").insert(backfillAlerts, {
+                  onConflict: "rule_code,review_id",
+                  ignoreDuplicates: true
+                }),
+              {
+                requestId,
+                label: "alerts.insert_backfill"
+              }
+            );
             if (backfillInsertError) {
               console.error("[alerts] backfill_insert_failed", {
                 message: backfillInsertError.message,
@@ -1297,14 +1436,22 @@ export const syncGoogleReviewsForUser = async (
       await sendPendingAlerts({
         supabaseAdmin,
         userId,
-        establishmentId: location.id
+        establishmentId: location.id,
+        requestId
       });
 
-      await supabaseAdmin
-        .from("google_locations")
-        .update({ last_synced_at: nowIso })
-        .eq("user_id", userId)
-        .eq("location_resource_name", location.location_resource_name);
+      await withSupabaseRetry(
+        () =>
+          supabaseAdmin
+            .from("google_locations")
+            .update({ last_synced_at: nowIso })
+            .eq("user_id", userId)
+            .eq("location_resource_name", location.location_resource_name),
+        {
+          requestId,
+          label: "google_locations.update_last_synced"
+        }
+      );
 
       await upsertImportStatus(
         supabaseAdmin,
@@ -1318,7 +1465,8 @@ export const syncGoogleReviewsForUser = async (
           pages_exhausted: pagesExhausted,
           stats: { scanned: reviews.length, upserted: inserted + updated },
           errors_count: 0
-        }
+        },
+        requestId
       );
 
       await finishSyncRun(supabaseAdmin, {
@@ -1332,7 +1480,8 @@ export const syncGoogleReviewsForUser = async (
           pages,
           pages_exhausted: pagesExhausted,
           http_statuses: httpStatuses
-        }
+        },
+        requestId
       });
 
       locationResults.push({
@@ -1404,7 +1553,8 @@ export const syncGoogleReviewsForUser = async (
           stats: { scanned: 0, upserted: 0 },
           errors_count: 1,
           last_error: message
-        }
+        },
+        requestId
       );
 
       await finishSyncRun(supabaseAdmin, {
@@ -1419,7 +1569,8 @@ export const syncGoogleReviewsForUser = async (
           pages: failedPages,
           pages_exhausted: failedPagesExhausted,
           http_statuses: failedStatuses
-        }
+        },
+        requestId
       });
 
       locationResults.push({
@@ -1452,28 +1603,42 @@ export const syncGoogleReviewsForUser = async (
   });
 
   if (locationList.length > 0) {
-    await supabaseAdmin
-      .from("google_connections")
-      .update({ last_synced_at: new Date().toISOString() })
-      .eq("user_id", userId)
-      .eq("provider", "google");
+    await withSupabaseRetry(
+      () =>
+        supabaseAdmin
+          .from("google_connections")
+          .update({ last_synced_at: new Date().toISOString() })
+          .eq("user_id", userId)
+          .eq("provider", "google"),
+      {
+        requestId,
+        label: "google_connections.update_last_synced"
+      }
+    );
   }
 
   // Persist last run status per user (cron_state is user-scoped now)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (supabaseAdmin as any).from("cron_state").upsert({
-    key: "google_reviews_last_run",
-    user_id: userId,
-    value: {
-      at: new Date().toISOString(),
-      inserted: totalInserted,
-      updated: totalUpdated,
-      skipped: totalSkipped,
-      processed: totalInserted + totalUpdated + totalSkipped,
-      locationsProcessed: locationList.length
-    },
-    updated_at: new Date().toISOString()
-  });
+  await withSupabaseRetry(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    () =>
+      (supabaseAdmin as any).from("cron_state").upsert({
+        key: "google_reviews_last_run",
+        user_id: userId,
+        value: {
+          at: new Date().toISOString(),
+          inserted: totalInserted,
+          updated: totalUpdated,
+          skipped: totalSkipped,
+          processed: totalInserted + totalUpdated + totalSkipped,
+          locationsProcessed: locationList.length
+        },
+        updated_at: new Date().toISOString()
+      }),
+    {
+      requestId,
+      label: "cron_state.upsert_last_run"
+    }
+  );
   console.log("[cron_state] upsert google_reviews_last_run", userId);
 
   return {
@@ -1571,19 +1736,34 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       if (userId) {
         const supabaseAdmin = createSupabaseAdmin();
         const nowIso = new Date().toISOString();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (supabaseAdmin as any).from("cron_state").upsert({
-          key: "google_reviews_last_error",
-          user_id: userId,
-          value: {
-            at: nowIso,
-            code: "reauth_required",
-            reason,
-            message: "reconnexion_google_requise",
-            location_pk: locationId ?? null
-          },
-          updated_at: nowIso
-        });
+        try {
+          await withSupabaseRetry(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            () =>
+              (supabaseAdmin as any).from("cron_state").upsert({
+                key: "google_reviews_last_error",
+                user_id: userId,
+                value: {
+                  at: nowIso,
+                  code: "reauth_required",
+                  reason,
+                  message: "reconnexion_google_requise",
+                  location_pk: locationId ?? null
+                },
+                updated_at: nowIso
+              }),
+            {
+              requestId,
+              label: "cron_state.upsert_last_error"
+            }
+          );
+        } catch (upsertError) {
+          console.error("[google_reviews_auth] cron_state upsert failed", {
+            requestId,
+            userId,
+            message: getErrorMessage(upsertError)
+          });
+        }
         console.warn("[google_reviews_auth]", {
           requestId,
           userId,

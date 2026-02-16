@@ -8,6 +8,7 @@ import {
   sendError,
   logRequest
 } from "../../../api_utils.js";
+import { withRetry } from "../../../utils/withRetry.js";
 
 type GoogleReview = {
   reviewId?: string;
@@ -31,6 +32,22 @@ type JobQueueRow = Database["public"]["Tables"]["job_queue"]["Row"];
 
 const CURSOR_KEY = "google_sync_replies_cursor_v1";
 const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000;
+const SUPABASE_RETRY_TRIES = 4;
+const SUPABASE_RETRY_BASE_MS = 300;
+const CRON_SYNC_REPLIES_PATH = "/api/cron/google/sync-replies";
+
+const withSupabaseRetry = async <T>(
+  operation: () => PromiseLike<T> | T,
+  params: { requestId?: string; label: string }
+) =>
+  withRetry(() => operation(), {
+    tries: SUPABASE_RETRY_TRIES,
+    baseMs: SUPABASE_RETRY_BASE_MS,
+    requestId: params.requestId,
+    method: "POST",
+    path: CRON_SYNC_REPLIES_PATH,
+    label: params.label
+  });
 
 const getEnv = (keys: string[]) => {
   for (const key of keys) {
@@ -72,25 +89,37 @@ type Cursor = {
   errors_count?: number;
 };
 
-const loadCursor = async (): Promise<Cursor> => {
-  const { data } = await supabaseAdmin
-    .from("cron_state")
-    .select("value")
-    .eq("key", CURSOR_KEY)
-    .is("user_id", null)
-    .maybeSingle();
+const loadCursor = async (requestId?: string): Promise<Cursor> => {
+  const { data } = await withSupabaseRetry(
+    () =>
+      supabaseAdmin
+        .from("cron_state")
+        .select("value")
+        .eq("key", CURSOR_KEY)
+        .is("user_id", null)
+        .maybeSingle(),
+    {
+      requestId,
+      label: "cron_state.load_cursor"
+    }
+  );
   return (data?.value as Cursor) ?? { location_pk: null, page_token: null };
 };
 
-const saveCursor = async (cursor: Cursor) => {
-  await supabaseAdmin
-    .from("cron_state")
-    .upsert({
-      key: CURSOR_KEY,
-      value: cursor,
-      user_id: null,
-      updated_at: new Date().toISOString()
-    });
+const saveCursor = async (cursor: Cursor, requestId?: string) => {
+  await withSupabaseRetry(
+    () =>
+      supabaseAdmin.from("cron_state").upsert({
+        key: CURSOR_KEY,
+        value: cursor,
+        user_id: null,
+        updated_at: new Date().toISOString()
+      }),
+    {
+      requestId,
+      label: "cron_state.save_cursor"
+    }
+  );
 };
 
 const mapRating = (starRating?: string): number | null => {
@@ -173,12 +202,14 @@ const getCronSecrets = (req: VercelRequest) => {
 
 const JOB_RATE_LIMIT_DELAY_MS = 60_000;
 
-const claimJobs = async (limit: number) => {
+const claimJobs = async (limit: number, requestId?: string) => {
+  // Keep claim single-shot: retrying a state-mutating claim can over-claim when the
+  // first DB transaction committed but the response was lost in transit.
   const { data, error } = await supabaseAdmin.rpc("job_queue_claim", {
     max_jobs: limit
   });
   if (error) {
-    console.error("[jobs] claim failed", error);
+    console.error("[jobs] claim failed", { requestId, message: error.message });
     return [];
   }
   return (data ?? []) as JobQueueRow[];
@@ -186,25 +217,39 @@ const claimJobs = async (limit: number) => {
 
 const updateJob = async (
   jobId: string,
-  patch: Partial<Pick<JobQueueRow, "status" | "attempts" | "last_error" | "run_at" | "updated_at">>
+  patch: Partial<Pick<JobQueueRow, "status" | "attempts" | "last_error" | "run_at" | "updated_at">>,
+  requestId?: string
 ) => {
-  await supabaseAdmin.from("job_queue").update(patch).eq("id", jobId);
+  await withSupabaseRetry(
+    () => supabaseAdmin.from("job_queue").update(patch).eq("id", jobId),
+    {
+      requestId,
+      label: "job_queue.update"
+    }
+  );
 };
 
-const processJobQueue = async () => {
+const processJobQueue = async (requestId?: string) => {
   const maxJobs = Number(process.env.JOB_QUEUE_MAX ?? 50);
-  const jobs = await claimJobs(maxJobs);
+  const jobs = await claimJobs(maxJobs, requestId);
   if (jobs.length === 0) {
     return { processed: 0, failed: 0, skipped: 0 };
   }
 
   const jobIds = jobs.map((job) => job.id);
   const userIds = Array.from(new Set(jobs.map((job) => job.user_id)));
-  const { data: runningRows } = await supabaseAdmin
-    .from("job_queue")
-    .select("id, user_id")
-    .eq("status", "running")
-    .in("user_id", userIds);
+  const { data: runningRows } = await withSupabaseRetry(
+    () =>
+      supabaseAdmin
+        .from("job_queue")
+        .select("id, user_id")
+        .eq("status", "running")
+        .in("user_id", userIds),
+    {
+      requestId,
+      label: "job_queue.load_running"
+    }
+  );
   const activeUsers = new Set(
     (runningRows ?? [])
       .filter((row) => !jobIds.includes(row.id))
@@ -220,43 +265,64 @@ const processJobQueue = async () => {
     const attempts = (job.attempts ?? 0) + 1;
     if (activeUsers.has(job.user_id) || inBatchUsers.has(job.user_id)) {
       skipped += 1;
-      await updateJob(job.id, {
-        status: "queued",
-        attempts,
-        last_error: "rate_limited",
-        run_at: new Date(Date.now() + JOB_RATE_LIMIT_DELAY_MS).toISOString(),
-        updated_at: new Date().toISOString()
-      });
+      await updateJob(
+        job.id,
+        {
+          status: "queued",
+          attempts,
+          last_error: "rate_limited",
+          run_at: new Date(Date.now() + JOB_RATE_LIMIT_DELAY_MS).toISOString(),
+          updated_at: new Date().toISOString()
+        },
+        requestId
+      );
       continue;
     }
     inBatchUsers.add(job.user_id);
     try {
       if (job.type === "google_gbp_sync") {
         await syncGoogleLocationsForUser(supabaseAdmin, job.user_id);
-        await syncGoogleReviewsForUser(supabaseAdmin, job.user_id, null);
-        await updateJob(job.id, {
-          status: "done",
-          attempts,
-          last_error: null,
-          updated_at: new Date().toISOString()
-        });
+        await syncGoogleReviewsForUser(
+          supabaseAdmin,
+          job.user_id,
+          null,
+          requestId
+        );
+        await updateJob(
+          job.id,
+          {
+            status: "done",
+            attempts,
+            last_error: null,
+            updated_at: new Date().toISOString()
+          },
+          requestId
+        );
         processed += 1;
       } else {
-        await updateJob(job.id, {
-          status: "failed",
-          attempts,
-          last_error: `Unknown job type: ${job.type}`,
-          updated_at: new Date().toISOString()
-        });
+        await updateJob(
+          job.id,
+          {
+            status: "failed",
+            attempts,
+            last_error: `Unknown job type: ${job.type}`,
+            updated_at: new Date().toISOString()
+          },
+          requestId
+        );
         failed += 1;
       }
     } catch (error) {
-      await updateJob(job.id, {
-        status: "failed",
-        attempts,
-        last_error: error instanceof Error ? error.message : "Job failed",
-        updated_at: new Date().toISOString()
-      });
+      await updateJob(
+        job.id,
+        {
+          status: "failed",
+          attempts,
+          last_error: error instanceof Error ? error.message : "Job failed",
+          updated_at: new Date().toISOString()
+        },
+        requestId
+      );
       failed += 1;
     }
   }
@@ -319,7 +385,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 
-  const jobStats = await processJobQueue();
+  const jobStats = await processJobQueue(requestId);
 
   const errors: Array<{ locationId: string; message: string }> = [];
   let processedUsers = 0;
@@ -329,9 +395,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const isProd = process.env.NODE_ENV === "production";
 
   try {
-    const { data: connections, error: connectionsError } = await supabaseAdmin
-      .from("google_connections")
-      .select("user_id, refresh_token");
+    const { data: connections, error: connectionsError } = await withSupabaseRetry(
+      () => supabaseAdmin.from("google_connections").select("user_id, refresh_token"),
+      {
+        requestId,
+        label: "google_connections.load_for_cron"
+      }
+    );
 
     if (connectionsError) {
       console.error("[sync]", requestId, "connections fetch failed", connectionsError);
@@ -355,7 +425,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const result = await syncGoogleReviewsForUser(
           supabaseAdmin,
           userId,
-          null
+          null,
+          requestId
         );
         if (!isProd) {
           console.log("[sync] reviews synced", {
@@ -376,18 +447,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               : message.includes("token_revoked")
                 ? "token_revoked"
                 : "unknown";
-          await (supabaseAdmin as any).from("cron_state").upsert({
-            key: "google_reviews_last_error",
-            user_id: userId,
-            value: {
-              at: new Date().toISOString(),
-              code: "reauth_required",
-              reason,
-              message: "reconnexion_google_requise",
-              location_pk: null
-            },
-            updated_at: new Date().toISOString()
-          });
+          await withSupabaseRetry(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            () =>
+              (supabaseAdmin as any).from("cron_state").upsert({
+                key: "google_reviews_last_error",
+                user_id: userId,
+                value: {
+                  at: new Date().toISOString(),
+                  code: "reauth_required",
+                  reason,
+                  message: "reconnexion_google_requise",
+                  location_pk: null
+                },
+                updated_at: new Date().toISOString()
+              }),
+            {
+              requestId,
+              label: "cron_state.upsert_last_error"
+            }
+          );
           console.warn("[sync] reviews reauth_required", {
             requestId,
             userId,
@@ -399,14 +478,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const cursor = await loadCursor();
-    const { data: locations, error: locationsError } = await supabaseAdmin
-      .from("google_locations")
-      .select(
-        "id, user_id, account_resource_name, location_resource_name, location_title"
-      )
-      .order("id", { ascending: true })
-      .limit(1000);
+    const cursor = await loadCursor(requestId);
+    const { data: locations, error: locationsError } = await withSupabaseRetry(
+      () =>
+        supabaseAdmin
+          .from("google_locations")
+          .select(
+            "id, user_id, account_resource_name, location_resource_name, location_title"
+          )
+          .order("id", { ascending: true })
+          .limit(1000),
+      {
+        requestId,
+        label: "google_locations.load_for_cron"
+      }
+    );
 
     if (locationsError) {
       console.error("[sync]", requestId, "locations fetch failed", locationsError);
@@ -430,13 +516,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
 
     const recentSince = new Date(Date.now() - RECENT_WINDOW_MS).toISOString();
-    const { data: recentReviews } = await supabaseAdmin
-      .from("google_reviews")
-      .select("location_id, update_time, status")
-      .or("status.is.null,status.neq.replied")
-      .gte("update_time", recentSince)
-      .order("update_time", { ascending: false })
-      .limit(50);
+    const { data: recentReviews } = await withSupabaseRetry(
+      () =>
+        supabaseAdmin
+          .from("google_reviews")
+          .select("location_id, update_time, status")
+          .or("status.is.null,status.neq.replied")
+          .gte("update_time", recentSince)
+          .order("update_time", { ascending: false })
+          .limit(50),
+      {
+        requestId,
+        label: "google_reviews.load_recent_for_cron"
+      }
+    );
 
     const priorityLocations: typeof locationsList = [];
     const seenPriority = new Set<string>();
@@ -526,13 +619,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const nowIso = new Date().toISOString();
             const reviewUpdateTime = review.updateTime ?? null;
 
-            const { data: existingReview } = await supabaseAdmin
-              .from("google_reviews")
-              .select("last_synced_at, status")
-              .eq("user_id", location.user_id)
-              .eq("location_id", location.location_resource_name)
-              .eq("review_name", normalizedReviewName)
-              .maybeSingle();
+            const { data: existingReview } = await withSupabaseRetry(
+              () =>
+                supabaseAdmin
+                  .from("google_reviews")
+                  .select("last_synced_at, status")
+                  .eq("user_id", location.user_id)
+                  .eq("location_id", location.location_resource_name)
+                  .eq("review_name", normalizedReviewName)
+                  .maybeSingle(),
+              {
+                requestId,
+                label: "google_reviews.load_existing_for_reply"
+              }
+            );
 
             if (
               existingReview?.last_synced_at &&
@@ -571,11 +671,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               row.replied_at = replyUpdateTime ? String(replyUpdateTime) : nowIso;
             }
 
-            const { data: upserted, error: upsertError } = await supabaseAdmin
-              .from("google_reviews")
-              .upsert(row, { onConflict: "user_id,review_name" })
-              .select("id, status")
-              .maybeSingle();
+            const { data: upserted, error: upsertError } = await withSupabaseRetry(
+              () =>
+                supabaseAdmin
+                  .from("google_reviews")
+                  .upsert(row, { onConflict: "user_id,review_name" })
+                  .select("id, status")
+                  .maybeSingle(),
+              {
+                requestId,
+                label: "google_reviews.upsert"
+              }
+            );
 
             if (upsertError || !upserted?.id) {
               console.error(
@@ -588,24 +695,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             if (replyComment) {
               const reviewKey = String(upserted.id);
-              const { data: existingSent } = await supabaseAdmin
-                .from("review_replies")
-                .select("id")
-                .eq("user_id", location.user_id)
-                .eq("source", "google")
-                .eq("review_id", reviewKey)
-                .eq("status", "sent")
-                .maybeSingle();
+              const { data: existingSent } = await withSupabaseRetry(
+                () =>
+                  supabaseAdmin
+                    .from("review_replies")
+                    .select("id")
+                    .eq("user_id", location.user_id)
+                    .eq("source", "google")
+                    .eq("review_id", reviewKey)
+                    .eq("status", "sent")
+                    .maybeSingle(),
+                {
+                  requestId,
+                  label: "review_replies.load_existing_sent"
+                }
+              );
 
               if (existingSent?.id) {
-                await supabaseAdmin
-                  .from("review_replies")
-                  .update({
-                    reply_text: replyComment,
-                    sent_at: replyUpdateTime ?? nowIso
-                  })
-                  .eq("id", existingSent.id);
+                await withSupabaseRetry(
+                  () =>
+                    supabaseAdmin
+                      .from("review_replies")
+                      .update({
+                        reply_text: replyComment,
+                        sent_at: replyUpdateTime ?? nowIso
+                      })
+                      .eq("id", existingSent.id),
+                  {
+                    requestId,
+                    label: "review_replies.update_sent"
+                  }
+                );
               } else {
+                // Keep single-shot insert: no retry to avoid duplicating a non-idempotent write.
                 await supabaseAdmin.from("review_replies").insert({
                   user_id: location.user_id,
                   source: "google",
@@ -629,7 +751,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             if (allowCursorUpdate) {
               cursor.location_pk = location.id;
               cursor.page_token = null;
-              await saveCursor(cursor);
+              await saveCursor(cursor, requestId);
             }
             break;
           }
@@ -637,7 +759,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (allowCursorUpdate) {
             cursor.location_pk = location.id;
             cursor.page_token = page.nextPageToken;
-            await saveCursor(cursor);
+            await saveCursor(cursor, requestId);
           }
           pageToken = page.nextPageToken;
         }
@@ -654,7 +776,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (allowCursorUpdate) {
           cursor.location_pk = location.id;
           cursor.page_token = null;
-          await saveCursor(cursor);
+          await saveCursor(cursor, requestId);
         }
       }
     };
@@ -683,7 +805,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     cursor.errors_count = errors.length;
-    await saveCursor(cursor);
+    await saveCursor(cursor, requestId);
 
     const aborted = timeUp();
     return res.status(200).json({
