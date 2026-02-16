@@ -30,3 +30,4 @@ server/_shared_dist__bak/
 
 # Supabase db pull snapshots
 supabase/migrations/*_remote_schema.sql
+supabase/migrations/*_tmp_check.sql
