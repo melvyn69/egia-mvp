@@ -2,16 +2,16 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { randomUUID } from "crypto";
 import {
   createSupabaseAdmin,
-  getRequiredEnv,
-  getUserFromRequest
-} from "../../../../google/_utils.js";
+  getRequiredEnv
+} from "../../../../google/_utils";
+import { requireUser } from "../../../../_auth";
 import {
   getRequestId,
   sendError,
   parseQuery,
   getParam,
   logRequest
-} from "../../../../api_utils.js";
+} from "../../../../api_utils";
 
 type GoogleReview = {
   reviewId?: string;
@@ -49,6 +49,7 @@ type AlertInsert = {
 
 type ReviewRowForAlert = {
   review_id: string;
+  review_name: string;
   rating: number | null;
   comment: string | null;
   create_time: string | null;
@@ -60,7 +61,7 @@ type ReviewRowForAlert = {
 };
 
 type ExistingReviewRow = {
-  review_id: string | null;
+  review_name: string;
   rating: number | null;
   comment: string | null;
   update_time: string | null;
@@ -189,6 +190,47 @@ const mapRating = (starRating?: string): number | null => {
     default:
       return null;
   }
+};
+
+const getReviewIdFromReviewName = (reviewName: string | null) => {
+  if (!reviewName) {
+    return null;
+  }
+  const segment = reviewName.split("/").pop() ?? null;
+  return segment && segment.length > 0 ? segment : null;
+};
+
+const buildReviewName = (params: {
+  locationResourceName: string;
+  reviewName: string | null;
+  reviewId: string | null;
+}) => {
+  const { locationResourceName, reviewName, reviewId } = params;
+  if (reviewName) {
+    return reviewName;
+  }
+  if (!reviewId) {
+    return null;
+  }
+  if (reviewId.includes("/reviews/")) {
+    return reviewId;
+  }
+  return `${locationResourceName}/reviews/${reviewId}`;
+};
+
+const isSameOrNewerReviewSnapshot = (
+  candidate: Pick<ReviewRowForAlert, "update_time" | "create_time">,
+  baseline: Pick<ReviewRowForAlert, "update_time" | "create_time">
+) => {
+  const candidateTs =
+    normalizeTimestamp(candidate.update_time) ??
+    normalizeTimestamp(candidate.create_time) ??
+    0;
+  const baselineTs =
+    normalizeTimestamp(baseline.update_time) ??
+    normalizeTimestamp(baseline.create_time) ??
+    0;
+  return candidateTs >= baselineTs;
 };
 
 const defaultAlertSettings = (): AlertSettings => ({
@@ -788,7 +830,8 @@ const upsertImportStatus = async (
 export const syncGoogleReviewsForUser = async (
   supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
   userId: string,
-  locationId: string | null
+  locationId: string | null,
+  requestId?: string
 ) => {
   const { data: connection, error: connectionError } = await supabaseAdmin
     .from("google_connections")
@@ -1026,12 +1069,23 @@ export const syncGoogleReviewsForUser = async (
 
       const rows = reviews
         .map((review) => {
-          const reviewName = review.name ?? null;
-          const reviewIdFromName = review.name
-            ? review.name.split("/").pop() ?? null
-            : null;
-          const reviewId = review.reviewId ?? reviewIdFromName ?? null;
-          if (!reviewId) {
+          const reviewNameFromApi =
+            typeof review.name === "string" && review.name.trim().length > 0
+              ? review.name.trim()
+              : null;
+          const rawReviewId =
+            typeof review.reviewId === "string" && review.reviewId.trim().length > 0
+              ? review.reviewId.trim()
+              : null;
+          const reviewName = buildReviewName({
+            locationResourceName: location.location_resource_name,
+            reviewName: reviewNameFromApi,
+            reviewId: rawReviewId
+          });
+          const reviewId =
+            getReviewIdFromReviewName(reviewName) ??
+            (rawReviewId && !rawReviewId.includes("/reviews/") ? rawReviewId : null);
+          if (!reviewName || !reviewId) {
             return null;
           }
           const rawReview = review as {
@@ -1067,24 +1121,48 @@ export const syncGoogleReviewsForUser = async (
             raw: review
           } as ReviewRowForAlert & { [key: string]: unknown };
         })
-        .filter(Boolean);
+        .filter((row): row is ReviewRowForAlert & { [key: string]: unknown } =>
+          Boolean(row)
+        );
 
-      const reviewIds = rows
-        .map((row) => row.review_id)
-        .filter((id): id is string => typeof id === "string" && id.length > 0);
-      const existingByReviewId = new Map<string, ExistingReviewRow>();
-      if (reviewIds.length > 0) {
-        const { data: existingRows } = await supabaseAdmin
+      const dedupedRowsByResource = new Map<
+        string,
+        ReviewRowForAlert & { [key: string]: unknown }
+      >();
+      for (const row of rows) {
+        const existing = dedupedRowsByResource.get(row.review_name);
+        if (!existing || isSameOrNewerReviewSnapshot(row, existing)) {
+          dedupedRowsByResource.set(row.review_name, row);
+        }
+      }
+      const dedupedRows = Array.from(dedupedRowsByResource.values());
+      const conflictKey = "user_id,review_name";
+
+      logRequest("[gbp/reviews-upsert]", {
+        requestId: requestId ?? runId,
+        location_id: location.location_resource_name,
+        fetched: reviews.length,
+        deduped: dedupedRows.length,
+        conflictKey
+      });
+
+      const reviewNames = dedupedRows.map((row) => row.review_name);
+      const existingByReviewName = new Map<string, ExistingReviewRow>();
+      if (reviewNames.length > 0) {
+        const { data: existingRows, error: existingRowsError } = await supabaseAdmin
           .from("google_reviews")
-          .select("review_id, rating, comment, update_time, reply_text, replied_at")
+          .select("review_name, rating, comment, update_time, reply_text, replied_at")
           .eq("user_id", userId)
           .eq("location_id", location.location_resource_name)
-          .in("review_id", reviewIds);
+          .in("review_name", reviewNames);
+        if (existingRowsError) {
+          throw new Error(existingRowsError.message ?? "Existing reviews query failed.");
+        }
         for (const row of existingRows ?? []) {
-          if (row && typeof row === "object" && "review_id" in row) {
-            const key = (row as ExistingReviewRow).review_id;
-            if (key) {
-              existingByReviewId.set(key, row as ExistingReviewRow);
+          if (row && typeof row === "object" && "review_name" in row) {
+            const key = (row as ExistingReviewRow).review_name;
+            if (typeof key === "string" && key.length > 0) {
+              existingByReviewName.set(key, row as ExistingReviewRow);
             }
           }
         }
@@ -1092,27 +1170,24 @@ export const syncGoogleReviewsForUser = async (
 
       let inserted = 0;
       let updated = 0;
-      let skipped = Math.max(reviews.length - rows.length, 0);
+      let skipped = Math.max(reviews.length - dedupedRows.length, 0);
+      const existingReviewNames = new Set<string>(existingByReviewName.keys());
 
-      for (const row of rows as ReviewRowForAlert[]) {
-        const existing = existingByReviewId.get(row.review_id);
-        if (!existing) {
+      for (const row of dedupedRows as ReviewRowForAlert[]) {
+        if (!existingReviewNames.has(row.review_name)) {
           inserted += 1;
+          existingReviewNames.add(row.review_name);
           continue;
         }
-        if (hasReviewChanged(existing, row)) {
-          updated += 1;
-        } else {
-          skipped += 1;
-        }
+        updated += 1;
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error: upsertError } = await (supabaseAdmin as any)
         .from("google_reviews")
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .upsert(rows as any, {
-          onConflict: "user_id,location_id,review_id"
+        .upsert(dedupedRows as any, {
+          onConflict: conflictKey
         });
 
       if (upsertError) {
@@ -1124,8 +1199,8 @@ export const syncGoogleReviewsForUser = async (
       totalUpdated += updated;
       totalSkipped += skipped;
 
-      const changedReviews = (rows as ReviewRowForAlert[]).filter((row) =>
-        hasReviewChanged(existingByReviewId.get(row.review_id), row)
+      const changedReviews = (dedupedRows as ReviewRowForAlert[]).filter((row) =>
+        hasReviewChanged(existingByReviewName.get(row.review_name), row)
       );
       let insertedAlerts = 0;
       let locationMetrics: LocationAlertMetrics | null = null;
@@ -1275,9 +1350,12 @@ export const syncGoogleReviewsForUser = async (
       });
 
       console.log("[gbp_reviews]", {
+        requestId: requestId ?? runId,
         user_id: userId,
         location_id: location.location_resource_name,
+        conflictKey,
         fetched: reviews.length,
+        deduped: dedupedRows.length,
         inserted,
         updated,
         skipped,
@@ -1411,10 +1489,25 @@ export const syncGoogleReviewsForUser = async (
 
 const handler = async (req: VercelRequest, res: VercelResponse) => {
   const requestId = getRequestId(req);
+  const rawAuthHeader =
+    (req.headers as Record<string, string | string[] | undefined>).authorization ??
+    (req.headers as Record<string, string | string[] | undefined>).Authorization;
+  const authHeader = Array.isArray(rawAuthHeader)
+    ? (rawAuthHeader[0] ?? "")
+    : (rawAuthHeader ?? "");
+  const hasAuthHeader = authHeader.length > 0;
+  const authHeaderPrefix = hasAuthHeader
+    ? authHeader.startsWith("Bearer ")
+      ? "Bearer"
+      : authHeader.split(/\s+/)[0] ?? "unknown"
+    : "none";
+
   logRequest("[gbp/reviews-sync]", {
     requestId,
+    hasAuthHeader,
+    authHeaderPrefix,
     method: req.method ?? "GET",
-    route: req.url ?? "/api/google/gbp/reviews/sync"
+    path: req.url ?? "/api/google/gbp/reviews/sync"
   });
   if (req.method !== "POST") {
     return sendError(
@@ -1428,21 +1521,12 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
   let userId: string | null = null;
   let locationId: string | null = null;
   try {
-    const supabaseAdmin = createSupabaseAdmin();
-    const userResult = await getUserFromRequest(
-      { headers: req.headers as Record<string, string | undefined> },
-      supabaseAdmin
-    );
-    userId = userResult.userId ?? null;
-
-    if (!userId) {
-      return sendError(
-        res,
-        requestId,
-        { code: "UNAUTHORIZED", message: "Unauthorized" },
-        401
-      );
+    const auth = await requireUser(req, res);
+    if (!auth) {
+      return;
     }
+    const { userId: authenticatedUserId, supabaseAdmin } = auth;
+    userId = authenticatedUserId;
 
     const { params } = parseQuery(req);
     locationId = getParam(params, "location_id");
@@ -1464,7 +1548,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     const result = await syncGoogleReviewsForUser(
       supabaseAdmin,
       userId,
-      locationId
+      locationId,
+      requestId
     );
 
     return res.status(200).json({

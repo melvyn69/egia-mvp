@@ -497,12 +497,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               break;
             }
             processedReviews += 1;
-            const reviewName = review.name ?? null;
-            const reviewIdFromName = reviewName
-              ? reviewName.split("/").pop() ?? null
-              : null;
-            const reviewId = review.reviewId ?? reviewIdFromName ?? null;
-            if (!reviewId) {
+            const reviewName =
+              typeof review.name === "string" && review.name.trim().length > 0
+                ? review.name.trim()
+                : null;
+            const rawReviewId =
+              typeof review.reviewId === "string" && review.reviewId.trim().length > 0
+                ? review.reviewId.trim()
+                : null;
+            const normalizedReviewName = reviewName
+              ? reviewName
+              : rawReviewId
+                ? rawReviewId.includes("/reviews/")
+                  ? rawReviewId
+                  : `${location.location_resource_name}/reviews/${rawReviewId}`
+                : null;
+            const reviewId =
+              (normalizedReviewName
+                ? normalizedReviewName.split("/").pop() ?? null
+                : null) ??
+              (rawReviewId && !rawReviewId.includes("/reviews/") ? rawReviewId : null);
+            if (!reviewId || !normalizedReviewName) {
               continue;
             }
 
@@ -516,7 +531,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               .select("last_synced_at, status")
               .eq("user_id", location.user_id)
               .eq("location_id", location.location_resource_name)
-              .eq("review_id", reviewId)
+              .eq("review_name", normalizedReviewName)
               .maybeSingle();
 
             if (
@@ -538,7 +553,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               location_id: String(location.location_resource_name),
               location_name: displayName ? String(displayName) : null,
               review_id: String(reviewId),
-              review_name: reviewName ? String(reviewName) : null,
+              review_name: String(normalizedReviewName),
               author_name: review.reviewer?.displayName
                 ? String(review.reviewer.displayName)
                 : null,
@@ -558,7 +573,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             const { data: upserted, error: upsertError } = await supabaseAdmin
               .from("google_reviews")
-              .upsert(row, { onConflict: "user_id,location_id,review_id" })
+              .upsert(row, { onConflict: "user_id,review_name" })
               .select("id, status")
               .maybeSingle();
 

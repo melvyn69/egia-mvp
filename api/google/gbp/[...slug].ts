@@ -27,17 +27,22 @@ const getRequestId = (req: VercelRequest) => {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId = getRequestId(req);
-  const parts = getRouteParts(req);
+  const slugNormalized = getRouteParts(req);
   console.log("[api/google/gbp]", {
+    method: req.method ?? "GET",
     url: req.url ?? null,
-    slug: parts,
+    slugNormalized,
     requestId
   });
 
-  if (parts.length === 1 && parts[0] === "sync") {
+  if (slugNormalized.length === 1 && slugNormalized[0] === "sync") {
     return handleSync(req, res);
   }
-  if (parts.length === 2 && parts[0] === "reviews" && parts[1] === "sync") {
+  if (
+    slugNormalized.length === 2 &&
+    slugNormalized[0] === "reviews" &&
+    slugNormalized[1] === "sync"
+  ) {
     return handleReviewsSync(req, res);
   }
   return res.status(404).json({

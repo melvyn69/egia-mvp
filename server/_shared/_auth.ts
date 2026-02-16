@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { createSupabaseAdmin, getBearerToken } from "./google/_utils.js";
-import { getRequestId, sendError, logRequest } from "./api_utils.js";
+import { createSupabaseAdmin, getBearerToken } from "./google/_utils";
+import { getRequestId, sendError, logRequest } from "./api_utils";
 
 const requireUser = async (req: VercelRequest, res: VercelResponse) => {
   const requestId = getRequestId(req);
