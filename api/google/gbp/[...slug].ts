@@ -8,7 +8,10 @@ const getRouteParts = (req: VercelRequest) => {
     (req.query as Record<string, unknown>)?.slug ??
     (req.query as Record<string, unknown>)?.["slug[]"];
   const parts = Array.isArray(raw) ? raw : raw ? [raw] : [];
-  return parts.map(String);
+  return parts
+    .map(String)
+    .flatMap((part) => part.split("/"))
+    .filter((part) => part.length > 0);
 };
 
 const getRequestId = (req: VercelRequest) => {
@@ -23,7 +26,14 @@ const getRequestId = (req: VercelRequest) => {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const requestId = getRequestId(req);
   const parts = getRouteParts(req);
+  console.log("[api/google/gbp]", {
+    url: req.url ?? null,
+    slug: parts,
+    requestId
+  });
+
   if (parts.length === 1 && parts[0] === "sync") {
     return handleSync(req, res);
   }
@@ -36,6 +46,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       code: "NOT_FOUND",
       message: "Route not found"
     },
-    requestId: getRequestId(req)
+    requestId
   });
 }

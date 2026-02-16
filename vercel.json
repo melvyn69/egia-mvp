@@ -1,6 +1,10 @@
 {
   "version": 2,
   "routes": [
+    {
+      "src": "^/api/google/gbp/(.+)$",
+      "dest": "/api/google/gbp/[...slug]?slug=$1"
+    },
     { "handle": "filesystem" },
     { "src": "/(?!api/).*", "dest": "/index.html" }
   ]
