@@ -1,0 +1,3 @@
+-- Placeholder migration (0 bytes originally).
+-- This version exists in remote migration history, but the local file was missing.
+-- DO NOT MODIFY.
