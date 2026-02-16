@@ -176,10 +176,26 @@ Deno.serve(async (req) => {
                 status: "draft",
                 updated_at: new Date().toISOString()
               },
-              { onConflict: "review_id" }
+              { onConflict: "user_id,review_id" }
             );
           if (upsertError) {
             throw new Error(upsertError.message || "Failed to upsert draft");
+          }
+
+          const { data: persistedDraft, error: persistedDraftError } = await supabaseAdmin
+            .from("review_ai_replies")
+            .select("review_id, draft_text")
+            .eq("review_id", computedReviewIdForInsert)
+            .eq("user_id", jobUserId)
+            .maybeSingle();
+          if (persistedDraftError) {
+            throw new Error(persistedDraftError.message || "Failed to verify draft write");
+          }
+          const persistedText = persistedDraft?.draft_text
+            ? String(persistedDraft.draft_text).trim()
+            : "";
+          if (!persistedDraft?.review_id || !persistedText) {
+            throw new Error("Draft write verification failed");
           }
         }
 
@@ -193,9 +209,10 @@ Deno.serve(async (req) => {
         done += 1;
       } catch (err) {
         const message = err instanceof Error ? err.message : "Job failed";
+        const shortMessage = message.slice(0, 500);
         const { error: markError } = await supabaseAdmin
           .from("ai_jobs")
-          .update({ status: "error", finished_at: new Date().toISOString(), error: message })
+          .update({ status: "error", finished_at: new Date().toISOString(), error: shortMessage })
           .eq("id", jobId);
         if (markError) {
           console.error("[process-review-analyze] failed to mark job error", {
