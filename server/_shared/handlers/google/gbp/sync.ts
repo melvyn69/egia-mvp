@@ -39,8 +39,32 @@ type SyncFailure = {
   status: number | null;
 };
 
+type GoogleConnectionStatus =
+  | "disconnected"
+  | "connected"
+  | "reauth_required"
+  | "unknown";
+
+type GoogleConnectionReason =
+  | "ok"
+  | "token_revoked"
+  | "missing_refresh_token"
+  | "expired"
+  | "unknown"
+  | "no_connection";
+
+type GoogleConnectionSnapshot = {
+  status: GoogleConnectionStatus;
+  reason: GoogleConnectionReason;
+  lastError: string | null;
+  lastCheckedAt: string;
+};
+
 const MAX_RETRY_ATTEMPTS = 3;
 const MAX_PAGE_COUNT = 20;
+const AUTH_REAUTH_SIGNAL_TTL_MS = Number(
+  process.env.GOOGLE_AUTH_SIGNAL_TTL_MS ?? 6 * 60 * 60 * 1000
+);
 
 class GoogleHttpError extends Error {
   status: number;
@@ -72,6 +96,31 @@ const getErrorMessage = (error: unknown) =>
     : typeof error === "string"
       ? error
       : JSON.stringify(error);
+
+const isGoogleConnectionReason = (
+  value: unknown
+): value is GoogleConnectionReason =>
+  value === "ok" ||
+  value === "token_revoked" ||
+  value === "missing_refresh_token" ||
+  value === "expired" ||
+  value === "unknown" ||
+  value === "no_connection";
+
+const deriveReauthReasonFromMessage = (message: string | null) => {
+  const normalized = message?.toLowerCase() ?? "";
+  if (normalized.includes("missing") && normalized.includes("refresh")) {
+    return "missing_refresh_token" as const;
+  }
+  if (
+    normalized.includes("invalid_grant") ||
+    normalized.includes("revoked") ||
+    normalized.includes("expired")
+  ) {
+    return "token_revoked" as const;
+  }
+  return "unknown" as const;
+};
 
 const readJsonBody = async (req: VercelRequest) => {
   let raw = "";
@@ -205,6 +254,41 @@ const finishSyncRun = async (
   }
 };
 
+const upsertGoogleReauthState = async (
+  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
+  payload: {
+    userId: string;
+    reason: GoogleConnectionReason;
+    message: string;
+    requestId?: string;
+  }
+) => {
+  const nowIso = new Date().toISOString();
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabaseAdmin as any).from("cron_state").upsert({
+      key: "google_reviews_last_error",
+      user_id: payload.userId,
+      value: {
+        at: nowIso,
+        code: "reauth_required",
+        reason: payload.reason,
+        message: payload.message,
+        request_id: payload.requestId ?? null
+      },
+      updated_at: nowIso
+    });
+  } catch (error) {
+    console.error("cron_state upsert google_reviews_last_error failed:", getErrorMessage(error));
+    return;
+  }
+  console.warn("[google_auth_state]", {
+    requestId: payload.requestId ?? null,
+    userId: payload.userId,
+    reason: payload.reason
+  });
+};
+
 const refreshAccessToken = async (refreshToken: string) => {
   const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -326,7 +410,8 @@ const listLocationsForAccount = async (
 
 export const syncGoogleLocationsForUser = async (
   supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
-  userId: string
+  userId: string,
+  requestId?: string
 ) => {
   const runId = await createSyncRun(supabaseAdmin, {
     userId,
@@ -339,6 +424,12 @@ export const syncGoogleLocationsForUser = async (
   const startedAt = new Date().toISOString();
   const httpStatuses: Record<string, number> = {};
   const failures: SyncFailure[] = [];
+  let authStatusForMeta: GoogleConnectionSnapshot = {
+    status: "connected",
+    reason: "ok",
+    lastError: null,
+    lastCheckedAt: startedAt
+  };
 
   const { data: connection, error: connectionError } = await supabaseAdmin
     .from("google_connections")
@@ -348,12 +439,19 @@ export const syncGoogleLocationsForUser = async (
     .maybeSingle();
 
   if (connectionError || !connection) {
+    authStatusForMeta = {
+      status: "disconnected",
+      reason: "no_connection",
+      lastError: "Google not connected",
+      lastCheckedAt: new Date().toISOString()
+    };
     await finishSyncRun(supabaseAdmin, {
       runId,
       status: "error",
       error: "google_not_connected",
       meta: {
         started_at: startedAt,
+        auth_status: authStatusForMeta,
         failures_count: 1,
         failures: [
           {
@@ -377,12 +475,25 @@ export const syncGoogleLocationsForUser = async (
 
   if (shouldRefresh) {
     if (!connection.refresh_token) {
+      authStatusForMeta = {
+        status: "reauth_required",
+        reason: "missing_refresh_token",
+        lastError: "Missing Google refresh token",
+        lastCheckedAt: new Date().toISOString()
+      };
+      await upsertGoogleReauthState(supabaseAdmin, {
+        userId,
+        reason: "missing_refresh_token",
+        message: "missing_refresh_token",
+        requestId
+      });
       await finishSyncRun(supabaseAdmin, {
         runId,
         status: "error",
         error: "reauth_required",
         meta: {
           started_at: startedAt,
+          auth_status: authStatusForMeta,
           failures_count: 1,
           failures: [
             {
@@ -407,11 +518,18 @@ export const syncGoogleLocationsForUser = async (
         refreshError.code === "invalid_grant" ||
         /expired or revoked/i.test(refreshError.message);
       if (reauthRequired) {
-        await supabaseAdmin
-          .from("google_connections")
-          .delete()
-          .eq("user_id", userId)
-          .eq("provider", "google");
+        authStatusForMeta = {
+          status: "reauth_required",
+          reason: "token_revoked",
+          lastError: "Google token revoked or expired",
+          lastCheckedAt: new Date().toISOString()
+        };
+        await upsertGoogleReauthState(supabaseAdmin, {
+          userId,
+          reason: "token_revoked",
+          message: "google_token_revoked_or_expired",
+          requestId
+        });
 
         await finishSyncRun(supabaseAdmin, {
           runId,
@@ -419,6 +537,7 @@ export const syncGoogleLocationsForUser = async (
           error: "reauth_required",
           meta: {
             started_at: startedAt,
+            auth_status: authStatusForMeta,
             failures_count: 1,
             failures: [
               {
@@ -440,6 +559,12 @@ export const syncGoogleLocationsForUser = async (
         error: getErrorMessage(error),
         meta: {
           started_at: startedAt,
+          auth_status: {
+            status: "unknown",
+            reason: "unknown",
+            lastError: getErrorMessage(error),
+            lastCheckedAt: new Date().toISOString()
+          },
           failures_count: 1,
           failures: [
             {
@@ -482,12 +607,25 @@ export const syncGoogleLocationsForUser = async (
     accounts = await listAccounts(accessToken, httpStatuses);
   } catch (error) {
     if (error instanceof GoogleHttpError && (error.status === 401 || error.status === 403)) {
+      authStatusForMeta = {
+        status: "reauth_required",
+        reason: "token_revoked",
+        lastError: "Google permission denied",
+        lastCheckedAt: new Date().toISOString()
+      };
+      await upsertGoogleReauthState(supabaseAdmin, {
+        userId,
+        reason: "token_revoked",
+        message: "google_permission_denied",
+        requestId
+      });
       await finishSyncRun(supabaseAdmin, {
         runId,
         status: "error",
         error: "reauth_required",
         meta: {
           started_at: startedAt,
+          auth_status: authStatusForMeta,
           failures_count: 1,
           failures: [
             {
@@ -592,6 +730,7 @@ export const syncGoogleLocationsForUser = async (
   const runError = failures.length > 0 ? `${failures.length} location errors` : null;
   const meta = {
     started_at: startedAt,
+    auth_status: authStatusForMeta,
     accounts_count: accountsCount,
     locations_discovered: locationsDiscovered,
     locations_upserted: locationsUpserted,
@@ -631,6 +770,98 @@ type LocationRow = {
   updated_at?: string | null;
 };
 
+type GoogleConnectionRow = {
+  user_id: string;
+  expires_at: string | null;
+  refresh_token: string | null;
+  updated_at: string;
+};
+
+type CronStateErrorRow = {
+  value: unknown;
+  updated_at: string | null;
+};
+
+const parseConnectionStatus = (params: {
+  connection: GoogleConnectionRow | null;
+  cronError: CronStateErrorRow | null;
+}): GoogleConnectionSnapshot => {
+  const lastCheckedAt = new Date().toISOString();
+  const value = params.cronError?.value;
+  const parsed =
+    value && typeof value === "object"
+      ? (value as { code?: string; message?: string; reason?: string })
+      : null;
+  const errorCode = typeof parsed?.code === "string" ? parsed.code : null;
+  const errorMessage =
+    typeof parsed?.message === "string" ? parsed.message : null;
+  const errorReason = isGoogleConnectionReason(parsed?.reason)
+    ? parsed.reason
+    : deriveReauthReasonFromMessage(errorMessage);
+
+  const connectionUpdatedAt = params.connection?.updated_at
+    ? new Date(params.connection.updated_at).getTime()
+    : 0;
+  const errorUpdatedAt = params.cronError?.updated_at
+    ? new Date(params.cronError.updated_at).getTime()
+    : 0;
+
+  if (!params.connection) {
+    return {
+      status: "disconnected",
+      reason: "no_connection",
+      lastError: null,
+      lastCheckedAt
+    };
+  }
+
+  const refreshToken =
+    typeof params.connection.refresh_token === "string"
+      ? params.connection.refresh_token.trim()
+      : "";
+  if (!refreshToken) {
+    return {
+      status: "reauth_required",
+      reason: "missing_refresh_token",
+      lastError: errorMessage ?? "missing_refresh_token",
+      lastCheckedAt
+    };
+  }
+
+  const reauthSignalIsCurrent =
+    errorCode === "reauth_required" &&
+    !!errorUpdatedAt &&
+    Date.now() - errorUpdatedAt <= AUTH_REAUTH_SIGNAL_TTL_MS &&
+    (!connectionUpdatedAt || connectionUpdatedAt <= errorUpdatedAt);
+  if (reauthSignalIsCurrent) {
+    return {
+      status: "reauth_required",
+      reason: errorReason,
+      lastError: errorMessage ?? null,
+      lastCheckedAt
+    };
+  }
+
+  const expiresAtMs = params.connection.expires_at
+    ? new Date(params.connection.expires_at).getTime()
+    : Number.NaN;
+  if (Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now()) {
+    return {
+      status: "connected",
+      reason: "expired",
+      lastError: null,
+      lastCheckedAt
+    };
+  }
+
+  return {
+    status: "connected",
+    reason: Number.isFinite(expiresAtMs) ? "ok" : "unknown",
+    lastError: null,
+    lastCheckedAt
+  };
+};
+
 const fetchActiveLocationIds = async (
   supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
   userId: string
@@ -657,46 +888,100 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       const { userId, supabaseAdmin } = auth;
       const { params } = parseQuery(req);
       const activeOnly = getParam(params, "active_only") === "1";
+      const connectionOnly = getParam(params, "connection_only") === "1";
 
-      let query = supabaseAdmin
-        .from("google_locations")
-        .select("id, location_resource_name, location_title, updated_at")
-        .eq("user_id", userId);
+      let locations: Array<{
+        id: string;
+        location_resource_name: string;
+        location_title: string | null;
+        updated_at: string | null;
+      }> = [];
 
-      if (activeOnly) {
-        const activeIds = await fetchActiveLocationIds(supabaseAdmin, userId);
-        if (activeIds && activeIds.size > 0) {
-          query = query.in("id", Array.from(activeIds));
+      if (!connectionOnly) {
+        let query = supabaseAdmin
+          .from("google_locations")
+          .select("id, location_resource_name, location_title, updated_at")
+          .eq("user_id", userId);
+
+        if (activeOnly) {
+          const activeIds = await fetchActiveLocationIds(supabaseAdmin, userId);
+          if (activeIds && activeIds.size > 0) {
+            query = query.in("id", Array.from(activeIds));
+          }
         }
+
+        const { data, error } = await query.order("location_title", {
+          ascending: true
+        });
+        if (error) {
+          console.error("google locations list failed:", error);
+          return sendError(
+            res,
+            requestId,
+            { code: "INTERNAL", message: "Failed to load locations" },
+            500
+          );
+        }
+
+        locations = (data ?? []).map((row: LocationRow) => ({
+          id: row.id,
+          location_resource_name: row.location_resource_name,
+          location_title: row.location_title ?? null,
+          updated_at: row.updated_at ?? null
+        }));
       }
 
-      const { data, error } = await query.order("location_title", {
-        ascending: true
+      const { data: connectionData, error: connectionError } = await supabaseAdmin
+        .from("google_connections")
+        .select("user_id, expires_at, refresh_token, updated_at")
+        .eq("user_id", userId)
+        .eq("provider", "google")
+        .maybeSingle();
+      if (connectionError) {
+        console.error("google connection read failed:", connectionError);
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: cronErrorData, error: cronError } = await (supabaseAdmin as any)
+        .from("cron_state")
+        .select("value, updated_at")
+        .eq("user_id", userId)
+        .eq("key", "google_reviews_last_error")
+        .maybeSingle();
+      if (cronError) {
+        console.error("cron_state connection error read failed:", cronError);
+      }
+
+      const connection = (connectionData ?? null) as GoogleConnectionRow | null;
+      const cronErrorRow = (cronErrorData ?? null) as CronStateErrorRow | null;
+      const parsedStatus = parseConnectionStatus({
+        connection,
+        cronError: cronErrorRow
       });
-      if (error) {
-        console.error("google locations list failed:", error);
-        return sendError(
-          res,
-          requestId,
-          { code: "INTERNAL", message: "Failed to load locations" },
-          500
-        );
-      }
-
-      const locations = (data ?? []).map((row: LocationRow) => ({
-        id: row.id,
-        location_resource_name: row.location_resource_name,
-        location_title: row.location_title ?? null,
-        updated_at: row.updated_at ?? null
-      }));
 
       logRequest("[gbp/locations]", {
         requestId,
         userId,
         activeOnly,
-        count: locations.length
+        connectionOnly,
+        count: locations.length,
+        connection_status: parsedStatus.status,
+        connection_reason: parsedStatus.reason
       });
-      return res.status(200).json({ ok: true, locations, requestId });
+      return res.status(200).json({
+        ok: true,
+        locations,
+        requestId,
+        connection: {
+          status: parsedStatus.status,
+          reason: parsedStatus.reason,
+          expiresAt: connection?.expires_at ?? null,
+          userId,
+          lastError: parsedStatus.lastError,
+          last_checked_at: parsedStatus.lastCheckedAt,
+          lastCheckedAt: parsedStatus.lastCheckedAt
+        }
+      });
     } catch (error) {
       console.error("google gbp get locations error:", error);
       return sendError(
@@ -762,7 +1047,11 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     }
 
     if (syncNow) {
-      const result = await syncGoogleLocationsForUser(supabaseAdmin, userId);
+      const result = await syncGoogleLocationsForUser(
+        supabaseAdmin,
+        userId,
+        requestId
+      );
       return res.status(200).json({
         ok: true,
         queued: false,

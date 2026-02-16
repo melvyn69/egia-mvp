@@ -88,6 +88,21 @@ type PendingAlertRow = {
 
 type SyncRunStatus = "running" | "done" | "error";
 
+type AuthStatusReason =
+  | "ok"
+  | "token_revoked"
+  | "missing_refresh_token"
+  | "expired"
+  | "unknown"
+  | "no_connection";
+
+type AuthStatusSummary = {
+  status: "connected" | "reauth_required" | "disconnected" | "unknown";
+  reason: AuthStatusReason;
+  last_checked_at: string;
+  message: string | null;
+};
+
 type LocationSyncResult = {
   location_id: string;
   location_title: string | null;
@@ -111,6 +126,21 @@ const getErrorMessage = (err: unknown): string =>
     : typeof err === "string"
       ? err
       : JSON.stringify(err);
+
+const deriveReauthReasonFromMessage = (message: string | null): AuthStatusReason => {
+  const normalized = message?.toLowerCase() ?? "";
+  if (normalized.includes("missing") && normalized.includes("refresh")) {
+    return "missing_refresh_token";
+  }
+  if (
+    normalized.includes("invalid_grant") ||
+    normalized.includes("revoked") ||
+    normalized.includes("expired")
+  ) {
+    return "token_revoked";
+  }
+  return "unknown";
+};
 
 const sleep = (ms: number) =>
   new Promise((resolve) => {
@@ -779,7 +809,7 @@ export const syncGoogleReviewsForUser = async (
 
   if (shouldRefresh) {
     if (!connection.refresh_token) {
-      throw new Error("reauth_required");
+      throw new Error("reauth_required:missing_refresh_token");
     }
     let refreshed: Awaited<ReturnType<typeof refreshAccessToken>>;
     try {
@@ -791,7 +821,7 @@ export const syncGoogleReviewsForUser = async (
         refreshError.code === "invalid_grant" ||
         /expired or revoked/i.test(refreshMessage);
       if (reauthRequired) {
-        throw new Error("reauth_required");
+        throw new Error("reauth_required:token_revoked");
       }
       throw error;
     }
@@ -849,6 +879,12 @@ export const syncGoogleReviewsForUser = async (
   for (const location of locationList) {
     const locationStart = Date.now();
     const runStartedAt = new Date().toISOString();
+    const runAuthStatus: AuthStatusSummary = {
+      status: "connected",
+      reason: "ok",
+      last_checked_at: runStartedAt,
+      message: null
+    };
     const runId = await createSyncRun(supabaseAdmin, {
       userId,
       locationId: location.location_resource_name,
@@ -914,6 +950,7 @@ export const syncGoogleReviewsForUser = async (
           status: "error",
           error: notFoundMessage,
           meta: {
+            auth_status: runAuthStatus,
             inserted: 0,
             updated: 0,
             skipped: 0,
@@ -1213,6 +1250,7 @@ export const syncGoogleReviewsForUser = async (
         runId,
         status: "done",
         meta: {
+          auth_status: runAuthStatus,
           inserted,
           updated,
           skipped,
@@ -1259,6 +1297,21 @@ export const syncGoogleReviewsForUser = async (
           ? error.httpStatuses
           : httpStatuses;
       const failedPagesExhausted = pagesExhausted;
+      const failedAuthStatus: AuthStatusSummary =
+        error instanceof GoogleReviewsFetchError &&
+        (error.status === 401 || error.status === 403)
+          ? {
+              status: "reauth_required",
+              reason: "token_revoked",
+              last_checked_at: new Date().toISOString(),
+              message
+            }
+          : {
+              status: "unknown",
+              reason: "unknown",
+              last_checked_at: new Date().toISOString(),
+              message
+            };
 
       await upsertImportStatus(
         supabaseAdmin,
@@ -1281,6 +1334,7 @@ export const syncGoogleReviewsForUser = async (
         status: "error",
         error: message,
         meta: {
+          auth_status: failedAuthStatus,
           inserted: 0,
           updated: 0,
           skipped: 0,
@@ -1426,22 +1480,30 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     });
   } catch (error: unknown) {
     const message = getErrorMessage(error);
-    if (message === "reauth_required") {
+    if (message.startsWith("reauth_required")) {
+      const [, rawReason] = message.split(":");
+      const reason = rawReason ? deriveReauthReasonFromMessage(rawReason) : "unknown";
       if (userId) {
         const supabaseAdmin = createSupabaseAdmin();
+        const nowIso = new Date().toISOString();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (supabaseAdmin as any).from("cron_state").upsert({
           key: "google_reviews_last_error",
           user_id: userId,
           value: {
-            at: new Date().toISOString(),
+            at: nowIso,
             code: "reauth_required",
+            reason,
             message: "reconnexion_google_requise",
             location_pk: locationId ?? null
           },
-          updated_at: new Date().toISOString()
+          updated_at: nowIso
         });
-        console.log("[cron_state] upsert google_reviews_last_error", userId);
+        console.warn("[google_reviews_auth]", {
+          requestId,
+          userId,
+          reason
+        });
       }
       return sendError(
         res,

@@ -369,19 +369,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        if (message === "reauth_required") {
+        if (message.startsWith("reauth_required")) {
+          const reason =
+            message.includes("missing_refresh_token")
+              ? "missing_refresh_token"
+              : message.includes("token_revoked")
+                ? "token_revoked"
+                : "unknown";
           await (supabaseAdmin as any).from("cron_state").upsert({
             key: "google_reviews_last_error",
             user_id: userId,
             value: {
               at: new Date().toISOString(),
               code: "reauth_required",
+              reason,
               message: "reconnexion_google_requise",
               location_pk: null
             },
             updated_at: new Date().toISOString()
           });
-          console.warn("[sync] reviews reauth_required", { userId });
+          console.warn("[sync] reviews reauth_required", {
+            requestId,
+            userId,
+            reason
+          });
           continue;
         }
         console.warn("[sync] reviews sync failed", { userId, message });

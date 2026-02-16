@@ -23,15 +23,9 @@ import { SyncStatus } from "./pages/SyncStatus";
 import AIJobHealth from "./pages/AIJobHealth";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
+import { useGoogleConnectionStatus } from "./hooks/useGoogleConnectionStatus";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
-
-type SessionDebugInfo = {
-  userId: string | null;
-  expiresAt: number | null;
-  accessToken: string | null;
-  googleConnected: boolean;
-};
 
 type OnboardingLocationProgress = {
   locationId: string;
@@ -59,9 +53,7 @@ const App = () => {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [authEmail, setAuthEmail] = useState("");
-  const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
   const [googleError, setGoogleError] = useState<string | null>(null);
-  const [googleReauthRequired, setGoogleReauthRequired] = useState(false);
   const [syncAllLoading, setSyncAllLoading] = useState(false);
   const [syncAllMessage, setSyncAllMessage] = useState<string | null>(null);
   const [retryFailedLoading, setRetryFailedLoading] = useState(false);
@@ -72,8 +64,6 @@ const App = () => {
   >([]);
   const [importFailures, setImportFailures] = useState<SyncFailureRow[]>([]);
   const [errorToast, setErrorToast] = useState<string | null>(null);
-  const [debugInfo, setDebugInfo] = useState<SessionDebugInfo | null>(null);
-  const [debugError, setDebugError] = useState<string | null>(null);
   const [locations, setLocations] = useState<
     Array<{
       id: string;
@@ -102,10 +92,12 @@ const App = () => {
   const isCallbackPath =
     location.pathname === "/google_oauth_callback" ||
     location.pathname === "/auth/callback";
-  const debugExpiresAtLabel =
-    debugInfo?.expiresAt && Number.isFinite(debugInfo.expiresAt)
-      ? new Date(debugInfo.expiresAt * 1000).toISOString()
-      : "—";
+  const debugModeEnabled =
+    new URLSearchParams(location.search).get("debug") === "1" ||
+    import.meta.env.VITE_ENABLE_DEBUG_SESSION === "1";
+  const googleConnection = useGoogleConnectionStatus(session);
+  const googleConnected = googleConnection.status === "connected";
+  const googleReauthRequired = googleConnection.status === "reauth_required";
 
   const pageMeta = useMemo(() => {
     if (location.pathname === "/auth/callback") {
@@ -212,40 +204,6 @@ const App = () => {
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [location.pathname]);
-
-  useEffect(() => {
-    if (!supabase || !session) {
-      setGoogleConnected(null);
-      return;
-    }
-
-    let isMounted = true;
-    setGoogleError(null);
-
-    supabase
-      .from("google_connections")
-      .select("id")
-      .eq("user_id", session.user.id)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (!isMounted) {
-          return;
-        }
-
-        if (error) {
-          console.error("Google connection lookup error:", error);
-          setGoogleError("Impossible de verifier la connexion Google.");
-          setGoogleConnected(false);
-          return;
-        }
-
-        setGoogleConnected(Boolean(data));
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [session]);
 
   // user_profiles is now created via DB trigger; no client writes.
 
@@ -379,7 +337,6 @@ const App = () => {
 
   const handleConnectGoogle = async () => {
     setGoogleError(null);
-    setGoogleReauthRequired(false);
 
     if (!supabase) {
       setGoogleError("Connexion Supabase requise.");
@@ -432,9 +389,9 @@ const App = () => {
           "Impossible de synchroniser les lieux."
         );
         if (response.status === 401 && apiMessage === "reauth_required") {
-          setGoogleReauthRequired(true);
           setLocationsError("Reconnecte Google.");
           showErrorToast("Reconnecte Google.");
+          void googleConnection.refresh();
           return;
         }
         console.error("google gbp sync error:", data);
@@ -454,7 +411,7 @@ const App = () => {
         setSyncCooldownUntil(cooldown);
       }
 
-      setGoogleReauthRequired(false);
+      void googleConnection.refresh();
       await fetchLocations(session.user.id);
     } catch (error) {
       console.error(error);
@@ -603,6 +560,14 @@ const App = () => {
       showErrorToast(message);
       return;
     }
+    if (googleConnection.status === "reauth_required") {
+      const message = "Reconnecte Google avant la synchronisation.";
+      setSyncAllMessage(message);
+      setLastLogStatus("error");
+      setLastLogMessage("Reconnexion Google requise.");
+      showErrorToast(message);
+      return;
+    }
     if (!googleConnected) {
       const message = "Connexion Google requise avant la synchronisation.";
       setSyncAllMessage(message);
@@ -636,11 +601,11 @@ const App = () => {
       if (!importResponse.ok || !importData?.ok) {
         const message = getApiErrorMessage(importData, "Import des lieux impossible.");
         if (importResponse.status === 401 && message === "reauth_required") {
-          setGoogleReauthRequired(true);
           setSyncAllMessage("Reconnecte Google.");
           setLastLogStatus("error");
           setLastLogMessage("Reconnexion Google requise.");
           showErrorToast("Reconnecte Google.");
+          void googleConnection.refresh();
           return;
         }
         throw new Error(message);
@@ -706,7 +671,7 @@ const App = () => {
       if (result.failed > 0 || failures.length > 0) {
         showErrorToast("Certaines synchronisations ont echoue.");
       }
-      setGoogleReauthRequired(false);
+      void googleConnection.refresh();
     } catch (error) {
       console.error(error);
       const message =
@@ -757,6 +722,7 @@ const App = () => {
       if (result.failed > 0) {
         showErrorToast("Des etablissements restent en erreur.");
       }
+      void googleConnection.refresh();
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Retry impossible.";
@@ -778,40 +744,21 @@ const App = () => {
     console.info("Supabase auth: signed out");
   };
 
-  const handleDebugSession = async () => {
-    if (!supabase) {
-      setDebugError("Configuration Supabase manquante.");
+  const handleDebugSession = () => {
+    if (!session) {
+      showErrorToast("Aucune session active.");
       return;
     }
-    setDebugError(null);
-    const { data, error } = await supabase.auth.getSession();
-    if (error || !data.session) {
-      setDebugInfo(null);
-      setDebugError("Session introuvable.");
-      return;
-    }
-    const accessToken = data.session.access_token ?? null;
-    setDebugInfo({
-      userId: data.session.user?.id ?? null,
-      expiresAt: data.session.expires_at ?? null,
-      accessToken,
-      googleConnected: Boolean(googleConnected)
+    console.info("[debug_session]", {
+      user_id: session.user.id,
+      email: session.user.email ?? null,
+      google_status: googleConnection.status,
+      google_reason: googleConnection.reason,
+      google_expires_at: googleConnection.expiresAt ?? null,
+      google_last_error: googleConnection.lastError ?? null,
+      google_last_checked_at: googleConnection.lastCheckedAt ?? null
     });
-  };
-
-  const handleCopyAccessToken = async () => {
-    if (!debugInfo?.accessToken) {
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(debugInfo.accessToken);
-      setLastLogStatus("info");
-      setLastLogMessage("Access token copié dans le presse-papiers.");
-    } catch (error) {
-      console.error(error);
-      setLastLogStatus("error");
-      setLastLogMessage("Impossible de copier le token.");
-    }
+    showErrorToast("Debug session journalisé dans la console.");
   };
 
   const authPanel = (
@@ -865,7 +812,7 @@ const App = () => {
             userEmail={session?.user.email}
             session={session}
             onSignOut={session ? handleSignOut : undefined}
-            onDebugSession={session ? handleDebugSession : undefined}
+            onDebugSession={debugModeEnabled ? handleDebugSession : undefined}
             onToggleMenu={() => setMobileMenuOpen((prev) => !prev)}
             isMenuOpen={mobileMenuOpen}
           />
@@ -882,48 +829,6 @@ const App = () => {
                 {googleError}
               </div>
             )}
-            {(debugInfo || debugError) && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Debug session</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm text-slate-600">
-                  {debugError && <p>{debugError}</p>}
-                  {debugInfo && (
-                    <>
-                      <p>
-                        <span className="font-semibold text-slate-700">
-                          expires_at:
-                        </span>{" "}
-                        {debugExpiresAtLabel}
-                      </p>
-                      <p>
-                        <span className="font-semibold text-slate-700">
-                          user.id:
-                        </span>{" "}
-                        {debugInfo.userId ?? "—"}
-                      </p>
-                      <p>
-                        <span className="font-semibold text-slate-700">
-                          google_connection:
-                        </span>{" "}
-                        {debugInfo.googleConnected ? "connected" : "missing"}
-                      </p>
-                      {import.meta.env.DEV && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleCopyAccessToken}
-                        >
-                          Copier access_token (dev)
-                        </Button>
-                      )}
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
             {!session && !isCallbackPath ? (
               authPanel
             ) : (
@@ -933,8 +838,8 @@ const App = () => {
                   element={
                     <Dashboard
                       session={session}
-                      googleConnected={googleConnected}
-                      onConnect={handleConnectGoogle}
+                      googleStatus={googleConnection.status}
+                      googleLastError={googleConnection.lastError}
                       onSyncLocations={handleSyncLocations}
                       syncDisabled={googleReauthRequired}
                       locations={locations}
@@ -962,7 +867,7 @@ const App = () => {
                       onConnect={handleConnectGoogle}
                       onSync={handleSyncAll}
                       onRetryFailed={handleRetryFailed}
-                      syncDisabled={googleReauthRequired}
+                      syncDisabled={googleConnection.status !== "connected"}
                       syncLoading={syncAllLoading}
                       syncMessage={syncAllMessage}
                       lastLogStatus={lastLogStatus}

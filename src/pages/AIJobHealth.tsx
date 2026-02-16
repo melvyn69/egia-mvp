@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
+import { GoogleConnectionBadge } from "../components/GoogleConnectionBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
 import { Button } from "../components/ui/button";
+import { useGoogleConnectionStatus } from "../hooks/useGoogleConnectionStatus";
 
 type AIJobHealthProps = {
   session: Session | null;
@@ -84,6 +86,7 @@ const formatSkipReason = (value?: string | null) => {
 
 const AIJobHealth = ({ session }: AIJobHealthProps) => {
   const supabaseClient = supabase;
+  const googleConnection = useGoogleConnectionStatus(session);
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<CronStateRow[]>([]);
   const [locations, setLocations] = useState<LocationRow[]>([]);
@@ -406,6 +409,12 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
             {runResult.skipReason ? ` • ${runResult.skipReason}` : ""}
           </div>
         )}
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <GoogleConnectionBadge
+            status={googleConnection.status}
+            isLoading={googleConnection.isLoading}
+          />
+        </div>
         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-600">
           <label className="flex items-center gap-2">
             <input

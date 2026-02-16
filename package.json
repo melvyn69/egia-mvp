@@ -11,6 +11,8 @@
     "build": "tsc -b && npm run build:server && vite build",
     "lint": "eslint .",
     "smoke": "tsx scripts/smoke-api.ts",
+    "test:google-connection-status": "tsc --target ES2022 --module CommonJS --moduleResolution node --outDir .tmp-tests scripts/test-google-connection-status.ts && node .tmp-tests/scripts/test-google-connection-status.js",
+    "test:google-connection-status:clean": "rm -rf .tmp-tests",
     "smoke:google-onboarding": "tsx scripts/smoke-google-onboarding.ts",
     "preview": "vite preview",
     "sync:db-types": "cp src/database.types.ts server/_shared/database.types.ts",

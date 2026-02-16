@@ -9,6 +9,7 @@ import {
   MessageSquare,
   RefreshCw
 } from "lucide-react";
+import { GoogleConnectionBadge } from "../components/GoogleConnectionBadge";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -24,13 +25,13 @@ import {
   getReadNotificationIds,
   dispatchNotificationsUpdated
 } from "../lib/notifications";
-import { mockGoogleConnected } from "../mock/mockData";
+import type { GoogleConnectionStatus } from "../hooks/useGoogleConnectionStatus";
 import { supabase } from "../lib/supabase";
 
 type DashboardProps = {
   session: Session | null;
-  googleConnected: boolean | null;
-  onConnect: () => void;
+  googleStatus: GoogleConnectionStatus;
+  googleLastError?: string;
   onSyncLocations: () => void;
   syncDisabled?: boolean;
   locations: Array<{
@@ -412,8 +413,8 @@ const createNotification = (
 
 const Dashboard = ({
   session,
-  googleConnected,
-  onConnect,
+  googleStatus,
+  googleLastError,
   onSyncLocations,
   syncDisabled = false,
   locations,
@@ -421,15 +422,12 @@ const Dashboard = ({
   locationsError,
   syncing
 }: DashboardProps) => {
-  const connectedStatus = googleConnected ?? mockGoogleConnected;
   const greeting = getGreeting();
   const firstName = getFirstName(session);
   const greetingText = firstName ? `${greeting}, ${firstName}` : `${greeting}`;
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
-  const prevGoogleConnectedRef = useRef<boolean | null>(googleConnected);
   const prevSyncingRef = useRef<boolean>(syncing);
   const prevLocationsErrorRef = useRef<string | null>(locationsError);
-  const didMountRef = useRef(false);
 
   const [readNotificationIds] = useState<Set<string>>(
     getReadNotificationIds
@@ -775,16 +773,6 @@ const Dashboard = ({
   };
 
   useEffect(() => {
-    if (!didMountRef.current) {
-      didMountRef.current = true;
-      prevGoogleConnectedRef.current = googleConnected;
-      return;
-    }
-
-    prevGoogleConnectedRef.current = googleConnected;
-  }, [googleConnected]);
-
-  useEffect(() => {
     const prevSyncing = prevSyncingRef.current;
     if (prevSyncing !== syncing) {
       if (!prevSyncing && syncing) {
@@ -875,14 +863,6 @@ const Dashboard = ({
 
     return location.location_title ?? location.location_resource_name ?? "—";
   };
-
-  const connectionStatusText = connectedStatus
-    ? locationsError
-      ? "Synchronisation en erreur."
-      : syncing
-        ? "Synchronisation en cours."
-        : "Synchronisation active."
-    : "Aucune connexion active.";
 
   const kpiReason = getKpiReason(kpiData?.meta?.reasons);
   const noData = kpiData?.meta?.data_status === "no_data";
@@ -1196,35 +1176,29 @@ const Dashboard = ({
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
-        <Card className="overflow-hidden">
-          <CardHeader>
-            <CardTitle>Statut Google Business Profile</CardTitle>
-            <p className="text-sm text-slate-500">
-              Liez vos etablissements pour synchroniser avis, photos et
-              messages.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-3">
-              {googleConnected === null ? (
-                <Skeleton className="h-8 w-40" />
-              ) : (
-                <Badge variant={connectedStatus ? "success" : "warning"}>
-                  {connectedStatus ? "Google connecte" : "Connexion requise"}
-                </Badge>
-              )}
-              <p className="text-sm text-slate-600">
-                {connectionStatusText}
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-2">
+            <GoogleConnectionBadge status={googleStatus} />
+            <a href="/connect" className="text-xs font-semibold text-ink underline">
+              Gérer la connexion Google
+            </a>
+            {googleStatus === "reauth_required" && googleLastError && (
+              <p className="text-xs text-amber-700">
+                Dernière erreur: {googleLastError}
               </p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <Button onClick={onConnect}>
-                {connectedStatus ? "Reconnecter Google" : "Connecter Google"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+            )}
+          </div>
+          {googleStatus === "connected" && (
+            <Button
+              variant="outline"
+              onClick={onSyncLocations}
+              disabled={syncing || syncDisabled}
+            >
+              {syncing ? "Synchronisation..." : "Synchroniser maintenant"}
+            </Button>
+          )}
+        </div>
       </section>
 
       <section id="locations-section">
@@ -1232,22 +1206,13 @@ const Dashboard = ({
           <h2 className="text-2xl font-semibold text-slate-900">
             Lieux connectes
           </h2>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={saveActiveLocations}
-              disabled={activeLocationsSaving || locationsLoading}
-            >
-              {activeLocationsSaving ? "Enregistrement..." : "Enregistrer"}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={onSyncLocations}
-              disabled={syncing || syncDisabled}
-            >
-              {syncing ? "Synchronisation..." : "Synchroniser les lieux"}
-            </Button>
-          </div>
+          <Button
+            variant="outline"
+            onClick={saveActiveLocations}
+            disabled={activeLocationsSaving || locationsLoading}
+          >
+            {activeLocationsSaving ? "Enregistrement..." : "Enregistrer"}
+          </Button>
         </div>
         {locationsError && (
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">

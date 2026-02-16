@@ -38,7 +38,33 @@ const callApi = async (
 };
 
 const run = async () => {
-  console.log("[1/3] List locations");
+  console.log("[0/4] Check Google connection status");
+  const connectionResult = await callApi("/api/google/gbp/sync?connection_only=1", {
+    method: "GET"
+  });
+  if (!connectionResult.ok) {
+    console.error(
+      "Connection status failed:",
+      connectionResult.status,
+      connectionResult.body
+    );
+    process.exit(1);
+  }
+  const connection = (connectionResult.body as {
+    connection?: {
+      status?: string;
+      reason?: string;
+      last_checked_at?: string | null;
+      lastCheckedAt?: string | null;
+    };
+  })?.connection;
+  console.log("Connection:", {
+    status: connection?.status ?? "unknown",
+    reason: connection?.reason ?? "unknown",
+    last_checked_at: connection?.last_checked_at ?? connection?.lastCheckedAt ?? null
+  });
+
+  console.log("[1/4] List locations");
   const listResult = await callApi("/api/google/gbp/sync?active_only=1", {
     method: "GET"
   });
@@ -59,7 +85,7 @@ const run = async () => {
 
   const selectedLocationId =
     forcedLocationId || locations[0]?.location_resource_name || "";
-  console.log(`[2/3] Sync reviews for: ${selectedLocationId}`);
+  console.log(`[2/4] Sync reviews for: ${selectedLocationId}`);
 
   const syncResult = await callApi("/api/google/gbp/reviews/sync", {
     method: "POST",
@@ -102,12 +128,12 @@ const run = async () => {
 
   if (!supabaseUrl || !supabaseAnonKey) {
     console.log(
-      "[3/3] Skip google_sync_runs read (missing SUPABASE_URL/SUPABASE_ANON_KEY)."
+      "[3/4] Skip google_sync_runs read (missing SUPABASE_URL/SUPABASE_ANON_KEY)."
     );
     return;
   }
 
-  console.log("[3/3] Read last sync runs");
+  console.log("[3/4] Read last sync runs");
   const runsUrl = new URL(`${supabaseUrl.replace(/\/$/, "")}/rest/v1/google_sync_runs`);
   runsUrl.searchParams.set(
     "select",
