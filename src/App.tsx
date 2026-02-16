@@ -33,6 +33,26 @@ type SessionDebugInfo = {
   googleConnected: boolean;
 };
 
+type OnboardingLocationProgress = {
+  locationId: string;
+  label: string;
+  status: "pending" | "running" | "done" | "error";
+  detail?: string | null;
+  inserted?: number;
+  updated?: number;
+  skipped?: number;
+};
+
+type SyncFailureRow = {
+  location_resource_name: string | null;
+  message: string;
+};
+
+type SyncTarget = {
+  locationId: string;
+  label: string;
+};
+
 const App = () => {
   const location = useLocation();
   const [session, setSession] = useState<Session | null>(null);
@@ -44,8 +64,14 @@ const App = () => {
   const [googleReauthRequired, setGoogleReauthRequired] = useState(false);
   const [syncAllLoading, setSyncAllLoading] = useState(false);
   const [syncAllMessage, setSyncAllMessage] = useState<string | null>(null);
+  const [retryFailedLoading, setRetryFailedLoading] = useState(false);
   const [lastLogStatus, setLastLogStatus] = useState<string | null>(null);
   const [lastLogMessage, setLastLogMessage] = useState<string | null>(null);
+  const [onboardingProgress, setOnboardingProgress] = useState<
+    OnboardingLocationProgress[]
+  >([]);
+  const [importFailures, setImportFailures] = useState<SyncFailureRow[]>([]);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<SessionDebugInfo | null>(null);
   const [debugError, setDebugError] = useState<string | null>(null);
   const [locations, setLocations] = useState<
@@ -223,6 +249,66 @@ const App = () => {
 
   // user_profiles is now created via DB trigger; no client writes.
 
+  useEffect(() => {
+    const handleWindowError = (event: ErrorEvent) => {
+      const message = event.message || "Erreur inattendue.";
+      setErrorToast(message);
+    };
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const message =
+        event.reason instanceof Error
+          ? event.reason.message
+          : "Erreur inattendue.";
+      setErrorToast(message);
+    };
+    window.addEventListener("error", handleWindowError);
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+    return () => {
+      window.removeEventListener("error", handleWindowError);
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!errorToast) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setErrorToast(null);
+    }, 6000);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [errorToast]);
+
+  const showErrorToast = (message: string) => {
+    setErrorToast(message);
+  };
+
+  const getApiErrorMessage = (payload: unknown, fallback: string) => {
+    if (!payload || typeof payload !== "object") {
+      return fallback;
+    }
+    const candidate = payload as {
+      error?: string | { message?: string };
+      message?: string;
+    };
+    if (typeof candidate.error === "string") {
+      return candidate.error;
+    }
+    if (
+      candidate.error &&
+      typeof candidate.error === "object" &&
+      typeof candidate.error.message === "string"
+    ) {
+      return candidate.error.message;
+    }
+    if (typeof candidate.message === "string") {
+      return candidate.message;
+    }
+    return fallback;
+  };
+
   const fetchLocations = async (userId: string) => {
     if (!supabase) {
       return;
@@ -309,6 +395,7 @@ const App = () => {
           ? error.message
           : "Impossible de demarrer la connexion Google.";
       setGoogleError(message);
+      showErrorToast(message);
     }
   };
 
@@ -323,9 +410,9 @@ const App = () => {
     const now = Date.now();
     if (syncCooldownUntil && syncCooldownUntil > now) {
       const secondsLeft = Math.ceil((syncCooldownUntil - now) / 1000);
-      setLocationsError(
-        `Reessaie dans ${secondsLeft} secondes avant une nouvelle synchronisation.`
-      );
+      const message = `Reessaie dans ${secondsLeft} secondes avant une nouvelle synchronisation.`;
+      setLocationsError(message);
+      showErrorToast(message);
       return;
     }
 
@@ -340,13 +427,19 @@ const App = () => {
       const data = await response.json().catch(() => null);
 
       if (!response.ok || !data?.ok) {
-        if (response.status === 401 && data?.error === "reauth_required") {
+        const apiMessage = getApiErrorMessage(
+          data,
+          "Impossible de synchroniser les lieux."
+        );
+        if (response.status === 401 && apiMessage === "reauth_required") {
           setGoogleReauthRequired(true);
           setLocationsError("Reconnecte Google.");
+          showErrorToast("Reconnecte Google.");
           return;
         }
         console.error("google gbp sync error:", data);
-        setLocationsError("Impossible de synchroniser les lieux.");
+        setLocationsError(apiMessage);
+        showErrorToast(apiMessage);
         return;
       }
 
@@ -365,71 +458,315 @@ const App = () => {
       await fetchLocations(session.user.id);
     } catch (error) {
       console.error(error);
-      setLocationsError("Impossible de synchroniser les lieux.");
+      const message = "Impossible de synchroniser les lieux.";
+      setLocationsError(message);
+      showErrorToast(message);
     } finally {
       setSyncingLocations(false);
     }
   };
 
+  const runReviewSyncForLocations = async (
+    jwt: string,
+    targets: Array<{ locationId: string; label: string }>
+  ) => {
+    let done = 0;
+    let failed = 0;
+
+    for (const target of targets) {
+      setOnboardingProgress((prev) =>
+        prev.map((row) =>
+          row.locationId === target.locationId
+            ? { ...row, status: "running", detail: "Sync avis en cours..." }
+            : row
+        )
+      );
+
+      try {
+        const response = await fetch("/api/google/gbp/reviews/sync", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${jwt}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ location_id: target.locationId })
+        });
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok || !data?.ok) {
+          const message = getApiErrorMessage(
+            data,
+            "Echec de synchronisation des avis."
+          );
+          failed += 1;
+          setOnboardingProgress((prev) =>
+            prev.map((row) =>
+              row.locationId === target.locationId
+                ? {
+                    ...row,
+                    status: "error",
+                    detail: message,
+                    inserted: 0,
+                    updated: 0,
+                    skipped: 0
+                  }
+                : row
+            )
+          );
+          continue;
+        }
+
+        const runResult = Array.isArray(data?.locationResults)
+          ? data.locationResults.find(
+              (item: { location_id?: string }) =>
+                item.location_id === target.locationId
+            ) ?? data.locationResults[0]
+          : null;
+        const hasError =
+          runResult?.status === "error" || Number(data?.locationsFailed ?? 0) > 0;
+
+        if (hasError) {
+          failed += 1;
+          const message =
+            typeof runResult?.error === "string"
+              ? runResult.error
+              : "Echec de synchronisation des avis.";
+          setOnboardingProgress((prev) =>
+            prev.map((row) =>
+              row.locationId === target.locationId
+                ? {
+                    ...row,
+                    status: "error",
+                    detail: message,
+                    inserted: Number(runResult?.inserted ?? 0),
+                    updated: Number(runResult?.updated ?? 0),
+                    skipped: Number(runResult?.skipped ?? 0)
+                  }
+                : row
+            )
+          );
+          continue;
+        }
+
+        done += 1;
+        const pages = Number(runResult?.pages ?? 0);
+        setOnboardingProgress((prev) =>
+          prev.map((row) =>
+            row.locationId === target.locationId
+              ? {
+                  ...row,
+                  status: "done",
+                  detail: `Pages synchronisees: ${pages}`,
+                  inserted: Number(runResult?.inserted ?? data?.inserted ?? 0),
+                  updated: Number(runResult?.updated ?? data?.updated ?? 0),
+                  skipped: Number(runResult?.skipped ?? data?.skipped ?? 0)
+                }
+              : row
+          )
+        );
+      } catch (error) {
+        const message = getApiErrorMessage(
+          error,
+          "Erreur reseau pendant la synchronisation."
+        );
+        failed += 1;
+        setOnboardingProgress((prev) =>
+          prev.map((row) =>
+            row.locationId === target.locationId
+              ? {
+                  ...row,
+                  status: "error",
+                  detail: message,
+                  inserted: 0,
+                  updated: 0,
+                  skipped: 0
+                }
+              : row
+          )
+        );
+      }
+    }
+
+    return { done, failed };
+  };
+
   const handleSyncAll = async () => {
     setSyncAllMessage(null);
+    setImportFailures([]);
+    setOnboardingProgress([]);
+
     if (!supabase || !session) {
-      setSyncAllMessage("Connecte-toi puis reconnecte Google.");
+      const message = "Connecte-toi puis reconnecte Google.";
+      setSyncAllMessage(message);
       setLastLogStatus("error");
       setLastLogMessage("Session Supabase manquante.");
+      showErrorToast(message);
       return;
     }
     if (!googleConnected) {
-      setSyncAllMessage("Connexion Google requise avant la synchronisation.");
+      const message = "Connexion Google requise avant la synchronisation.";
+      setSyncAllMessage(message);
       setLastLogStatus("error");
       setLastLogMessage("Connexion Google manquante.");
+      showErrorToast(message);
       return;
     }
+
     setSyncAllLoading(true);
     setLastLogStatus("running");
-    setLastLogMessage("Synchronisation en cours...");
+    setLastLogMessage("Import des etablissements...");
+
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const jwt = sessionData.session?.access_token ?? null;
       if (!jwt) {
-        throw new Error("Missing Supabase session token.");
+        throw new Error("Session Supabase manquante.");
       }
-      const response = await fetch("/api/google/gbp/sync", {
+
+      const importResponse = await fetch("/api/google/gbp/sync?sync_now=1", {
         method: "POST",
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ sync_now: true })
+      });
+      const importData = await importResponse.json().catch(() => null);
+
+      if (!importResponse.ok || !importData?.ok) {
+        const message = getApiErrorMessage(importData, "Import des lieux impossible.");
+        if (importResponse.status === 401 && message === "reauth_required") {
+          setGoogleReauthRequired(true);
+          setSyncAllMessage("Reconnecte Google.");
+          setLastLogStatus("error");
+          setLastLogMessage("Reconnexion Google requise.");
+          showErrorToast("Reconnecte Google.");
+          return;
+        }
+        throw new Error(message);
+      }
+
+      const failures = Array.isArray(importData?.failures)
+        ? (importData.failures as SyncFailureRow[])
+        : [];
+      setImportFailures(failures);
+
+      const listResponse = await fetch("/api/google/gbp/sync", {
+        method: "GET",
         headers: {
           Authorization: `Bearer ${jwt}`
         }
       });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data?.ok) {
-        if (response.status === 401 && data?.error === "reauth_required") {
-          setSyncAllMessage("Reconnecte Google.");
-          setLastLogStatus("error");
-          setLastLogMessage("Reconnexion Google requise.");
-          setGoogleReauthRequired(true);
-          return;
-        }
-        throw new Error("Sync failed.");
-      }
-      if (data?.queued) {
-        setSyncAllMessage("Synchronisation planifiée.");
-        setLastLogStatus("running");
-        setLastLogMessage("Synchronisation en file d'attente...");
-      } else {
-        setSyncAllMessage(
-          `Synchronisation terminée: ${data?.locationsCount ?? 0} lieux.`
+      const listData = await listResponse.json().catch(() => null);
+      if (!listResponse.ok || !listData?.ok) {
+        throw new Error(
+          getApiErrorMessage(listData, "Impossible de charger les etablissements.")
         );
-        setLastLogStatus("success");
-        setLastLogMessage("Synchronisation terminée avec succès.");
+      }
+
+      const targets: SyncTarget[] = Array.isArray(listData?.locations)
+        ? listData.locations.map(
+            (item: { location_resource_name: string; location_title?: string | null }) => ({
+              locationId: item.location_resource_name,
+              label: item.location_title ?? item.location_resource_name
+            })
+          )
+        : [];
+
+      if (targets.length === 0) {
+        setSyncAllMessage("Aucun etablissement a synchroniser.");
+        setLastLogStatus(failures.length > 0 ? "error" : "success");
+        setLastLogMessage(
+          failures.length > 0
+            ? "Import partiel termine avec erreurs."
+            : "Import termine."
+        );
+        return;
+      }
+
+      setOnboardingProgress(
+        targets.map((target) => ({
+          locationId: target.locationId,
+          label: target.label,
+          status: "pending",
+          detail: "En attente..."
+        }))
+      );
+
+      setLastLogMessage("Synchronisation des avis par etablissement...");
+      const result = await runReviewSyncForLocations(jwt, targets);
+      await fetchLocations(session.user.id);
+
+      const summary =
+        `Sync terminee: ${result.done}/${targets.length} OK` +
+        (result.failed > 0 ? `, ${result.failed} en erreur.` : ".");
+      setSyncAllMessage(summary);
+      setLastLogStatus(result.failed > 0 || failures.length > 0 ? "error" : "success");
+      setLastLogMessage(summary);
+      if (result.failed > 0 || failures.length > 0) {
+        showErrorToast("Certaines synchronisations ont echoue.");
       }
       setGoogleReauthRequired(false);
     } catch (error) {
       console.error(error);
-      setSyncAllMessage("Erreur de synchronisation.");
+      const message =
+        error instanceof Error ? error.message : "Erreur de synchronisation.";
+      setSyncAllMessage(message);
       setLastLogStatus("error");
-      setLastLogMessage("Echec de la synchronisation.");
+      setLastLogMessage(message);
+      showErrorToast(message);
+    } finally {
+      setSyncAllLoading(false);
     }
-    setSyncAllLoading(false);
+  };
+
+  const handleRetryFailed = async () => {
+    if (!supabase || !session) {
+      const message = "Session Supabase manquante.";
+      setSyncAllMessage(message);
+      showErrorToast(message);
+      return;
+    }
+
+    const failedTargets = onboardingProgress
+      .filter((item) => item.status === "error")
+      .map((item) => ({ locationId: item.locationId, label: item.label }));
+
+    if (failedTargets.length === 0) {
+      setSyncAllMessage("Aucun etablissement en echec a relancer.");
+      return;
+    }
+
+    setRetryFailedLoading(true);
+    setLastLogStatus("running");
+    setLastLogMessage("Retry des etablissements en echec...");
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const jwt = sessionData.session?.access_token ?? null;
+      if (!jwt) {
+        throw new Error("Session Supabase manquante.");
+      }
+      const result = await runReviewSyncForLocations(jwt, failedTargets);
+      const summary =
+        `Retry termine: ${result.done}/${failedTargets.length} OK` +
+        (result.failed > 0 ? `, ${result.failed} en erreur.` : ".");
+      setSyncAllMessage(summary);
+      setLastLogStatus(result.failed > 0 ? "error" : "success");
+      setLastLogMessage(summary);
+      if (result.failed > 0) {
+        showErrorToast("Des etablissements restent en erreur.");
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Retry impossible.";
+      setSyncAllMessage(message);
+      setLastLogStatus("error");
+      setLastLogMessage(message);
+      showErrorToast(message);
+    } finally {
+      setRetryFailedLoading(false);
+    }
   };
 
   const handleSignOut = async () => {
@@ -624,11 +961,15 @@ const App = () => {
                     <Connect
                       onConnect={handleConnectGoogle}
                       onSync={handleSyncAll}
+                      onRetryFailed={handleRetryFailed}
                       syncDisabled={googleReauthRequired}
                       syncLoading={syncAllLoading}
                       syncMessage={syncAllMessage}
                       lastLogStatus={lastLogStatus}
                       lastLogMessage={lastLogMessage}
+                      locationProgress={onboardingProgress}
+                      importFailures={importFailures}
+                      retryLoading={retryFailedLoading}
                     />
                   }
                 />
@@ -705,6 +1046,21 @@ const App = () => {
               className="h-full"
               onNavigate={() => setMobileMenuOpen(false)}
             />
+          </div>
+        </div>
+      )}
+      {errorToast && (
+        <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 shadow-lg">
+          <div className="flex items-start justify-between gap-3">
+            <span>{errorToast}</span>
+            <button
+              type="button"
+              className="font-semibold text-rose-800"
+              onClick={() => setErrorToast(null)}
+              aria-label="Fermer l'erreur"
+            >
+              X
+            </button>
           </div>
         </div>
       )}

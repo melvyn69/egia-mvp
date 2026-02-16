@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { randomUUID } from "crypto";
 import {
   createSupabaseAdmin,
   getRequiredEnv,
@@ -25,6 +26,183 @@ type GoogleLocation = {
   storefrontAddress?: unknown;
   primaryPhone?: string;
   websiteUri?: string;
+};
+
+type SyncRunType = "locations_import" | "reviews_sync";
+type SyncRunStatus = "running" | "done" | "error";
+
+type SyncFailure = {
+  step: "list_accounts" | "list_locations" | "upsert_location";
+  account_resource_name: string | null;
+  location_resource_name: string | null;
+  message: string;
+  status: number | null;
+};
+
+const MAX_RETRY_ATTEMPTS = 3;
+const MAX_PAGE_COUNT = 20;
+
+class GoogleHttpError extends Error {
+  status: number;
+  body: string;
+
+  constructor(status: number, body: string) {
+    super(`Google API error ${status}`);
+    this.status = status;
+    this.body = body;
+  }
+}
+
+const sleep = (ms: number) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const backoffWithJitter = (attempt: number) => {
+  const base = 350 * 2 ** (attempt - 1);
+  const jitter = Math.floor(Math.random() * 140);
+  return base + jitter;
+};
+
+const isRetryableStatus = (status: number) => status === 429 || status >= 500;
+
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : JSON.stringify(error);
+
+const readJsonBody = async (req: VercelRequest) => {
+  let raw = "";
+  for await (const chunk of req) {
+    raw += chunk;
+  }
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+};
+
+const bumpHttpStatus = (map: Record<string, number>, status: number) => {
+  const key = String(status);
+  map[key] = (map[key] ?? 0) + 1;
+};
+
+const parseGoogleErrorMessage = (body: string) => {
+  if (!body) {
+    return "Google API error";
+  }
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: string } };
+    const message = parsed?.error?.message;
+    if (typeof message === "string" && message.trim().length > 0) {
+      return message;
+    }
+  } catch {
+    // body is not JSON
+  }
+  return body.slice(0, 300);
+};
+
+const fetchGoogleJsonWithRetry = async (
+  url: string,
+  accessToken: string,
+  httpStatuses: Record<string, number>
+) => {
+  let lastStatus = 0;
+  let lastBody = "";
+
+  for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt += 1) {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    });
+
+    lastStatus = response.status;
+    lastBody = await response.text();
+    bumpHttpStatus(httpStatuses, response.status);
+
+    if (response.ok) {
+      if (!lastBody) {
+        return {} as Record<string, unknown>;
+      }
+      try {
+        return JSON.parse(lastBody) as Record<string, unknown>;
+      } catch {
+        throw new GoogleHttpError(
+          response.status,
+          "Google API response is not valid JSON."
+        );
+      }
+    }
+
+    if (!isRetryableStatus(response.status) || attempt === MAX_RETRY_ATTEMPTS) {
+      throw new GoogleHttpError(response.status, lastBody);
+    }
+
+    await sleep(backoffWithJitter(attempt));
+  }
+
+  throw new GoogleHttpError(lastStatus, lastBody);
+};
+
+const createSyncRun = async (
+  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
+  payload: {
+    userId: string;
+    runType: SyncRunType;
+    locationId?: string | null;
+    meta?: Record<string, unknown>;
+  }
+) => {
+  const runId = randomUUID();
+  const nowIso = new Date().toISOString();
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabaseAdmin as any).from("google_sync_runs").insert({
+      id: runId,
+      user_id: payload.userId,
+      location_id: payload.locationId ?? null,
+      run_type: payload.runType,
+      status: "running",
+      started_at: nowIso,
+      meta: payload.meta ?? {}
+    });
+  } catch (error) {
+    console.error("google_sync_runs insert failed:", getErrorMessage(error));
+  }
+  return runId;
+};
+
+const finishSyncRun = async (
+  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
+  payload: {
+    runId: string;
+    status: SyncRunStatus;
+    error?: string | null;
+    meta?: Record<string, unknown>;
+  }
+) => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabaseAdmin as any)
+      .from("google_sync_runs")
+      .update({
+        status: payload.status,
+        error: payload.error ?? null,
+        finished_at: new Date().toISOString(),
+        meta: payload.meta ?? {}
+      })
+      .eq("id", payload.runId);
+  } catch (error) {
+    console.error("google_sync_runs update failed:", getErrorMessage(error));
+  }
 };
 
 const refreshAccessToken = async (refreshToken: string) => {
@@ -58,33 +236,62 @@ const refreshAccessToken = async (refreshToken: string) => {
   };
 };
 
-const listAccounts = async (accessToken: string) => {
-  const response = await fetch(
-    "https://mybusinessaccountmanagement.googleapis.com/v1/accounts",
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`
-      }
+const listAccounts = async (
+  accessToken: string,
+  httpStatuses: Record<string, number>
+) => {
+  const accounts: GoogleAccount[] = [];
+  const seenTokens = new Set<string>();
+  let pageToken: string | undefined;
+  let page = 0;
+
+  while (page < MAX_PAGE_COUNT) {
+    const url = new URL("https://mybusinessaccountmanagement.googleapis.com/v1/accounts");
+    if (pageToken) {
+      url.searchParams.set("pageToken", pageToken);
     }
-  );
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data?.error?.message ?? "Failed to list accounts.");
+
+    const tokenKey = pageToken ?? "__first__";
+    if (seenTokens.has(tokenKey)) {
+      break;
+    }
+    seenTokens.add(tokenKey);
+
+    const data = await fetchGoogleJsonWithRetry(
+      url.toString(),
+      accessToken,
+      httpStatuses
+    );
+
+    accounts.push(...((data.accounts ?? []) as GoogleAccount[]));
+    const nextToken =
+      typeof data.nextPageToken === "string" && data.nextPageToken.length > 0
+        ? data.nextPageToken
+        : undefined;
+
+    page += 1;
+    if (!nextToken) {
+      break;
+    }
+    pageToken = nextToken;
   }
-  return (data.accounts ?? []) as GoogleAccount[];
+
+  return accounts;
 };
 
 const listLocationsForAccount = async (
   accessToken: string,
-  accountName: string
+  accountName: string,
+  httpStatuses: Record<string, number>
 ) => {
   const locations: GoogleLocation[] = [];
+  const seenTokens = new Set<string>();
   let pageToken: string | undefined;
   const normalizedAccountName = accountName.startsWith("accounts/")
     ? accountName
     : `accounts/${accountName}`;
 
-  do {
+  for (let page = 0; page < MAX_PAGE_COUNT; page += 1) {
     const baseUrl =
       `https://mybusinessbusinessinformation.googleapis.com/v1/${normalizedAccountName}/locations` +
       `?readMask=name,title,storefrontAddress,metadata,phoneNumbers,websiteUri` +
@@ -93,30 +300,46 @@ const listLocationsForAccount = async (
       ? `${baseUrl}&pageToken=${encodeURIComponent(pageToken)}`
       : baseUrl;
 
-    console.log("[GBP] account.name =", accountName);
-    console.log("[GBP] list locations url =", url);
-
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`
-      }
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data?.error?.message ?? "Failed to list locations.");
+    const tokenKey = pageToken ?? "__first__";
+    if (seenTokens.has(tokenKey)) {
+      break;
     }
+    seenTokens.add(tokenKey);
+
+    const data = await fetchGoogleJsonWithRetry(url, accessToken, httpStatuses);
 
     locations.push(...((data.locations ?? []) as GoogleLocation[]));
-    pageToken = data.nextPageToken;
-  } while (pageToken);
+    const nextToken =
+      typeof data.nextPageToken === "string" && data.nextPageToken.length > 0
+        ? data.nextPageToken
+        : undefined;
 
-  return locations;
+    if (!nextToken) {
+      return locations;
+    }
+
+    pageToken = nextToken;
+  }
+
+  throw new Error("Locations pagination limit reached.");
 };
 
 export const syncGoogleLocationsForUser = async (
   supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
   userId: string
 ) => {
+  const runId = await createSyncRun(supabaseAdmin, {
+    userId,
+    runType: "locations_import",
+    meta: {
+      source: "api/google/gbp/sync"
+    }
+  });
+
+  const startedAt = new Date().toISOString();
+  const httpStatuses: Record<string, number> = {};
+  const failures: SyncFailure[] = [];
+
   const { data: connection, error: connectionError } = await supabaseAdmin
     .from("google_connections")
     .select("access_token,refresh_token,expires_at")
@@ -125,6 +348,24 @@ export const syncGoogleLocationsForUser = async (
     .maybeSingle();
 
   if (connectionError || !connection) {
+    await finishSyncRun(supabaseAdmin, {
+      runId,
+      status: "error",
+      error: "google_not_connected",
+      meta: {
+        started_at: startedAt,
+        failures_count: 1,
+        failures: [
+          {
+            step: "list_accounts",
+            account_resource_name: null,
+            location_resource_name: null,
+            message: "Google not connected",
+            status: null
+          }
+        ]
+      }
+    });
     throw new Error("google_not_connected");
   }
 
@@ -136,8 +377,27 @@ export const syncGoogleLocationsForUser = async (
 
   if (shouldRefresh) {
     if (!connection.refresh_token) {
+      await finishSyncRun(supabaseAdmin, {
+        runId,
+        status: "error",
+        error: "reauth_required",
+        meta: {
+          started_at: startedAt,
+          failures_count: 1,
+          failures: [
+            {
+              step: "list_accounts",
+              account_resource_name: null,
+              location_resource_name: null,
+              message: "Missing Google refresh token",
+              status: null
+            }
+          ]
+        }
+      });
       throw new Error("reauth_required");
     }
+
     let refreshed: Awaited<ReturnType<typeof refreshAccessToken>>;
     try {
       refreshed = await refreshAccessToken(connection.refresh_token);
@@ -152,10 +412,49 @@ export const syncGoogleLocationsForUser = async (
           .delete()
           .eq("user_id", userId)
           .eq("provider", "google");
+
+        await finishSyncRun(supabaseAdmin, {
+          runId,
+          status: "error",
+          error: "reauth_required",
+          meta: {
+            started_at: startedAt,
+            failures_count: 1,
+            failures: [
+              {
+                step: "list_accounts",
+                account_resource_name: null,
+                location_resource_name: null,
+                message: "Google token revoked or expired",
+                status: null
+              }
+            ]
+          }
+        });
         throw new Error("reauth_required");
       }
+
+      await finishSyncRun(supabaseAdmin, {
+        runId,
+        status: "error",
+        error: getErrorMessage(error),
+        meta: {
+          started_at: startedAt,
+          failures_count: 1,
+          failures: [
+            {
+              step: "list_accounts",
+              account_resource_name: null,
+              location_resource_name: null,
+              message: getErrorMessage(error),
+              status: null
+            }
+          ]
+        }
+      });
       throw error;
     }
+
     accessToken = refreshed.access_token;
     const newExpiresAt =
       refreshed.expires_in && refreshed.expires_in > 0
@@ -178,43 +477,151 @@ export const syncGoogleLocationsForUser = async (
     }
   }
 
-  const accounts = await listAccounts(accessToken);
-  let locationsCount = 0;
+  let accounts: GoogleAccount[] = [];
+  try {
+    accounts = await listAccounts(accessToken, httpStatuses);
+  } catch (error) {
+    if (error instanceof GoogleHttpError && (error.status === 401 || error.status === 403)) {
+      await finishSyncRun(supabaseAdmin, {
+        runId,
+        status: "error",
+        error: "reauth_required",
+        meta: {
+          started_at: startedAt,
+          failures_count: 1,
+          failures: [
+            {
+              step: "list_accounts",
+              account_resource_name: null,
+              location_resource_name: null,
+              message: "Google permission denied",
+              status: error.status
+            }
+          ],
+          http_statuses: httpStatuses
+        }
+      });
+      throw new Error("reauth_required");
+    }
+
+    failures.push({
+      step: "list_accounts",
+      account_resource_name: null,
+      location_resource_name: null,
+      message:
+        error instanceof GoogleHttpError
+          ? parseGoogleErrorMessage(error.body)
+          : getErrorMessage(error),
+      status: error instanceof GoogleHttpError ? error.status : null
+    });
+  }
+
+  let accountsCount = 0;
+  let locationsDiscovered = 0;
+  let locationsUpserted = 0;
 
   for (const account of accounts) {
     if (!account.name) {
       continue;
     }
-    const locations = await listLocationsForAccount(accessToken, account.name);
-    locationsCount += locations.length;
 
-    if (locations.length === 0) {
+    accountsCount += 1;
+
+    let locations: GoogleLocation[] = [];
+    try {
+      locations = await listLocationsForAccount(
+        accessToken,
+        account.name,
+        httpStatuses
+      );
+    } catch (error) {
+      failures.push({
+        step: "list_locations",
+        account_resource_name: account.name,
+        location_resource_name: null,
+        message:
+          error instanceof GoogleHttpError
+            ? parseGoogleErrorMessage(error.body)
+            : getErrorMessage(error),
+        status: error instanceof GoogleHttpError ? error.status : null
+      });
       continue;
     }
 
-    const rows = locations.map((location) => ({
-      user_id: userId,
-      provider: "google",
-      account_resource_name: account.name,
-      location_resource_name: location.name,
-      location_title: location.title ?? null,
-      store_code: location.storeCode ?? null,
-      address_json: (location.storefrontAddress ?? null) as Json | null,
-      phone: location.primaryPhone ?? null,
-      website_uri: location.websiteUri ?? null,
-      updated_at: new Date().toISOString()
-    }));
+    for (const location of locations) {
+      if (!location.name) {
+        continue;
+      }
 
-    const { error: upsertError } = await supabaseAdmin
-      .from("google_locations")
-      .upsert(rows, { onConflict: "user_id,location_resource_name" });
+      locationsDiscovered += 1;
 
-    if (upsertError) {
-      console.error("google locations upsert failed:", upsertError);
+      const { error: upsertError } = await supabaseAdmin
+        .from("google_locations")
+        .upsert(
+          {
+            user_id: userId,
+            provider: "google",
+            account_resource_name: account.name,
+            location_resource_name: location.name,
+            location_title: location.title ?? null,
+            store_code: location.storeCode ?? null,
+            address_json: (location.storefrontAddress ?? null) as Json | null,
+            phone: location.primaryPhone ?? null,
+            website_uri: location.websiteUri ?? null,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: "user_id,location_resource_name" }
+        );
+
+      if (upsertError) {
+        failures.push({
+          step: "upsert_location",
+          account_resource_name: account.name,
+          location_resource_name: location.name,
+          message: upsertError.message ?? "Failed to upsert location.",
+          status: null
+        });
+        continue;
+      }
+
+      locationsUpserted += 1;
     }
   }
 
-  return { locationsCount };
+  const runStatus: SyncRunStatus = failures.length > 0 ? "error" : "done";
+  const runError = failures.length > 0 ? `${failures.length} location errors` : null;
+  const meta = {
+    started_at: startedAt,
+    accounts_count: accountsCount,
+    locations_discovered: locationsDiscovered,
+    locations_upserted: locationsUpserted,
+    failures_count: failures.length,
+    failures,
+    http_statuses: httpStatuses
+  };
+
+  await finishSyncRun(supabaseAdmin, {
+    runId,
+    status: runStatus,
+    error: runError,
+    meta
+  });
+
+  console.log("[gbp_locations_sync]", {
+    user_id: userId,
+    accounts_count: accountsCount,
+    locations_count: locationsUpserted,
+    failures_count: failures.length
+  });
+
+  return {
+    runId,
+    status: runStatus,
+    accountsCount,
+    locationsCount: locationsUpserted,
+    failuresCount: failures.length,
+    failures
+  };
 };
 
 type LocationRow = {
@@ -326,6 +733,11 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       );
     }
 
+    const { params } = parseQuery(req);
+    const body = await readJsonBody(req);
+    const syncNow =
+      getParam(params, "sync_now") === "1" || body?.sync_now === true;
+
     const { data: connection, error: connectionError } = await supabaseAdmin
       .from("google_connections")
       .select("refresh_token")
@@ -347,6 +759,21 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         { code: "UNAUTHORIZED", message: "reauth_required" },
         401
       );
+    }
+
+    if (syncNow) {
+      const result = await syncGoogleLocationsForUser(supabaseAdmin, userId);
+      return res.status(200).json({
+        ok: true,
+        queued: false,
+        requestId,
+        run_id: result.runId,
+        status: result.status,
+        accountsCount: result.accountsCount,
+        locationsCount: result.locationsCount,
+        failuresCount: result.failuresCount,
+        failures: result.failures
+      });
     }
 
     const { data: existingJob } = await supabaseAdmin
@@ -412,6 +839,23 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       requestId
     });
   } catch (error) {
+    const message = getErrorMessage(error);
+    if (message === "reauth_required") {
+      return sendError(
+        res,
+        requestId,
+        { code: "UNAUTHORIZED", message: "reauth_required" },
+        401
+      );
+    }
+    if (message === "google_not_connected") {
+      return sendError(
+        res,
+        requestId,
+        { code: "NOT_FOUND", message: "Google not connected" },
+        404
+      );
+    }
     console.error("google gbp sync error:", error);
     return sendError(
       res,

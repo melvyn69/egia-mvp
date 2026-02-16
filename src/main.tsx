@@ -7,14 +7,17 @@ import App from "./App";
 import "./index.css";
 import { queryClient } from "./lib/queryClient";
 import { PWAInstallProvider } from "./components/pwa/PWAInstallProvider";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <PWAInstallProvider>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
+        <ErrorBoundary>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </ErrorBoundary>
       </PWAInstallProvider>
       {import.meta.env.DEV ? <ReactQueryDevtools initialIsOpen={false} /> : null}
     </QueryClientProvider>

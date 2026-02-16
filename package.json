@@ -11,6 +11,7 @@
     "build": "tsc -b && npm run build:server && vite build",
     "lint": "eslint .",
     "smoke": "tsx scripts/smoke-api.ts",
+    "smoke:google-onboarding": "tsx scripts/smoke-google-onboarding.ts",
     "preview": "vite preview",
     "sync:db-types": "cp src/database.types.ts server/_shared/database.types.ts",
     "smoke:auth": "node scripts/smoke-auth.mjs",

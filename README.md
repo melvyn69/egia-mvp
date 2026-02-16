@@ -111,6 +111,24 @@ npm install
 npm run dev
 ```
 
+## Demo checklist (Google onboarding)
+
+1. Connecte-toi dans l'app puis ouvre `/connect`.
+2. Clique `Lancer la connexion Google`.
+3. Clique `Importer mes etablissements`.
+4. Verifie la progression par etablissement et les erreurs eventuelles.
+5. Si besoin, clique `Retry failed` (relance uniquement les etablissements en erreur).
+
+Commandes utiles:
+
+```bash
+# Smoke onboarding (locations + sync 1 location + logs runs)
+BASE_URL=http://localhost:3000 JWT=<jwt_supabase_user> npm run smoke:google-onboarding
+
+# (optionnel) forcer une location
+BASE_URL=http://localhost:3000 JWT=<jwt_supabase_user> LOCATION_ID=locations/123 npm run smoke:google-onboarding
+```
+
 ## Cron-job.org
 
 Créer un job POST:
