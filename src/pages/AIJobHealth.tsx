@@ -132,14 +132,25 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
       .like("key", `ai_status_v1:${userId}:%`)
       .eq("user_id", userId);
 
-    const sbAny = supabaseClient as unknown as any;
-    const { data: runRows } = await sbAny
-        .from("ai_run_history")
-        .select(
-          "id, started_at, finished_at, duration_ms, processed, tags_upserted, errors_count, aborted, skip_reason, meta"
-        )
-        .order("started_at", { ascending: false })
-        .limit(50);
+    const dynamicSupabaseClient = supabaseClient as unknown as {
+      from: (table: string) => {
+        select: (columns: string) => {
+          order: (
+            column: string,
+            options: { ascending: boolean }
+          ) => {
+            limit: (count: number) => Promise<{ data: RunRow[] | null }>;
+          };
+        };
+      };
+    };
+    const { data: runRows } = await dynamicSupabaseClient
+      .from("ai_run_history")
+      .select(
+        "id, started_at, finished_at, duration_ms, processed, tags_upserted, errors_count, aborted, skip_reason, meta"
+      )
+      .order("started_at", { ascending: false })
+      .limit(50);
 
     if (locationsError || cronError) {
       setError(
