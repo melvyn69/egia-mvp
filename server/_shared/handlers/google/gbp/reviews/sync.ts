@@ -12,7 +12,7 @@ import {
   getParam,
   logRequest
 } from "../../../../api_utils";
-import { withRetry, isTransientError } from "../../../../utils/withRetry";
+import { withRetry } from "../../../../utils/withRetry";
 
 type GoogleReview = {
   reviewId?: string;
@@ -108,7 +108,7 @@ type AuthStatusSummary = {
 type LocationSyncResult = {
   location_id: string;
   location_title: string | null;
-  status: "done" | "error";
+  status: "ok" | "warning" | "error";
   inserted: number;
   updated: number;
   skipped: number;
@@ -116,6 +116,7 @@ type LocationSyncResult = {
   pages_exhausted: boolean;
   http_statuses: Record<string, number>;
   error: string | null;
+  warnings?: string[];
   run_id: string;
 };
 
@@ -208,19 +209,19 @@ const loadExistingReviewsChunked = async (params: {
         }
       }
     } catch (error) {
-      if (isTransientError(error)) {
-        console.warn("[google_reviews.load_existing_fallback]", {
-          requestId: params.requestId ?? null,
-          user_id: params.userId,
-          location_id: params.locationId,
-          chunk_index: chunkIndex + 1,
-          chunks_total: chunks.length,
-          chunk_size: chunk.length,
-          message: getErrorMessage(error).slice(0, 220)
-        });
-        return { existingByReviewName: new Map<string, ExistingReviewRow>(), existingLoadFailed: true as const };
-      }
-      throw error;
+      console.warn("[google_reviews.load_existing_fallback]", {
+        requestId: params.requestId ?? null,
+        user_id: params.userId,
+        location_id: params.locationId,
+        chunk_index: chunkIndex + 1,
+        chunks_total: chunks.length,
+        chunk_size: chunk.length,
+        message: getErrorMessage(error).slice(0, 220)
+      });
+      return {
+        existingByReviewName: new Map<string, ExistingReviewRow>(),
+        existingLoadFailed: true as const
+      };
     }
   }
 
@@ -1201,6 +1202,7 @@ export const syncGoogleReviewsForUser = async (
           pages_exhausted: pagesExhausted,
           http_statuses: httpStatuses,
           error: notFoundMessage,
+          warnings: [],
           run_id: runId
         });
         continue;
@@ -1251,7 +1253,7 @@ export const syncGoogleReviewsForUser = async (
         locationResults.push({
           location_id: location.location_resource_name,
           location_title: displayName ?? null,
-          status: "done",
+          status: "ok",
           inserted: 0,
           updated: 0,
           skipped: 0,
@@ -1259,6 +1261,7 @@ export const syncGoogleReviewsForUser = async (
           pages_exhausted: pagesExhausted,
           http_statuses: httpStatuses,
           error: null,
+          warnings: [],
           run_id: runId
         });
         continue;
@@ -1563,7 +1566,7 @@ export const syncGoogleReviewsForUser = async (
       locationResults.push({
         location_id: location.location_resource_name,
         location_title: displayName ?? null,
-        status: "done",
+        status: existingLoadFailed ? "warning" : "ok",
         inserted,
         updated,
         skipped,
@@ -1571,6 +1574,7 @@ export const syncGoogleReviewsForUser = async (
         pages_exhausted: pagesExhausted,
         http_statuses: httpStatuses,
         error: null,
+        warnings: existingLoadFailed ? ["existing_load_failed"] : [],
         run_id: runId
       });
 
@@ -1661,6 +1665,7 @@ export const syncGoogleReviewsForUser = async (
         pages_exhausted: failedPagesExhausted,
         http_statuses: failedStatuses,
         error: message,
+        warnings: [],
         run_id: runId
       });
 
