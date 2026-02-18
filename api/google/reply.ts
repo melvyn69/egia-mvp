@@ -1,7 +1,10 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../../server/_shared_dist/database.types.js";
-import { generateAiReply } from "../../server/_shared_dist/ai_reply.js";
+import {
+  generateAiReply,
+  isMissingAiIdentityError
+} from "../../server/_shared_dist/ai_reply.js";
 
 const getEnv = (keys: string[]) => {
   for (const key of keys) {
@@ -190,38 +193,6 @@ const resolveDraftReview = async (
   return { data: data ?? null, error: null };
 };
 
-const fetchBrandVoice = async (
-  userId: string,
-  locationId: string | null
-) => {
-  const selectFields =
-    "enabled, tone, language_level, context, use_emojis, forbidden_words, location_id";
-  if (locationId) {
-    const { data: specific, error } = await supabaseAdmin
-      .from("brand_voice")
-      .select(selectFields)
-      .eq("user_id", userId)
-      .eq("location_id", locationId)
-      .maybeSingle();
-    if (error) {
-      console.error("[reply] brand_voice fetch failed", error);
-    }
-    if (specific) {
-      return specific;
-    }
-  }
-  const { data: globalRow, error: globalError } = await supabaseAdmin
-    .from("brand_voice")
-    .select(selectFields)
-    .eq("user_id", userId)
-    .is("location_id", null)
-    .maybeSingle();
-  if (globalError) {
-    console.error("[reply] brand_voice fetch failed", globalError);
-  }
-  return globalRow ?? null;
-};
-
 const normalizeBrandVoiceOverride = (value: unknown) => {
   if (!value || typeof value !== "object") {
     return null;
@@ -238,29 +209,6 @@ const normalizeBrandVoiceOverride = (value: unknown) => {
       ? raw.forbidden_words.filter((word): word is string => typeof word === "string")
       : []
   };
-};
-
-const fetchBusinessSettings = async (userId: string) => {
-  const { data: byUser, error: byUserError } = await supabaseAdmin
-    .from("business_settings")
-    .select("default_tone, signature")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (byUserError) {
-    console.error("[reply] business_settings fetch failed", byUserError);
-  }
-  if (byUser) {
-    return byUser;
-  }
-  const { data: byBusiness, error: byBusinessError } = await supabaseAdmin
-    .from("business_settings")
-    .select("default_tone, signature")
-    .eq("business_id", userId)
-    .maybeSingle();
-  if (byBusinessError) {
-    console.error("[reply] business_settings fetch failed", byBusinessError);
-  }
-  return byBusiness ?? null;
 };
 
 const fetchAiInsights = async (reviewPk: string) => {
@@ -353,8 +301,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       replyText,
       draftReplyId,
       googleReviewId,
-      tone,
-      brand_voice_override
+      brand_voice_override,
+      allow_identity_override
     } =
       payload as {
         id?: string;
@@ -367,8 +315,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         replyText?: string;
         draftReplyId?: string;
         googleReviewId?: string;
-        tone?: string;
         brand_voice_override?: unknown;
+        allow_identity_override?: boolean;
       };
 
     if (mode === "test") {
@@ -378,35 +326,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: "Missing review_text" });
       }
       try {
-        const brandVoiceOverride = normalizeBrandVoiceOverride(brand_voice_override);
-        const [brandVoice, businessSettings] = await Promise.all([
-          brandVoiceOverride ??
-            fetchBrandVoice(
-              userId,
-              typeof location_id === "string" ? location_id : null
-            ),
-          fetchBusinessSettings(userId)
-        ]);
-        const reply = await generateAiReply({
+        const aiResult = await generateAiReply({
           reviewText: safeText,
           rating: typeof rating === "number" ? rating : null,
-          brandVoice: brandVoice ?? null,
-          overrideTone: tone ?? null,
-          businessTone: businessSettings?.default_tone ?? null,
-          signature: businessSettings?.signature ?? null,
+          userId,
+          locationId: typeof location_id === "string" ? location_id : null,
+          supabaseAdmin,
+          allowIdentityOverride: Boolean(allow_identity_override),
+          brandVoiceOverride: normalizeBrandVoiceOverride(brand_voice_override),
           openaiApiKey,
           model: openaiModel,
-          requestId
+          requestId,
+          strictIdentity: true
         });
         void insertReplyHistory({
           userId,
           reviewId: "test",
           locationId: null,
-          replyText: reply,
+          replyText: aiResult.replyText,
           source: "test"
         });
-        return res.status(200).json({ reply_text: reply });
+        return res.status(200).json({
+          reply_text: aiResult.replyText,
+          meta: aiResult.meta
+        });
       } catch (error) {
+        if (isMissingAiIdentityError(error)) {
+          console.error("[reply]", requestId, "missing ai identity (test)", {
+            userId,
+            locationId: typeof location_id === "string" ? location_id : null
+          });
+          return res.status(422).json({
+            error: "missing_ai_identity",
+            failed_reason: "missing_ai_identity",
+            meta: error.meta
+          });
+        }
         if ((error as Error).name === "AbortError") {
           console.error("[reply]", requestId, "test openai timeout");
           return res.status(504).json({ error: "OpenAI request timeout" });
@@ -461,35 +416,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const reviewText = typeof review.comment === "string" ? review.comment : "";
       try {
-        const [brandVoice, businessSettings, insights] = await Promise.all([
-          fetchBrandVoice(
-            userId,
-            review.location_id ?? (typeof location_id === "string" ? location_id : null)
-          ),
-          fetchBusinessSettings(userId),
-          fetchAiInsights(review.id)
-        ]);
-        const reply = await generateAiReply({
+        const insights = await fetchAiInsights(review.id);
+        const aiResult = await generateAiReply({
           reviewText: reviewText || "Avis sans commentaire.",
           rating: typeof review.rating === "number" ? review.rating : null,
-          brandVoice: brandVoice ?? null,
-          overrideTone: tone ?? null,
-          businessTone: businessSettings?.default_tone ?? null,
-          signature: businessSettings?.signature ?? null,
+          userId,
+          locationId:
+            review.location_id ?? (typeof location_id === "string" ? location_id : null),
+          supabaseAdmin,
           insights,
           openaiApiKey,
           model: openaiModel,
-          requestId
+          requestId,
+          strictIdentity: true
         });
         void insertReplyHistory({
           userId,
           reviewId: review.review_id ?? review.id,
           locationId: review.location_id ?? null,
-          replyText: reply,
+          replyText: aiResult.replyText,
           source: mode === "automation" ? "automation" : "manual"
         });
-        return res.status(200).json({ draft_text: reply });
+        return res.status(200).json({
+          draft_text: aiResult.replyText,
+          meta: aiResult.meta
+        });
       } catch (error) {
+        if (isMissingAiIdentityError(error)) {
+          console.error("[reply]", requestId, "missing ai identity (draft)", {
+            userId,
+            locationId:
+              review.location_id ?? (typeof location_id === "string" ? location_id : null)
+          });
+          return res.status(422).json({
+            error: "missing_ai_identity",
+            failed_reason: "missing_ai_identity",
+            meta: error.meta
+          });
+        }
         if ((error as Error).name === "AbortError") {
           console.error("[reply]", requestId, "draft openai timeout");
           return res.status(504).json({ error: "OpenAI request timeout" });

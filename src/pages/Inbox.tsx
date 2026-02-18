@@ -1736,39 +1736,88 @@ const Inbox = () => {
   );
 
   const requestBrandVoiceDraft = useCallback(
-    async (review: Review, tone: TonePreset) => {
+    async (review: Review) => {
       if (!supabase) {
         setGenerationError("Configuration Supabase manquante.");
-        return null;
+        return { draftText: null, pending: false };
       }
       const token = await getAccessToken(supabase);
-      const response = await fetch("/api/google/reply", {
+      const enqueueResponse = await fetch("/api/reviews?action=prepare_drafts", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          mode: "draft",
-          review_id: review.reviewId ?? review.id,
           location_id: review.locationId,
-          tone
+          review_id: review.id,
+          limit: 1
         })
       });
-      const payload = await response.json().catch(() => null);
-      if (response.status === 401) {
+      const enqueuePayload = await enqueueResponse.json().catch(() => null);
+      if (enqueueResponse.status === 401) {
         setGenerationError("Session expiree, reconnecte-toi.");
-        return null;
+        return { draftText: null, pending: false };
       }
-      if (response.status === 403) {
+      if (enqueueResponse.status === 403) {
         setGenerationError("Reconnexion Google requise.");
-        return null;
+        return { draftText: null, pending: false };
       }
-      if (!response.ok || !payload?.draft_text) {
+      if (!enqueueResponse.ok) {
         setGenerationError("Impossible de generer une reponse pour le moment.");
-        return null;
+        return { draftText: null, pending: false };
       }
-      return String(payload.draft_text);
+      const resultForReview = Array.isArray(enqueuePayload?.results)
+        ? enqueuePayload.results.find(
+            (item: { review_id?: string } | null) => item?.review_id === review.id
+          )
+        : null;
+      const skippedReason =
+        resultForReview &&
+        typeof resultForReview === "object" &&
+        "skipped_reason" in resultForReview
+          ? (
+              resultForReview as {
+                skipped_reason?: string;
+              }
+            ).skipped_reason ?? null
+          : null;
+      if (skippedReason === "no_comment") {
+        setGenerationError("Avis note seule: utilisez le modele court.");
+        return { draftText: null, pending: false };
+      }
+
+      const maxAttempts = 15;
+      const intervalMs = 2000;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const statusResponse = await fetch(
+          `/api/reviews?action=draft_status&review_id=${encodeURIComponent(review.id)}`,
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+        const statusPayload = await statusResponse.json().catch(() => null);
+        if (statusResponse.status === 401) {
+          setGenerationError("Session expiree, reconnecte-toi.");
+          return { draftText: null, pending: false };
+        }
+        if (statusResponse.status === 403) {
+          setGenerationError("Reconnexion Google requise.");
+          return { draftText: null, pending: false };
+        }
+        if (
+          statusResponse.ok &&
+          typeof statusPayload?.draft_text === "string" &&
+          statusPayload.draft_text.trim().length > 0
+        ) {
+          return { draftText: statusPayload.draft_text.trim(), pending: false };
+        }
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, intervalMs);
+        });
+      }
+      setGenerationError("Generation en cours. Reviens dans quelques secondes.");
+      return { draftText: null, pending: true };
     },
     [supabase]
   );
@@ -1788,16 +1837,38 @@ const Inbox = () => {
     }
     setIsGenerating(true);
     setGenerationError(null);
+    autoDraftRequestedRef.current[selectedReview.id] = true;
+    setAutoDraftStatusByReview((prev) => ({
+      ...prev,
+      [selectedReview.id]: "loading"
+    }));
     try {
-      const draftText = await requestBrandVoiceDraft(selectedReview, tonePreset);
-      if (!draftText) {
+      const result = await requestBrandVoiceDraft(selectedReview);
+      if (!result.draftText) {
+        setAutoDraftStatusByReview((prev) => ({
+          ...prev,
+          [selectedReview.id]: result.pending ? "loading" : "error"
+        }));
         return;
       }
-      setReplyText(draftText);
-      setDrafts((prev) => ({ ...prev, [selectedReview.id]: draftText }));
-      await saveDraftReply(selectedReview, draftText, tonePreset, lengthPreset);
+      setReplyText(result.draftText);
+      setDrafts((prev) => ({ ...prev, [selectedReview.id]: result.draftText }));
+      setAutoDraftStatusByReview((prev) => ({
+        ...prev,
+        [selectedReview.id]: "ready"
+      }));
+      await saveDraftReply(
+        selectedReview,
+        result.draftText,
+        tonePreset,
+        lengthPreset
+      );
     } catch {
       setGenerationError("Erreur lors de la generation.");
+      setAutoDraftStatusByReview((prev) => ({
+        ...prev,
+        [selectedReview.id]: "error"
+      }));
     } finally {
       setIsGenerating(false);
       setCooldownUntil(Date.now() + COOLDOWN_MS);

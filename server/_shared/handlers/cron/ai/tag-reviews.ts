@@ -25,6 +25,62 @@ type AiResult = {
   model: string;
 };
 
+type DynamicSupabaseError = {
+  message?: string | null;
+};
+
+type DynamicSupabaseRow = Record<string, unknown>;
+
+type DynamicSupabaseResponse = {
+  data: DynamicSupabaseRow[] | null;
+  error: DynamicSupabaseError | null;
+  count?: number | null;
+};
+
+type DynamicSupabaseSingleResponse = {
+  data: DynamicSupabaseRow | null;
+  error: DynamicSupabaseError | null;
+};
+
+type DynamicSupabaseQuery = PromiseLike<DynamicSupabaseResponse> & {
+  select: (
+    columns: string,
+    options?: Record<string, unknown>
+  ) => DynamicSupabaseQuery;
+  insert: (
+    values: Record<string, unknown> | Record<string, unknown>[],
+    options?: { onConflict?: string; ignoreDuplicates?: boolean }
+  ) => DynamicSupabaseQuery;
+  upsert: (
+    values: Record<string, unknown>,
+    options?: { onConflict?: string; ignoreDuplicates?: boolean }
+  ) => DynamicSupabaseQuery;
+  update: (values: Record<string, unknown>) => DynamicSupabaseQuery;
+  delete: () => DynamicSupabaseQuery;
+  eq: (column: string, value: unknown) => DynamicSupabaseQuery;
+  is: (column: string, value: unknown) => DynamicSupabaseQuery;
+  like: (column: string, pattern: string) => DynamicSupabaseQuery;
+  lt: (column: string, value: string) => DynamicSupabaseQuery;
+  in: (column: string, values: string[]) => DynamicSupabaseQuery;
+  not: (column: string, operator: string, value: unknown) => DynamicSupabaseQuery;
+  neq: (column: string, value: string) => DynamicSupabaseQuery;
+  or: (filters: string) => DynamicSupabaseQuery;
+  order: (
+    column: string,
+    options?: { ascending?: boolean; nullsFirst?: boolean }
+  ) => DynamicSupabaseQuery;
+  limit: (count: number) => DynamicSupabaseQuery;
+  maybeSingle: () => Promise<DynamicSupabaseSingleResponse>;
+};
+
+type DynamicSupabaseClient = {
+  from: (table: string) => DynamicSupabaseQuery;
+  rpc: (
+    fn: string,
+    params?: Record<string, unknown>
+  ) => Promise<{ data: unknown; error: DynamicSupabaseError | null }>;
+};
+
 const CURSOR_KEY = "ai_tag_cursor_v2";
 
 const getEnv = (keys: string[]) => {
@@ -56,6 +112,7 @@ const getMissingEnv = () => {
 const supabaseAdmin = createClient<Database>(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false }
 });
+const dynamicSupabase = supabaseAdmin as unknown as DynamicSupabaseClient;
 
 type Cursor = {
   last_source_time: string | null;
@@ -63,7 +120,7 @@ type Cursor = {
 };
 
 const loadCursor = async (): Promise<Cursor> => {
-  const cronTable = supabaseAdmin.from("cron_state") as any;
+  const cronTable = dynamicSupabase.from("cron_state");
   const { data } = await cronTable
     .select("value")
     .eq("key", CURSOR_KEY)
@@ -76,7 +133,7 @@ const loadCursor = async (): Promise<Cursor> => {
 };
 
 const saveCursor = async (cursor: Cursor) => {
-  const cronTable = supabaseAdmin.from("cron_state") as any;
+  const cronTable = dynamicSupabase.from("cron_state");
   await cronTable.upsert({
     key: CURSOR_KEY,
     value: cursor,
@@ -99,7 +156,7 @@ const upsertAiStatus = async (
     missing_insights_count?: number;
   }
 ) => {
-  const cronTable = supabaseAdmin.from("cron_state") as any;
+  const cronTable = dynamicSupabase.from("cron_state");
   await cronTable.upsert({
     key: `ai_status_v1:${userId}:${locationId}`,
     value,
@@ -115,7 +172,7 @@ const acquireLock = async (
   locationId: string
 ): Promise<boolean> => {
   const key = `lock_ai_tag_v1:${userId}:${locationId}`;
-  const cronTable = supabaseAdmin.from("cron_state") as any;
+  const cronTable = dynamicSupabase.from("cron_state");
   const { data } = await cronTable
     .select("value")
     .eq("key", key)
@@ -139,7 +196,7 @@ const acquireLock = async (
 
 const releaseLock = async (userId: string, locationId: string) => {
   const key = `lock_ai_tag_v1:${userId}:${locationId}`;
-  const cronTable = supabaseAdmin.from("cron_state") as any;
+  const cronTable = dynamicSupabase.from("cron_state");
   await cronTable.delete().eq("key", key).eq("user_id", userId);
 };
 const getCronSecrets = (req: VercelRequest) => {
@@ -493,7 +550,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         auth: { persistSession: false },
         global: { headers: { Authorization: `Bearer ${bearerToken}` } }
       });
-      const { data: isAdminViaRls } = await (userClient as any).rpc("is_admin");
+      const dynamicUserClient = userClient as unknown as DynamicSupabaseClient;
+      const { data: isAdminViaRls } = await dynamicUserClient.rpc("is_admin");
       const isAdmin =
         Boolean(isAdminViaRls) ||
         (adminEmails.length > 0 && userEmail && adminEmails.includes(userEmail));
@@ -631,7 +689,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       mode: runMode,
       limit: runLimit || undefined
     };
-    const { data: runRow } = await (supabaseAdmin as any)
+    const { data: runRow } = await dynamicSupabase
       .from("ai_run_history")
       .insert({
         user_id: null,
@@ -646,19 +704,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
       .select("id")
       .maybeSingle();
-    runId = runRow?.id ?? null;
+    runId = (runRow as { id?: string | null } | null)?.id ?? null;
 
     // Recover stale running statuses / locks (15 min)
     const staleCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-    const cronTable = supabaseAdmin.from("cron_state") as any;
-    const { data: staleStatusRows } = await cronTable
+    const dynamicCronTable = dynamicSupabase.from("cron_state");
+    const { data: staleStatusRowsRaw } = await dynamicCronTable
       .select("key, user_id, value")
       .like("key", "ai_status_v1:%")
       .lt("updated_at", staleCutoff);
-    for (const row of staleStatusRows ?? []) {
+    const staleStatusRows = (staleStatusRowsRaw ?? []) as Array<{
+      key?: string | null;
+      user_id?: string | null;
+      value?: { status?: string; [key: string]: unknown } | null;
+    }>;
+    for (const row of staleStatusRows) {
       const value = row?.value as { status?: string } | null;
       if (value?.status === "running" && row?.user_id) {
-        await cronTable
+        await dynamicCronTable
           .update({
             value: {
               ...value,
@@ -671,13 +734,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .eq("user_id", row.user_id);
       }
     }
-    const { data: staleLocks } = await cronTable
+    const { data: staleLocksRaw } = await dynamicCronTable
       .select("key, user_id")
       .like("key", "lock_ai_tag_v1:%")
       .lt("updated_at", staleCutoff);
-    for (const row of staleLocks ?? []) {
+    const staleLocks = (staleLocksRaw ?? []) as Array<{
+      key?: string | null;
+      user_id?: string | null;
+    }>;
+    for (const row of staleLocks) {
       if (row?.key && row?.user_id) {
-        await cronTable.delete().eq("key", row.key).eq("user_id", row.user_id);
+        await dynamicCronTable.delete().eq("key", row.key).eq("user_id", row.user_id);
       }
     }
 
@@ -745,7 +812,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const lastReviewPk = force
       ? "00000000-0000-0000-0000-000000000000"
       : cursor.last_review_pk ?? "00000000-0000-0000-0000-000000000000";
-    const jobsTable = (supabaseAdmin as any).from("ai_jobs");
+    const jobsTable = dynamicSupabase.from("ai_jobs");
     const loadCandidates = async () => {
       const queueBatch = runLimit > 0 ? runLimit : 20;
       const { data: pendingJobs, error: pendingError } = await jobsTable
@@ -757,7 +824,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.error("[ai-tag]", requestId, "ai_jobs pending query failed", pendingError);
       }
 
-      const queueReviewIds = (pendingJobs ?? [])
+      const pendingJobRows = (pendingJobs ?? []) as Array<{
+        id: string;
+        payload?: { review_id?: string };
+        created_at?: string | null;
+      }>;
+      const queueReviewIds = pendingJobRows
         .map((job: { payload?: { review_id?: string } }) =>
           String(job?.payload?.review_id ?? "")
         )
@@ -799,16 +871,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { data: queueRows, error: queueError } = await queueQuery;
         if (queueError) {
           console.error("[ai-tag]", requestId, "queue reviews fetch failed", queueError);
-          return {
-            rows: [] as Array<Record<string, unknown>>,
-            error: queueError,
-            queueJobs: pendingJobs ?? []
-          };
+          return { rows: [] as Array<Record<string, unknown>>, error: queueError, queueJobs: pendingJobRows };
         }
         return {
           rows: queueRows ?? [],
           error: null,
-          queueJobs: pendingJobs ?? []
+          queueJobs: pendingJobRows
         };
       }
 
@@ -844,7 +912,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (runMode === "retry_errors") {
-        let retryQuery = supabaseAdmin
+        const retryQuery = supabaseAdmin
           .from("review_ai_insights")
           .select("review_pk, error, processed_at")
           .or("error.not.is.null,processed_at.is.null")
@@ -1053,18 +1121,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     });
     const locationIds = Array.from(locationUserMap.keys());
-    const brandVoiceCache = new Map<string, {
-      enabled: boolean | null;
-      tone: string | null;
-      language_level: string | null;
-      context: string | null;
-      use_emojis: boolean | null;
-      forbidden_words: string[] | null;
-    }>();
-    const businessSettingsCache = new Map<string, {
-      default_tone: string | null;
-      signature: string | null;
-    }>();
     const lockedLocations = new Set<string>();
     const locationStats = new Map<string, { missingInsights: number }>();
     let totalMissing = 0;
@@ -1126,17 +1182,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       for (const locationId of locationIds) {
         const textIds = textByLocation.get(locationId) ?? [];
-        let withTextCount = 0;
-        let insightsOkCount = 0;
         let missingInsights = 0;
         const missingSample: string[] = [];
         for (const row of textIds) {
-          withTextCount += 1;
           const insight = insightByPk.get(row.review_pk);
           const ok = Boolean(insight && !insight.error && insight.processed_at);
-          if (ok) {
-            insightsOkCount += 1;
-          } else {
+          if (!ok) {
             missingInsights += 1;
             if (missingSample.length < 5) {
               missingSample.push(
@@ -1245,9 +1296,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq("id", jobId);
     };
 
-    const candidateRowsByLock = candidateRows.filter((review) =>
-      review.location_id ? lockedLocations.has(review.location_id) : false
-    );
+    const candidateRowsByLock = candidateRows.filter((review) => {
+      const locationId = typeof review.location_id === "string" ? review.location_id : "";
+      return locationId ? lockedLocations.has(locationId) : false;
+    });
 
     if (lockedLocations.size === 0 && locationIds.length > 0) {
       skipReason = "locked";
@@ -1325,7 +1377,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
 
         const nowIso = new Date().toISOString();
-        const { error: insightError } = await (supabaseAdmin as any)
+        const { error: insightError } = await supabaseAdmin
           .from("review_ai_insights")
           .upsert({
             review_pk: reviewPk,
@@ -1354,7 +1406,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             );
           }
           await markJobError(reviewPk, insightError.message ?? "insight upsert failed");
-          await (supabaseAdmin as any).from("review_ai_insights").upsert({
+          await supabaseAdmin.from("review_ai_insights").upsert({
             review_pk: reviewPk,
             user_id: reviewUserId,
             location_resource_name: reviewLocationId ?? reviewLocationName,
@@ -1371,7 +1423,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         for (const tag of analysis.topics ?? []) {
-          const { data: tagRow, error: tagError } = await (supabaseAdmin as any)
+          const { data: tagRow, error: tagError } = await supabaseAdmin
             .from("ai_tags")
             .upsert(
               { tag: tag.name, category: tag.category ?? null },
@@ -1389,7 +1441,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             continue;
           }
 
-          await (supabaseAdmin as any)
+          await supabaseAdmin
             .from("review_ai_tags")
             .upsert({
               review_pk: reviewPk,
@@ -1399,7 +1451,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               evidence: tag.evidence ?? null
             });
           if (reviewUserId && reviewIdText) {
-            await (supabaseAdmin as any).from("review_tags").insert({
+            await supabaseAdmin.from("review_tags").insert({
               user_id: reviewUserId,
               review_id: reviewIdText,
               location_id: reviewLocationId ?? null,
@@ -1420,92 +1472,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } else if (hasManualReply) {
           repliesSkippedManual += 1;
         } else {
-          const { data: existingDraft } = await (supabaseAdmin as any)
+          const { data: existingDraft } = await dynamicSupabase
             .from("review_ai_replies")
-            .select("status, draft_text")
+            .select("status, draft_text, identity_hash")
             .eq("review_id", reviewPk)
             .maybeSingle();
-
-          const existingStatus = existingDraft?.status ?? null;
-          const existingText = existingDraft?.draft_text ?? "";
-          if (
-            existingStatus === "edited" ||
-            existingStatus === "sent" ||
-            (existingStatus === "draft" && String(existingText).trim())
-          ) {
+          const existingStatus =
+            (existingDraft as { status?: string | null } | null)?.status ?? null;
+          if (existingStatus === "edited" || existingStatus === "sent") {
             repliesSkippedExisting += 1;
           } else {
-            let brandVoice = brandVoiceCache.get(reviewUserId) ?? null;
-            if (!brandVoiceCache.has(reviewUserId)) {
-              const { data: voiceRow } = await supabaseAdmin
-                .from("brand_voice")
-                .select("enabled, tone, language_level, context, use_emojis, forbidden_words")
-                .eq("user_id", reviewUserId)
-                .maybeSingle();
-              if (voiceRow) {
-                const languageLevel =
-                  voiceRow.language_level === "tutoiement" ||
-                  voiceRow.language_level === "vouvoiement"
-                    ? voiceRow.language_level
-                    : "vouvoiement";
-                brandVoice = {
-                  enabled: Boolean(voiceRow.enabled),
-                  tone: voiceRow.tone,
-                  language_level: languageLevel,
-                  context: voiceRow.context,
-                  use_emojis: voiceRow.use_emojis,
-                  forbidden_words: voiceRow.forbidden_words ?? []
-                } as unknown as typeof brandVoice;
-              } else {
-                brandVoice = null;
-              }
-              brandVoiceCache.set(reviewUserId, brandVoice);
-            }
-
-            let businessSettings = businessSettingsCache.get(reviewUserId) ?? null;
-            if (!businessSettingsCache.has(reviewUserId)) {
-              const { data: settingsRow } = await supabaseAdmin
-                .from("business_settings")
-                .select("default_tone, signature")
-                .eq("user_id", reviewUserId)
-                .maybeSingle();
-              businessSettings = settingsRow ?? null;
-              businessSettingsCache.set(reviewUserId, businessSettings);
-            }
-
-            const brandVoiceForReply = brandVoice
-              ? ({
-                  ...brandVoice,
-                  tone:
-                    brandVoice.tone === "professional" ||
-                    brandVoice.tone === "friendly" ||
-                    brandVoice.tone === "warm" ||
-                    brandVoice.tone === "formal"
-                      ? brandVoice.tone
-                      : "professional",
-                  language_level:
-                    brandVoice.language_level === "tutoiement" ||
-                    brandVoice.language_level === "vouvoiement"
-                      ? brandVoice.language_level
-                      : "vouvoiement"
-                } as {
-                  enabled: boolean | null;
-                  tone: "professional" | "friendly" | "warm" | "formal";
-                  language_level: "tutoiement" | "vouvoiement";
-                  context: string | null;
-                  use_emojis: boolean | null;
-                  forbidden_words: string[] | null;
-                })
-              : null;
-
             try {
-              const replyText = await generateAiReply({
+              const aiReply = await generateAiReply({
                 reviewText,
                 rating: typeof reviewRow.rating === "number" ? reviewRow.rating : null,
-                brandVoice: brandVoiceForReply,
-                overrideTone: null,
-                businessTone: businessSettings?.default_tone ?? null,
-                signature: businessSettings?.signature ?? null,
+                userId: reviewUserId,
+                locationId: reviewLocationId ?? null,
+                supabaseAdmin,
                 insights: {
                   sentiment: analysis.sentiment,
                   score: analysis.sentiment_score,
@@ -1517,19 +1500,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   process.env.OPENAI_REPLY_MODEL ??
                   process.env.OPENAI_MODEL ??
                   "gpt-4o-mini",
-                requestId
+                requestId,
+                strictIdentity: true
               });
-              if (replyText) {
-                await (supabaseAdmin as any).from("review_ai_replies").upsert({
-                  review_id: reviewPk,
-                  user_id: reviewUserId,
-                  location_id: reviewLocationId ?? null,
-                  draft_text: replyText,
-                  tone: "professional",
-                  length: "short",
-                  status: "draft",
-                  updated_at: new Date().toISOString()
-                });
+              if (aiReply.replyText) {
+                await dynamicSupabase.from("review_ai_replies").upsert(
+                  {
+                    review_id: reviewPk,
+                    user_id: reviewUserId,
+                    location_id: reviewLocationId ?? null,
+                    draft_text: aiReply.replyText,
+                    tone: "professional",
+                    length: "short",
+                    mode: "draft",
+                    identity_hash: aiReply.meta.ai_identity_hash,
+                    status: "draft",
+                    updated_at: new Date().toISOString()
+                  },
+                  { onConflict: "review_id" }
+                );
                 repliesGenerated += 1;
               }
             } catch (replyError) {
@@ -1625,7 +1614,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Persist last run status per user
     const runAt = new Date().toISOString();
     for (const userId of new Set(locationUserMap.values())) {
-      await (supabaseAdmin as any).from("cron_state").upsert({
+      await dynamicSupabase.from("cron_state").upsert({
         key: "ai_tag_last_run",
         user_id: userId,
         value: {
@@ -1648,7 +1637,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const lastError = errorByUser.get(userId);
       if (lastError) {
-        await (supabaseAdmin as any).from("cron_state").upsert({
+        await dynamicSupabase.from("cron_state").upsert({
           key: "ai_tag_last_error",
           user_id: userId,
           value: {
@@ -1667,7 +1656,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (runId) {
       const finishedAt = new Date().toISOString();
-      await (supabaseAdmin as any).from("ai_run_history").update({
+      await dynamicSupabase.from("ai_run_history").update({
         finished_at: finishedAt,
         duration_ms: Date.now() - runStartMs,
         processed: reviewsProcessed,
@@ -1762,7 +1751,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error("[ai]", requestId, "fatal error", message);
     if (runId) {
       const finishedAt = new Date().toISOString();
-      await (supabaseAdmin as any).from("ai_run_history").update({
+      await dynamicSupabase.from("ai_run_history").update({
         finished_at: finishedAt,
         duration_ms: Date.now() - runStartMs,
         processed: reviewsProcessed,
@@ -1811,7 +1800,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } finally {
     if (runId && !runCompleted) {
       const finishedAt = new Date().toISOString();
-      await (supabaseAdmin as any).from("ai_run_history").update({
+      await dynamicSupabase.from("ai_run_history").update({
         finished_at: finishedAt,
         duration_ms: Date.now() - runStartMs,
         processed: reviewsProcessed,

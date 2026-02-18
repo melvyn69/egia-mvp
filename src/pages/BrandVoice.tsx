@@ -250,6 +250,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
           review_text: input,
           rating: null,
           location_id: selectedLocationId,
+          allow_identity_override: true,
           brand_voice_override: {
             enabled: form.enabled,
             tone: form.tone,
