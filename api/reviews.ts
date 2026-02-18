@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { randomUUID } from "crypto";
 import { resolveDateRange } from "../server/_shared_dist/_date.js";
 import { parseFilters } from "../server/_shared_dist/_filters.js";
+import { buildPromptContext } from "../server/_shared_dist/ai_reply.js";
 import { requireUser } from "../server/_shared_dist/_auth.js";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken } from "../server/_shared_dist/google/_utils.js";
@@ -36,6 +37,7 @@ type PrepareDraftResultItem = {
   skipped_reason?:
     | "no_comment"
     | "already_has_draft"
+    | "job_in_flight"
     | "already_queued"
     | "limit_reached"
     | "missing_review_id"
@@ -161,6 +163,27 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     const { supabaseAdmin } = auth;
     const bearerToken = getBearerToken(req.headers);
     const supabaseUser = createUserSupabase(bearerToken) ?? supabaseAdmin;
+    const identityHashCache = new Map<string, string>();
+    const resolveIdentityHash = async (
+      params: { locationId: string | null; reviewText?: string | null }
+    ) => {
+      const locationKey = params.locationId?.trim() || "__none__";
+      const cached = identityHashCache.get(locationKey);
+      if (cached) {
+        return cached;
+      }
+      const context = await buildPromptContext({
+        reviewText: params.reviewText?.trim() || "Avis sans commentaire.",
+        rating: null,
+        userId,
+        locationId: params.locationId,
+        supabaseAdmin,
+        strictIdentity: false
+      });
+      const hash = context.meta.ai_identity_hash || "none";
+      identityHashCache.set(locationKey, hash);
+      return hash;
+    };
 
     if (!action && req.method === "POST") {
       const payload = parseBody(req);
@@ -225,12 +248,18 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       if (!reviewId) {
         return res.status(400).json({ error: "Missing review_id" });
       }
+      const identityHash = await resolveIdentityHash({
+        locationId,
+        reviewText: typeof payload?.review_text === "string" ? payload.review_text : null
+      });
 
       const { data: existingDraft } = await supabaseAdmin
         .from("review_ai_replies")
-        .select("status, draft_text")
+        .select("status, draft_text, identity_hash")
         .eq("review_id", reviewId)
         .eq("user_id", userId)
+        .eq("mode", "draft")
+        .eq("identity_hash", identityHash)
         .maybeSingle();
       const existingText = existingDraft?.draft_text
         ? String(existingDraft.draft_text).trim()
@@ -244,8 +273,13 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           select: (columns: string) => {
             filter: (column: string, operator: string, value: string) => {
               in: (column: string, values: string[]) => {
-                maybeSingle: () => Promise<{
-                  data?: { id?: string | null } | null;
+                limit: (count: number) => Promise<{
+                  data?:
+                    | Array<{
+                        id?: string | null;
+                        payload?: Record<string, unknown> | null;
+                      }>
+                    | null;
                   error?: { message?: string | null } | null;
                 }>;
               };
@@ -259,11 +293,18 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
       const { data: existingJob } = await jobsTable
         .from("ai_jobs")
-        .select("id")
+        .select("id, payload")
         .filter("payload->>review_id", "eq", reviewId)
         .in("status", ["pending", "processing"])
-        .maybeSingle();
-      if (existingJob?.id) {
+        .limit(20);
+      const hasInFlightJob = (existingJob ?? []).some((job) => {
+        const payloadHash =
+          typeof job?.payload?.identity_hash === "string"
+            ? job.payload.identity_hash
+            : "none";
+        return payloadHash === identityHash;
+      });
+      if (hasInFlightJob) {
         return res
           .status(200)
           .json({ ok: true, status: "already_running" });
@@ -271,7 +312,12 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
       const { error: enqueueError } = await jobsTable.from("ai_jobs").insert({
         type: "review_analyze",
-        payload: { review_id: reviewId, location_id: locationId, user_id: userId },
+        payload: {
+          review_id: reviewId,
+          location_id: locationId,
+          user_id: userId,
+          identity_hash: identityHash
+        },
         status: "pending"
       });
       if (enqueueError) {
@@ -291,15 +337,17 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       }
       const payload = parseBody(req);
       const locationId = String(payload?.location_id ?? "").trim();
+      const singleReviewId =
+        typeof payload?.review_id === "string" ? payload.review_id.trim() : "";
+      const singleReviewMode = singleReviewId.length > 0;
       if (!locationId) {
         return res.status(400).json({ error: "Missing location_id" });
       }
       const limitRaw = payload?.limit ?? 10;
       const cooldownRaw = payload?.cooldownMinutes ?? 15;
-      const limit = Math.min(
-        25,
-        Math.max(1, Number.parseInt(String(limitRaw), 10) || 10)
-      );
+      const limit = singleReviewMode
+        ? 1
+        : Math.min(25, Math.max(1, Number.parseInt(String(limitRaw), 10) || 10));
       const cooldownMinutes = Math.min(
         120,
         Math.max(1, Number.parseInt(String(cooldownRaw), 10) || 15)
@@ -322,54 +370,89 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       }
 
       const cooldownMs = cooldownMinutes * 60 * 1000;
-      const { data: lastRun } = await supabaseAdmin
-        .from("ai_draft_runs")
-        .select("last_run_at")
-        .eq("user_id", userId)
-        .eq("location_id", locationId)
-        .order("last_run_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      const now = Date.now();
-      const lastRunAt = lastRun?.last_run_at
-        ? new Date(lastRun.last_run_at).getTime()
-        : 0;
-      if (lastRunAt && now - lastRunAt < cooldownMs) {
-        await supabaseAdmin.from("ai_draft_runs").upsert(
-          {
-            user_id: userId,
-            location_id: locationId,
-            last_run_at: new Date().toISOString(),
-            requested_limit: limit,
-            generated_count: 0
-          },
-          { onConflict: "user_id,location_id" }
-        );
-        return res.status(200).json({
-          ok: true,
-          queued: 0,
-          skipped: 0,
-          cooldown: true,
-          limit,
-          results: [] as PrepareDraftResultItem[]
-        });
+      if (!singleReviewMode) {
+        const { data: lastRun } = await supabaseAdmin
+          .from("ai_draft_runs")
+          .select("last_run_at")
+          .eq("user_id", userId)
+          .eq("location_id", locationId)
+          .order("last_run_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const now = Date.now();
+        const lastRunAt = lastRun?.last_run_at
+          ? new Date(lastRun.last_run_at).getTime()
+          : 0;
+        if (lastRunAt && now - lastRunAt < cooldownMs) {
+          await supabaseAdmin.from("ai_draft_runs").upsert(
+            {
+              user_id: userId,
+              location_id: locationId,
+              last_run_at: new Date().toISOString(),
+              requested_limit: limit,
+              generated_count: 0
+            },
+            { onConflict: "user_id,location_id" }
+          );
+          return res.status(200).json({
+            ok: true,
+            queued: 0,
+            skipped: 0,
+            cooldown: true,
+            limit,
+            results: [] as PrepareDraftResultItem[]
+          });
+        }
       }
 
-      const candidateLimit = Math.max(limit * 5, limit);
-      const { data: inboxRows, error: inboxError } = await supabaseAdmin
-        .from("inbox_reviews")
-        .select(
-          "id, location_id, status, replied_at, needs_reply, update_time, create_time, created_at, comment"
-        )
-        .eq("user_id", userId)
-        .eq("location_id", locationId)
-        .or("replied_at.is.null,needs_reply.eq.true")
-        .order("update_time", { ascending: false, nullsFirst: false })
-        .order("create_time", { ascending: false, nullsFirst: false })
-        .order("created_at", { ascending: false, nullsFirst: false })
-        .limit(candidateLimit);
-      if (inboxError) {
-        return res.status(500).json({ error: "Failed to load inbox" });
+      let inboxRows:
+        | Array<{
+            id: string | null;
+            location_id: string | null;
+            status: string | null;
+            replied_at: string | null;
+            needs_reply: boolean | null;
+            update_time: string | null;
+            create_time: string | null;
+            created_at: string | null;
+            comment: string | null;
+          }>
+        | null = null;
+      if (singleReviewMode) {
+        const { data: singleRow, error: singleRowError } = await supabaseAdmin
+          .from("inbox_reviews")
+          .select(
+            "id, location_id, status, replied_at, needs_reply, update_time, create_time, created_at, comment"
+          )
+          .eq("user_id", userId)
+          .eq("location_id", locationId)
+          .eq("id", singleReviewId)
+          .maybeSingle();
+        if (singleRowError) {
+          return res.status(500).json({ error: "Failed to load review" });
+        }
+        if (!singleRow) {
+          return res.status(404).json({ error: "Review not found" });
+        }
+        inboxRows = [singleRow];
+      } else {
+        const candidateLimit = Math.max(limit * 5, limit);
+        const { data, error: inboxError } = await supabaseAdmin
+          .from("inbox_reviews")
+          .select(
+            "id, location_id, status, replied_at, needs_reply, update_time, create_time, created_at, comment"
+          )
+          .eq("user_id", userId)
+          .eq("location_id", locationId)
+          .or("replied_at.is.null,needs_reply.eq.true")
+          .order("update_time", { ascending: false, nullsFirst: false })
+          .order("create_time", { ascending: false, nullsFirst: false })
+          .order("created_at", { ascending: false, nullsFirst: false })
+          .limit(candidateLimit);
+        if (inboxError) {
+          return res.status(500).json({ error: "Failed to load inbox" });
+        }
+        inboxRows = data;
       }
 
       const candidateIds = (inboxRows ?? [])
@@ -397,13 +480,69 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
       const { data: existingDrafts } = await supabaseAdmin
         .from("review_ai_replies")
-        .select("review_id")
+        .select("review_id, identity_hash")
         .eq("user_id", userId)
+        .eq("mode", "draft")
         .in("review_id", candidateIds);
       const draftSet = new Set(
         (existingDrafts ?? [])
-          .map((row) => (row.review_id ? String(row.review_id) : ""))
+          .map((row) => {
+            const reviewId = row.review_id ? String(row.review_id) : "";
+            const identityHash =
+              typeof row.identity_hash === "string"
+                ? row.identity_hash
+                : "none";
+            return reviewId ? `${reviewId}::${identityHash}` : "";
+          })
           .filter((id) => id.length > 0)
+      );
+      const locationIdentityHash = await resolveIdentityHash({ locationId });
+
+      const { data: inFlightJobs } = await (
+        supabaseAdmin as unknown as {
+          from: (table: string) => {
+            select: (columns: string) => {
+              eq: (column: string, value: string) => {
+                in: (
+                  column: string,
+                  values: string[]
+                ) => Promise<{
+                  data?:
+                    | Array<{
+                        payload?: Record<string, unknown> | null;
+                      }>
+                    | null;
+                  error?: { message?: string | null } | null;
+                }>;
+              };
+            };
+          };
+        }
+      )
+        .from("ai_jobs")
+        .select("payload")
+        .eq("type", "review_analyze")
+        .in("status", ["pending", "processing"]);
+      const inFlightSet = new Set(
+        (inFlightJobs ?? [])
+          .map((job) => {
+            const payload = job.payload ?? {};
+            const payloadUserId =
+              typeof payload.user_id === "string" ? payload.user_id : "";
+            const payloadLocationId =
+              typeof payload.location_id === "string" ? payload.location_id : "";
+            if (payloadUserId !== userId || payloadLocationId !== locationId) {
+              return "";
+            }
+            const payloadReviewId =
+              typeof payload.review_id === "string" ? payload.review_id : "";
+            const payloadHash =
+              typeof payload.identity_hash === "string"
+                ? payload.identity_hash
+                : "none";
+            return payloadReviewId ? `${payloadReviewId}::${payloadHash}` : "";
+          })
+          .filter((key) => key.length > 0)
       );
 
       let queued = 0;
@@ -443,6 +582,14 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           typeof row.comment === "string" ? row.comment.trim() : "";
         if (!reviewComment) {
           skipped += 1;
+          console.info("[prepare_drafts] enqueue_decision", {
+            userId,
+            locationId,
+            reviewId,
+            identityHash: locationIdentityHash,
+            decision: "skipped",
+            reason: "no_comment"
+          });
           results.push({
             review_id: reviewId,
             queued: false,
@@ -451,8 +598,17 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           });
           continue;
         }
-        if (draftSet.has(reviewId)) {
+        const draftKey = `${reviewId}::${locationIdentityHash}`;
+        if (draftSet.has(draftKey)) {
           skipped += 1;
+          console.info("[prepare_drafts] enqueue_decision", {
+            userId,
+            locationId,
+            reviewId,
+            identityHash: locationIdentityHash,
+            decision: "skipped",
+            reason: "already_has_draft"
+          });
           results.push({
             review_id: reviewId,
             queued: false,
@@ -461,23 +617,63 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           });
           continue;
         }
+        if (inFlightSet.has(draftKey)) {
+          skipped += 1;
+          console.info("[prepare_drafts] enqueue_decision", {
+            userId,
+            locationId,
+            reviewId,
+            identityHash: locationIdentityHash,
+            decision: "skipped",
+            reason: "job_in_flight"
+          });
+          results.push({
+            review_id: reviewId,
+            queued: false,
+            skipped: true,
+            skipped_reason: "job_in_flight"
+          });
+          continue;
+        }
         const { error: enqueueError } = await jobsTable.from("ai_jobs").insert({
           type: "review_analyze",
-          payload: { review_id: reviewId, location_id: locationId, user_id: userId },
+          payload: {
+            review_id: reviewId,
+            location_id: locationId,
+            user_id: userId,
+            identity_hash: locationIdentityHash
+          },
           status: "pending"
         });
         if (enqueueError) {
           if (enqueueError.code === "23505") {
             skipped += 1;
+            inFlightSet.add(draftKey);
+            console.info("[prepare_drafts] enqueue_decision", {
+              userId,
+              locationId,
+              reviewId,
+              identityHash: locationIdentityHash,
+              decision: "skipped",
+              reason: "job_in_flight"
+            });
             results.push({
               review_id: reviewId,
               queued: false,
               skipped: true,
-              skipped_reason: "already_queued"
+              skipped_reason: "job_in_flight"
             });
             continue;
           }
           skipped += 1;
+          console.info("[prepare_drafts] enqueue_decision", {
+            userId,
+            locationId,
+            reviewId,
+            identityHash: locationIdentityHash,
+            decision: "skipped",
+            reason: "enqueue_error"
+          });
           results.push({
             review_id: reviewId,
             queued: false,
@@ -493,6 +689,15 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           continue;
         }
         queued += 1;
+        inFlightSet.add(draftKey);
+        console.info("[prepare_drafts] enqueue_decision", {
+          userId,
+          locationId,
+          reviewId,
+          identityHash: locationIdentityHash,
+          decision: "enqueued",
+          reason: "ok"
+        });
         results.push({
           review_id: reviewId,
           queued: true,
@@ -529,6 +734,39 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         cooldown: false,
         limit,
         results
+      });
+    }
+
+    if (action === "draft_status") {
+      if (req.method !== "GET") {
+        return res.status(405).json({ error: "Method not allowed" });
+      }
+      const reviewIdParam = req.query.review_id;
+      const reviewId = String(
+        Array.isArray(reviewIdParam) ? (reviewIdParam[0] ?? "") : (reviewIdParam ?? "")
+      ).trim();
+      if (!reviewId) {
+        return res.status(400).json({ error: "Missing review_id" });
+      }
+      const { data: draftRows, error: draftError } = await supabaseAdmin
+        .from("review_ai_replies")
+        .select("draft_text, status, created_at")
+        .eq("user_id", userId)
+        .eq("review_id", reviewId)
+        .eq("mode", "draft")
+        .order("created_at", { ascending: false, nullsFirst: false })
+        .limit(1);
+      if (draftError) {
+        return res.status(500).json({ error: "Failed to load draft status" });
+      }
+      const row = (draftRows ?? [])[0] ?? null;
+      const draftText = row?.draft_text ? String(row.draft_text).trim() : "";
+      return res.status(200).json({
+        ok: true,
+        review_id: reviewId,
+        ready: draftText.length > 0,
+        draft_text: draftText.length > 0 ? draftText : null,
+        status: typeof row?.status === "string" ? row.status : null
       });
     }
 
