@@ -44,22 +44,31 @@ const applyForbiddenWords = (text: string, forbidden: string[]) => {
   }, text);
 };
 
-export const generateAiReply = async ({
+type PromptContext = {
+  system: string;
+  user: string;
+  useEmojis: boolean;
+  forbiddenWords: string[];
+};
+
+export const buildPromptContext = ({
   reviewText,
   rating,
   brandVoice,
   overrideTone,
   businessTone,
   signature,
-  insights,
-  openaiApiKey,
-  model,
-  requestId
-}: GenerateAiReplyParams) => {
-  if (!openaiApiKey) {
-    return DEFAULT_REPLY;
-  }
-
+  insights
+}: Pick<
+  GenerateAiReplyParams,
+  | "reviewText"
+  | "rating"
+  | "brandVoice"
+  | "overrideTone"
+  | "businessTone"
+  | "signature"
+  | "insights"
+>): PromptContext => {
   const enabled = brandVoice?.enabled ?? false;
   const toneKey =
     overrideTone ??
@@ -112,6 +121,40 @@ export const generateAiReply = async ({
   ]
     .filter(Boolean)
     .join("\n");
+
+  return {
+    system,
+    user,
+    useEmojis,
+    forbiddenWords
+  };
+};
+
+export const generateAiReply = async ({
+  reviewText,
+  rating,
+  brandVoice,
+  overrideTone,
+  businessTone,
+  signature,
+  insights,
+  openaiApiKey,
+  model,
+  requestId
+}: GenerateAiReplyParams) => {
+  if (!openaiApiKey) {
+    return DEFAULT_REPLY;
+  }
+
+  const { system, user, useEmojis, forbiddenWords } = buildPromptContext({
+    reviewText,
+    rating,
+    brandVoice,
+    overrideTone,
+    businessTone,
+    signature,
+    insights
+  });
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);

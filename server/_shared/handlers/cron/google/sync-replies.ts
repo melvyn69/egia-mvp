@@ -139,6 +139,20 @@ const mapRating = (starRating?: string): number | null => {
   }
 };
 
+const isAuthFailureReauth = (reason: string, rawMessage: string) => {
+  if (reason === "missing_refresh_token" || reason === "token_revoked") {
+    return true;
+  }
+  const normalized = rawMessage.toLowerCase();
+  return (
+    normalized.includes("invalid_grant") ||
+    normalized.includes("revoked") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("401") ||
+    normalized.includes("403")
+  );
+};
+
 const refreshGoogleAccessToken = async (refreshToken: string) => {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -447,6 +461,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               : message.includes("token_revoked")
                 ? "token_revoked"
                 : "unknown";
+          if (!isAuthFailureReauth(reason, message)) {
+            console.warn("[sync] reauth marker ignored (non-auth)", {
+              requestId,
+              userId,
+              message
+            });
+            continue;
+          }
           await withSupabaseRetry(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             () =>

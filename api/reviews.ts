@@ -29,6 +29,19 @@ type ReviewTagLinkRow = { review_pk: string; tag_id: string };
 
 type AiTagRow = { id: string; tag: string };
 
+type PrepareDraftResultItem = {
+  review_id: string;
+  queued: boolean;
+  skipped: boolean;
+  skipped_reason?:
+    | "no_comment"
+    | "already_has_draft"
+    | "already_queued"
+    | "limit_reached"
+    | "missing_review_id"
+    | "enqueue_error";
+};
+
 type CronStatus = {
   status: "idle" | "running" | "done" | "error";
   [key: string]: unknown;
@@ -337,7 +350,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           queued: 0,
           skipped: 0,
           cooldown: true,
-          limit
+          limit,
+          results: [] as PrepareDraftResultItem[]
         });
       }
 
@@ -349,8 +363,6 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         )
         .eq("user_id", userId)
         .eq("location_id", locationId)
-        .not("comment", "is", null)
-        .neq("comment", "")
         .or("replied_at.is.null,needs_reply.eq.true")
         .order("update_time", { ascending: false, nullsFirst: false })
         .order("create_time", { ascending: false, nullsFirst: false })
@@ -374,7 +386,13 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           },
           { onConflict: "user_id,location_id" }
         );
-        return res.status(200).json({ ok: true, queued: 0, skipped: 0, limit });
+        return res.status(200).json({
+          ok: true,
+          queued: 0,
+          skipped: 0,
+          limit,
+          results: [] as PrepareDraftResultItem[]
+        });
       }
 
       const { data: existingDrafts } = await supabaseAdmin
@@ -390,6 +408,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
       let queued = 0;
       let skipped = 0;
+      const results: PrepareDraftResultItem[] = [];
       const jobsTable = supabaseAdmin as unknown as {
         from: (table: string) => {
           insert: (values: Record<string, unknown>) => Promise<{
@@ -399,15 +418,47 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       };
 
       for (const row of inboxRows ?? []) {
-        if (queued >= limit) {
-          break;
-        }
         const reviewId = row.id ? String(row.id) : "";
         if (!reviewId) {
+          skipped += 1;
+          results.push({
+            review_id: "",
+            queued: false,
+            skipped: true,
+            skipped_reason: "missing_review_id"
+          });
+          continue;
+        }
+        if (queued >= limit) {
+          skipped += 1;
+          results.push({
+            review_id: reviewId,
+            queued: false,
+            skipped: true,
+            skipped_reason: "limit_reached"
+          });
+          continue;
+        }
+        const reviewComment =
+          typeof row.comment === "string" ? row.comment.trim() : "";
+        if (!reviewComment) {
+          skipped += 1;
+          results.push({
+            review_id: reviewId,
+            queued: false,
+            skipped: true,
+            skipped_reason: "no_comment"
+          });
           continue;
         }
         if (draftSet.has(reviewId)) {
           skipped += 1;
+          results.push({
+            review_id: reviewId,
+            queued: false,
+            skipped: true,
+            skipped_reason: "already_has_draft"
+          });
           continue;
         }
         const { error: enqueueError } = await jobsTable.from("ai_jobs").insert({
@@ -418,11 +469,46 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         if (enqueueError) {
           if (enqueueError.code === "23505") {
             skipped += 1;
+            results.push({
+              review_id: reviewId,
+              queued: false,
+              skipped: true,
+              skipped_reason: "already_queued"
+            });
             continue;
           }
-          return res.status(500).json({ error: "Failed to enqueue" });
+          skipped += 1;
+          results.push({
+            review_id: reviewId,
+            queued: false,
+            skipped: true,
+            skipped_reason: "enqueue_error"
+          });
+          console.error("[reviews] prepare_drafts enqueue failed", {
+            userId,
+            locationId,
+            reviewId,
+            message: enqueueError.message ?? "unknown"
+          });
+          continue;
         }
         queued += 1;
+        results.push({
+          review_id: reviewId,
+          queued: true,
+          skipped: false
+        });
+      }
+      const noCommentSkipped = results.reduce(
+        (count, item) => (item.skipped_reason === "no_comment" ? count + 1 : count),
+        0
+      );
+      if (noCommentSkipped > 0) {
+        console.info("[reviews] prepare_drafts no_comment skipped", {
+          userId,
+          locationId,
+          count: noCommentSkipped
+        });
       }
 
       await supabaseAdmin.from("ai_draft_runs").upsert(
@@ -441,7 +527,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         queued,
         skipped,
         cooldown: false,
-        limit
+        limit,
+        results
       });
     }
 

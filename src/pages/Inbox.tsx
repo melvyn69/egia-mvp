@@ -336,6 +336,18 @@ const formatStatusIcon = (status: ReviewCronStatus["status"]) => {
 const truncateText = (value: string, maxLength = 80) =>
   value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
 
+const DEFAULT_NEW_DAYS = 90;
+
+const toDateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const isReviewNoteOnly = (review: Pick<Review, "text"> | null) =>
+  !review?.text || review.text.trim().length === 0;
+
 const Inbox = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("new");
   const [selectedLocation, setSelectedLocation] = useState("all");
@@ -347,9 +359,13 @@ const Inbox = () => {
     | "last_year"
     | "all_time"
     | "custom"
-  >("all_time");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  >("custom");
+  const [dateFrom, setDateFrom] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - DEFAULT_NEW_DAYS);
+    return toDateInputValue(date);
+  });
+  const [dateTo, setDateTo] = useState(() => toDateInputValue(new Date()));
   const [sentimentFilter, setSentimentFilter] = useState<
     "all" | "positive" | "neutral" | "negative"
   >("all");
@@ -380,7 +396,6 @@ const Inbox = () => {
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [activityEvents, setActivityEvents] = useState(initialActivityEvents);
-  const [businessSignature, setBusinessSignature] = useState<string | null>(null);
   const [businessMemory, setBusinessMemory] = useState<string[]>([]);
   const toneTouchedRef = useRef(false);
   const lengthTouchedRef = useRef(false);
@@ -897,6 +912,8 @@ const Inbox = () => {
   const selectedReview = useMemo(() => {
     return reviews.find((review: Review) => review.id === selectedReviewId) ?? null;
   }, [reviews, selectedReviewId]);
+  const selectedReviewIsNoteOnly = isReviewNoteOnly(selectedReview);
+  const hasSavedDraft = Boolean(draftReplyId);
 
   const activeLocationId = useMemo(() => {
     if (selectedLocation !== "all") {
@@ -1081,7 +1098,10 @@ const Inbox = () => {
   };
 
   const handlePrepareDrafts = useCallback(
-    async (locationId: string) => {
+    async (locationId: string, userTriggered = false) => {
+      if (!userTriggered) {
+        return;
+      }
       if (!supabase || !locationId || prepareDraftLoading) {
         return;
       }
@@ -1110,11 +1130,26 @@ const Inbox = () => {
           setPrepareDraftMessage("Erreur lors de la préparation.");
           return;
         }
+        const noCommentSkipped = Array.isArray(payload?.results)
+          ? payload.results.filter(
+              (
+                item: { skipped?: boolean; skipped_reason?: string } | null
+              ) => item?.skipped && item.skipped_reason === "no_comment"
+            ).length
+          : 0;
         if (payload?.cooldown) {
           setPrepareDraftMessage("Préparation en cooldown.");
           prepareDraftCooldownRef.current[locationId] = Date.now() + 15 * 60 * 1000;
         } else if ((payload?.queued ?? 0) > 0) {
-          setPrepareDraftMessage(`${payload.queued} brouillons en préparation.`);
+          const suffix =
+            noCommentSkipped > 0 ? ` (${noCommentSkipped} note seule ignorée)` : "";
+          setPrepareDraftMessage(
+            `${payload.queued} brouillons en préparation.${suffix}`
+          );
+        } else if (noCommentSkipped > 0) {
+          setPrepareDraftMessage(
+            `${noCommentSkipped} avis sans commentaire ignorés (note seule).`
+          );
         } else {
           setPrepareDraftMessage("Aucun brouillon à préparer.");
         }
@@ -1127,27 +1162,6 @@ const Inbox = () => {
     },
     [prepareDraftLoading, supabase]
   );
-
-  useEffect(() => {
-    if (!activeLocationId || !supabase) {
-      return;
-    }
-    const now = Date.now();
-    const lastCall = prepareDraftLastCallRef.current[activeLocationId] ?? 0;
-    if (now - lastCall < 30000) {
-      return;
-    }
-    const cooldownUntil = prepareDraftCooldownRef.current[activeLocationId] ?? 0;
-    if (cooldownUntil && now < cooldownUntil) {
-      return;
-    }
-    const timeoutId = window.setTimeout(() => {
-      void handlePrepareDrafts(activeLocationId);
-    }, 800);
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [activeLocationId, handlePrepareDrafts, supabase]);
 
   const handleRunAiForSpecificLocation = async (locationId: string) => {
     if (!supabase || !locationId || aiRunLocationLoading) {
@@ -1295,7 +1309,6 @@ const Inbox = () => {
 
     const supabaseClient = supabase;
     if (!selectedReview || !supabaseClient) {
-      setBusinessSignature(null);
       setBusinessMemory([]);
       return;
     }
@@ -1321,8 +1334,6 @@ const Inbox = () => {
           : ratingPreset.length;
         setLengthPreset(nextLength);
       }
-      setBusinessSignature(settings?.signature ?? null);
-
       const { data: memories } = await supabaseClient
         .from("business_memory")
         .select("content")
@@ -1441,6 +1452,13 @@ const Inbox = () => {
       return;
     }
     const reviewId = selectedReview.id;
+    if (isReviewNoteOnly(selectedReview)) {
+      setAutoDraftStatusByReview((prev) => ({
+        ...prev,
+        [reviewId]: "idle"
+      }));
+      return;
+    }
     const suggestionText =
       aiSuggestion?.reviewId === reviewId ? aiSuggestion.text.trim() : "";
 
@@ -1661,110 +1679,68 @@ const Inbox = () => {
     return () => window.clearTimeout(timeout);
   }, [cooldownUntil]);
 
-  const handleGenerate = async () => {
-    if (!selectedReview) {
-      return;
+  const buildNoteOnlyTemplate = (review: Review) => {
+    if (review.rating >= 4) {
+      return "Merci pour votre note et votre confiance. Au plaisir de vous accueillir de nouveau.";
     }
-    const supabaseClient = supabase;
-    if (!supabaseClient) {
-      setGenerationError("Configuration Supabase manquante.");
-      console.log("generate-reply: supabase client missing");
-      return;
+    if (review.rating === 3) {
+      return "Merci pour votre note. Nous restons attentifs a votre experience et serions ravis de vous accueillir a nouveau.";
     }
-    setIsGenerating(true);
-    setGenerationError(null);
-    try {
-      // TODO: generate_ai_reply(review)
-      console.log("generate-reply: invoking edge function", {
-        reviewId: selectedReview.id,
-        tone: tonePreset,
-        length: lengthPreset
-      });
-      const { data, error } = await supabaseClient.functions.invoke("generate-reply", {
-        body: {
-          businessId: selectedReview.businessId,
-          reviewText: selectedReview.text,
-          rating: selectedReview.rating,
-          authorName: selectedReview.authorName,
-          businessName: selectedReview.locationName,
-          source: selectedReview.source.toLowerCase(),
-          tone: tonePreset,
-          length: lengthPreset,
-          memory: businessMemory.length > 0 ? businessMemory : undefined,
-          signature: businessSignature ?? undefined
-        }
-      });
-      const isInvalidJwt =
-        error?.status === 401 ||
-        error?.message?.includes("Invalid JWT") ||
-        (data as { code?: number; message?: string } | null)?.code === 401 ||
-        (data as { message?: string } | null)?.message?.includes("Invalid JWT");
-      if (isInvalidJwt) {
-        await handleInvalidJwt();
-        return;
-      }
-      console.log("generate-reply: response", { data, error });
-      if (error || !data?.reply) {
-        setGenerationError("Impossible de générer une réponse pour le moment.");
-        console.error("generate-reply error:", error ?? data?.error);
-      } else {
-        setReplyText(data.reply);
-        setDrafts((prev) => ({ ...prev, [selectedReview.id]: data.reply }));
-        if (supabaseClient) {
-          const { data: sessionData } = await supabaseClient.auth.getSession();
-          if (!sessionData.session?.user) {
-            setGenerationError("Connecte-toi pour sauvegarder le brouillon.");
-          } else {
-            const locationId =
-              uuidRegex.test(selectedReview.locationId)
-                ? selectedReview.locationId
-                : null;
-            const { data: inserted, error: insertError } = await supabaseClient
-              .from("review_replies")
-              .insert({
-                user_id: sessionData.session.user.id,
-                review_id: selectedReview.id,
-                source: selectedReview.source.toLowerCase(),
-                location_id: locationId,
-                business_name: selectedReview.locationName,
-                tone: tonePreset,
-                length: lengthPreset,
-                reply_text: data.reply,
-                status: "draft"
-              })
-              .select("id, review_id, reply_text, status, created_at, sent_at")
-              .single();
-            if (!insertError && inserted) {
-              const row = inserted as ReviewReply;
-              setReplyHistory((prev) => [row, ...prev]);
-              setDraftReplyId(row.id);
-              setDraftByReview((prev) => ({ ...prev, [selectedReview.id]: true }));
-            } else if (import.meta.env.DEV) {
-              console.log("review_replies insert error:", insertError);
-            }
-          }
-        }
-      }
-    } catch {
-      setGenerationError("Erreur lors de la génération.");
-      console.error("generate-reply error: request failed");
-    } finally {
-      setIsGenerating(false);
-      setCooldownUntil(Date.now() + COOLDOWN_MS);
-    }
+    return "Merci pour votre note. Nous prenons votre retour au serieux et travaillons a ameliorer votre prochaine experience.";
   };
 
-  const handleGenerateBrandVoice = async () => {
-    if (!selectedReview) {
-      return;
-    }
-    if (!supabase) {
-      setGenerationError("Configuration Supabase manquante.");
-      return;
-    }
-    setIsGenerating(true);
-    setGenerationError(null);
-    try {
+  const saveDraftReply = useCallback(
+    async (
+      review: Review,
+      draftText: string,
+      tone: TonePreset,
+      length: LengthPreset
+    ) => {
+      if (!supabase) {
+        return false;
+      }
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session?.user) {
+        setGenerationError("Connecte-toi pour sauvegarder le brouillon.");
+        return false;
+      }
+      const locationId = uuidRegex.test(review.locationId) ? review.locationId : null;
+      const { data: inserted, error: insertError } = await supabase
+        .from("review_replies")
+        .insert({
+          user_id: sessionData.session.user.id,
+          review_id: review.id,
+          source: review.source.toLowerCase(),
+          location_id: locationId,
+          business_name: review.locationName,
+          tone,
+          length,
+          reply_text: draftText,
+          status: "draft"
+        })
+        .select("id, review_id, reply_text, status, created_at, sent_at")
+        .single();
+      if (insertError || !inserted) {
+        if (import.meta.env.DEV) {
+          console.log("review_replies insert error:", insertError);
+        }
+        return false;
+      }
+      const row = inserted as ReviewReply;
+      setReplyHistory((prev) => [row, ...prev]);
+      setDraftReplyId(row.id);
+      setDraftByReview((prev) => ({ ...prev, [review.id]: true }));
+      return true;
+    },
+    [supabase]
+  );
+
+  const requestBrandVoiceDraft = useCallback(
+    async (review: Review, tone: TonePreset) => {
+      if (!supabase) {
+        setGenerationError("Configuration Supabase manquante.");
+        return null;
+      }
       const token = await getAccessToken(supabase);
       const response = await fetch("/api/google/reply", {
         method: "POST",
@@ -1774,71 +1750,73 @@ const Inbox = () => {
         },
         body: JSON.stringify({
           mode: "draft",
-          review_id: selectedReview.reviewId ?? selectedReview.id,
-          location_id: selectedReview.locationId
+          review_id: review.reviewId ?? review.id,
+          location_id: review.locationId,
+          tone
         })
       });
       const payload = await response.json().catch(() => null);
+      if (response.status === 401) {
+        setGenerationError("Session expiree, reconnecte-toi.");
+        return null;
+      }
+      if (response.status === 403) {
+        setGenerationError("Reconnexion Google requise.");
+        return null;
+      }
       if (!response.ok || !payload?.draft_text) {
-        setGenerationError("Impossible de générer une réponse pour le moment.");
+        setGenerationError("Impossible de generer une reponse pour le moment.");
+        return null;
+      }
+      return String(payload.draft_text);
+    },
+    [supabase]
+  );
+
+  const handleGenerate = async () => {
+    if (!selectedReview) {
+      return;
+    }
+    const supabaseClient = supabase;
+    if (!supabaseClient) {
+      setGenerationError("Configuration Supabase manquante.");
+      return;
+    }
+    if (isReviewNoteOnly(selectedReview)) {
+      setGenerationError("Avis note seule: utilisez le modele court.");
+      return;
+    }
+    setIsGenerating(true);
+    setGenerationError(null);
+    try {
+      const draftText = await requestBrandVoiceDraft(selectedReview, tonePreset);
+      if (!draftText) {
         return;
       }
-      setReplyText(payload.draft_text);
-      setDrafts((prev) => ({ ...prev, [selectedReview.id]: payload.draft_text }));
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session?.user) {
-        setGenerationError("Connecte-toi pour sauvegarder le brouillon.");
-      } else {
-        const locationId =
-          uuidRegex.test(selectedReview.locationId)
-            ? selectedReview.locationId
-            : null;
-        const { data: inserted, error: insertError } = await supabase
-          .from("review_replies")
-          .insert({
-            user_id: sessionData.session.user.id,
-            review_id: selectedReview.id,
-            source: selectedReview.source.toLowerCase(),
-            location_id: locationId,
-            business_name: selectedReview.locationName,
-            tone: tonePreset,
-            length: lengthPreset,
-            reply_text: payload.draft_text,
-            status: "draft"
-          })
-          .select("id, review_id, reply_text, status, created_at, sent_at")
-          .single();
-        if (!insertError && inserted) {
-          const row = inserted as ReviewReply;
-          setReplyHistory((prev) => [row, ...prev]);
-          setDraftReplyId(row.id);
-          setDraftByReview((prev) => ({ ...prev, [selectedReview.id]: true }));
-        } else if (import.meta.env.DEV) {
-          console.log("review_replies insert error:", insertError);
-        }
-      }
+      setReplyText(draftText);
+      setDrafts((prev) => ({ ...prev, [selectedReview.id]: draftText }));
+      await saveDraftReply(selectedReview, draftText, tonePreset, lengthPreset);
     } catch {
-      setGenerationError("Erreur lors de la génération.");
+      setGenerationError("Erreur lors de la generation.");
     } finally {
       setIsGenerating(false);
       setCooldownUntil(Date.now() + COOLDOWN_MS);
     }
   };
 
-  const handleViewDraft = () => {
+  const handleUseNoteOnlyTemplate = async () => {
     if (!selectedReview) {
       return;
     }
-    const latestDraft = replyHistory.find(
-      (item: ReviewReply) => item.status === "draft"
-    );
-    if (!latestDraft) {
-      setGenerationError("Aucun brouillon disponible pour cet avis.");
-      return;
-    }
-    setReplyText(latestDraft.reply_text);
-    setDrafts((prev) => ({ ...prev, [selectedReview.id]: latestDraft.reply_text }));
-    setDraftReplyId(latestDraft.id);
+    const template = buildNoteOnlyTemplate(selectedReview);
+    setReplyText(template);
+    setDrafts((prev) => ({ ...prev, [selectedReview.id]: template }));
+    setReplyDirtyByReview((prev) => ({
+      ...prev,
+      [selectedReview.id]: true
+    }));
+    setGenerationError(null);
+    await saveDraftReply(selectedReview, template, tonePreset, lengthPreset);
   };
 
   const handleSave = async () => {
@@ -1846,21 +1824,36 @@ const Inbox = () => {
       return;
     }
     const supabaseClient = supabase;
-    if (!draftReplyId || !supabaseClient) {
-      setGenerationError("Aucun brouillon à sauvegarder.");
+    if (!supabaseClient) {
+      setGenerationError("Configuration Supabase manquante.");
+      return;
+    }
+    if (!replyText.trim()) {
+      setGenerationError("Le brouillon est vide.");
       return;
     }
     setReplySaving(true);
     try {
-      const { error } = await supabaseClient
-        .from("review_replies")
-        .update({ reply_text: replyText })
-        .eq("id", draftReplyId);
-      if (error) {
-        setGenerationError("Impossible de sauvegarder le brouillon.");
+      if (!draftReplyId) {
+        const created = await saveDraftReply(
+          selectedReview,
+          replyText,
+          tonePreset,
+          lengthPreset
+        );
+        if (!created) {
+          setGenerationError("Impossible de sauvegarder le brouillon.");
+          return;
+        }
       } else {
-        const now = new Date();
-        setSavedAt(now.toISOString());
+        const { error } = await supabaseClient
+          .from("review_replies")
+          .update({ reply_text: replyText })
+          .eq("id", draftReplyId);
+        if (error) {
+          setGenerationError("Impossible de sauvegarder le brouillon.");
+          return;
+        }
         setReplyHistory((prev) =>
           prev.map((item) =>
             item.id === draftReplyId
@@ -1868,15 +1861,17 @@ const Inbox = () => {
               : item
           )
         );
-        setActivityEvents((prev) => [
-          {
-            id: `save-${now.getTime()}`,
-            label: "Brouillon sauvegardé",
-            timestamp: "À l'instant"
-          },
-          ...prev
-        ]);
       }
+      const now = new Date();
+      setSavedAt(now.toISOString());
+      setActivityEvents((prev) => [
+        {
+          id: `save-${now.getTime()}`,
+          label: "Brouillon sauvegardé",
+          timestamp: "A l'instant"
+        },
+        ...prev
+      ]);
     } finally {
       setReplySaving(false);
     }
@@ -2071,80 +2066,32 @@ const Inbox = () => {
   };
 
   const handleGenerateBatch = async () => {
-    const supabaseClient = supabase;
-    if (!supabaseClient) {
+    if (!supabase) {
       setGenerationError("Configuration Supabase manquante.");
       return;
     }
-    const targets = filteredReviews.filter(
-      (review: Review) => review.status === "new"
-    );
-    if (targets.length === 0) {
+    if (!activeLocationId) {
+      setBatchError("Selectionne un lieu.");
+      return;
+    }
+    if (filteredReviews.length === 0) {
       setBatchError("Aucun avis à traiter.");
       return;
     }
-    if (isCooldownActive) {
-      setBatchError("Cooldown en cours. Réessaie dans quelques secondes.");
+    const cooldownUntil = prepareDraftCooldownRef.current[activeLocationId] ?? 0;
+    if (cooldownUntil && Date.now() < cooldownUntil) {
+      setBatchError("Preparation en cooldown.");
       return;
     }
     setBatchGenerating(true);
     setBatchError(null);
-    setBatchProgress({ current: 0, total: targets.length });
-    for (let index = 0; index < targets.length; index += 1) {
-      const review = targets[index];
-      setBatchProgress({ current: index + 1, total: targets.length });
-      const preset = getRatingPreset(review.rating);
-      const { data: genData, error: genError } = await supabaseClient.functions.invoke(
-        "generate-reply",
-        {
-          body: {
-            businessId: review.businessId,
-            reviewText: review.text,
-            rating: review.rating,
-            authorName: review.authorName,
-            businessName: review.locationName,
-            source: review.source.toLowerCase(),
-            tone: preset.tone,
-            length: preset.length
-          }
-        }
-      );
-      if (genError?.status === 429 || genData?.error === "Rate limit") {
-        setBatchError("Rate limit atteint. Réessaie plus tard.");
-        break;
-      }
-      if (genError || !genData?.reply) {
-        setBatchError("Erreur pendant la génération batch.");
-        break;
-      }
-      const { data: sessionData } = await supabaseClient.auth.getSession();
-      if (!sessionData.session?.user) {
-        setBatchError("Connecte-toi pour sauvegarder les brouillons.");
-        break;
-      }
-      const locationId = uuidRegex.test(review.locationId) ? review.locationId : null;
-      const { data: inserted, error: insertError } = await supabaseClient
-        .from("review_replies")
-        .insert({
-          user_id: sessionData.session.user.id,
-          review_id: review.id,
-          source: review.source.toLowerCase(),
-          location_id: locationId,
-          business_name: review.locationName,
-          tone: preset.tone,
-          length: preset.length,
-          reply_text: genData.reply,
-          status: "draft"
-        })
-        .select("id, review_id, reply_text, status, created_at, sent_at")
-        .single();
-      if (!insertError && inserted) {
-        setDraftByReview((prev) => ({ ...prev, [review.id]: true }));
-      } else if (import.meta.env.DEV) {
-        console.log("review_replies batch insert error:", insertError);
-      }
+    setBatchProgress({ current: 0, total: 1 });
+    try {
+      setBatchProgress({ current: 1, total: 1 });
+      await handlePrepareDrafts(activeLocationId, true);
+    } finally {
+      setBatchGenerating(false);
     }
-    setBatchGenerating(false);
   };
 
   return (
@@ -2545,6 +2492,9 @@ const Inbox = () => {
                         {review.aiPriority && (
                           <Badge variant="warning">À traiter</Badge>
                         )}
+                        {isReviewNoteOnly(review) && (
+                          <Badge variant="neutral">Note seule</Badge>
+                        )}
                         <Badge
                           variant={
                             safeSentiment
@@ -2569,7 +2519,7 @@ const Inbox = () => {
                         <span>{formatDate(review.createdAt)}</span>
                       </div>
                       <p className="mt-3 line-clamp-2 text-sm text-slate-600">
-                        {review.text}
+                        {review.text || "Avis sans commentaire."}
                       </p>
                     </button>
                   );
@@ -2620,10 +2570,13 @@ const Inbox = () => {
                   <Badge variant={statusVariantMap[selectedReview.status]}>
                     {statusLabelMap[selectedReview.status]}
                   </Badge>
+                  {selectedReviewIsNoteOnly && (
+                    <Badge variant="neutral">Note seule</Badge>
+                  )}
                 </div>
 
                 <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                  {selectedReview.text}
+                  {selectedReview.text || "Avis sans commentaire."}
                 </p>
 
                 <div className="space-y-2">
@@ -2833,70 +2786,27 @@ const Inbox = () => {
                     {aiSuggestionError}
                   </div>
                 )}
-                {aiSuggestion &&
-                  selectedReview &&
-                  aiSuggestion.reviewId === selectedReview.id && (
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                          Suggestion IA
-                        </p>
-                        {aiSuggestion.status && (
-                          <p className="mt-1 text-xs text-slate-500">
-                            Statut: {aiSuggestion.status}
-                          </p>
-                        )}
-                      </div>
-                      <Badge variant="neutral">Suggestion</Badge>
-                    </div>
-                    <p className="mt-3 text-sm text-slate-700">{aiSuggestion.text}</p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => {
-                          setReplyText(aiSuggestion.text);
-                          if (selectedReview) {
-                            setDrafts((prev) => ({
-                              ...prev,
-                              [selectedReview.id]: aiSuggestion.text
-                            }));
-                          }
-                        }}
-                      >
-                        Utiliser la suggestion
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          if (navigator?.clipboard) {
-                            void navigator.clipboard.writeText(aiSuggestion.text);
-                          }
-                        }}
-                      >
-                        Copier
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                {autoDraftStatus === "loading" && (
+                {autoDraftStatus === "loading" && !selectedReviewIsNoteOnly && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                    Génération en cours…
+                    Generation en cours...
                   </div>
                 )}
-                {autoDraftStatus === "error" && (
+                {autoDraftStatus === "error" && !selectedReviewIsNoteOnly && (
                   <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
-                    Impossible de générer un brouillon pour le moment.
+                    Impossible de generer un brouillon pour le moment.
+                  </div>
+                )}
+                {selectedReviewIsNoteOnly && (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                    Avis note seule: generation automatique desactivee.
                   </div>
                 )}
 
                 <div>
                   <textarea
+                    id="reply-editor"
                     className="min-h-[220px] w-full rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700"
-                    placeholder="Générer une réponse..."
+                    placeholder="Rediger une reponse..."
                     value={replyText}
                     onChange={(event) => {
                       const next = event.target.value;
@@ -2916,84 +2826,85 @@ const Inbox = () => {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    onClick={handleGenerate}
-                    disabled={
-                      isGenerating ||
-                      !selectedReview ||
-                      !isSupabaseAvailable ||
-                      isCooldownActive
-                    }
-                  >
-                    {isGenerating ? "Génération..." : "Générer"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleGenerateBrandVoice}
-                    disabled={
-                      isGenerating ||
-                      !selectedReview ||
-                      !isSupabaseAvailable ||
-                      isCooldownActive
-                    }
-                  >
-                    Générer IA
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleViewDraft}
-                    disabled={
-                      isGenerating ||
-                      !selectedReview ||
-                      replyHistoryLoading ||
-                      !draftReplyId
-                    }
-                  >
-                    Voir réponse proposée
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleGenerate}
-                    disabled={
-                      isGenerating ||
-                      !selectedReview ||
-                      !isSupabaseAvailable ||
-                      isCooldownActive
-                    }
-                  >
-                    Regénérer
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleSave}
-                    disabled={
-                      isGenerating ||
-                      replySaving ||
-                      !selectedReview ||
-                      !draftReplyId
-                    }
-                  >
-                    {replySaving ? "Sauvegarde..." : "Sauvegarder"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleSend}
-                    disabled={
-                      isGenerating ||
-                      replySending ||
-                      !selectedReview ||
-                      !draftReplyId ||
-                      selectedReview?.status === "replied"
-                    }
-                  >
-                    {replySending ? "Envoi..." : "Envoyer"}
-                  </Button>
+                  {!hasSavedDraft ? (
+                    <>
+                      <Button
+                        type="button"
+                        onClick={handleGenerate}
+                        disabled={
+                          isGenerating ||
+                          !selectedReview ||
+                          !isSupabaseAvailable ||
+                          isCooldownActive ||
+                          selectedReviewIsNoteOnly
+                        }
+                      >
+                        {isGenerating ? "Generation..." : "Generer (IA)"}
+                      </Button>
+                      {selectedReviewIsNoteOnly ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleUseNoteOnlyTemplate}
+                          disabled={!selectedReview}
+                        >
+                          Modele note seule
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            const editor = document.getElementById("reply-editor");
+                            if (editor instanceof HTMLTextAreaElement) {
+                              editor.focus();
+                            }
+                          }}
+                          disabled={!selectedReview}
+                        >
+                          Ecrire moi-meme
+                        </Button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        type="button"
+                        onClick={handleSend}
+                        disabled={
+                          isGenerating ||
+                          replySending ||
+                          !selectedReview ||
+                          !draftReplyId ||
+                          selectedReview?.status === "replied"
+                        }
+                      >
+                        {replySending ? "Envoi..." : "Envoyer"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleSave}
+                        disabled={isGenerating || replySaving || !selectedReview}
+                      >
+                        {replySaving ? "Sauvegarde..." : "Sauvegarder"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleGenerate}
+                        disabled={
+                          isGenerating ||
+                          !selectedReview ||
+                          !isSupabaseAvailable ||
+                          isCooldownActive ||
+                          selectedReviewIsNoteOnly
+                        }
+                      >
+                        Regenerer
+                      </Button>
+                    </>
+                  )}
                 </div>
                 {!selectedReview && (
                   <p className="text-xs text-slate-500">Sélectionne un avis.</p>

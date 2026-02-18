@@ -250,6 +250,23 @@ const deriveReauthReasonFromMessage = (message: string | null): AuthStatusReason
   return "unknown";
 };
 
+const isAuthFailureReauth = (
+  reason: AuthStatusReason,
+  rawMessage: string | null
+) => {
+  if (reason === "missing_refresh_token" || reason === "token_revoked") {
+    return true;
+  }
+  const normalized = rawMessage?.toLowerCase() ?? "";
+  return (
+    normalized.includes("invalid_grant") ||
+    normalized.includes("revoked") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("401") ||
+    normalized.includes("403")
+  );
+};
+
 const sleep = (ms: number) =>
   new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -1815,6 +1832,20 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     if (message.startsWith("reauth_required")) {
       const [, rawReason] = message.split(":");
       const reason = rawReason ? deriveReauthReasonFromMessage(rawReason) : "unknown";
+      const shouldMarkReauth = isAuthFailureReauth(reason, rawReason ?? null);
+      if (!shouldMarkReauth) {
+        console.warn("[google_reviews_auth] ignored_non_auth_reauth_marker", {
+          requestId,
+          userId,
+          rawReason: rawReason ?? null
+        });
+        return sendError(
+          res,
+          requestId,
+          { code: "INTERNAL", message: "Sync failed" },
+          500
+        );
+      }
       if (userId) {
         const supabaseAdmin = createSupabaseAdmin();
         const nowIso = new Date().toISOString();
