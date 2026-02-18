@@ -203,9 +203,6 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
       use_emojis: form.use_emojis,
       forbidden_words: form.forbidden_words.filter(Boolean)
     };
-    const conflictTarget = selectedLocationId
-      ? "user_id,location_id"
-      : "user_id";
     const { data, error } = await supabaseClient
       .from("brand_voice")
       .upsert(
@@ -213,7 +210,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
           ...payload,
           updated_at: new Date().toISOString()
         },
-        { onConflict: conflictTarget }
+        { onConflict: "user_id,location_id" }
       )
       .select()
       .single();
