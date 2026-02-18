@@ -12,7 +12,7 @@ import {
   getParam,
   logRequest
 } from "../../../../api_utils";
-import { withRetry } from "../../../../utils/withRetry";
+import { withRetry, isTransientError } from "../../../../utils/withRetry";
 
 type GoogleReview = {
   reviewId?: string;
@@ -124,6 +124,13 @@ const MAX_REVIEWS_RETRIES = 3;
 const SUPABASE_RETRY_TRIES = 4;
 const SUPABASE_RETRY_BASE_MS = 300;
 const REVIEWS_SYNC_PATH = "/api/google/gbp/reviews/sync";
+const EXISTING_LOAD_CHUNK_SIZE = (() => {
+  const raw = Number(process.env.GOOGLE_EXISTING_LOAD_CHUNK_SIZE ?? 150);
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return 150;
+  }
+  return Math.min(Math.floor(raw), 500);
+})();
 
 const withSupabaseRetry = async <T>(
   operation: () => PromiseLike<T> | T,
@@ -137,6 +144,88 @@ const withSupabaseRetry = async <T>(
     path: REVIEWS_SYNC_PATH,
     label: params.label
   });
+
+const chunkArray = <T>(items: T[], size: number): T[][] => {
+  if (items.length === 0) {
+    return [];
+  }
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+};
+
+const loadExistingReviewsChunked = async (params: {
+  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>;
+  userId: string;
+  locationId: string;
+  reviewNames: string[];
+  requestId?: string;
+}) => {
+  const uniqueReviewNames = Array.from(
+    new Set(
+      params.reviewNames.filter(
+        (reviewName): reviewName is string =>
+          typeof reviewName === "string" && reviewName.length > 0
+      )
+    )
+  );
+
+  const existingByReviewName = new Map<string, ExistingReviewRow>();
+  if (uniqueReviewNames.length === 0) {
+    return { existingByReviewName, existingLoadFailed: false as const };
+  }
+
+  const chunks = chunkArray(uniqueReviewNames, EXISTING_LOAD_CHUNK_SIZE);
+  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+    const chunk = chunks[chunkIndex];
+    try {
+      const { data, error } = await withSupabaseRetry(
+        () =>
+          params.supabaseAdmin
+            .from("google_reviews")
+            .select("review_name, rating, comment, update_time, reply_text, replied_at")
+            .eq("user_id", params.userId)
+            .eq("location_id", params.locationId)
+            .in("review_name", chunk),
+        {
+          requestId: params.requestId,
+          label: `google_reviews.load_existing.chunk_${chunkIndex + 1}`
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      for (const row of data ?? []) {
+        if (row && typeof row === "object" && "review_name" in row) {
+          const key = (row as ExistingReviewRow).review_name;
+          if (typeof key === "string" && key.length > 0) {
+            existingByReviewName.set(key, row as ExistingReviewRow);
+          }
+        }
+      }
+    } catch (error) {
+      if (isTransientError(error)) {
+        console.warn("[google_reviews.load_existing_fallback]", {
+          requestId: params.requestId ?? null,
+          user_id: params.userId,
+          location_id: params.locationId,
+          chunk_index: chunkIndex + 1,
+          chunks_total: chunks.length,
+          chunk_size: chunk.length,
+          message: getErrorMessage(error).slice(0, 220)
+        });
+        return { existingByReviewName: new Map<string, ExistingReviewRow>(), existingLoadFailed: true as const };
+      }
+      throw error;
+    }
+  }
+
+  return { existingByReviewName, existingLoadFailed: false as const };
+};
 
 const getErrorMessage = (err: unknown): string =>
   err instanceof Error
@@ -1255,46 +1344,30 @@ export const syncGoogleReviewsForUser = async (
       });
 
       const reviewNames = dedupedRows.map((row) => row.review_name);
-      const existingByReviewName = new Map<string, ExistingReviewRow>();
-      if (reviewNames.length > 0) {
-        const { data: existingRows, error: existingRowsError } = await withSupabaseRetry(
-          () =>
-            supabaseAdmin
-              .from("google_reviews")
-              .select("review_name, rating, comment, update_time, reply_text, replied_at")
-              .eq("user_id", userId)
-              .eq("location_id", location.location_resource_name)
-              .in("review_name", reviewNames),
-          {
-            requestId,
-            label: "google_reviews.load_existing"
-          }
-        );
-        if (existingRowsError) {
-          throw new Error(existingRowsError.message ?? "Existing reviews query failed.");
-        }
-        for (const row of existingRows ?? []) {
-          if (row && typeof row === "object" && "review_name" in row) {
-            const key = (row as ExistingReviewRow).review_name;
-            if (typeof key === "string" && key.length > 0) {
-              existingByReviewName.set(key, row as ExistingReviewRow);
-            }
-          }
-        }
-      }
+      const { existingByReviewName, existingLoadFailed } = await loadExistingReviewsChunked({
+        supabaseAdmin,
+        userId,
+        locationId: location.location_resource_name,
+        reviewNames,
+        requestId
+      });
 
       let inserted = 0;
       let updated = 0;
       let skipped = Math.max(reviews.length - dedupedRows.length, 0);
-      const existingReviewNames = new Set<string>(existingByReviewName.keys());
-
-      for (const row of dedupedRows as ReviewRowForAlert[]) {
-        if (!existingReviewNames.has(row.review_name)) {
-          inserted += 1;
-          existingReviewNames.add(row.review_name);
-          continue;
+      if (existingLoadFailed) {
+        // We cannot reliably compute insert vs update when existing read failed.
+        skipped += dedupedRows.length;
+      } else {
+        const existingReviewNames = new Set<string>(existingByReviewName.keys());
+        for (const row of dedupedRows as ReviewRowForAlert[]) {
+          if (!existingReviewNames.has(row.review_name)) {
+            inserted += 1;
+            existingReviewNames.add(row.review_name);
+            continue;
+          }
+          updated += 1;
         }
-        updated += 1;
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1319,9 +1392,11 @@ export const syncGoogleReviewsForUser = async (
       totalUpdated += updated;
       totalSkipped += skipped;
 
-      const changedReviews = (dedupedRows as ReviewRowForAlert[]).filter((row) =>
-        hasReviewChanged(existingByReviewName.get(row.review_name), row)
-      );
+      const changedReviews = existingLoadFailed
+        ? []
+        : (dedupedRows as ReviewRowForAlert[]).filter((row) =>
+            hasReviewChanged(existingByReviewName.get(row.review_name), row)
+          );
       let insertedAlerts = 0;
       let locationMetrics: LocationAlertMetrics | null = null;
       if (changedReviews.length > 0) {
@@ -1474,6 +1549,7 @@ export const syncGoogleReviewsForUser = async (
         status: "done",
         meta: {
           auth_status: runAuthStatus,
+          existing_load_failed: existingLoadFailed,
           inserted,
           updated,
           skipped,
@@ -1503,6 +1579,7 @@ export const syncGoogleReviewsForUser = async (
         user_id: userId,
         location_id: location.location_resource_name,
         conflictKey,
+        existing_load_failed: existingLoadFailed,
         fetched: reviews.length,
         deduped: dedupedRows.length,
         inserted,
