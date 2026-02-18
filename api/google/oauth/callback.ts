@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../../../server/_shared_dist/database.types.js";
+import { clearGoogleReauthRequired } from "../../../server/_shared/utils/googleAuthState";
 
 const requiredEnv = [
   "SUPABASE_URL",
@@ -118,18 +119,10 @@ const handler = async (req: any, res: any) => {
     return;
   }
 
-  try {
-    await supabaseAdmin
-      .from("cron_state")
-      .delete()
-      .eq("key", "google_reviews_last_error")
-      .eq("user_id", oauthState.user_id);
-  } catch (clearError) {
-    console.warn("[google_oauth_callback] clear reauth state failed", {
-      userId: oauthState.user_id,
-      message: clearError instanceof Error ? clearError.message : String(clearError)
-    });
-  }
+  await clearGoogleReauthRequired(supabaseAdmin, {
+    userId: oauthState.user_id,
+    source: "oauth_callback"
+  });
 
   await supabaseAdmin
     .from("google_oauth_states")

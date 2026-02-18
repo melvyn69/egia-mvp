@@ -13,6 +13,11 @@ import {
   logRequest
 } from "../../../../api_utils";
 import { withRetry } from "../../../../utils/withRetry";
+import {
+  clearGoogleReauthRequired,
+  isAuthReauthRequiredError,
+  setGoogleReauthRequired
+} from "../../../../utils/googleAuthState";
 
 type GoogleReview = {
   reviewId?: string;
@@ -295,58 +300,6 @@ const deriveReauthReasonFromMessage = (message: string | null): AuthStatusReason
   }
   return "unknown";
 };
-
-const isAuthReauthRequired = (params: {
-  status?: number | null;
-  reason?: AuthStatusReason | null;
-  message?: string | null;
-}) => {
-  if (
-    params.reason === "missing_refresh_token" ||
-    params.reason === "token_revoked"
-  ) {
-    return true;
-  }
-  const normalized = (params.message ?? "").toLowerCase();
-  const hasTransientHint =
-    normalized.includes("429") ||
-    normalized.includes("5xx") ||
-    normalized.includes("500") ||
-    normalized.includes("502") ||
-    normalized.includes("503") ||
-    normalized.includes("504") ||
-    normalized.includes("520") ||
-    normalized.includes("cloudflare") ||
-    normalized.includes("timeout") ||
-    normalized.includes("network");
-  if (hasTransientHint) {
-    return false;
-  }
-  const hasAuthMessage =
-    normalized.includes("invalid_grant") ||
-    normalized.includes("request had invalid authentication credentials") ||
-    normalized.includes("invalid authentication credentials") ||
-    normalized.includes("token has been expired or revoked") ||
-    normalized.includes("expired or revoked") ||
-    normalized.includes("insufficient authentication scopes");
-  if (params.status === 401) {
-    return true;
-  }
-  if (params.status === 403) {
-    return hasAuthMessage;
-  }
-  return hasAuthMessage;
-};
-
-const isAuthFailureReauth = (
-  reason: AuthStatusReason,
-  rawMessage: string | null
-) =>
-  isAuthReauthRequired({
-    reason,
-    message: rawMessage,
-    status: null
-  });
 
 const sleep = (ms: number) =>
   new Promise((resolve) => {
@@ -1053,39 +1006,6 @@ const finishSyncRun = async (
   }
 };
 
-const clearGoogleReauthState = async (
-  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
-  params: { userId: string; requestId?: string; context: string }
-) => {
-  const dynamicSupabase = supabaseAdmin as unknown as DynamicSupabaseClient;
-  try {
-    await withSupabaseRetry(
-      () =>
-        dynamicSupabase
-          .from("cron_state")
-          .delete()
-          .eq("key", "google_reviews_last_error")
-          .eq("user_id", params.userId),
-      {
-        requestId: params.requestId,
-        label: "cron_state.clear_last_error"
-      }
-    );
-    console.log("[google_reviews_auth] cleared_reauth_state", {
-      requestId: params.requestId ?? null,
-      userId: params.userId,
-      context: params.context
-    });
-  } catch (error) {
-    console.error("[google_reviews_auth] clear_reauth_state_failed", {
-      requestId: params.requestId ?? null,
-      userId: params.userId,
-      context: params.context,
-      message: getErrorMessage(error).slice(0, 220)
-    });
-  }
-};
-
 const upsertImportStatus = async (
   supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
   userId: string,
@@ -1740,7 +1660,7 @@ export const syncGoogleReviewsForUser = async (
       const failedPagesExhausted = pagesExhausted;
       const isConfirmedAuthFailure =
         error instanceof GoogleReviewsFetchError &&
-        isAuthReauthRequired({
+        isAuthReauthRequiredError({
           status: error.status,
           reason: null,
           message
@@ -1838,10 +1758,10 @@ export const syncGoogleReviewsForUser = async (
   }
 
   if (googleApiCallSucceeded && refreshSucceeded) {
-    await clearGoogleReauthState(supabaseAdmin, {
+    await clearGoogleReauthRequired(supabaseAdmin, {
       userId,
       requestId,
-      context: "reviews_sync_success"
+      source: "sync_success"
     });
   }
 
@@ -1960,7 +1880,11 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     if (message.startsWith("reauth_required")) {
       const [, rawReason] = message.split(":");
       const reason = rawReason ? deriveReauthReasonFromMessage(rawReason) : "unknown";
-      const shouldMarkReauth = isAuthFailureReauth(reason, rawReason ?? null);
+      const shouldMarkReauth = isAuthReauthRequiredError({
+        status: null,
+        reason,
+        message: rawReason ?? null
+      });
       if (!shouldMarkReauth) {
         console.warn("[google_reviews_auth] ignored_non_auth_reauth_marker", {
           requestId,
@@ -1976,39 +1900,11 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       }
       if (userId) {
         const supabaseAdmin = createSupabaseAdmin();
-        const dynamicSupabase = supabaseAdmin as unknown as DynamicSupabaseClient;
-        const nowIso = new Date().toISOString();
-        try {
-          await withSupabaseRetry(
-            () =>
-              dynamicSupabase.from("cron_state").upsert({
-                key: "google_reviews_last_error",
-                user_id: userId,
-                value: {
-                  at: nowIso,
-                  code: "reauth_required",
-                  reason,
-                  message: "reconnexion_google_requise",
-                  location_pk: locationId ?? null
-                },
-                updated_at: nowIso
-              }),
-            {
-              requestId,
-              label: "cron_state.upsert_last_error"
-            }
-          );
-        } catch (upsertError) {
-          console.error("[google_reviews_auth] cron_state upsert failed", {
-            requestId,
-            userId,
-            message: getErrorMessage(upsertError)
-          });
-        }
-        console.warn("[google_reviews_auth]", {
-          requestId,
+        await setGoogleReauthRequired(supabaseAdmin, {
           userId,
-          reason
+          reason,
+          message: "reconnexion_google_requise",
+          requestId
         });
       }
       return sendError(

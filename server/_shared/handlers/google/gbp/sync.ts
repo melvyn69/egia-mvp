@@ -14,6 +14,11 @@ import {
   getParam,
   logRequest
 } from "../../../api_utils";
+import {
+  clearGoogleReauthRequired,
+  isAuthReauthRequiredError,
+  setGoogleReauthRequired
+} from "../../../utils/googleAuthState";
 
 type GoogleAccount = {
   name: string;
@@ -120,48 +125,6 @@ const deriveReauthReasonFromMessage = (message: string | null) => {
     return "token_revoked" as const;
   }
   return "unknown" as const;
-};
-
-const isAuthReauthRequired = (params: {
-  status?: number | null;
-  reason?: GoogleConnectionReason | null;
-  message?: string | null;
-}) => {
-  if (
-    params.reason === "missing_refresh_token" ||
-    params.reason === "token_revoked"
-  ) {
-    return true;
-  }
-  const normalized = (params.message ?? "").toLowerCase();
-  const hasTransientHint =
-    normalized.includes("429") ||
-    normalized.includes("5xx") ||
-    normalized.includes("500") ||
-    normalized.includes("502") ||
-    normalized.includes("503") ||
-    normalized.includes("504") ||
-    normalized.includes("520") ||
-    normalized.includes("cloudflare") ||
-    normalized.includes("timeout") ||
-    normalized.includes("network");
-  if (hasTransientHint) {
-    return false;
-  }
-  const hasAuthMessage =
-    normalized.includes("invalid_grant") ||
-    normalized.includes("request had invalid authentication credentials") ||
-    normalized.includes("invalid authentication credentials") ||
-    normalized.includes("token has been expired or revoked") ||
-    normalized.includes("expired or revoked") ||
-    normalized.includes("insufficient authentication scopes");
-  if (params.status === 401) {
-    return true;
-  }
-  if (params.status === 403) {
-    return hasAuthMessage;
-  }
-  return hasAuthMessage;
 };
 
 const readJsonBody = async (req: VercelRequest) => {
@@ -293,71 +256,6 @@ const finishSyncRun = async (
       .eq("id", payload.runId);
   } catch (error) {
     console.error("google_sync_runs update failed:", getErrorMessage(error));
-  }
-};
-
-const upsertGoogleReauthState = async (
-  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
-  payload: {
-    userId: string;
-    reason: GoogleConnectionReason;
-    message: string;
-    requestId?: string;
-  }
-) => {
-  const nowIso = new Date().toISOString();
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabaseAdmin as any).from("cron_state").upsert({
-      key: "google_reviews_last_error",
-      user_id: payload.userId,
-      value: {
-        at: nowIso,
-        code: "reauth_required",
-        reason: payload.reason,
-        message: payload.message,
-        request_id: payload.requestId ?? null
-      },
-      updated_at: nowIso
-    });
-  } catch (error) {
-    console.error("cron_state upsert google_reviews_last_error failed:", getErrorMessage(error));
-    return;
-  }
-  console.warn("[google_auth_state]", {
-    requestId: payload.requestId ?? null,
-    userId: payload.userId,
-    reason: payload.reason
-  });
-};
-
-const clearGoogleReauthState = async (
-  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
-  payload: { userId: string; requestId?: string; context: string }
-) => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data } = await (supabaseAdmin as any)
-      .from("cron_state")
-      .delete()
-      .eq("key", "google_reviews_last_error")
-      .eq("user_id", payload.userId)
-      .select("key")
-      .limit(1);
-    if (Array.isArray(data) && data.length > 0) {
-      console.log("[google_auth_state] cleared", {
-        requestId: payload.requestId ?? null,
-        userId: payload.userId,
-        context: payload.context
-      });
-    }
-  } catch (error) {
-    console.error("cron_state clear google_reviews_last_error failed:", {
-      requestId: payload.requestId ?? null,
-      userId: payload.userId,
-      context: payload.context,
-      message: getErrorMessage(error)
-    });
   }
 };
 
@@ -554,7 +452,7 @@ export const syncGoogleLocationsForUser = async (
         lastError: "Missing Google refresh token",
         lastCheckedAt: new Date().toISOString()
       };
-      await upsertGoogleReauthState(supabaseAdmin, {
+      await setGoogleReauthRequired(supabaseAdmin, {
         userId,
         reason: "missing_refresh_token",
         message: "missing_refresh_token",
@@ -597,11 +495,12 @@ export const syncGoogleLocationsForUser = async (
           lastError: "Google token revoked or expired",
           lastCheckedAt: new Date().toISOString()
         };
-        await upsertGoogleReauthState(supabaseAdmin, {
+        await setGoogleReauthRequired(supabaseAdmin, {
           userId,
           reason: "token_revoked",
           message: "google_token_revoked_or_expired",
-          requestId
+          requestId,
+          errCode: refreshError.code ?? null
         });
 
         await finishSyncRun(supabaseAdmin, {
@@ -680,12 +579,16 @@ export const syncGoogleLocationsForUser = async (
     accounts = await listAccounts(accessToken, httpStatuses);
     googleApiCallSucceeded = true;
   } catch (error) {
+    const googleErrorMessage =
+      error instanceof GoogleHttpError
+        ? parseGoogleErrorMessage(error.body)
+        : getErrorMessage(error);
     if (
       error instanceof GoogleHttpError &&
-      isAuthReauthRequired({
+      isAuthReauthRequiredError({
         status: error.status,
         reason: null,
-        message: parseGoogleErrorMessage(error.body)
+        message: googleErrorMessage
       })
     ) {
       authStatusForMeta = {
@@ -694,11 +597,12 @@ export const syncGoogleLocationsForUser = async (
         lastError: "Google permission denied",
         lastCheckedAt: new Date().toISOString()
       };
-      await upsertGoogleReauthState(supabaseAdmin, {
+      await setGoogleReauthRequired(supabaseAdmin, {
         userId,
         reason: "token_revoked",
-        message: "google_permission_denied",
-        requestId
+        message: googleErrorMessage,
+        requestId,
+        httpStatus: error.status
       });
       await finishSyncRun(supabaseAdmin, {
         runId,
@@ -727,10 +631,7 @@ export const syncGoogleLocationsForUser = async (
       step: "list_accounts",
       account_resource_name: null,
       location_resource_name: null,
-      message:
-        error instanceof GoogleHttpError
-          ? parseGoogleErrorMessage(error.body)
-          : getErrorMessage(error),
+      message: googleErrorMessage,
       status: error instanceof GoogleHttpError ? error.status : null
     });
   }
@@ -828,10 +729,10 @@ export const syncGoogleLocationsForUser = async (
   });
 
   if (googleApiCallSucceeded) {
-    await clearGoogleReauthState(supabaseAdmin, {
+    await clearGoogleReauthRequired(supabaseAdmin, {
       userId,
       requestId,
-      context: "locations_import_success"
+      source: "sync_success"
     });
   }
 
@@ -919,7 +820,7 @@ const parseConnectionStatus = (params: {
 
   const reauthSignalIsCurrent =
     errorCode === "reauth_required" &&
-    isAuthReauthRequired({
+    isAuthReauthRequiredError({
       status: null,
       reason: errorReason,
       message: errorMessage

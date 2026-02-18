@@ -9,6 +9,11 @@ import {
   logRequest
 } from "../../../api_utils.js";
 import { withRetry } from "../../../utils/withRetry.js";
+import {
+  clearGoogleReauthRequired,
+  isAuthReauthRequiredError,
+  setGoogleReauthRequired
+} from "../../../utils/googleAuthState.js";
 
 type GoogleReview = {
   reviewId?: string;
@@ -137,35 +142,6 @@ const mapRating = (starRating?: string): number | null => {
     default:
       return null;
   }
-};
-
-const isAuthFailureReauth = (reason: string, rawMessage: string) => {
-  if (reason === "missing_refresh_token" || reason === "token_revoked") {
-    return true;
-  }
-  const normalized = rawMessage.toLowerCase();
-  const hasTransientHint =
-    normalized.includes("429") ||
-    normalized.includes("5xx") ||
-    normalized.includes("500") ||
-    normalized.includes("502") ||
-    normalized.includes("503") ||
-    normalized.includes("504") ||
-    normalized.includes("520") ||
-    normalized.includes("cloudflare") ||
-    normalized.includes("timeout") ||
-    normalized.includes("network");
-  if (hasTransientHint) {
-    return false;
-  }
-  return (
-    normalized.includes("invalid_grant") ||
-    normalized.includes("request had invalid authentication credentials") ||
-    normalized.includes("invalid authentication credentials") ||
-    normalized.includes("token has been expired or revoked") ||
-    normalized.includes("expired or revoked") ||
-    normalized.includes("insufficient authentication scopes")
-  );
 };
 
 const refreshGoogleAccessToken = async (refreshToken: string) => {
@@ -457,6 +433,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           null,
           requestId
         );
+        if (result.locationsCount > 0) {
+          await clearGoogleReauthRequired(supabaseAdmin, {
+            userId,
+            requestId,
+            source: "sync_success"
+          });
+        }
         if (!isProd) {
           console.log("[sync] reviews synced", {
             requestId,
@@ -476,7 +459,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               : message.includes("token_revoked")
                 ? "token_revoked"
                 : "unknown";
-          if (!isAuthFailureReauth(reason, message)) {
+          if (
+            !isAuthReauthRequiredError({
+              status: null,
+              reason,
+              message
+            })
+          ) {
             console.warn("[sync] reauth marker ignored (non-auth)", {
               requestId,
               userId,
@@ -484,29 +473,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             });
             continue;
           }
-          await withSupabaseRetry(
-            () =>
-              supabaseAdmin.from("cron_state").upsert({
-                key: "google_reviews_last_error",
-                user_id: userId,
-                value: {
-                  at: new Date().toISOString(),
-                  code: "reauth_required",
-                  reason,
-                  message: "reconnexion_google_requise",
-                  location_pk: null
-                },
-                updated_at: new Date().toISOString()
-              }),
-            {
-              requestId,
-              label: "cron_state.upsert_last_error"
-            }
-          );
-          console.warn("[sync] reviews reauth_required", {
-            requestId,
+          await setGoogleReauthRequired(supabaseAdmin, {
             userId,
-            reason
+            reason,
+            message: "reconnexion_google_requise",
+            requestId
           });
           continue;
         }
