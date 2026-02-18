@@ -144,12 +144,27 @@ const isAuthFailureReauth = (reason: string, rawMessage: string) => {
     return true;
   }
   const normalized = rawMessage.toLowerCase();
+  const hasTransientHint =
+    normalized.includes("429") ||
+    normalized.includes("5xx") ||
+    normalized.includes("500") ||
+    normalized.includes("502") ||
+    normalized.includes("503") ||
+    normalized.includes("504") ||
+    normalized.includes("520") ||
+    normalized.includes("cloudflare") ||
+    normalized.includes("timeout") ||
+    normalized.includes("network");
+  if (hasTransientHint) {
+    return false;
+  }
   return (
     normalized.includes("invalid_grant") ||
-    normalized.includes("revoked") ||
-    normalized.includes("unauthorized") ||
-    normalized.includes("401") ||
-    normalized.includes("403")
+    normalized.includes("request had invalid authentication credentials") ||
+    normalized.includes("invalid authentication credentials") ||
+    normalized.includes("token has been expired or revoked") ||
+    normalized.includes("expired or revoked") ||
+    normalized.includes("insufficient authentication scopes")
   );
 };
 
@@ -470,9 +485,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             continue;
           }
           await withSupabaseRetry(
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             () =>
-              (supabaseAdmin as any).from("cron_state").upsert({
+              supabaseAdmin.from("cron_state").upsert({
                 key: "google_reviews_last_error",
                 user_id: userId,
                 value: {

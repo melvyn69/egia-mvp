@@ -122,6 +122,48 @@ const deriveReauthReasonFromMessage = (message: string | null) => {
   return "unknown" as const;
 };
 
+const isAuthReauthRequired = (params: {
+  status?: number | null;
+  reason?: GoogleConnectionReason | null;
+  message?: string | null;
+}) => {
+  if (
+    params.reason === "missing_refresh_token" ||
+    params.reason === "token_revoked"
+  ) {
+    return true;
+  }
+  const normalized = (params.message ?? "").toLowerCase();
+  const hasTransientHint =
+    normalized.includes("429") ||
+    normalized.includes("5xx") ||
+    normalized.includes("500") ||
+    normalized.includes("502") ||
+    normalized.includes("503") ||
+    normalized.includes("504") ||
+    normalized.includes("520") ||
+    normalized.includes("cloudflare") ||
+    normalized.includes("timeout") ||
+    normalized.includes("network");
+  if (hasTransientHint) {
+    return false;
+  }
+  const hasAuthMessage =
+    normalized.includes("invalid_grant") ||
+    normalized.includes("request had invalid authentication credentials") ||
+    normalized.includes("invalid authentication credentials") ||
+    normalized.includes("token has been expired or revoked") ||
+    normalized.includes("expired or revoked") ||
+    normalized.includes("insufficient authentication scopes");
+  if (params.status === 401) {
+    return true;
+  }
+  if (params.status === 403) {
+    return hasAuthMessage;
+  }
+  return hasAuthMessage;
+};
+
 const readJsonBody = async (req: VercelRequest) => {
   let raw = "";
   for await (const chunk of req) {
@@ -289,6 +331,36 @@ const upsertGoogleReauthState = async (
   });
 };
 
+const clearGoogleReauthState = async (
+  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
+  payload: { userId: string; requestId?: string; context: string }
+) => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data } = await (supabaseAdmin as any)
+      .from("cron_state")
+      .delete()
+      .eq("key", "google_reviews_last_error")
+      .eq("user_id", payload.userId)
+      .select("key")
+      .limit(1);
+    if (Array.isArray(data) && data.length > 0) {
+      console.log("[google_auth_state] cleared", {
+        requestId: payload.requestId ?? null,
+        userId: payload.userId,
+        context: payload.context
+      });
+    }
+  } catch (error) {
+    console.error("cron_state clear google_reviews_last_error failed:", {
+      requestId: payload.requestId ?? null,
+      userId: payload.userId,
+      context: payload.context,
+      message: getErrorMessage(error)
+    });
+  }
+};
+
 const refreshAccessToken = async (refreshToken: string) => {
   const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -430,6 +502,7 @@ export const syncGoogleLocationsForUser = async (
     lastError: null,
     lastCheckedAt: startedAt
   };
+  let googleApiCallSucceeded = false;
 
   const { data: connection, error: connectionError } = await supabaseAdmin
     .from("google_connections")
@@ -605,8 +678,16 @@ export const syncGoogleLocationsForUser = async (
   let accounts: GoogleAccount[] = [];
   try {
     accounts = await listAccounts(accessToken, httpStatuses);
+    googleApiCallSucceeded = true;
   } catch (error) {
-    if (error instanceof GoogleHttpError && (error.status === 401 || error.status === 403)) {
+    if (
+      error instanceof GoogleHttpError &&
+      isAuthReauthRequired({
+        status: error.status,
+        reason: null,
+        message: parseGoogleErrorMessage(error.body)
+      })
+    ) {
       authStatusForMeta = {
         status: "reauth_required",
         reason: "token_revoked",
@@ -746,6 +827,14 @@ export const syncGoogleLocationsForUser = async (
     meta
   });
 
+  if (googleApiCallSucceeded) {
+    await clearGoogleReauthState(supabaseAdmin, {
+      userId,
+      requestId,
+      context: "locations_import_success"
+    });
+  }
+
   console.log("[gbp_locations_sync]", {
     user_id: userId,
     accounts_count: accountsCount,
@@ -830,6 +919,11 @@ const parseConnectionStatus = (params: {
 
   const reauthSignalIsCurrent =
     errorCode === "reauth_required" &&
+    isAuthReauthRequired({
+      status: null,
+      reason: errorReason,
+      message: errorMessage
+    }) &&
     !!errorUpdatedAt &&
     Date.now() - errorUpdatedAt <= AUTH_REAUTH_SIGNAL_TTL_MS &&
     (!connectionUpdatedAt || connectionUpdatedAt <= errorUpdatedAt);

@@ -120,6 +120,52 @@ type LocationSyncResult = {
   run_id: string;
 };
 
+type DynamicSupabaseError = {
+  message?: string | null;
+};
+
+type DynamicSupabaseRow = Record<string, unknown>;
+
+type DynamicSupabaseResponse = {
+  data: DynamicSupabaseRow[] | null;
+  error: DynamicSupabaseError | null;
+};
+
+type DynamicSupabaseSingleResponse = {
+  data: DynamicSupabaseRow | null;
+  error: DynamicSupabaseError | null;
+};
+
+type DynamicSupabaseQuery = PromiseLike<DynamicSupabaseResponse> & {
+  select: (
+    columns: string,
+    options?: Record<string, unknown>
+  ) => DynamicSupabaseQuery;
+  delete: () => DynamicSupabaseQuery;
+  insert: (
+    values: Record<string, unknown> | Record<string, unknown>[],
+    options?: { onConflict?: string; ignoreDuplicates?: boolean }
+  ) => DynamicSupabaseQuery;
+  upsert: (
+    values: Record<string, unknown> | Record<string, unknown>[],
+    options?: { onConflict?: string; ignoreDuplicates?: boolean }
+  ) => DynamicSupabaseQuery;
+  update: (values: Record<string, unknown>) => DynamicSupabaseQuery;
+  eq: (column: string, value: unknown) => DynamicSupabaseQuery;
+  is: (column: string, value: unknown) => DynamicSupabaseQuery;
+  not: (column: string, operator: string, value: unknown) => DynamicSupabaseQuery;
+  order: (
+    column: string,
+    options?: { ascending?: boolean; nullsFirst?: boolean }
+  ) => DynamicSupabaseQuery;
+  limit: (count: number) => DynamicSupabaseQuery;
+  maybeSingle: () => Promise<DynamicSupabaseSingleResponse>;
+};
+
+type DynamicSupabaseClient = {
+  from: (table: string) => DynamicSupabaseQuery;
+};
+
 const MAX_REVIEWS_PAGES = 20;
 const MAX_REVIEWS_RETRIES = 3;
 const SUPABASE_RETRY_TRIES = 4;
@@ -250,22 +296,57 @@ const deriveReauthReasonFromMessage = (message: string | null): AuthStatusReason
   return "unknown";
 };
 
+const isAuthReauthRequired = (params: {
+  status?: number | null;
+  reason?: AuthStatusReason | null;
+  message?: string | null;
+}) => {
+  if (
+    params.reason === "missing_refresh_token" ||
+    params.reason === "token_revoked"
+  ) {
+    return true;
+  }
+  const normalized = (params.message ?? "").toLowerCase();
+  const hasTransientHint =
+    normalized.includes("429") ||
+    normalized.includes("5xx") ||
+    normalized.includes("500") ||
+    normalized.includes("502") ||
+    normalized.includes("503") ||
+    normalized.includes("504") ||
+    normalized.includes("520") ||
+    normalized.includes("cloudflare") ||
+    normalized.includes("timeout") ||
+    normalized.includes("network");
+  if (hasTransientHint) {
+    return false;
+  }
+  const hasAuthMessage =
+    normalized.includes("invalid_grant") ||
+    normalized.includes("request had invalid authentication credentials") ||
+    normalized.includes("invalid authentication credentials") ||
+    normalized.includes("token has been expired or revoked") ||
+    normalized.includes("expired or revoked") ||
+    normalized.includes("insufficient authentication scopes");
+  if (params.status === 401) {
+    return true;
+  }
+  if (params.status === 403) {
+    return hasAuthMessage;
+  }
+  return hasAuthMessage;
+};
+
 const isAuthFailureReauth = (
   reason: AuthStatusReason,
   rawMessage: string | null
-) => {
-  if (reason === "missing_refresh_token" || reason === "token_revoked") {
-    return true;
-  }
-  const normalized = rawMessage?.toLowerCase() ?? "";
-  return (
-    normalized.includes("invalid_grant") ||
-    normalized.includes("revoked") ||
-    normalized.includes("unauthorized") ||
-    normalized.includes("401") ||
-    normalized.includes("403")
-  );
-};
+) =>
+  isAuthReauthRequired({
+    reason,
+    message: rawMessage,
+    status: null
+  });
 
 const sleep = (ms: number) =>
   new Promise((resolve) => {
@@ -527,8 +608,7 @@ const sendPendingAlerts = async (params: {
   establishmentId: string;
   requestId?: string;
 }) => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sb: any = params.supabaseAdmin;
+  const sb = params.supabaseAdmin as unknown as DynamicSupabaseClient;
   const resendKey = process.env.RESEND_API_KEY ?? "";
   const emailFrom = process.env.EMAIL_FROM ?? "";
   if (!resendKey || !emailFrom) {
@@ -550,8 +630,7 @@ const sendPendingAlerts = async (params: {
         label: "alerts.load_profile"
       }
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recipient = (profileRow as any)?.email ?? null;
+    recipient = (profileRow as { email?: string | null } | null)?.email ?? null;
   } catch {
     recipient = null;
   }
@@ -917,11 +996,11 @@ const createSyncRun = async (
   }
 ) => {
   const runId = randomUUID();
+  const dynamicSupabase = supabaseAdmin as unknown as DynamicSupabaseClient;
   try {
     await withSupabaseRetry(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () =>
-        (supabaseAdmin as any).from("google_sync_runs").insert({
+        dynamicSupabase.from("google_sync_runs").insert({
           id: runId,
           user_id: payload.userId,
           location_id: payload.locationId,
@@ -951,11 +1030,11 @@ const finishSyncRun = async (
     requestId?: string;
   }
 ) => {
+  const dynamicSupabase = supabaseAdmin as unknown as DynamicSupabaseClient;
   try {
     await withSupabaseRetry(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () =>
-        (supabaseAdmin as any)
+        dynamicSupabase
           .from("google_sync_runs")
           .update({
             status: payload.status,
@@ -971,6 +1050,39 @@ const finishSyncRun = async (
     );
   } catch (error) {
     console.error("google_sync_runs update failed:", getErrorMessage(error));
+  }
+};
+
+const clearGoogleReauthState = async (
+  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
+  params: { userId: string; requestId?: string; context: string }
+) => {
+  const dynamicSupabase = supabaseAdmin as unknown as DynamicSupabaseClient;
+  try {
+    await withSupabaseRetry(
+      () =>
+        dynamicSupabase
+          .from("cron_state")
+          .delete()
+          .eq("key", "google_reviews_last_error")
+          .eq("user_id", params.userId),
+      {
+        requestId: params.requestId,
+        label: "cron_state.clear_last_error"
+      }
+    );
+    console.log("[google_reviews_auth] cleared_reauth_state", {
+      requestId: params.requestId ?? null,
+      userId: params.userId,
+      context: params.context
+    });
+  } catch (error) {
+    console.error("[google_reviews_auth] clear_reauth_state_failed", {
+      requestId: params.requestId ?? null,
+      userId: params.userId,
+      context: params.context,
+      message: getErrorMessage(error).slice(0, 220)
+    });
   }
 };
 
@@ -1038,6 +1150,8 @@ export const syncGoogleReviewsForUser = async (
     ? new Date(connection.expires_at).getTime()
     : 0;
   const shouldRefresh = !accessToken || expiresAt - Date.now() < 60_000;
+  let refreshSucceeded = !shouldRefresh;
+  let googleApiCallSucceeded = false;
 
   if (shouldRefresh) {
     if (!connection.refresh_token) {
@@ -1057,6 +1171,7 @@ export const syncGoogleReviewsForUser = async (
       }
       throw error;
     }
+    refreshSucceeded = true;
     accessToken = refreshed.access_token;
     const newExpiresAt =
       refreshed.expires_in && refreshed.expires_in > 0
@@ -1169,6 +1284,7 @@ export const syncGoogleReviewsForUser = async (
 
     try {
       const result = await listReviewsForLocation(accessToken, parent);
+      googleApiCallSucceeded = true;
       const reviews = result.reviews;
       pages = result.pages;
       pagesExhausted = result.pagesExhausted;
@@ -1390,13 +1506,15 @@ export const syncGoogleReviewsForUser = async (
         }
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dynamicSupabase = supabaseAdmin as unknown as DynamicSupabaseClient;
       const { error: upsertError } = await withSupabaseRetry(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () =>
-          (supabaseAdmin as any).from("google_reviews").upsert(dedupedRows as any, {
-            onConflict: conflictKey
-          }),
+          dynamicSupabase.from("google_reviews").upsert(
+            dedupedRows as unknown as Record<string, unknown>[],
+            {
+              onConflict: conflictKey
+            }
+          ),
         {
           requestId,
           label: "google_reviews.upsert"
@@ -1442,9 +1560,8 @@ export const syncGoogleReviewsForUser = async (
         insertedAlerts = alertsToInsert.length;
         if (alertsToInsert.length > 0) {
           const { error: alertError } = await withSupabaseRetry(
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             () =>
-              (supabaseAdmin as any).from("alerts").insert(alertsToInsert, {
+              dynamicSupabase.from("alerts").insert(alertsToInsert as unknown as Record<string, unknown>, {
                 onConflict: "rule_code,review_id",
                 ignoreDuplicates: true
               }),
@@ -1507,9 +1624,8 @@ export const syncGoogleReviewsForUser = async (
           );
           if (backfillAlerts.length > 0) {
             const { error: backfillInsertError } = await withSupabaseRetry(
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               () =>
-                (supabaseAdmin as any).from("alerts").insert(backfillAlerts, {
+                dynamicSupabase.from("alerts").insert(backfillAlerts as unknown as Record<string, unknown>, {
                   onConflict: "rule_code,review_id",
                   ignoreDuplicates: true
                 }),
@@ -1622,21 +1738,26 @@ export const syncGoogleReviewsForUser = async (
           ? error.httpStatuses
           : httpStatuses;
       const failedPagesExhausted = pagesExhausted;
-      const failedAuthStatus: AuthStatusSummary =
+      const isConfirmedAuthFailure =
         error instanceof GoogleReviewsFetchError &&
-        (error.status === 401 || error.status === 403)
-          ? {
-              status: "reauth_required",
-              reason: "token_revoked",
-              last_checked_at: new Date().toISOString(),
-              message
-            }
-          : {
-              status: "unknown",
-              reason: "unknown",
-              last_checked_at: new Date().toISOString(),
-              message
-            };
+        isAuthReauthRequired({
+          status: error.status,
+          reason: null,
+          message
+        });
+      const failedAuthStatus: AuthStatusSummary = isConfirmedAuthFailure
+        ? {
+            status: "reauth_required",
+            reason: deriveReauthReasonFromMessage(message),
+            last_checked_at: new Date().toISOString(),
+            message
+          }
+        : {
+            status: "unknown",
+            reason: "unknown",
+            last_checked_at: new Date().toISOString(),
+            message
+          };
 
       await upsertImportStatus(
         supabaseAdmin,
@@ -1716,11 +1837,18 @@ export const syncGoogleReviewsForUser = async (
     );
   }
 
+  if (googleApiCallSucceeded && refreshSucceeded) {
+    await clearGoogleReauthState(supabaseAdmin, {
+      userId,
+      requestId,
+      context: "reviews_sync_success"
+    });
+  }
+
   // Persist last run status per user (cron_state is user-scoped now)
   await withSupabaseRetry(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     () =>
-      (supabaseAdmin as any).from("cron_state").upsert({
+      supabaseAdmin.from("cron_state").upsert({
         key: "google_reviews_last_run",
         user_id: userId,
         value: {
@@ -1848,12 +1976,12 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       }
       if (userId) {
         const supabaseAdmin = createSupabaseAdmin();
+        const dynamicSupabase = supabaseAdmin as unknown as DynamicSupabaseClient;
         const nowIso = new Date().toISOString();
         try {
           await withSupabaseRetry(
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             () =>
-              (supabaseAdmin as any).from("cron_state").upsert({
+              dynamicSupabase.from("cron_state").upsert({
                 key: "google_reviews_last_error",
                 user_id: userId,
                 value: {
