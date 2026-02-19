@@ -1055,12 +1055,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     }
 
     if (!locationIds || locationIds.length === 0) {
-      return res.status(200).json({
-        rows: [],
-        nextCursor: null,
-        reason: "no_locations_or_no_reviews"
-      });
+      throw new Error("No location selected");
     }
+    const selectedLocationId = locationIds[0];
 
     const preset = filters.preset;
     const from = filters.from;
@@ -1116,7 +1113,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     const { data: inboxRowsRaw, error: inboxRowsError } = await inboxRpcClient.rpc(
       "get_inbox_reviews",
       {
-        p_location_id: locationIds.length === 1 ? locationIds[0] : null,
+        p_location_id: selectedLocationId,
         p_limit: candidateLimit,
         p_only_with_comment: !includeNoComment,
         p_lookback_days: lookbackDays,
