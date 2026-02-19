@@ -1114,8 +1114,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       {
         p_location_id: locationIds.length === 1 ? locationIds[0] : null,
         p_limit: candidateLimit,
-        p_include_no_comment: includeNoComment,
-        p_lookback_days: lookbackDays
+        p_only_with_comment: !includeNoComment,
+        p_lookback_days: lookbackDays,
+        p_user_id: userId
       }
     );
     if (inboxRowsError) {
