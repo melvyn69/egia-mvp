@@ -1138,7 +1138,11 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
             create_time: row.create_time,
             update_time: row.update_time,
             created_at: row.inserted_at ?? row.create_time ?? row.update_time,
-            status: row.status,
+            status: row.owner_reply
+              ? "replied"
+              : row.has_draft
+                ? "draft"
+                : "new",
             owner_reply: row.owner_reply,
             draft_status: row.draft_status,
             draft_preview: row.draft_preview,
@@ -1222,8 +1226,16 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       ) {
         return false;
       }
-      if (status && row.status !== status) {
-        return false;
+      if (status) {
+        const computedStatus = row.owner_reply
+          ? "replied"
+          : row.has_draft
+            ? "draft"
+            : "new";
+
+        if (computedStatus !== status) {
+          return false;
+        }
       }
       if (!cursor) {
         return true;
