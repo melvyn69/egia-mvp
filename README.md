@@ -150,7 +150,7 @@ where gr.user_id = '00000000-0000-0000-0000-000000000000'::uuid
   and gr.location_id = 'locations/1111111111111111111'
   and nullif(btrim(coalesce(gr.comment, '')), '') is not null
   and nullif(btrim(coalesce(gr.owner_reply, '')), '') is null
-  and coalesce(gr.create_time, gr.update_time, gr.inserted_at) >= now() - interval '180 days'
+  and coalesce(gr.create_time, gr.update_time, gr.created_at) >= now() - interval '180 days'
   and not exists (
     select 1
     from public.review_ai_replies rar
@@ -166,8 +166,28 @@ where gr.user_id = '00000000-0000-0000-0000-000000000000'::uuid
       and coalesce(aj.payload->>'location_id', '') = coalesce(gr.location_id, '')
       and aj.status in ('queued', 'pending', 'processing', 'generating')
   )
-order by coalesce(gr.update_time, gr.create_time, gr.inserted_at) desc, gr.id desc
+order by coalesce(gr.update_time, gr.create_time, gr.created_at) desc, gr.id desc
 limit 20;
+```
+
+Contrôle direct `google_reviews` (location + owner_reply manquant):
+
+```sql
+select
+  count(*) as missing_owner_reply_total
+from public.google_reviews
+where location_id = 'locations/1116485163914248460'
+  and (owner_reply is null or btrim(owner_reply) = '');
+```
+
+Si votre schéma utilise `location_resource_name` au lieu de `location_id`, utilisez:
+
+```sql
+select
+  count(*) as missing_owner_reply_total
+from public.google_reviews
+where location_resource_name = 'locations/1116485163914248460'
+  and (owner_reply is null or btrim(owner_reply) = '');
 ```
 
 Exemple d'appel RPC:
@@ -188,9 +208,20 @@ Exemple d'appel inbox listing:
 ```sql
 select *
 from public.get_inbox_reviews(
-  'locations/1111111111111111111',
+  'locations/1116485163914248460',
   50,
   false,
+  180
+);
+```
+
+Exemple d'appel génération (éligibles uniquement):
+
+```sql
+select *
+from public.get_reviews_to_reply(
+  'locations/1116485163914248460',
+  50,
   180
 );
 ```
@@ -201,7 +232,7 @@ Breakdown debug (missing_owner_reply_total / already_has_draft / eligible_to_gen
 with inbox as (
   select *
   from public.get_inbox_reviews(
-    'locations/1111111111111111111',
+    'locations/1116485163914248460',
     500,
     false,
     180
