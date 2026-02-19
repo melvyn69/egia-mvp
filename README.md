@@ -129,6 +129,90 @@ BASE_URL=http://localhost:3000 JWT=<jwt_supabase_user> npm run smoke:google-onbo
 BASE_URL=http://localhost:3000 JWT=<jwt_supabase_user> LOCATION_ID=locations/123 npm run smoke:google-onboarding
 ```
 
+## Debug SQL (reviews to reply / drafts)
+
+Important: l'éditeur SQL Supabase n'injecte pas `$1/$2` dans une requête ad-hoc. Les placeholders fonctionnent dans une FUNCTION/RPC.
+
+Requête debug (valeurs littérales) pour lister les reviews à traiter:
+
+```sql
+select
+  gr.id,
+  gr.user_id,
+  gr.location_id,
+  gr.review_id,
+  gr.comment,
+  gr.owner_reply,
+  gr.create_time,
+  gr.update_time
+from public.google_reviews gr
+where gr.user_id = '00000000-0000-0000-0000-000000000000'::uuid
+  and gr.location_id = 'locations/1111111111111111111'
+  and nullif(btrim(coalesce(gr.comment, '')), '') is not null
+  and nullif(btrim(coalesce(gr.owner_reply, '')), '') is null
+  and coalesce(gr.create_time, gr.update_time, gr.inserted_at) >= now() - interval '180 days'
+  and not exists (
+    select 1
+    from public.review_ai_replies rar
+    where rar.review_id = gr.id
+      and coalesce(rar.mode, 'draft') = 'draft'
+      and coalesce(rar.status, 'draft') in ('draft', 'queued', 'processing', 'generating')
+  )
+  and not exists (
+    select 1
+    from public.ai_jobs aj
+    where aj.type = 'review_analyze'
+      and coalesce(aj.payload->>'review_id', '') = gr.id::text
+      and coalesce(aj.payload->>'location_id', '') = coalesce(gr.location_id, '')
+      and aj.status in ('queued', 'pending', 'processing', 'generating')
+  )
+order by coalesce(gr.update_time, gr.create_time, gr.inserted_at) desc, gr.id desc
+limit 20;
+```
+
+Exemple d'appel RPC:
+
+```sql
+select *
+from public.get_reviews_to_reply(
+  p_location_id := 'locations/1111111111111111111',
+  p_limit := 20,
+  p_lookback_days := 180,
+  p_user_id := '00000000-0000-0000-0000-000000000000'::uuid,
+  p_review_id := null
+);
+```
+
+Vérifier qu'il n'y a pas de doublons de drafts:
+
+```sql
+select
+  review_id,
+  mode,
+  count(*) as row_count
+from public.review_ai_replies
+group by review_id, mode
+having count(*) > 1;
+```
+
+Vérifier une liste ciblée de reviews:
+
+```sql
+select *
+from public.get_reviews_to_reply(
+  p_location_id := 'locations/1111111111111111111',
+  p_limit := 50,
+  p_lookback_days := 180,
+  p_user_id := '00000000-0000-0000-0000-000000000000'::uuid,
+  p_review_id := null
+)
+where review_pk::text in (
+  '77f24fce-0000-0000-0000-000000000000',
+  'f2565d0e-0000-0000-0000-000000000000',
+  '1086485f-0000-0000-0000-000000000000'
+);
+```
+
 ## Cron-job.org
 
 Créer un job POST:
