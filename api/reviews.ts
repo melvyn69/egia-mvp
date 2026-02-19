@@ -189,6 +189,10 @@ const AI_JOB_IN_FLIGHT_STATUSES = [
 const isNonEmptyText = (value: unknown) =>
   typeof value === "string" && value.trim().length > 0;
 
+const isUuid = (value: unknown): value is string =>
+  typeof value === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+
 const parseBooleanQuery = (value: unknown, defaultValue = false) => {
   const raw = Array.isArray(value) ? value[0] : value;
   if (typeof raw !== "string") {
@@ -1116,7 +1120,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         p_limit: candidateLimit,
         p_only_with_comment: !includeNoComment,
         p_lookback_days: lookbackDays,
-        p_user_id: userId
+        p_user_id: isUuid(userId) ? userId : null
       }
     );
     if (inboxRowsError) {
