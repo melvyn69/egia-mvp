@@ -55,6 +55,12 @@ type Review = {
   aiTags: string[];
   aiPriority: boolean;
   aiPriorityScore: number;
+  draftStatus?: string | null;
+  draftPreview?: string | null;
+  draftUpdatedAt?: string | null;
+  hasDraft?: boolean;
+  hasJobInflight?: boolean;
+  isEligibleToGenerate?: boolean;
 };
 
 type LengthPreset = "court" | "moyen" | "long";
@@ -88,6 +94,12 @@ type ReviewRow = {
   create_time: string | null;
   update_time: string | null;
   status: ReviewStatus | null;
+  draft_status?: string | null;
+  draft_preview?: string | null;
+  draft_updated_at?: string | null;
+  has_draft?: boolean;
+  has_job_inflight?: boolean;
+  is_eligible_to_generate?: boolean;
 };
 
 type AiInsight = {
@@ -518,7 +530,13 @@ const Inbox = () => {
         aiSummary: null,
         aiTags: [],
         aiPriority: false,
-        aiPriorityScore: 0
+        aiPriorityScore: 0,
+        draftStatus: row.draft_status ?? null,
+        draftPreview: row.draft_preview ?? null,
+        draftUpdatedAt: row.draft_updated_at ?? null,
+        hasDraft: Boolean(row.has_draft),
+        hasJobInflight: Boolean(row.has_job_inflight),
+        isEligibleToGenerate: Boolean(row.is_eligible_to_generate)
       } satisfies Review;
     });
 
@@ -856,6 +874,11 @@ const Inbox = () => {
     });
   }, [reviews, statusFilter, selectedLocation]);
 
+  const eligibleFilteredReviews = useMemo(
+    () => filteredReviews.filter((review: Review) => review.isEligibleToGenerate === true),
+    [filteredReviews]
+  );
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const targetReviewId = params.get("review_id");
@@ -1098,7 +1121,7 @@ const Inbox = () => {
   };
 
   const handlePrepareDrafts = useCallback(
-    async (locationId: string, userTriggered = false) => {
+    async (locationId: string, userTriggered = false, requestedLimit = 10) => {
       if (!userTriggered) {
         return;
       }
@@ -1107,6 +1130,7 @@ const Inbox = () => {
       }
       setPrepareDraftLoading(true);
       setPrepareDraftMessage(null);
+      const safeLimit = Math.min(25, Math.max(1, Math.trunc(requestedLimit) || 10));
       try {
         const token = await getAccessToken(supabase);
         const response = await fetch("/api/reviews?action=prepare_drafts", {
@@ -1115,7 +1139,7 @@ const Inbox = () => {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({ location_id: locationId, limit: 10 })
+          body: JSON.stringify({ location_id: locationId, limit: safeLimit })
         });
         const payload = await response.json().catch(() => null);
         if (response.status === 401) {
@@ -2149,6 +2173,10 @@ const Inbox = () => {
       setBatchError("Aucun avis à traiter.");
       return;
     }
+    if (eligibleFilteredReviews.length === 0) {
+      setBatchError("Aucun avis éligible à générer.");
+      return;
+    }
     const cooldownUntil = prepareDraftCooldownRef.current[activeLocationId] ?? 0;
     if (cooldownUntil && Date.now() < cooldownUntil) {
       setBatchError("Preparation en cooldown.");
@@ -2156,10 +2184,14 @@ const Inbox = () => {
     }
     setBatchGenerating(true);
     setBatchError(null);
-    setBatchProgress({ current: 0, total: 1 });
+    setBatchProgress({ current: 0, total: eligibleFilteredReviews.length });
     try {
-      setBatchProgress({ current: 1, total: 1 });
-      await handlePrepareDrafts(activeLocationId, true);
+      setBatchProgress({ current: eligibleFilteredReviews.length, total: eligibleFilteredReviews.length });
+      await handlePrepareDrafts(
+        activeLocationId,
+        true,
+        eligibleFilteredReviews.length
+      );
     } finally {
       setBatchGenerating(false);
     }
@@ -2331,7 +2363,7 @@ const Inbox = () => {
                 variant="outline"
                 size="sm"
                 onClick={handleGenerateBatch}
-                disabled={batchGenerating || filteredReviews.length === 0}
+                disabled={batchGenerating || eligibleFilteredReviews.length === 0}
               >
                 {batchGenerating
                   ? `Génération ${batchProgress.current}/${batchProgress.total}`
