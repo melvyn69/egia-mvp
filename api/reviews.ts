@@ -22,6 +22,13 @@ type GoogleReviewRow = {
   update_time: string | null;
   created_at: string | null;
   status: string | null;
+  owner_reply?: string | null;
+  draft_status?: string | null;
+  draft_preview?: string | null;
+  draft_updated_at?: string | null;
+  has_draft?: boolean;
+  has_job_inflight?: boolean;
+  is_eligible_to_generate?: boolean;
 };
 
 type ReviewInsightRow = { review_pk: string; sentiment: string | null };
@@ -66,6 +73,27 @@ type ReviewEligibilityProbe = {
   create_time: string | null;
   update_time: string | null;
   inserted_at: string | null;
+};
+
+type InboxReviewRpcRow = {
+  review_id: string;
+  review_name: string | null;
+  google_review_id: string | null;
+  location_id: string | null;
+  author_name: string | null;
+  status: string | null;
+  create_time: string | null;
+  update_time: string | null;
+  inserted_at: string | null;
+  rating: number | null;
+  comment: string | null;
+  owner_reply: string | null;
+  draft_status: string | null;
+  draft_preview: string | null;
+  draft_updated_at: string | null;
+  has_draft: boolean | null;
+  has_job_inflight: boolean | null;
+  is_eligible_to_generate: boolean | null;
 };
 
 type CronStatus = {
@@ -160,6 +188,21 @@ const AI_JOB_IN_FLIGHT_STATUSES = [
 
 const isNonEmptyText = (value: unknown) =>
   typeof value === "string" && value.trim().length > 0;
+
+const parseBooleanQuery = (value: unknown, defaultValue = false) => {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== "string") {
+    return defaultValue;
+  }
+  const normalized = raw.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return defaultValue;
+};
 
 const handler = async (req: VercelRequest, res: VercelResponse) => {
   const route = "/api/reviews";
@@ -1029,6 +1072,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       typeof range.from === "string" ? range.from : range.from.toISOString();
     const rangeTo =
       typeof range.to === "string" ? range.to : range.to.toISOString();
+    const rangeFromMs = new Date(rangeFrom).getTime();
+    const rangeToMs = new Date(rangeTo).getTime();
 
     const ratingMin = filters.rating_min ?? null;
     const ratingMax = filters.rating_max ?? null;
@@ -1041,51 +1086,67 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       Math.max(Number(limitParam) || 50, 1),
       200
     );
+    const includeNoComment = parseBooleanQuery(
+      req.query.include_no_comment,
+      false
+    );
+    const lookbackDays = Math.min(
+      3650,
+      Math.max(
+        0,
+        Number.parseInt(String(req.query.lookback_days ?? 180), 10) || 180
+      )
+    );
+    const candidateLimit = Math.min(Math.max(limit * 6, limit), 500);
     const cursorParam = req.query.cursor;
     const cursor = parseCursor(
       Array.isArray(cursorParam) ? cursorParam[0] : cursorParam
     );
 
-    let query = supabaseUser
-      .from("google_reviews")
-      .select(
-        "id, review_id, location_id, author_name, rating, comment, create_time, update_time, created_at, status"
-      )
-      .eq("user_id", userId)
-      .order("update_time", { ascending: false, nullsFirst: false })
-      .order("create_time", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false, nullsFirst: false })
-      .order("review_id", { ascending: false })
-      .limit(limit * 3);
-    if (locationIds.length === 1) {
-      query = query.eq("location_id", locationIds[0]);
-    } else {
-      query = query.in("location_id", locationIds);
-    }
-
-    query = query.or(
-      `and(update_time.gte.${rangeFrom},update_time.lte.${rangeTo}),` +
-        `and(update_time.is.null,create_time.gte.${rangeFrom},create_time.lte.${rangeTo}),` +
-        `and(update_time.is.null,create_time.is.null,created_at.gte.${rangeFrom},created_at.lte.${rangeTo})`
-    );
-
-    if (ratingMin !== null && Number.isFinite(ratingMin)) {
-      query = query.gte("rating", ratingMin);
-    }
-    if (ratingMax !== null && Number.isFinite(ratingMax)) {
-      query = query.lte("rating", ratingMax);
-    }
-    if (status) {
-      query = query.eq("status", status);
-    }
-
-    const { data: baseRows, error: baseError } = (await query) as {
-      data: GoogleReviewRow[] | null;
-      error: unknown;
+    const inboxRpcClient = supabaseUser as unknown as {
+      rpc: (
+        fn: string,
+        params: Record<string, unknown>
+      ) => Promise<{ data: InboxReviewRpcRow[] | null; error: { message?: string | null } | null }>;
     };
-    if (baseError) {
-      throw baseError;
+    const { data: inboxRowsRaw, error: inboxRowsError } = await inboxRpcClient.rpc(
+      "get_inbox_reviews",
+      {
+        p_location_id: locationIds.length === 1 ? locationIds[0] : null,
+        p_limit: candidateLimit,
+        p_include_no_comment: includeNoComment,
+        p_lookback_days: lookbackDays
+      }
+    );
+    if (inboxRowsError) {
+      throw new Error(inboxRowsError.message ?? "Failed to load inbox reviews");
     }
+    const allowedLocationSet = new Set(locationIds);
+    const baseRows = (inboxRowsRaw ?? [])
+      .filter((row) => row.location_id && allowedLocationSet.has(row.location_id))
+      .map(
+        (row) =>
+          ({
+            id: row.review_id,
+            review_id: row.google_review_id ?? row.review_name ?? null,
+            location_id: row.location_id,
+            author_name: row.author_name,
+            rating: row.rating,
+            comment: row.comment,
+            create_time: row.create_time,
+            update_time: row.update_time,
+            created_at: row.inserted_at ?? row.create_time ?? row.update_time,
+            status: row.status,
+            owner_reply: row.owner_reply,
+            draft_status: row.draft_status,
+            draft_preview: row.draft_preview,
+            draft_updated_at: row.draft_updated_at,
+            has_draft: Boolean(row.has_draft),
+            has_job_inflight: Boolean(row.has_job_inflight),
+            is_eligible_to_generate: Boolean(row.is_eligible_to_generate)
+          }) satisfies GoogleReviewRow
+      );
+
     const countQuery = supabaseUser
       .from("google_reviews")
       .select("id", { count: "exact", head: true })
@@ -1095,10 +1156,14 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     } else {
       countQuery.in("location_id", locationIds);
     }
+    countQuery.or("owner_reply.is.null,owner_reply.eq.");
+    if (!includeNoComment) {
+      countQuery.not("comment", "is", null).neq("comment", "");
+    }
     countQuery.or(
       `and(update_time.gte.${rangeFrom},update_time.lte.${rangeTo}),` +
         `and(update_time.is.null,create_time.gte.${rangeFrom},create_time.lte.${rangeTo}),` +
-        `and(update_time.is.null,create_time.is.null,created_at.gte.${rangeFrom},created_at.lte.${rangeTo})`
+        `and(update_time.is.null,create_time.is.null,inserted_at.gte.${rangeFrom},inserted_at.lte.${rangeTo})`
     );
     if (ratingMin !== null && Number.isFinite(ratingMin)) {
       countQuery.gte("rating", ratingMin);
@@ -1118,6 +1183,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         tz: timeZone,
         rangeFrom,
         rangeTo,
+        lookbackDays,
+        includeNoComment,
         total: total ?? 0
       });
       console.info("[reviews] rows", {
@@ -1129,7 +1196,34 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     const rows = (baseRows ?? []).filter((row) => {
       const sourceTime =
         row.update_time ?? row.create_time ?? row.created_at ?? null;
-      if (!sourceTime || !cursor) {
+      if (!sourceTime) {
+        return false;
+      }
+      const sourceTimeMs = new Date(sourceTime).getTime();
+      if (Number.isFinite(rangeFromMs) && sourceTimeMs < rangeFromMs) {
+        return false;
+      }
+      if (Number.isFinite(rangeToMs) && sourceTimeMs > rangeToMs) {
+        return false;
+      }
+      if (
+        ratingMin !== null &&
+        Number.isFinite(ratingMin) &&
+        (row.rating === null || row.rating < ratingMin)
+      ) {
+        return false;
+      }
+      if (
+        ratingMax !== null &&
+        Number.isFinite(ratingMax) &&
+        (row.rating === null || row.rating > ratingMax)
+      ) {
+        return false;
+      }
+      if (status && row.status !== status) {
+        return false;
+      }
+      if (!cursor) {
         return true;
       }
       if (sourceTime < cursor.source_time) {

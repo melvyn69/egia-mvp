@@ -183,6 +183,37 @@ from public.get_reviews_to_reply(
 );
 ```
 
+Exemple d'appel inbox listing:
+
+```sql
+select *
+from public.get_inbox_reviews(
+  'locations/1111111111111111111',
+  50,
+  false,
+  180
+);
+```
+
+Breakdown debug (missing_owner_reply_total / already_has_draft / eligible_to_generate):
+
+```sql
+with inbox as (
+  select *
+  from public.get_inbox_reviews(
+    'locations/1111111111111111111',
+    500,
+    false,
+    180
+  )
+)
+select 'missing_owner_reply_total' as metric, count(*)::bigint as value from inbox
+union all
+select 'already_has_draft' as metric, count(*)::bigint as value from inbox where has_draft
+union all
+select 'eligible_to_generate' as metric, count(*)::bigint as value from inbox where is_eligible_to_generate;
+```
+
 Vérifier qu'il n'y a pas de doublons de drafts:
 
 ```sql
