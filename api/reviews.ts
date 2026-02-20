@@ -76,6 +76,7 @@ type ReviewEligibilityProbe = {
 };
 
 type InboxReviewRpcRow = {
+  review_pk?: string | null;
   review_id: string;
   review_name: string | null;
   google_review_id: string | null;
@@ -1123,29 +1124,37 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     if (inboxRowsError) {
       throw new Error(inboxRowsError.message ?? "Failed to load inbox reviews");
     }
+    console.info("[reviews] inbox rpc", {
+      requestId,
+      userId,
+      selectedLocationId,
+      count: inboxRowsRaw?.length ?? 0,
+      status
+    });
+    if (!inboxRowsRaw) {
+      return res
+        .status(200)
+        .json({ rows: [], nextCursor: null, reason: "no_inbox_rows" });
+    }
     const allowedLocationSet = new Set(locationIds);
-    const baseRows = (inboxRowsRaw ?? [])
+    const baseRows = inboxRowsRaw
       .filter((row) => row.location_id && allowedLocationSet.has(row.location_id))
       .map(
         (row) =>
           ({
-            id: row.review_id,
-            review_id: row.google_review_id ?? row.review_name ?? null,
-            location_id: row.location_id,
-            author_name: row.author_name,
+            id: row.review_pk ?? row.review_id ?? row.review_name ?? "",
+            review_id: row.google_review_id ?? row.review_name ?? "",
+            location_id: row.location_id ?? "",
+            author_name: row.author_name ?? "",
             rating: row.rating,
-            comment: row.comment,
+            comment: row.comment ?? "",
             create_time: row.create_time,
             update_time: row.update_time,
             created_at: row.inserted_at ?? row.create_time ?? row.update_time,
-            status: row.owner_reply
-              ? "replied"
-              : row.has_draft
-                ? "draft"
-                : "new",
-            owner_reply: row.owner_reply,
+            status: row.status ?? "new",
+            owner_reply: row.owner_reply ?? "",
             draft_status: row.draft_status,
-            draft_preview: row.draft_preview,
+            draft_preview: row.draft_preview ?? "",
             draft_updated_at: row.draft_updated_at,
             has_draft: Boolean(row.has_draft),
             has_job_inflight: Boolean(row.has_job_inflight),
@@ -1225,17 +1234,6 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         (row.rating === null || row.rating > ratingMax)
       ) {
         return false;
-      }
-      if (status) {
-        const computedStatus = row.owner_reply
-          ? "replied"
-          : row.has_draft
-            ? "draft"
-            : "new";
-
-        if (computedStatus !== status) {
-          return false;
-        }
       }
       if (!cursor) {
         return true;
