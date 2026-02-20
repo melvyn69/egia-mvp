@@ -25,6 +25,7 @@ const googleClientSecret = getEnv([
 ]);
 const openaiApiKey = process.env.OPENAI_API_KEY ?? "";
 const openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const internalApiKey = (process.env.INTERNAL_API_KEY ?? "").trim();
 
 const getMissingEnv = (mode: "reply" | "draft" | "test" | "automation") => {
   const missing = [];
@@ -252,15 +253,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `req_${crypto.randomUUID()}`;
 
   try {
-    const auth = req.headers.authorization || "";
-    const jwt = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    if (!jwt) {
-      console.error("[reply]", requestId, "missing bearer token");
-      return res.status(401).json({ error: "Missing Authorization Bearer token" });
-    }
-
-    const userId = await getUserIdFromJwt(jwt);
-
     let payload = req.body ?? {};
     if (typeof payload === "string") {
       try {
@@ -276,6 +268,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       payload?.mode === "automation"
         ? payload.mode
         : "reply";
+    const internalHeader = req.headers["x-internal-api-key"];
+    const internalHeaderValue = Array.isArray(internalHeader)
+      ? internalHeader[0] ?? ""
+      : internalHeader ?? "";
+    const isInternalAutomationRequest =
+      mode === "automation" &&
+      internalApiKey.length > 0 &&
+      internalHeaderValue.trim() === internalApiKey;
+    let userId = "";
+    if (isInternalAutomationRequest) {
+      const internalUserId =
+        typeof (payload as { user_id?: unknown }).user_id === "string"
+          ? (payload as { user_id: string }).user_id.trim()
+          : "";
+      if (!internalUserId) {
+        return res.status(400).json({ error: "Missing user_id for internal automation" });
+      }
+      userId = internalUserId;
+    } else {
+      const auth = req.headers.authorization || "";
+      const jwt = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+      if (!jwt) {
+        console.error("[reply]", requestId, "missing bearer token");
+        return res.status(401).json({ error: "Missing Authorization Bearer token" });
+      }
+      userId = await getUserIdFromJwt(jwt);
+    }
     const missingEnv = getMissingEnv(mode);
     if (missingEnv.length) {
       console.error("[reply]", requestId, "missing env:", missingEnv);
@@ -283,7 +302,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .status(500)
         .json({ error: `Missing env: ${missingEnv.join(", ")}` });
     }
-    if (mode === "automation") {
+    if (mode === "automation" && !isInternalAutomationRequest) {
       const isAdmin = await isAdminUser(userId);
       if (!isAdmin) {
         return res.status(403).json({ error: "Admin role required" });
@@ -315,6 +334,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         replyText?: string;
         draftReplyId?: string;
         googleReviewId?: string;
+        user_id?: string;
         brand_voice_override?: unknown;
         allow_identity_override?: boolean;
       };
@@ -430,6 +450,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           requestId,
           strictIdentity: true
         });
+        if (mode === "automation" && process.env.NODE_ENV !== "production") {
+          const aiMeta = aiResult.meta as Record<string, unknown> | undefined;
+          const hasIdentityFields = Boolean(
+            aiMeta?.ai_identity_hash || aiMeta?.ai_identity_id || aiMeta?.ai_identity_applied
+          );
+          console.info("[reply] automation prompt context", {
+            requestId,
+            userId,
+            locationId:
+              review.location_id ?? (typeof location_id === "string" ? location_id : null),
+            hasIdentityFields
+          });
+        }
         void insertReplyHistory({
           userId,
           reviewId: review.review_id ?? review.id,

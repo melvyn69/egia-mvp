@@ -30,21 +30,85 @@ const getSupabaseAdmin = () => {
   });
 };
 
-const buildFallbackDraft = (review: {
-  author_name?: string | null;
-  rating?: number | null;
-  comment?: string | null;
-  location_name?: string | null;
+const getEnv = (keys: string[]) => {
+  for (const key of keys) {
+    const value = (Deno.env.get(key) ?? "").trim();
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+};
+
+const getAutomationReplyUrl = () => {
+  const explicit = getEnv(["AUTOMATION_REPLY_URL"]);
+  if (explicit) {
+    return explicit;
+  }
+  const appUrl = getEnv(["APP_URL"]);
+  if (appUrl) {
+    return `${appUrl.replace(/\/+$/, "")}/api/google/reply`;
+  }
+  const vercelUrl = getEnv(["VERCEL_URL"]);
+  if (vercelUrl) {
+    const base = vercelUrl.startsWith("http") ? vercelUrl : `https://${vercelUrl}`;
+    return `${base.replace(/\/+$/, "")}/api/google/reply`;
+  }
+  return "";
+};
+
+const invokeAutomationReply = async (params: {
+  requestId: string;
+  reviewId: string;
+  reviewGoogleId: string | null;
+  locationId: string | null;
+  userId: string;
 }) => {
-  const author = review.author_name?.trim() || "merci";
-  const rating = review.rating ?? null;
-  const location = review.location_name?.trim();
-  const intro = rating !== null && rating <= 2 ? "Nous sommes désolés" : "Merci";
-  const body = review.comment
-    ? `Nous avons bien pris en compte votre retour: "${review.comment}".`
-    : "";
-  const outro = "Nous restons à votre écoute.";
-  return `${intro} ${author}${location ? ` (${location})` : ""}. ${body} ${outro}`.trim();
+  const automationReplyUrl = getAutomationReplyUrl();
+  if (!automationReplyUrl) {
+    throw new Error("Missing AUTOMATION_REPLY_URL/APP_URL/VERCEL_URL");
+  }
+  const internalApiKey = getEnv(["INTERNAL_API_KEY"]);
+  if (!internalApiKey) {
+    throw new Error("Missing INTERNAL_API_KEY");
+  }
+  const response = await fetch(automationReplyUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-internal-api-key": internalApiKey,
+      "x-request-id": params.requestId
+    },
+    body: JSON.stringify({
+      mode: "automation",
+      id: params.reviewId,
+      review_id: params.reviewGoogleId,
+      location_id: params.locationId,
+      user_id: params.userId
+    })
+  });
+  const responseText = await response.text();
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    parsed = responseText ? (JSON.parse(responseText) as Record<string, unknown>) : null;
+  } catch {
+    parsed = null;
+  }
+  if (!response.ok) {
+    const detail =
+      (parsed && typeof parsed.error === "string" ? parsed.error : responseText)?.slice(0, 500);
+    throw new Error(`automation reply failed (${response.status}): ${detail || "unknown error"}`);
+  }
+  const draftText =
+    parsed && typeof parsed.draft_text === "string" ? parsed.draft_text.trim() : "";
+  if (!draftText) {
+    throw new Error("automation reply returned empty draft_text");
+  }
+  const meta =
+    parsed && parsed.meta && typeof parsed.meta === "object"
+      ? (parsed.meta as Record<string, unknown>)
+      : null;
+  return { draftText, meta };
 };
 
 Deno.serve(async (req) => {
@@ -133,7 +197,7 @@ Deno.serve(async (req) => {
       try {
         const { data: reviewRow, error: reviewError } = await supabaseAdmin
           .from("google_reviews")
-          .select("id, user_id, location_id, author_name, rating, comment, location_name")
+          .select("id, review_id, user_id, location_id, author_name, rating, comment, location_name")
           .eq("id", reviewId)
           .eq("user_id", jobUserId)
           .maybeSingle();
@@ -158,13 +222,25 @@ Deno.serve(async (req) => {
           : "";
 
         if (!existingText) {
-          const draftText = buildFallbackDraft(reviewRow);
-          const computedReviewIdForInsert = reviewId;
-          console.log("[process-review-analyze] draft upsert", {
-            job_id: jobId,
-            payload_review_id: reviewId,
-            computed_review_id_used_for_insert: computedReviewIdForInsert
+          const { draftText, meta } = await invokeAutomationReply({
+            requestId: `${jobId}:${reviewId}`,
+            reviewId,
+            reviewGoogleId: reviewRow.review_id ?? null,
+            locationId: jobLocationId ?? reviewRow.location_id ?? null,
+            userId: jobUserId
           });
+          if (Deno.env.get("NODE_ENV") !== "production") {
+            const hasIdentityFields = Boolean(
+              meta?.ai_identity_hash || meta?.ai_identity_id || meta?.ai_identity_applied
+            );
+            console.info("[process-review-analyze] automation prompt context", {
+              job_id: jobId,
+              userId: jobUserId,
+              locationId: jobLocationId ?? reviewRow.location_id ?? null,
+              hasIdentityFields
+            });
+          }
+          const computedReviewIdForInsert = reviewId;
           const { error: upsertError } = await supabaseAdmin
             .from("review_ai_replies")
             .upsert(
@@ -173,6 +249,11 @@ Deno.serve(async (req) => {
                 user_id: jobUserId,
                 location_id: jobLocationId ?? reviewRow.location_id ?? null,
                 draft_text: draftText,
+                mode: "draft",
+                identity_hash:
+                  meta && typeof meta.ai_identity_hash === "string"
+                    ? meta.ai_identity_hash
+                    : null,
                 status: "draft",
                 updated_at: new Date().toISOString()
               },
@@ -196,6 +277,13 @@ Deno.serve(async (req) => {
             : "";
           if (!persistedDraft?.review_id || !persistedText) {
             throw new Error("Draft write verification failed");
+          }
+          if (Deno.env.get("NODE_ENV") !== "production") {
+            console.info("[process-review-analyze] draft saved", {
+              review_id: computedReviewIdForInsert,
+              draft_length: persistedText.length,
+              source: "automation-generateAiReply"
+            });
           }
         }
 
