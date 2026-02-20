@@ -209,6 +209,41 @@ const parseBooleanQuery = (value: unknown, defaultValue = false) => {
   return defaultValue;
 };
 
+type InboxStatusFilter = "new" | "draft" | "replied" | "ignored";
+
+const normalizeInboxStatus = (value: unknown): InboxStatusFilter | null => {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized || normalized === "all" || normalized === "tout") {
+    return null;
+  }
+  if (
+    normalized === "new" ||
+    normalized === "draft" ||
+    normalized === "replied" ||
+    normalized === "ignored"
+  ) {
+    return normalized;
+  }
+  return null;
+};
+
+const toInboxRowStatus = (row: Pick<GoogleReviewRow, "status" | "owner_reply" | "has_draft">): InboxStatusFilter => {
+  if (String(row.status ?? "").toLowerCase() === "ignored") {
+    return "ignored";
+  }
+  if (isNonEmptyText(row.owner_reply)) {
+    return "replied";
+  }
+  if (Boolean(row.has_draft)) {
+    return "draft";
+  }
+  return "new";
+};
+
 const handler = async (req: VercelRequest, res: VercelResponse) => {
   const route = "/api/reviews";
   const requestId = getRequestId(req);
@@ -666,10 +701,19 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
                   .from("ai_jobs")
                   .select("id,payload")
                   .filter("payload->>review_id", "eq", singleReviewId)
-                  .filter("payload->>location_id", "eq", locationId)
                   .in("status", AI_JOB_IN_FLIGHT_STATUSES)
-                  .limit(1);
-                if (Array.isArray(activeJobs) && activeJobs.length > 0) {
+                  .limit(20);
+                const hasLocationJobInProgress =
+                  Array.isArray(activeJobs) &&
+                  activeJobs.some((job) => {
+                    const payload = job?.payload;
+                    if (!payload || typeof payload !== "object") {
+                      return false;
+                    }
+                    const payloadLocationId = (payload as Record<string, unknown>).location_id;
+                    return payloadLocationId === locationId;
+                  });
+                if (hasLocationJobInProgress) {
                   skippedReason = "job_in_progress";
                 }
               }
@@ -1014,12 +1058,14 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     if (filters.reject) {
       return res.status(200).json({ rows: [], nextCursor: null });
     }
-    console.log("[reviews]", {
-      route,
-      query: req.query,
-      userId,
-      location_id: locationId ?? "all"
-    });
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[reviews]", {
+        route,
+        query: req.query,
+        userId,
+        location_id: locationId ?? "all"
+      });
+    }
 
     let locationIds: string[] = [];
     const activeLocationIds = await fetchActiveLocationIds(
@@ -1080,7 +1126,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     const ratingMin = filters.rating_min ?? null;
     const ratingMax = filters.rating_max ?? null;
     const sentiment = filters.sentiment;
-    const status = filters.status;
+    const statusNormalized = normalizeInboxStatus(filters.status);
     const tags = filters.tags;
 
     const limitParam = req.query.limit;
@@ -1124,13 +1170,6 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     if (inboxRowsError) {
       throw new Error(inboxRowsError.message ?? "Failed to load inbox reviews");
     }
-    console.info("[reviews] inbox rpc", {
-      requestId,
-      userId,
-      selectedLocationId,
-      count: inboxRowsRaw?.length ?? 0,
-      status
-    });
     if (!inboxRowsRaw) {
       return res
         .status(200)
@@ -1186,27 +1225,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     if (ratingMax !== null && Number.isFinite(ratingMax)) {
       countQuery.lte("rating", ratingMax);
     }
-    if (status) {
-      countQuery.eq("status", status);
+    if (statusNormalized === "ignored") {
+      countQuery.eq("status", "ignored");
     }
     const { count: total } = await countQuery;
-    if (process.env.NODE_ENV !== "production") {
-      console.info("[reviews] filter", {
-        requestId,
-        userId,
-        preset,
-        tz: timeZone,
-        rangeFrom,
-        rangeTo,
-        lookbackDays,
-        includeNoComment,
-        total: total ?? 0
-      });
-      console.info("[reviews] rows", {
-        requestId,
-        count: baseRows?.length ?? 0
-      });
-    }
 
     const rows = (baseRows ?? []).filter((row) => {
       const sourceTime =
@@ -1234,6 +1256,12 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         (row.rating === null || row.rating > ratingMax)
       ) {
         return false;
+      }
+      if (statusNormalized) {
+        const rowStatus = toInboxRowStatus(row);
+        if (rowStatus !== statusNormalized) {
+          return false;
+        }
       }
       if (!cursor) {
         return true;
@@ -1307,6 +1335,17 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           })
         : null;
 
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[reviews] inbox response", {
+        requestId,
+        selectedLocationId,
+        statusNormalized,
+        baseRows: baseRows.length,
+        filtered: filtered.length,
+        limited: limited.length
+      });
+    }
+
     return res.status(200).json({
       ok: true,
       items: limited.map((row) => ({
@@ -1344,3 +1383,5 @@ export default handler;
 // Manual test plan:
 // 1) curl /api/reviews with Bearer token -> should return rows for user_id.
 // 2) Verify /api/reviews without token -> 401.
+// 3) Compare /api/reviews?status=all vs /api/reviews?status=new and confirm item counts differ.
+// 4) Compare /api/reviews?status=draft vs /api/reviews?status=replied and confirm filtered lists differ.
