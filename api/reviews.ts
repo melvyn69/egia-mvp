@@ -216,17 +216,32 @@ const normalizeInboxStatus = (value: unknown): InboxStatusFilter | null => {
   if (typeof raw !== "string") {
     return null;
   }
-  const normalized = raw.trim().toLowerCase();
+  const normalized = raw
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "_");
   if (!normalized || normalized === "all" || normalized === "tout") {
     return null;
   }
+  if (normalized === "new" || normalized === "nouveau") {
+    return "new";
+  }
   if (
-    normalized === "new" ||
     normalized === "draft" ||
-    normalized === "replied" ||
-    normalized === "ignored"
+    normalized === "a_traiter" ||
+    normalized === "a-traiter" ||
+    normalized === "to_treat" ||
+    normalized === "todo"
   ) {
-    return normalized;
+    return "draft";
+  }
+  if (normalized === "replied" || normalized === "repondu") {
+    return "replied";
+  }
+  if (normalized === "ignored" || normalized === "ignore") {
+    return "ignored";
   }
   return null;
 };
@@ -710,8 +725,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
                     if (!payload || typeof payload !== "object") {
                       return false;
                     }
-                    const payloadLocationId = (payload as Record<string, unknown>).location_id;
-                    return payloadLocationId === locationId;
+                    return (payload as Record<string, unknown>).location_id === locationId;
                   });
                 if (hasLocationJobInProgress) {
                   skippedReason = "job_in_progress";
@@ -1170,6 +1184,14 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     if (inboxRowsError) {
       throw new Error(inboxRowsError.message ?? "Failed to load inbox reviews");
     }
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[reviews] inbox rpc", {
+        requestId,
+        selectedLocationId,
+        count: inboxRowsRaw?.length ?? 0,
+        statusNormalized
+      });
+    }
     if (!inboxRowsRaw) {
       return res
         .status(200)
@@ -1229,6 +1251,23 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       countQuery.eq("status", "ignored");
     }
     const { count: total } = await countQuery;
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[reviews] filter", {
+        requestId,
+        userId,
+        preset,
+        tz: timeZone,
+        rangeFrom,
+        rangeTo,
+        lookbackDays,
+        includeNoComment,
+        total: total ?? 0
+      });
+      console.info("[reviews] rows", {
+        requestId,
+        count: baseRows?.length ?? 0
+      });
+    }
 
     const rows = (baseRows ?? []).filter((row) => {
       const sourceTime =
@@ -1383,5 +1422,3 @@ export default handler;
 // Manual test plan:
 // 1) curl /api/reviews with Bearer token -> should return rows for user_id.
 // 2) Verify /api/reviews without token -> 401.
-// 3) Compare /api/reviews?status=all vs /api/reviews?status=new and confirm item counts differ.
-// 4) Compare /api/reviews?status=draft vs /api/reviews?status=replied and confirm filtered lists differ.
