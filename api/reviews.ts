@@ -179,7 +179,6 @@ const createUserSupabase = (token: string | null) => {
   });
 };
 
-const DRAFT_ACTIVE_STATUSES = ["draft", "queued", "processing", "generating"];
 const AI_JOB_IN_FLIGHT_STATUSES = [
   "queued",
   "pending",
@@ -209,7 +208,7 @@ const parseBooleanQuery = (value: unknown, defaultValue = false) => {
   return defaultValue;
 };
 
-type InboxStatusFilter = "new" | "draft" | "replied" | "ignored";
+type InboxStatusFilter = "new" | "reading" | "replied" | "archived";
 
 const normalizeInboxStatus = (value: unknown): InboxStatusFilter | null => {
   const raw = Array.isArray(value) ? value[0] : value;
@@ -229,32 +228,41 @@ const normalizeInboxStatus = (value: unknown): InboxStatusFilter | null => {
     return "new";
   }
   if (
+    normalized === "reading" ||
     normalized === "draft" ||
     normalized === "a_traiter" ||
     normalized === "a-traiter" ||
     normalized === "to_treat" ||
     normalized === "todo"
   ) {
-    return "draft";
+    return "reading";
   }
   if (normalized === "replied" || normalized === "repondu") {
     return "replied";
   }
-  if (normalized === "ignored" || normalized === "ignore") {
-    return "ignored";
+  if (
+    normalized === "archived" ||
+    normalized === "ignored" ||
+    normalized === "ignore"
+  ) {
+    return "archived";
   }
   return null;
 };
 
 const toInboxRowStatus = (row: Pick<GoogleReviewRow, "status" | "owner_reply" | "has_draft">): InboxStatusFilter => {
-  if (String(row.status ?? "").toLowerCase() === "ignored") {
-    return "ignored";
+  const rawStatus = String(row.status ?? "").toLowerCase();
+  if (rawStatus === "ignored" || rawStatus === "archived") {
+    return "archived";
+  }
+  if (rawStatus === "reading" || rawStatus === "draft") {
+    return "reading";
   }
   if (isNonEmptyText(row.owner_reply)) {
     return "replied";
   }
   if (Boolean(row.has_draft)) {
-    return "draft";
+    return "reading";
   }
   return "new";
 };
@@ -400,10 +408,16 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       const existingText = existingDraft?.draft_text
         ? String(existingDraft.draft_text).trim()
         : "";
-      if (
-        existingText ||
-        DRAFT_ACTIVE_STATUSES.includes(String(existingDraft?.status ?? ""))
-      ) {
+      const existingStatus = String(existingDraft?.status ?? "").trim().toLowerCase();
+      if (existingText) {
+        if (existingStatus !== "draft") {
+          await supabaseAdmin
+            .from("review_ai_replies")
+            .update({ status: "draft", updated_at: new Date().toISOString() })
+            .eq("review_id", reviewId)
+            .eq("user_id", userId)
+            .eq("mode", "draft");
+        }
         return res.status(200).json({ ok: true, status: "exists" });
       }
 
@@ -532,6 +546,27 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       }
       if (draftUpsertError) {
         return res.status(500).json({ error: "Failed to upsert draft row" });
+      }
+      const { data: draftAfterUpsert } = await supabaseAdmin
+        .from("review_ai_replies")
+        .select("status, draft_text")
+        .eq("review_id", reviewId)
+        .eq("user_id", userId)
+        .eq("mode", "draft")
+        .maybeSingle();
+      const draftAfterUpsertText = draftAfterUpsert?.draft_text
+        ? String(draftAfterUpsert.draft_text).trim()
+        : "";
+      if (draftAfterUpsertText) {
+        if (String(draftAfterUpsert?.status ?? "").toLowerCase() !== "draft") {
+          await supabaseAdmin
+            .from("review_ai_replies")
+            .update({ status: "draft", updated_at: new Date().toISOString() })
+            .eq("review_id", reviewId)
+            .eq("user_id", userId)
+            .eq("mode", "draft");
+        }
+        return res.status(200).json({ ok: true, status: "exists" });
       }
 
       const { error: enqueueError } = await jobsTable.from("ai_jobs").insert({
@@ -815,6 +850,43 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           continue;
         }
 
+        const { data: existingDraftRow } = await supabaseAdmin
+          .from("review_ai_replies")
+          .select("status, draft_text")
+          .eq("review_id", reviewId)
+          .eq("user_id", userId)
+          .eq("mode", "draft")
+          .maybeSingle();
+        const existingDraftText = existingDraftRow?.draft_text
+          ? String(existingDraftRow.draft_text).trim()
+          : "";
+        if (existingDraftText) {
+          if (String(existingDraftRow?.status ?? "").toLowerCase() !== "draft") {
+            await supabaseAdmin
+              .from("review_ai_replies")
+              .update({ status: "draft", updated_at: new Date().toISOString() })
+              .eq("review_id", reviewId)
+              .eq("user_id", userId)
+              .eq("mode", "draft");
+          }
+          skipped += 1;
+          console.info("[prepare_drafts] enqueue_decision", {
+            userId,
+            locationId,
+            reviewId,
+            identityHash: locationIdentityHash,
+            decision: "skipped",
+            reason: "already_has_draft"
+          });
+          results.push({
+            review_id: reviewId,
+            queued: false,
+            skipped: true,
+            skipped_reason: "already_has_draft"
+          });
+          continue;
+        }
+
         const draftPayload = {
           review_id: reviewId,
           user_id: userId,
@@ -853,6 +925,42 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
             queued: false,
             skipped: true,
             skipped_reason: "enqueue_error"
+          });
+          continue;
+        }
+        const { data: draftAfterUpsertRow } = await supabaseAdmin
+          .from("review_ai_replies")
+          .select("status, draft_text")
+          .eq("review_id", reviewId)
+          .eq("user_id", userId)
+          .eq("mode", "draft")
+          .maybeSingle();
+        const draftAfterUpsertValue = draftAfterUpsertRow?.draft_text
+          ? String(draftAfterUpsertRow.draft_text).trim()
+          : "";
+        if (draftAfterUpsertValue) {
+          if (String(draftAfterUpsertRow?.status ?? "").toLowerCase() !== "draft") {
+            await supabaseAdmin
+              .from("review_ai_replies")
+              .update({ status: "draft", updated_at: new Date().toISOString() })
+              .eq("review_id", reviewId)
+              .eq("user_id", userId)
+              .eq("mode", "draft");
+          }
+          skipped += 1;
+          console.info("[prepare_drafts] enqueue_decision", {
+            userId,
+            locationId,
+            reviewId,
+            identityHash: locationIdentityHash,
+            decision: "skipped",
+            reason: "already_has_draft"
+          });
+          results.push({
+            review_id: reviewId,
+            queued: false,
+            skipped: true,
+            skipped_reason: "already_has_draft"
           });
           continue;
         }
@@ -1072,14 +1180,6 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     if (filters.reject) {
       return res.status(200).json({ rows: [], nextCursor: null });
     }
-    if (process.env.NODE_ENV !== "production") {
-      console.log("[reviews]", {
-        route,
-        query: req.query,
-        userId,
-        location_id: locationId ?? "all"
-      });
-    }
 
     let locationIds: string[] = [];
     const activeLocationIds = await fetchActiveLocationIds(
@@ -1152,57 +1252,67 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       req.query.include_no_comment,
       false
     );
-    const lookbackDays = Math.min(
-      3650,
-      Math.max(
-        0,
-        Number.parseInt(String(req.query.lookback_days ?? 180), 10) || 180
-      )
-    );
     const candidateLimit = Math.min(Math.max(limit * 6, limit), 500);
     const cursorParam = req.query.cursor;
     const cursor = parseCursor(
       Array.isArray(cursorParam) ? cursorParam[0] : cursorParam
     );
+    const safeUserId = isUuid(userId) ? userId : null;
+    if (!safeUserId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
-    const inboxRpcClient = supabaseUser as unknown as {
-      rpc: (
-        fn: string,
-        params: Record<string, unknown>
-      ) => Promise<{ data: InboxReviewRpcRow[] | null; error: { message?: string | null } | null }>;
-    };
-    const { data: inboxRowsRaw, error: inboxRowsError } = await inboxRpcClient.rpc(
-      "get_inbox_reviews",
-      {
-        p_location_id: selectedLocationId,
-        p_limit: candidateLimit,
-        p_only_with_comment: !includeNoComment,
-        p_lookback_days: lookbackDays,
-        p_user_id: isUuid(userId) ? userId : null
+    const computedLookbackDays = Number.isFinite(rangeFromMs)
+      ? Math.min(
+          3650,
+          Math.max(
+            0,
+            Math.ceil((Date.now() - rangeFromMs) / (24 * 60 * 60 * 1000)) + 7
+          )
+        )
+      : 180;
+    const useRpcInboxPath =
+      statusNormalized === "new" ||
+      statusNormalized === "reading" ||
+      statusNormalized === "archived";
+    const getSourceTime = (row: Pick<GoogleReviewRow, "update_time" | "create_time" | "created_at">) =>
+      row.update_time ?? row.create_time ?? row.created_at ?? null;
+
+    let baseRows: GoogleReviewRow[] = [];
+    let total = 0;
+
+    if (useRpcInboxPath) {
+      const inboxRpcClient = supabaseUser as unknown as {
+        rpc: (
+          fn: string,
+          params: Record<string, unknown>
+        ) => Promise<{ data: InboxReviewRpcRow[] | null; error: { message?: string | null } | null }>;
+      };
+      const rpcResponses = await Promise.all(
+        locationIds.map((locationResourceName) =>
+          inboxRpcClient.rpc("get_inbox_reviews", {
+            p_location_id: locationResourceName,
+            p_limit: candidateLimit,
+            p_only_with_comment: !includeNoComment,
+            p_lookback_days: computedLookbackDays,
+            p_user_id: safeUserId
+          })
+        )
+      );
+      const rpcRows: InboxReviewRpcRow[] = [];
+      for (const response of rpcResponses) {
+        if (response.error) {
+          throw new Error(response.error.message ?? "Failed to load inbox reviews");
+        }
+        if (response.data) {
+          rpcRows.push(...response.data);
+        }
       }
-    );
-    if (inboxRowsError) {
-      throw new Error(inboxRowsError.message ?? "Failed to load inbox reviews");
-    }
-    if (process.env.NODE_ENV !== "production") {
-      console.info("[reviews] inbox rpc", {
-        requestId,
-        selectedLocationId,
-        count: inboxRowsRaw?.length ?? 0,
-        statusNormalized
-      });
-    }
-    if (!inboxRowsRaw) {
-      return res
-        .status(200)
-        .json({ rows: [], nextCursor: null, reason: "no_inbox_rows" });
-    }
-    const allowedLocationSet = new Set(locationIds);
-    const baseRows = inboxRowsRaw
-      .filter((row) => row.location_id && allowedLocationSet.has(row.location_id))
-      .map(
-        (row) =>
-          ({
+      const allowedLocationSet = new Set(locationIds);
+      baseRows = rpcRows
+        .filter((row) => row.location_id && allowedLocationSet.has(row.location_id))
+        .map((row) => {
+          const mapped: GoogleReviewRow = {
             id: row.review_pk ?? row.review_id ?? row.review_name ?? "",
             review_id: row.google_review_id ?? row.review_name ?? "",
             location_id: row.location_id ?? "",
@@ -1212,7 +1322,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
             create_time: row.create_time,
             update_time: row.update_time,
             created_at: row.inserted_at ?? row.create_time ?? row.update_time,
-            status: row.status ?? "new",
+            status: row.status ?? null,
             owner_reply: row.owner_reply ?? "",
             draft_status: row.draft_status,
             draft_preview: row.draft_preview ?? "",
@@ -1220,58 +1330,183 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
             has_draft: Boolean(row.has_draft),
             has_job_inflight: Boolean(row.has_job_inflight),
             is_eligible_to_generate: Boolean(row.is_eligible_to_generate)
-          }) satisfies GoogleReviewRow
-      );
-
-    const countQuery = supabaseUser
-      .from("google_reviews")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId);
-    if (locationIds.length === 1) {
-      countQuery.eq("location_id", locationIds[0]);
+          };
+          return {
+            ...mapped,
+            status: toInboxRowStatus(mapped)
+          };
+        });
+      total = baseRows.length;
     } else {
-      countQuery.in("location_id", locationIds);
-    }
-    countQuery.or("owner_reply.is.null,owner_reply.eq.");
-    if (!includeNoComment) {
-      countQuery.not("comment", "is", null).neq("comment", "");
-    }
-    countQuery.or(
-      `and(update_time.gte.${rangeFrom},update_time.lte.${rangeTo}),` +
-        `and(update_time.is.null,create_time.gte.${rangeFrom},create_time.lte.${rangeTo}),` +
-        `and(update_time.is.null,create_time.is.null,inserted_at.gte.${rangeFrom},inserted_at.lte.${rangeTo})`
-    );
-    if (ratingMin !== null && Number.isFinite(ratingMin)) {
-      countQuery.gte("rating", ratingMin);
-    }
-    if (ratingMax !== null && Number.isFinite(ratingMax)) {
-      countQuery.lte("rating", ratingMax);
-    }
-    if (statusNormalized === "ignored") {
-      countQuery.eq("status", "ignored");
-    }
-    const { count: total } = await countQuery;
-    if (process.env.NODE_ENV !== "production") {
-      console.info("[reviews] filter", {
-        requestId,
-        userId,
-        preset,
-        tz: timeZone,
-        rangeFrom,
-        rangeTo,
-        lookbackDays,
-        includeNoComment,
-        total: total ?? 0
+      let tableQuery = supabaseUser
+        .from("google_reviews")
+        .select(
+          "id, review_id, location_id, author_name, rating, comment, create_time, update_time, inserted_at, status, owner_reply"
+        )
+        .eq("user_id", userId);
+      if (locationIds.length === 1) {
+        tableQuery = tableQuery.eq("location_id", locationIds[0]);
+      } else {
+        tableQuery = tableQuery.in("location_id", locationIds);
+      }
+      if (statusNormalized === "replied") {
+        tableQuery = tableQuery
+          .not("owner_reply", "is", null)
+          .neq("owner_reply", "");
+      } else if (statusNormalized === "archived") {
+        tableQuery = tableQuery.or("status.eq.ignored,status.eq.archived");
+      }
+      if (!includeNoComment) {
+        tableQuery = tableQuery.not("comment", "is", null).neq("comment", "");
+      }
+      if (ratingMin !== null && Number.isFinite(ratingMin)) {
+        tableQuery = tableQuery.gte("rating", ratingMin);
+      }
+      if (ratingMax !== null && Number.isFinite(ratingMax)) {
+        tableQuery = tableQuery.lte("rating", ratingMax);
+      }
+      if (cursor) {
+        tableQuery = tableQuery.or(
+          `and(update_time.not.is.null,update_time.lt.${cursor.source_time}),` +
+            `and(update_time.not.is.null,update_time.eq.${cursor.source_time},id.lt.${cursor.id}),` +
+            `and(update_time.is.null,create_time.not.is.null,create_time.lt.${cursor.source_time}),` +
+            `and(update_time.is.null,create_time.not.is.null,create_time.eq.${cursor.source_time},id.lt.${cursor.id}),` +
+            `and(update_time.is.null,create_time.is.null,inserted_at.lt.${cursor.source_time}),` +
+            `and(update_time.is.null,create_time.is.null,inserted_at.eq.${cursor.source_time},id.lt.${cursor.id})`
+        );
+      }
+      const { data: tableRowsRaw, error: tableRowsError } = await tableQuery
+        .order("update_time", { ascending: false, nullsFirst: false })
+        .order("create_time", { ascending: false, nullsFirst: false })
+        .order("inserted_at", { ascending: false, nullsFirst: false })
+        .order("id", { ascending: false })
+        .limit(candidateLimit);
+      if (tableRowsError) {
+        throw new Error(tableRowsError.message ?? "Failed to load review history");
+      }
+      baseRows = ((tableRowsRaw ?? []) as Array<{
+        id: string | null;
+        review_id: string | null;
+        location_id: string | null;
+        author_name: string | null;
+        rating: number | null;
+        comment: string | null;
+        create_time: string | null;
+        update_time: string | null;
+        inserted_at: string | null;
+        status: string | null;
+        owner_reply: string | null;
+      }>).map((row) => {
+        const mapped: GoogleReviewRow = {
+          id: row.id ?? "",
+          review_id: row.review_id ?? "",
+          location_id: row.location_id ?? "",
+          author_name: row.author_name ?? "",
+          rating: row.rating,
+          comment: row.comment ?? "",
+          create_time: row.create_time,
+          update_time: row.update_time,
+          created_at: row.inserted_at ?? row.create_time ?? row.update_time,
+          status: row.status ?? null,
+          owner_reply: row.owner_reply ?? "",
+          draft_status: null,
+          draft_preview: "",
+          draft_updated_at: null,
+          has_draft: false,
+          has_job_inflight: false,
+          is_eligible_to_generate: false
+        };
+        return {
+          ...mapped,
+          status: toInboxRowStatus(mapped)
+        };
       });
-      console.info("[reviews] rows", {
-        requestId,
-        count: baseRows?.length ?? 0
-      });
+
+      const tableReviewIds = baseRows.map((row) => row.id).filter(Boolean);
+      if (tableReviewIds.length > 0) {
+        const { data: draftRows } = await supabaseAdmin
+          .from("review_ai_replies")
+          .select("review_id, status, draft_text, updated_at")
+          .eq("user_id", userId)
+          .eq("mode", "draft")
+          .in("review_id", tableReviewIds);
+        type DraftLookupRow = {
+          review_id: string | null;
+          status: string | null;
+          draft_text: string | null;
+          updated_at: string | null;
+        };
+        const typedDraftRows = (draftRows ?? []) as DraftLookupRow[];
+        const draftByReview = new Map<
+          string,
+          { status: string | null; draft_text: string | null; updated_at: string | null }
+        >(
+          typedDraftRows.map((row) => [
+            String(row.review_id ?? ""),
+            {
+              status: row.status ?? null,
+              draft_text: row.draft_text ?? null,
+              updated_at: row.updated_at ?? null
+            }
+          ])
+        );
+        baseRows = baseRows.map((row) => {
+          const draft = draftByReview.get(row.id);
+          const hasDraft = Boolean(draft && isNonEmptyText(draft.draft_text));
+          const mapped: GoogleReviewRow = {
+            ...row,
+            has_draft: hasDraft,
+            draft_status: draft?.status ?? row.draft_status ?? null,
+            draft_preview: draft?.draft_text?.slice(0, 160) ?? row.draft_preview ?? "",
+            draft_updated_at: draft?.updated_at ?? row.draft_updated_at ?? null,
+            is_eligible_to_generate:
+              !isNonEmptyText(row.owner_reply) &&
+              isNonEmptyText(row.comment) &&
+              !hasDraft
+          };
+          return {
+            ...mapped,
+            status: toInboxRowStatus(mapped)
+          };
+        });
+      }
+
+      let countQuery = supabaseUser
+        .from("google_reviews")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId);
+      if (locationIds.length === 1) {
+        countQuery = countQuery.eq("location_id", locationIds[0]);
+      } else {
+        countQuery = countQuery.in("location_id", locationIds);
+      }
+      if (statusNormalized === "replied") {
+        countQuery = countQuery
+          .not("owner_reply", "is", null)
+          .neq("owner_reply", "");
+      } else if (statusNormalized === "archived") {
+        countQuery = countQuery.or("status.eq.ignored,status.eq.archived");
+      }
+      if (!includeNoComment) {
+        countQuery = countQuery.not("comment", "is", null).neq("comment", "");
+      }
+      countQuery = countQuery.or(
+        `and(update_time.gte.${rangeFrom},update_time.lte.${rangeTo}),` +
+          `and(update_time.is.null,create_time.gte.${rangeFrom},create_time.lte.${rangeTo}),` +
+          `and(update_time.is.null,create_time.is.null,inserted_at.gte.${rangeFrom},inserted_at.lte.${rangeTo})`
+      );
+      if (ratingMin !== null && Number.isFinite(ratingMin)) {
+        countQuery = countQuery.gte("rating", ratingMin);
+      }
+      if (ratingMax !== null && Number.isFinite(ratingMax)) {
+        countQuery = countQuery.lte("rating", ratingMax);
+      }
+      const { count } = await countQuery;
+      total = Number(count ?? 0);
     }
 
-    const rows = (baseRows ?? []).filter((row) => {
-      const sourceTime =
-        row.update_time ?? row.create_time ?? row.created_at ?? null;
+    const rangeFilteredRows = baseRows.filter((row) => {
+      const sourceTime = getSourceTime(row);
       if (!sourceTime) {
         return false;
       }
@@ -1296,25 +1531,16 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       ) {
         return false;
       }
-      if (statusNormalized) {
-        const rowStatus = toInboxRowStatus(row);
-        if (rowStatus !== statusNormalized) {
-          return false;
-        }
+      if (!includeNoComment && !isNonEmptyText(row.comment)) {
+        return false;
       }
-      if (!cursor) {
-        return true;
+      if (statusNormalized && toInboxRowStatus(row) !== statusNormalized) {
+        return false;
       }
-      if (sourceTime < cursor.source_time) {
-        return true;
-      }
-      if (sourceTime === cursor.source_time && row.id < cursor.id) {
-        return true;
-      }
-      return false;
+      return true;
     });
 
-    const reviewIds = rows.map((row) => row.id);
+    const reviewIds = rangeFilteredRows.map((row) => row.id).filter(Boolean);
     const { data: insights } = (await supabaseAdmin
       .from("review_ai_insights")
       .select("review_pk, sentiment")
@@ -1346,42 +1572,77 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       tagsByReview.set(link.review_pk, list);
     }
 
-    const filtered = rows.filter((row) => {
-      const rowSentiment = sentimentMap.get(row.id) ?? null;
-      if (sentiment && rowSentiment !== sentiment) {
-        return false;
-      }
-      if (tags && tags.length > 0) {
-        const rowTags = (tagsByReview.get(row.id) ?? []).map((tag) =>
-          tag.toLowerCase()
-        );
-        const matches = tags.some((tag) => rowTags.includes(tag));
-        if (!matches) {
+    const filtered = rangeFilteredRows
+      .filter((row) => {
+        const rowSentiment = sentimentMap.get(row.id) ?? null;
+        if (sentiment && rowSentiment !== sentiment) {
           return false;
         }
-      }
-      return true;
-    });
+        if (tags && tags.length > 0) {
+          const rowTags = (tagsByReview.get(row.id) ?? []).map((tag) =>
+            tag.toLowerCase()
+          );
+          const matches = tags.some((tag) => rowTags.includes(tag));
+          if (!matches) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const aSource = getSourceTime(a) ?? "";
+        const bSource = getSourceTime(b) ?? "";
+        if (aSource !== bSource) {
+          return aSource > bSource ? -1 : 1;
+        }
+        if (a.id === b.id) {
+          return 0;
+        }
+        return a.id > b.id ? -1 : 1;
+      });
 
-    const limited = filtered.slice(0, limit);
+    const cursorFiltered = cursor
+      ? filtered.filter((row) => {
+          const sourceTime = getSourceTime(row);
+          if (!sourceTime) {
+            return false;
+          }
+          if (sourceTime < cursor.source_time) {
+            return true;
+          }
+          return sourceTime === cursor.source_time && row.id < cursor.id;
+        })
+      : filtered;
+
+    const limited = cursorFiltered.slice(0, limit);
     const last = limited[limited.length - 1];
+    const hasMore = cursorFiltered.length > limit;
     const nextCursor =
-      last && limited.length === limit
+      last && hasMore
         ? buildCursor({
-            source_time:
-              last.update_time ?? last.create_time ?? last.created_at ?? "",
+            source_time: getSourceTime(last) ?? "",
             id: last.id
           })
         : null;
 
+    if (useRpcInboxPath || sentiment || (tags && tags.length > 0)) {
+      total = filtered.length;
+    }
+
     if (process.env.NODE_ENV !== "production") {
-      console.info("[reviews] inbox response", {
+      console.info("[reviews] list", {
         requestId,
+        path: useRpcInboxPath ? "rpc" : "table",
         selectedLocationId,
+        locationCount: locationIds.length,
         statusNormalized,
-        baseRows: baseRows.length,
+        rangeFrom,
+        rangeTo,
+        lookbackDays: computedLookbackDays,
+        base: baseRows.length,
         filtered: filtered.length,
-        limited: limited.length
+        limited: limited.length,
+        total
       });
     }
 
@@ -1393,7 +1654,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         tags: tagsByReview.get(row.id) ?? []
       })),
       nextCursor,
-      total: Number(total ?? 0)
+      total
     });
   } catch (err) {
     const missingEnv = isMissingEnvError(err);
