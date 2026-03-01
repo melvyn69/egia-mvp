@@ -1430,8 +1430,18 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           .eq("user_id", userId)
           .eq("mode", "draft")
           .in("review_id", tableReviewIds);
-        const draftByReview = new Map(
-          (draftRows ?? []).map((row) => [
+        type DraftLookupRow = {
+          review_id: string | null;
+          status: string | null;
+          draft_text: string | null;
+          updated_at: string | null;
+        };
+        const typedDraftRows = (draftRows ?? []) as DraftLookupRow[];
+        const draftByReview = new Map<
+          string,
+          { status: string | null; draft_text: string | null; updated_at: string | null }
+        >(
+          typedDraftRows.map((row) => [
             String(row.review_id ?? ""),
             {
               status: row.status ?? null,
