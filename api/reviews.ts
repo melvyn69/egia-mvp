@@ -179,7 +179,6 @@ const createUserSupabase = (token: string | null) => {
   });
 };
 
-const DRAFT_ACTIVE_STATUSES = ["draft", "queued", "processing", "generating"];
 const AI_JOB_IN_FLIGHT_STATUSES = [
   "queued",
   "pending",
@@ -409,10 +408,16 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       const existingText = existingDraft?.draft_text
         ? String(existingDraft.draft_text).trim()
         : "";
-      if (
-        existingText ||
-        DRAFT_ACTIVE_STATUSES.includes(String(existingDraft?.status ?? ""))
-      ) {
+      const existingStatus = String(existingDraft?.status ?? "").trim().toLowerCase();
+      if (existingText) {
+        if (existingStatus !== "draft") {
+          await supabaseAdmin
+            .from("review_ai_replies")
+            .update({ status: "draft", updated_at: new Date().toISOString() })
+            .eq("review_id", reviewId)
+            .eq("user_id", userId)
+            .eq("mode", "draft");
+        }
         return res.status(200).json({ ok: true, status: "exists" });
       }
 
@@ -541,6 +546,27 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       }
       if (draftUpsertError) {
         return res.status(500).json({ error: "Failed to upsert draft row" });
+      }
+      const { data: draftAfterUpsert } = await supabaseAdmin
+        .from("review_ai_replies")
+        .select("status, draft_text")
+        .eq("review_id", reviewId)
+        .eq("user_id", userId)
+        .eq("mode", "draft")
+        .maybeSingle();
+      const draftAfterUpsertText = draftAfterUpsert?.draft_text
+        ? String(draftAfterUpsert.draft_text).trim()
+        : "";
+      if (draftAfterUpsertText) {
+        if (String(draftAfterUpsert?.status ?? "").toLowerCase() !== "draft") {
+          await supabaseAdmin
+            .from("review_ai_replies")
+            .update({ status: "draft", updated_at: new Date().toISOString() })
+            .eq("review_id", reviewId)
+            .eq("user_id", userId)
+            .eq("mode", "draft");
+        }
+        return res.status(200).json({ ok: true, status: "exists" });
       }
 
       const { error: enqueueError } = await jobsTable.from("ai_jobs").insert({
@@ -824,6 +850,43 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           continue;
         }
 
+        const { data: existingDraftRow } = await supabaseAdmin
+          .from("review_ai_replies")
+          .select("status, draft_text")
+          .eq("review_id", reviewId)
+          .eq("user_id", userId)
+          .eq("mode", "draft")
+          .maybeSingle();
+        const existingDraftText = existingDraftRow?.draft_text
+          ? String(existingDraftRow.draft_text).trim()
+          : "";
+        if (existingDraftText) {
+          if (String(existingDraftRow?.status ?? "").toLowerCase() !== "draft") {
+            await supabaseAdmin
+              .from("review_ai_replies")
+              .update({ status: "draft", updated_at: new Date().toISOString() })
+              .eq("review_id", reviewId)
+              .eq("user_id", userId)
+              .eq("mode", "draft");
+          }
+          skipped += 1;
+          console.info("[prepare_drafts] enqueue_decision", {
+            userId,
+            locationId,
+            reviewId,
+            identityHash: locationIdentityHash,
+            decision: "skipped",
+            reason: "already_has_draft"
+          });
+          results.push({
+            review_id: reviewId,
+            queued: false,
+            skipped: true,
+            skipped_reason: "already_has_draft"
+          });
+          continue;
+        }
+
         const draftPayload = {
           review_id: reviewId,
           user_id: userId,
@@ -862,6 +925,42 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
             queued: false,
             skipped: true,
             skipped_reason: "enqueue_error"
+          });
+          continue;
+        }
+        const { data: draftAfterUpsertRow } = await supabaseAdmin
+          .from("review_ai_replies")
+          .select("status, draft_text")
+          .eq("review_id", reviewId)
+          .eq("user_id", userId)
+          .eq("mode", "draft")
+          .maybeSingle();
+        const draftAfterUpsertValue = draftAfterUpsertRow?.draft_text
+          ? String(draftAfterUpsertRow.draft_text).trim()
+          : "";
+        if (draftAfterUpsertValue) {
+          if (String(draftAfterUpsertRow?.status ?? "").toLowerCase() !== "draft") {
+            await supabaseAdmin
+              .from("review_ai_replies")
+              .update({ status: "draft", updated_at: new Date().toISOString() })
+              .eq("review_id", reviewId)
+              .eq("user_id", userId)
+              .eq("mode", "draft");
+          }
+          skipped += 1;
+          console.info("[prepare_drafts] enqueue_decision", {
+            userId,
+            locationId,
+            reviewId,
+            identityHash: locationIdentityHash,
+            decision: "skipped",
+            reason: "already_has_draft"
+          });
+          results.push({
+            review_id: reviewId,
+            queued: false,
+            skipped: true,
+            skipped_reason: "already_has_draft"
           });
           continue;
         }

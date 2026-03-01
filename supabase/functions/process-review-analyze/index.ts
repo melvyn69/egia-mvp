@@ -184,6 +184,16 @@ Deno.serve(async (req) => {
       const jobUserId = typeof payloadData.user_id === "string" ? payloadData.user_id : "";
       const jobLocationId =
         typeof payloadData.location_id === "string" ? payloadData.location_id : null;
+      const startedAtMs = Date.now();
+      const logContext = {
+        job_id: jobId,
+        review_id: reviewId,
+        user_id: jobUserId,
+        location_id: jobLocationId
+      };
+      if (Deno.env.get("NODE_ENV") !== "production") {
+        console.info("[process-review-analyze] step", { ...logContext, step: "start" });
+      }
 
       if (!reviewId || !jobUserId) {
         await supabaseAdmin
@@ -197,7 +207,9 @@ Deno.serve(async (req) => {
       try {
         const { data: reviewRow, error: reviewError } = await supabaseAdmin
           .from("google_reviews")
-          .select("id, review_id, user_id, location_id, author_name, rating, comment, location_name")
+          .select(
+            "id, review_id, user_id, location_id, author_name, rating, comment, location_name, owner_reply"
+          )
           .eq("id", reviewId)
           .eq("user_id", jobUserId)
           .maybeSingle();
@@ -207,10 +219,30 @@ Deno.serve(async (req) => {
         if (!reviewRow) {
           throw new Error("Review not found");
         }
+        const ownerReplyText =
+          typeof reviewRow.owner_reply === "string" ? reviewRow.owner_reply.trim() : "";
+        if (ownerReplyText.length > 0) {
+          const { error: doneNoopError } = await supabaseAdmin
+            .from("ai_jobs")
+            .update({ status: "done", finished_at: new Date().toISOString(), error: null })
+            .eq("id", jobId);
+          if (doneNoopError) {
+            throw new Error(doneNoopError.message || "Failed to mark owner-replied job done");
+          }
+          done += 1;
+          if (Deno.env.get("NODE_ENV") !== "production") {
+            console.info("[process-review-analyze] step", {
+              ...logContext,
+              step: "done_noop_owner_reply",
+              duration_ms: Date.now() - startedAtMs
+            });
+          }
+          continue;
+        }
 
         const { data: existingDraft, error: existingDraftError } = await supabaseAdmin
           .from("review_ai_replies")
-          .select("draft_text")
+          .select("status, draft_text")
           .eq("review_id", reviewId)
           .eq("user_id", jobUserId)
           .maybeSingle();
@@ -220,6 +252,18 @@ Deno.serve(async (req) => {
         const existingText = existingDraft?.draft_text
           ? String(existingDraft.draft_text).trim()
           : "";
+        const existingStatus = String(existingDraft?.status ?? "").toLowerCase();
+        if (existingText && existingStatus !== "draft") {
+          const { error: normalizeStatusError } = await supabaseAdmin
+            .from("review_ai_replies")
+            .update({ status: "draft", updated_at: new Date().toISOString() })
+            .eq("review_id", reviewId)
+            .eq("user_id", jobUserId)
+            .eq("mode", "draft");
+          if (normalizeStatusError) {
+            throw new Error(normalizeStatusError.message || "Failed to normalize draft status");
+          }
+        }
 
         if (!existingText) {
           const { draftText, meta } = await invokeAutomationReply({
@@ -257,34 +301,46 @@ Deno.serve(async (req) => {
                 status: "draft",
                 updated_at: new Date().toISOString()
               },
-              { onConflict: "user_id,review_id" }
+              { onConflict: "review_id" }
             );
           if (upsertError) {
             throw new Error(upsertError.message || "Failed to upsert draft");
           }
+        }
 
-          const { data: persistedDraft, error: persistedDraftError } = await supabaseAdmin
+        const { data: persistedDraft, error: persistedDraftError } = await supabaseAdmin
+          .from("review_ai_replies")
+          .select("review_id, status, draft_text")
+          .eq("review_id", reviewId)
+          .eq("user_id", jobUserId)
+          .eq("mode", "draft")
+          .maybeSingle();
+        if (persistedDraftError) {
+          throw new Error(persistedDraftError.message || "draft_write_failed");
+        }
+        const persistedText = persistedDraft?.draft_text
+          ? String(persistedDraft.draft_text).trim()
+          : "";
+        if (!persistedDraft?.review_id || !persistedText) {
+          throw new Error("empty_draft");
+        }
+        if (String(persistedDraft?.status ?? "").toLowerCase() !== "draft") {
+          const { error: normalizeStatusError } = await supabaseAdmin
             .from("review_ai_replies")
-            .select("review_id, draft_text")
-            .eq("review_id", computedReviewIdForInsert)
+            .update({ status: "draft", updated_at: new Date().toISOString() })
+            .eq("review_id", reviewId)
             .eq("user_id", jobUserId)
-            .maybeSingle();
-          if (persistedDraftError) {
-            throw new Error(persistedDraftError.message || "Failed to verify draft write");
+            .eq("mode", "draft");
+          if (normalizeStatusError) {
+            throw new Error(normalizeStatusError.message || "draft_write_failed");
           }
-          const persistedText = persistedDraft?.draft_text
-            ? String(persistedDraft.draft_text).trim()
-            : "";
-          if (!persistedDraft?.review_id || !persistedText) {
-            throw new Error("Draft write verification failed");
-          }
-          if (Deno.env.get("NODE_ENV") !== "production") {
-            console.info("[process-review-analyze] draft saved", {
-              review_id: computedReviewIdForInsert,
-              draft_length: persistedText.length,
-              source: "automation-generateAiReply"
-            });
-          }
+        }
+        if (Deno.env.get("NODE_ENV") !== "production") {
+          console.info("[process-review-analyze] draft saved", {
+            review_id: reviewId,
+            draft_length: persistedText.length,
+            source: "automation-generateAiReply"
+          });
         }
 
         const { error: doneError } = await supabaseAdmin
@@ -295,6 +351,13 @@ Deno.serve(async (req) => {
           throw new Error(doneError.message || "Failed to mark job done");
         }
         done += 1;
+        if (Deno.env.get("NODE_ENV") !== "production") {
+          console.info("[process-review-analyze] step", {
+            ...logContext,
+            step: "done",
+            duration_ms: Date.now() - startedAtMs
+          });
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : "Job failed";
         const shortMessage = message.slice(0, 500);
@@ -306,6 +369,14 @@ Deno.serve(async (req) => {
           console.error("[process-review-analyze] failed to mark job error", {
             job_id: jobId,
             message: markError.message
+          });
+        }
+        if (Deno.env.get("NODE_ENV") !== "production") {
+          console.error("[process-review-analyze] step", {
+            ...logContext,
+            step: "error",
+            duration_ms: Date.now() - startedAtMs,
+            message: shortMessage
           });
         }
         errors += 1;
