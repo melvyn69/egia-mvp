@@ -47,6 +47,7 @@ type PrepareDraftResultItem = {
   status?: string | null;
   skipped_reason?:
     | "has_owner_reply"
+    | "already_replied"
     | "no_comment"
     | "already_has_draft"
     | "job_in_progress"
@@ -360,6 +361,47 @@ const getInFlightReviewJob = async (
   return Array.isArray(data) ? data[0] ?? null : null;
 };
 
+const getExistingSentReplyForReview = async (
+  supabaseAdmin: SupabaseAdmin,
+  userId: string,
+  reviewId: string
+) => {
+  const { data, error } = await (supabaseAdmin as any)
+    .from("review_replies")
+    .select("id, reply_text, status, created_at")
+    .eq("review_id", reviewId)
+    .eq("user_id", userId)
+    .eq("status", "sent")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) {
+    console.warn("[reviews] sent_reply_lookup_failed", {
+      user_id: userId,
+      review_id: reviewId,
+      message: error.message ?? "unknown"
+    });
+  }
+  const sentReply = Array.isArray(data) ? data[0] ?? null : null;
+  if (sentReply) {
+    return sentReply;
+  }
+  const { data: aiSentReply, error: aiSentError } = await (supabaseAdmin as any)
+    .from("review_ai_replies")
+    .select("review_id, draft_text, status, updated_at")
+    .eq("review_id", reviewId)
+    .eq("user_id", userId)
+    .eq("status", "sent")
+    .limit(1);
+  if (aiSentError) {
+    console.warn("[reviews] sent_ai_reply_lookup_failed", {
+      user_id: userId,
+      review_id: reviewId,
+      message: aiSentError.message ?? "unknown"
+    });
+  }
+  return Array.isArray(aiSentReply) ? aiSentReply[0] ?? null : null;
+};
+
 const parseBooleanQuery = (value: unknown, defaultValue = false) => {
   const raw = Array.isArray(value) ? value[0] : value;
   if (typeof raw !== "string") {
@@ -631,6 +673,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       if (!reviewId) {
         return res.status(400).json({ error: "Missing review_id" });
       }
+      const aiProviderConfigured = Boolean(process.env.OPENAI_API_KEY);
       const locationContext = await resolveDraftLocation({
         supabaseAdmin,
         userId,
@@ -645,6 +688,27 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         userId,
         reviewId
       );
+      const existingSentReply = await getExistingSentReplyForReview(
+        supabaseAdmin,
+        userId,
+        reviewId
+      );
+      if (existingSentReply) {
+        console.info("[reviews] draft_context", {
+          action: "ensure_draft",
+          requestId,
+          user_id: userId,
+          review_id: reviewId,
+          ai_provider_configured: aiProviderConfigured,
+          decision: "skipped",
+          reason: "already_replied"
+        });
+        return res.status(200).json({
+          ok: true,
+          status: "skipped",
+          skipped_reason: "already_replied"
+        });
+      }
       if (existingDraft) {
         if (
           existingDraft.source === "review_ai_replies" &&
@@ -778,6 +842,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           });
         }
       }
+      if (!aiProviderConfigured) {
+        return res.status(503).json({ error: "AI provider not configured" });
+      }
 
       const draftLocationId =
         locationContext.googleLocationId ?? locationContext.googleLocationResource;
@@ -902,6 +969,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       if (!locationId) {
         return res.status(400).json({ error: "Missing location_id" });
       }
+      const aiProviderConfigured = Boolean(process.env.OPENAI_API_KEY);
       const limitRaw = payload?.limit ?? 10;
       const cooldownRaw = payload?.cooldownMinutes ?? 15;
       const limit = singleReviewMode
@@ -1167,6 +1235,29 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           userId,
           reviewId
         );
+        const existingSentReply = await getExistingSentReplyForReview(
+          supabaseAdmin,
+          userId,
+          reviewId
+        );
+        if (existingSentReply) {
+          skipped += 1;
+          console.info("[prepare_drafts] enqueue_decision", {
+            userId,
+            locationId: reviewFilterLocationId,
+            reviewId,
+            ai_provider_configured: aiProviderConfigured,
+            decision: "skipped",
+            reason: "already_replied"
+          });
+          results.push({
+            review_id: reviewId,
+            queued: false,
+            skipped: true,
+            skipped_reason: "already_replied"
+          });
+          continue;
+        }
         if (existingDraft) {
           if (
             existingDraft.source === "review_ai_replies" &&
@@ -1229,6 +1320,18 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
             skipped_reason: "job_in_progress"
           });
           continue;
+        }
+        if (!aiProviderConfigured) {
+          console.info("[prepare_drafts] enqueue_decision", {
+            requestId,
+            userId,
+            locationId: reviewFilterLocationId,
+            reviewId,
+            ai_provider_configured: false,
+            decision: "skipped",
+            reason: "ai_provider_not_configured"
+          });
+          return res.status(503).json({ error: "AI provider not configured" });
         }
 
         const draftPayload = {
@@ -1396,6 +1499,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           business_id: locationContext.businessId,
           reviewId,
           identityHash: locationIdentityHash,
+          ai_provider_configured: aiProviderConfigured,
+          ai_provider_will_be_called: true,
           decision: "enqueued",
           reason: "ok"
         });

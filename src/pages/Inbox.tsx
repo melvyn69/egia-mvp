@@ -514,7 +514,14 @@ const Inbox = () => {
     rows.map((row) => {
       const createdAt = row.create_time ?? row.update_time ?? new Date().toISOString();
       const updatedAt = row.update_time ?? createdAt;
-      const status = isReviewStatus(row.status) ? row.status : "new";
+      const ownerReply = row.owner_reply ?? row.reply_text ?? null;
+      const hasOwnerReply = Boolean(ownerReply?.trim());
+      const status =
+        hasOwnerReply
+          ? "replied"
+          : isReviewStatus(row.status) && row.status !== "replied"
+            ? row.status
+            : "new";
       return {
         id: row.id,
         reviewId: row.review_id ?? row.id,
@@ -529,7 +536,7 @@ const Inbox = () => {
         createdAt,
         updatedAt,
         text: row.comment ?? "",
-        ownerReply: row.owner_reply ?? row.reply_text ?? null,
+        ownerReply,
         ownerReplyTime: row.owner_reply_time ?? row.replied_at ?? null,
         tags: [],
         aiStatus: "pending",
@@ -944,6 +951,15 @@ const Inbox = () => {
     return reviews.find((review: Review) => review.id === selectedReviewId) ?? null;
   }, [reviews, selectedReviewId]);
   const selectedReviewIsNoteOnly = isReviewNoteOnly(selectedReview);
+  const selectedReviewHasRealReply = Boolean(
+    selectedReview?.ownerReply?.trim() ||
+      replyHistory.some((item) => item.status === "sent" && item.reply_text.trim())
+  );
+  const canGenerateForSelectedReview = Boolean(
+    selectedReview &&
+      !selectedReviewHasRealReply &&
+      !selectedReviewIsNoteOnly
+  );
   const hasSavedDraft = Boolean(draftReplyId);
 
   const activeLocationId = useMemo(() => {
@@ -1703,7 +1719,11 @@ const Inbox = () => {
         return { draftText: null, pending: false };
       }
       if (!enqueueResponse.ok) {
-        setGenerationError("Impossible de generer une reponse pour le moment.");
+        setGenerationError(
+          enqueueResponse.status === 503
+            ? "IA non configuree."
+            : "Impossible de generer une reponse pour le moment."
+        );
         return { draftText: null, pending: false };
       }
       const resultForReview = Array.isArray(enqueuePayload?.results)
@@ -1733,6 +1753,10 @@ const Inbox = () => {
       }
       if (skippedReason === "no_comment") {
         setGenerationError("Avis note seule: utilisez le modele court.");
+        return { draftText: null, pending: false };
+      }
+      if (skippedReason === "has_owner_reply" || skippedReason === "already_replied") {
+        setGenerationError("Avis deja repondu.");
         return { draftText: null, pending: false };
       }
 
@@ -1798,6 +1822,10 @@ const Inbox = () => {
     }
     if (isReviewNoteOnly(selectedReview)) {
       setGenerationError("Avis note seule: utilisez le modele court.");
+      return;
+    }
+    if (selectedReviewHasRealReply) {
+      setGenerationError("Avis deja repondu.");
       return;
     }
     setIsGenerating(true);
@@ -1932,7 +1960,7 @@ const Inbox = () => {
       setGenerationError("La réponse est vide.");
       return;
     }
-    if (selectedReview.status === "replied") {
+    if (selectedReviewHasRealReply) {
       setGenerationError("Avis déjà répondu.");
       return;
     }
@@ -2850,12 +2878,12 @@ const Inbox = () => {
                     {aiSuggestionError}
                   </div>
                 )}
-                {autoDraftStatus === "loading" && !selectedReviewIsNoteOnly && (
+                {autoDraftStatus === "loading" && canGenerateForSelectedReview && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
                     Generation en cours...
                   </div>
                 )}
-                {autoDraftStatus === "error" && !selectedReviewIsNoteOnly && (
+                {autoDraftStatus === "error" && canGenerateForSelectedReview && (
                   <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
                     Impossible de generer un brouillon pour le moment.
                   </div>
@@ -2890,7 +2918,11 @@ const Inbox = () => {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  {!hasSavedDraft ? (
+                  {selectedReviewHasRealReply ? (
+                    <Button type="button" variant="outline" disabled>
+                      Avis repondu
+                    </Button>
+                  ) : !hasSavedDraft ? (
                     <>
                       <Button
                         type="button"
@@ -2900,7 +2932,7 @@ const Inbox = () => {
                           !selectedReview ||
                           !isSupabaseAvailable ||
                           isCooldownActive ||
-                          selectedReviewIsNoteOnly
+                          !canGenerateForSelectedReview
                         }
                       >
                         {isGenerating ? "Generation..." : "Generer (IA)"}
@@ -2940,7 +2972,7 @@ const Inbox = () => {
                           replySending ||
                           !selectedReview ||
                           !draftReplyId ||
-                          selectedReview?.status === "replied"
+                          selectedReviewHasRealReply
                         }
                       >
                         {replySending ? "Envoi..." : "Envoyer"}
@@ -2962,7 +2994,7 @@ const Inbox = () => {
                           !selectedReview ||
                           !isSupabaseAvailable ||
                           isCooldownActive ||
-                          selectedReviewIsNoteOnly
+                          !canGenerateForSelectedReview
                         }
                       >
                         Regenerer
