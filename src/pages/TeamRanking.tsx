@@ -140,8 +140,8 @@ const TeamRanking = ({ session }: TeamRankingProps) => {
     enabled: Boolean(supabaseClient) && Boolean(session?.user?.id)
   });
 
-  const members = membersQuery.data ?? [];
-  const reviews = reviewsQuery.data ?? [];
+  const members = useMemo(() => membersQuery.data ?? [], [membersQuery.data]);
+  const reviews = useMemo(() => reviewsQuery.data ?? [], [reviewsQuery.data]);
 
   const memberMatchers = useMemo(() => {
     return members.map((member) => ({

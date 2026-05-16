@@ -39,6 +39,15 @@ const AuthCallback = () => {
         window.history.replaceState({}, "", url.toString());
       }
 
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        if (!cancelled) {
+          setStatus("error");
+          setErrorMessage("Lien de connexion invalide ou expiré.");
+        }
+        return;
+      }
+
       if (!cancelled) {
         setStatus("success");
         setErrorMessage(null);

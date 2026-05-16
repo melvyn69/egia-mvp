@@ -45,7 +45,7 @@ Branche stable : `release/v0.1-stable`
 
 ### Cron Sync (source of truth)
 - Endpoint : `POST /api/cron/google/sync-replies`
-- Protégé par secret (header `Authorization: Bearer <CRON_SECRET>` ou `?secret=...`)
+- Protégé par secret (header `Authorization: Bearer <CRON_SECRET>` ou `x-cron-secret: <CRON_SECRET>`)
 - Synchronise les replies Google → `google_reviews` + `review_replies`
 - Recommandé: cron-job.org toutes les 10 minutes
 
@@ -107,9 +107,15 @@ Contexte IA :
 
 ### Install
 ```bash
-npm install
+npm ci
 npm run dev
 ```
+
+`npm run dev` lance uniquement Vite sur `http://localhost:5173`. Les routes
+`/api/*` sont des fonctions Vercel et ne sont pas exécutées par Vite seul. Pour
+tester les parcours Google, KPI, rapports, équipe et automatisations de bout en
+bout, lancez l'application via Vercel local ou un déploiement de preview, puis
+utilisez cette URL comme `BASE_URL` dans les smoke tests.
 
 ## Demo checklist (Google onboarding)
 
@@ -278,7 +284,8 @@ where review_pk::text in (
 ## Cron-job.org
 
 Créer un job POST:
-- URL: `https://<votre-domaine>/api/cron/google/sync-replies?secret=<CRON_SECRET>`
+- URL: `https://<votre-domaine>/api/cron/google/sync-replies`
+- Header: `Authorization: Bearer <CRON_SECRET>` ou `x-cron-secret: <CRON_SECRET>`
 - Fréquence: toutes les 10 minutes
 
 Générer un secret:
@@ -288,7 +295,8 @@ openssl rand -hex 24
 
 Test local:
 ```bash
-curl -i -X POST "http://localhost:3000/api/cron/google/sync-replies?secret=<CRON_SECRET>"
+curl -i -X POST "http://localhost:3000/api/cron/google/sync-replies" \
+  -H "Authorization: Bearer <CRON_SECRET>"
 ```
 
 Settings Module – Architecture & Features (V1)

@@ -1184,7 +1184,7 @@ const Inbox = () => {
         setPrepareDraftLoading(false);
       }
     },
-    [prepareDraftLoading, supabase]
+    [prepareDraftLoading]
   );
 
   const handleRunAiForSpecificLocation = async (locationId: string) => {
@@ -1613,6 +1613,7 @@ const Inbox = () => {
     };
   }, [
     aiSuggestion?.text,
+    aiSuggestion?.reviewId,
     aiSuggestionLoadedByReview,
     lengthPreset,
     replyDirtyByReview,
@@ -1756,7 +1757,7 @@ const Inbox = () => {
       setDraftByReview((prev) => ({ ...prev, [review.id]: true }));
       return true;
     },
-    [supabase]
+    []
   );
 
   const requestBrandVoiceDraft = useCallback(
@@ -1843,7 +1844,7 @@ const Inbox = () => {
       setGenerationError("Generation en cours. Reviens dans quelques secondes.");
       return { draftText: null, pending: true };
     },
-    [supabase]
+    []
   );
 
   const handleGenerate = async () => {

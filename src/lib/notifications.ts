@@ -104,13 +104,14 @@ export const getReadNotificationIds = (): Set<string> => {
 };
 
 export const getUnreadNotificationCount = (
-  notifications: AppNotificationBase[] = mockNotifications
+  notifications?: AppNotificationBase[]
 ): number => {
   try {
+    const source = notifications ?? getNotifications();
     const readIds = getReadNotificationIds();
-    return notifications.filter((notif) => !readIds.has(notif.id)).length;
+    return source.filter((notif) => !readIds.has(notif.id)).length;
   } catch {
-    return notifications.length;
+    return notifications?.length ?? 0;
   }
 };
 
@@ -130,7 +131,7 @@ export const getNotifications = (): AppNotificationBase[] => {
   } catch {
     // fall through to seed
   }
-  const seed = mockNotifications;
+  const seed = import.meta.env.DEV ? mockNotifications : [];
   setNotifications(seed);
   return seed;
 };

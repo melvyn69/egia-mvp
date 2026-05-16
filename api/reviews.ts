@@ -261,7 +261,7 @@ const toInboxRowStatus = (row: Pick<GoogleReviewRow, "status" | "owner_reply" | 
   if (isNonEmptyText(row.owner_reply)) {
     return "replied";
   }
-  if (Boolean(row.has_draft)) {
+  if (row.has_draft) {
     return "reading";
   }
   return "new";

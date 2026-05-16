@@ -162,6 +162,13 @@ const App = () => {
       };
     }
 
+    if (location.pathname === "/team") {
+      return {
+        title: "Équipe",
+        subtitle: "Classement, rôles et suivi des membres."
+      };
+    }
+
     if (location.pathname === "/alerts") {
       return {
         title: "Alertes intelligentes",
@@ -169,9 +176,44 @@ const App = () => {
       };
     }
 
+    if (location.pathname === "/competitors") {
+      return {
+        title: "Veille concurrentielle",
+        subtitle: "Benchmark local, concurrents et opportunités."
+      };
+    }
+
+    if (location.pathname === "/settings") {
+      return {
+        title: "Paramètres",
+        subtitle: "Profil, entreprise, équipe et préférences."
+      };
+    }
+
+    if (location.pathname === "/invite") {
+      return {
+        title: "Invitation",
+        subtitle: "Finalisation de l'accès équipe."
+      };
+    }
+
+    if (location.pathname === "/sync-status") {
+      return {
+        title: "Sync status",
+        subtitle: "Suivi des synchronisations Google et erreurs."
+      };
+    }
+
+    if (location.pathname === "/ai-job-health") {
+      return {
+        title: "AI Job Health",
+        subtitle: "État des jobs IA, files et traitements."
+      };
+    }
+
     return {
       title: "Dashboard",
-      subtitle: "Suivi des avis, KPIs et activite en temps reel."
+      subtitle: "Suivi des avis, KPIs et activité en temps réel."
     };
   }, [location.pathname]);
 

@@ -61,7 +61,7 @@ const Sidebar = ({
       active = false;
       subscription?.subscription?.unsubscribe();
     };
-  }, [supabase]);
+  }, []);
 
   const prefetchAnalytics = async () => {
     if (!supabase) {

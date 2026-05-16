@@ -47,6 +47,10 @@ const Topbar = ({
   const companyName = brandingQuery.data?.companyName ?? null;
   const logoFallback = pickInitials(companyName ?? "EG");
   useEffect(() => {
+    if (!userId) {
+      return;
+    }
+
     const updateUnreadCount = () => {
       setUnreadCount(getUnreadNotificationCount());
     };
@@ -64,7 +68,7 @@ const Topbar = ({
       window.removeEventListener(NOTIFICATIONS_UPDATED_EVENT, handleNotificationsUpdate);
       window.removeEventListener("storage", handleNotificationsUpdate);
     };
-  }, []);
+  }, [userId]);
 
   const handleNotificationClick = () => {
     const section = document.getElementById("notifications-section");
@@ -121,19 +125,21 @@ const Topbar = ({
             )}
           </div>
         )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="relative rounded-full"
-          onClick={handleNotificationClick}
-        >
-          <Bell size={16} />
-          {unreadCount > 0 && (
-            <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-semibold text-white">
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </span>
-          )}
-        </Button>
+        {userId && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="relative rounded-full"
+            onClick={handleNotificationClick}
+          >
+            <Bell size={16} />
+            {unreadCount > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-semibold text-white">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
+            )}
+          </Button>
+        )}
         {userEmail && (
           <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-4 py-2">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">

@@ -85,7 +85,10 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
     enabled: Boolean(accessToken)
   });
 
-  const entities = entitiesQuery.data ?? [];
+  const entities = useMemo(
+    () => entitiesQuery.data ?? [],
+    [entitiesQuery.data]
+  );
   const selectedEntity = useMemo(() => {
     if (selectedId === "new") {
       return formState;

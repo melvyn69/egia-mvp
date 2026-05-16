@@ -731,8 +731,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
     }
   });
 
-  const radarItems = radarQuery.data ?? [];
-  const followedItems = followedQuery.data ?? [];
+  const radarItems = useMemo(() => radarQuery.data ?? [], [radarQuery.data]);
+  const followedItems = useMemo(
+    () => followedQuery.data ?? [],
+    [followedQuery.data]
+  );
   const settingsRow = settingsQuery.data;
   const enabled = Boolean(settingsRow?.competitive_monitoring_enabled);
   const googleConnected = (locationsQuery.data ?? []).length > 0;

@@ -152,8 +152,8 @@ const Alerts = ({ session }: AlertsProps) => {
     }
   };
 
-  const alerts = alertsQuery.data ?? [];
   const formattedAlerts = useMemo(() => {
+    const alerts = alertsQuery.data ?? [];
     const sorted = alerts.slice().sort((a, b) => {
       const aResolved = Boolean(a.resolved_at);
       const bResolved = Boolean(b.resolved_at);
@@ -216,7 +216,7 @@ const Alerts = ({ session }: AlertsProps) => {
           : "Date inconnue"
       };
     });
-  }, [alerts]);
+  }, [alertsQuery.data]);
 
   const lastCheckedLabel =
     alertsQuery.dataUpdatedAt && alertsQuery.dataUpdatedAt > 0

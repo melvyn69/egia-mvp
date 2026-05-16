@@ -740,7 +740,7 @@ const Settings = ({ session }: SettingsProps) => {
 
   const teamMembers = teamMembersQuery.data ?? [];
 
-  const tabContent = useMemo(() => {
+  const tabContent = (() => {
     if (activeTab === "team") {
       return (
         <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
@@ -1514,43 +1514,7 @@ const Settings = ({ session }: SettingsProps) => {
         </CardContent>
       </Card>
     );
-  }, [
-    activeTab,
-    teamMembersQuery.isLoading,
-    teamMembers,
-    inviteFirstName,
-    inviteEmail,
-    inviteRole,
-    inviteMonthly,
-    inviteError,
-    inviteSuccess,
-    toggleError,
-    inviteSending,
-    deviceHint,
-    appBaseUrl,
-    businessSettingsQuery.isLoading,
-    monthlyEnabled,
-    updatingCompany,
-    companyError,
-    googleConnectionQuery.data,
-    googleConnectionQuery.isLoading,
-    googleError,
-    locationsError,
-    locationsNotice,
-    locationsQuery.data,
-    locationsQuery.isLoading,
-    reviewsNeedingReplyQuery.data,
-    reviewsNeedingReplyQuery.isLoading,
-    lastSyncQuery.data,
-    lastSyncQuery.isLoading,
-    selectedActiveIds,
-    activeLocationsSaving,
-    syncingLocations,
-    invitationsQuery.isLoading,
-    invitationsQuery.data,
-    session,
-    navigate
-  ]);
+  })();
 
   return (
     <div className="space-y-6">
