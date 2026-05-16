@@ -47,6 +47,8 @@ type Review = {
   createdAt: string;
   updatedAt: string;
   text: string;
+  ownerReply?: string | null;
+  ownerReplyTime?: string | null;
   tags: string[];
   aiStatus: "pending" | "ready";
   aiSentiment: AiSentiment | null;
@@ -91,6 +93,10 @@ type ReviewRow = {
   author_name: string | null;
   rating: number | null;
   comment: string | null;
+  owner_reply?: string | null;
+  reply_text?: string | null;
+  owner_reply_time?: string | null;
+  replied_at?: string | null;
   create_time: string | null;
   update_time: string | null;
   status: ReviewStatus | null;
@@ -523,6 +529,8 @@ const Inbox = () => {
         createdAt,
         updatedAt,
         text: row.comment ?? "",
+        ownerReply: row.owner_reply ?? row.reply_text ?? null,
+        ownerReplyTime: row.owner_reply_time ?? row.replied_at ?? null,
         tags: [],
         aiStatus: "pending",
         aiSentiment: null,
@@ -1385,7 +1393,12 @@ const Inbox = () => {
       const { data, error } = await supabaseClient
         .from("review_replies")
         .select("id, review_id, reply_text, status, created_at, sent_at")
-        .eq("review_id", selectedReview.id)
+        .in(
+          "review_id",
+          Array.from(
+            new Set([selectedReview.id, selectedReview.reviewId].filter(Boolean))
+          ) as string[]
+        )
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -1748,12 +1761,28 @@ const Inbox = () => {
         ) {
           return { draftText: statusPayload.draft_text.trim(), pending: false };
         }
+        const status = typeof statusPayload?.status === "string"
+          ? statusPayload.status.toLowerCase()
+          : "";
+        const hasJobInflight = Boolean(statusPayload?.has_job_inflight);
+        if (statusResponse.ok && status === "error") {
+          setGenerationError("Generation IA en erreur.");
+          return { draftText: null, pending: false };
+        }
+        if (
+          statusResponse.ok &&
+          !hasJobInflight &&
+          ["done", "draft", "queued", ""].includes(status)
+        ) {
+          setGenerationError("Aucun brouillon IA disponible.");
+          return { draftText: null, pending: false };
+        }
         await new Promise((resolve) => {
           window.setTimeout(resolve, intervalMs);
         });
       }
       setGenerationError("Generation en cours. Reviens dans quelques secondes.");
-      return { draftText: null, pending: true };
+      return { draftText: null, pending: false };
     },
     []
   );
@@ -2680,6 +2709,24 @@ const Inbox = () => {
             {replyTab === "activity" ? (
               <div className="space-y-4">
                 <div className="space-y-3">
+                  {selectedReview?.ownerReply && (
+                    <div className="flex gap-3 rounded-2xl border border-slate-200 bg-white p-3">
+                      <span className="mt-1 h-2 w-2 rounded-full bg-emerald-500" />
+                      <div className="w-full">
+                        <div className="flex items-center justify-between text-xs text-slate-500">
+                          <span>
+                            {selectedReview.ownerReplyTime
+                              ? formatRelativeDate(selectedReview.ownerReplyTime)
+                              : "Reponse Google"}
+                          </span>
+                          <span>Envoyé</span>
+                        </div>
+                        <p className="mt-2 text-sm text-slate-700">
+                          {selectedReview.ownerReply}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                   {activityEvents.map((event) => (
                     <div
                       key={event.id}

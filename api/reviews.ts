@@ -22,6 +22,9 @@ type GoogleReviewRow = {
   created_at: string | null;
   status: string | null;
   owner_reply?: string | null;
+  reply_text?: string | null;
+  owner_reply_time?: string | null;
+  replied_at?: string | null;
   draft_status?: string | null;
   draft_preview?: string | null;
   draft_updated_at?: string | null;
@@ -1478,6 +1481,15 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       const row = (draftRows ?? [])[0] ?? null;
       const draftText = row?.draft_text ? String(row.draft_text).trim() : "";
       const existingJob = await getInFlightReviewJob(supabaseAdmin, userId, reviewId);
+      console.info("[reviews] draft_status", {
+        requestId,
+        user_id: userId,
+        review_id: reviewId,
+        draft_ready: draftText.length > 0,
+        draft_status: row?.status ?? null,
+        job_inflight: Boolean(existingJob),
+        job_id: existingJob?.id ?? null
+      });
       const status = existingJob
         ? "processing"
         : typeof row?.status === "string"
@@ -1488,7 +1500,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         review_id: reviewId,
         ready: draftText.length > 0,
         draft_text: draftText.length > 0 ? draftText : null,
-        status
+        status,
+        has_job_inflight: Boolean(existingJob)
       });
     }
 
@@ -1735,7 +1748,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     let tableQuery = supabaseAdmin
       .from("google_reviews")
       .select(
-        "id, review_id, location_id, author_name, rating, comment, create_time, update_time, created_at, status, owner_reply"
+        "id, review_id, location_id, author_name, rating, comment, create_time, update_time, created_at, status, owner_reply, reply_text, owner_reply_time, replied_at"
       )
       .eq("user_id", safeUserId);
     if (locationIds.length === 1) {
@@ -1810,6 +1823,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       created_at: string | null;
       status: string | null;
       owner_reply: string | null;
+      reply_text: string | null;
+      owner_reply_time: string | null;
+      replied_at: string | null;
     }>).map((row) => {
       const mapped: GoogleReviewRow = {
         id: row.id ?? "",
@@ -1823,6 +1839,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         created_at: row.created_at ?? row.create_time ?? row.update_time,
         status: row.status ?? null,
         owner_reply: row.owner_reply ?? "",
+        reply_text: row.reply_text ?? "",
+        owner_reply_time: row.owner_reply_time ?? null,
+        replied_at: row.replied_at ?? null,
         draft_status: null,
         draft_preview: "",
         draft_updated_at: null,
