@@ -1,11 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { randomUUID } from "crypto";
 import { resolveDateRange } from "../server/_shared_dist/_date.js";
-import { parseFilters } from "../server/_shared_dist/_filters.js";
 import { buildPromptContext } from "../server/_shared_dist/ai_reply.js";
 import { requireUser } from "../server/_shared_dist/_auth.js";
-import { createClient } from "@supabase/supabase-js";
-import { getBearerToken } from "../server/_shared_dist/google/_utils.js";
 
 type Cursor = { source_time: string; id: string };
 
@@ -72,29 +69,7 @@ type ReviewEligibilityProbe = {
   owner_reply: string | null;
   create_time: string | null;
   update_time: string | null;
-  inserted_at: string | null;
-};
-
-type InboxReviewRpcRow = {
-  review_pk?: string | null;
-  review_id: string;
-  review_name: string | null;
-  google_review_id: string | null;
-  location_id: string | null;
-  author_name: string | null;
-  status: string | null;
-  create_time: string | null;
-  update_time: string | null;
-  inserted_at: string | null;
-  rating: number | null;
-  comment: string | null;
-  owner_reply: string | null;
-  draft_status: string | null;
-  draft_preview: string | null;
-  draft_updated_at: string | null;
-  has_draft: boolean | null;
-  has_job_inflight: boolean | null;
-  is_eligible_to_generate: boolean | null;
+  created_at: string | null;
 };
 
 type CronStatus = {
@@ -165,20 +140,6 @@ const getRequestId = (req: VercelRequest) => {
 const isMissingEnvError = (err: unknown) =>
   err instanceof Error && err.message === "Missing SUPABASE env vars";
 
-const createUserSupabase = (token: string | null) => {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const anonKey = process.env.SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !anonKey || !token) {
-    return null;
-  }
-  return createClient(supabaseUrl, anonKey, {
-    auth: { persistSession: false },
-    global: {
-      headers: { Authorization: `Bearer ${token}` }
-    }
-  });
-};
-
 const AI_JOB_IN_FLIGHT_STATUSES = [
   "queued",
   "pending",
@@ -207,6 +168,79 @@ const parseBooleanQuery = (value: unknown, defaultValue = false) => {
   }
   return defaultValue;
 };
+
+const parseRequestUrl = (req: VercelRequest) => {
+  try {
+    return new URL(req.url ?? "/api/reviews", "http://localhost");
+  } catch {
+    return new URL("/api/reviews", "http://localhost");
+  }
+};
+
+const getQueryValue = (
+  parsedUrl: URL,
+  req: VercelRequest,
+  key: string
+): string | null => {
+  const fromUrl = parsedUrl.searchParams.get(key);
+  if (typeof fromUrl === "string") {
+    const trimmed = fromUrl.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  const fromReqQuery = (req.query as Record<string, unknown>)[key];
+  const raw = Array.isArray(fromReqQuery) ? fromReqQuery[0] : fromReqQuery;
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const parseNumberQuery = (
+  parsedUrl: URL,
+  req: VercelRequest,
+  key: string
+): number | null => {
+  const raw = getQueryValue(parsedUrl, req, key);
+  if (!raw) {
+    return null;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const parseIntegerQuery = (
+  parsedUrl: URL,
+  req: VercelRequest,
+  key: string,
+  options: { defaultValue: number; min: number; max: number }
+) => {
+  const raw = getQueryValue(parsedUrl, req, key);
+  const parsed = raw ? Number.parseInt(raw, 10) : options.defaultValue;
+  if (!Number.isFinite(parsed)) {
+    return options.defaultValue;
+  }
+  return Math.min(options.max, Math.max(options.min, parsed));
+};
+
+const parseTagsQuery = (
+  parsedUrl: URL,
+  req: VercelRequest
+): string[] | null => {
+  const raw = getQueryValue(parsedUrl, req, "tags");
+  if (!raw || raw === "all") {
+    return null;
+  }
+  const tags = raw
+    .split(",")
+    .map((tag) => tag.trim().toLowerCase())
+    .filter(Boolean);
+  return tags.length > 0 ? tags : null;
+};
+
+const getParsedQuerySnapshot = (parsedUrl: URL) =>
+  Object.fromEntries(parsedUrl.searchParams.entries());
 
 type InboxStatusFilter = "new" | "reading" | "replied" | "archived";
 
@@ -270,10 +304,11 @@ const toInboxRowStatus = (row: Pick<GoogleReviewRow, "status" | "owner_reply" | 
 const handler = async (req: VercelRequest, res: VercelResponse) => {
   const route = "/api/reviews";
   const requestId = getRequestId(req);
+  const parsedUrl = parseRequestUrl(req);
+  const parsedQuery = getParsedQuerySnapshot(parsedUrl);
   let userId: string | null = null;
   let locationId: string | null = null;
-  const actionParam = req.query.action;
-  let action = Array.isArray(actionParam) ? actionParam[0] : actionParam;
+  let action = getQueryValue(parsedUrl, req, "action") ?? undefined;
 
   try {
     let auth;
@@ -283,7 +318,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       const missingEnv = isMissingEnvError(err);
       console.error("[reviews] auth error", {
         route,
-        query: req.query,
+        req_url: req.url ?? null,
+        query: parsedQuery,
         reason: missingEnv ? "missing_env" : undefined,
         error: {
           message: err instanceof Error ? err.message : String(err),
@@ -302,8 +338,6 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     }
     userId = auth.userId;
     const { supabaseAdmin } = auth;
-    const bearerToken = getBearerToken(req.headers);
-    const supabaseUser = createUserSupabase(bearerToken) ?? supabaseAdmin;
     const identityHashCache = new Map<string, string>();
     const resolveIdentityHash = async (
       params: { locationId: string | null; reviewText?: string | null }
@@ -479,7 +513,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       if (!reviewRows || reviewRows.length === 0) {
         const { data: probe } = await supabaseAdmin
           .from("google_reviews")
-          .select("id, comment, owner_reply, create_time, update_time, inserted_at")
+          .select("id, comment, owner_reply, create_time, update_time, created_at")
           .eq("user_id", userId)
           .eq("id", reviewId)
           .maybeSingle();
@@ -493,7 +527,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         } else if (!isNonEmptyText(probeRow.comment)) {
           skippedReason = "no_comment";
         } else {
-          const sourceTs = probeRow.create_time ?? probeRow.update_time ?? probeRow.inserted_at;
+          const sourceTs = probeRow.create_time ?? probeRow.update_time ?? probeRow.created_at;
           if (sourceTs && lookbackDays > 0) {
             const cutoff = Date.now() - lookbackDays * 24 * 60 * 60 * 1000;
             if (new Date(sourceTs).getTime() < cutoff) {
@@ -699,7 +733,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         if (singleReviewMode) {
           const { data: probe } = await supabaseAdmin
             .from("google_reviews")
-            .select("id, comment, owner_reply, create_time, update_time, inserted_at")
+            .select("id, comment, owner_reply, create_time, update_time, created_at")
             .eq("user_id", userId)
             .eq("location_id", locationId)
             .eq("id", singleReviewId)
@@ -714,7 +748,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           } else if (!isNonEmptyText(probeRow.comment)) {
             skippedReason = "no_comment";
           } else {
-            const sourceTs = probeRow.create_time ?? probeRow.update_time ?? probeRow.inserted_at;
+            const sourceTs = probeRow.create_time ?? probeRow.update_time ?? probeRow.created_at;
             if (sourceTs && lookbackDays > 0) {
               const cutoff = Date.now() - lookbackDays * 24 * 60 * 60 * 1000;
               if (new Date(sourceTs).getTime() < cutoff) {
@@ -1175,36 +1209,95 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       }
     }
 
-    const filters = parseFilters(req.query);
-    locationId = filters.location_id ?? null;
-    if (filters.reject) {
-      return res.status(200).json({ rows: [], nextCursor: null });
+    locationId = getQueryValue(parsedUrl, req, "location_id");
+    const source = getQueryValue(parsedUrl, req, "source");
+    if (source && source !== "google") {
+      console.log("[reviews]", {
+        event: "list_rejected_source",
+        req_url: req.url ?? null,
+        query: parsedQuery,
+        user_id: userId,
+        source,
+        requestId
+      });
+      return res.status(200).json({ ok: true, items: [], nextCursor: null, total: 0 });
     }
 
-    let locationIds: string[] = [];
+    const rawStatus = getQueryValue(parsedUrl, req, "status");
+    const statusNormalized = normalizeInboxStatus(rawStatus);
+    const preset = getQueryValue(parsedUrl, req, "preset") ?? "this_month";
+    const from = getQueryValue(parsedUrl, req, "from") ?? undefined;
+    const to = getQueryValue(parsedUrl, req, "to") ?? undefined;
+    const timeZone = getQueryValue(parsedUrl, req, "tz") ?? "Europe/Paris";
+    const ratingMin = parseNumberQuery(parsedUrl, req, "rating_min");
+    const ratingMax = parseNumberQuery(parsedUrl, req, "rating_max");
+    const sentimentRaw = getQueryValue(parsedUrl, req, "sentiment");
+    const sentiment =
+      sentimentRaw && sentimentRaw !== "all" ? sentimentRaw : null;
+    const tags = parseTagsQuery(parsedUrl, req);
+    const limit = parseIntegerQuery(parsedUrl, req, "limit", {
+      defaultValue: 50,
+      min: 1,
+      max: 200
+    });
+    const offset = parseIntegerQuery(parsedUrl, req, "offset", {
+      defaultValue: 0,
+      min: 0,
+      max: 10_000
+    });
+    const includeNoComment = parseBooleanQuery(
+      getQueryValue(parsedUrl, req, "include_no_comment"),
+      false
+    );
+    const cursor = parseCursor(getQueryValue(parsedUrl, req, "cursor") ?? undefined);
+
     const activeLocationIds = await fetchActiveLocationIds(
       supabaseAdmin,
       userId
     );
+    let locationIds: string[] = [];
     if (locationId) {
-      const { data: locationRow } = (await supabaseAdmin
+      const { data: locationRow, error: locationError } = (await supabaseAdmin
         .from("google_locations")
         .select("id, location_resource_name")
         .eq("user_id", userId)
         .eq("location_resource_name", locationId)
-        .maybeSingle()) as { data: GoogleLocationRow | null; error: unknown };
+        .maybeSingle()) as { data: GoogleLocationRow | null; error: { message?: string | null } | null };
+      if (locationError) {
+        console.error("[reviews]", {
+          event: "location_lookup_failed",
+          req_url: req.url ?? null,
+          query: parsedQuery,
+          location_id: locationId,
+          user_id: userId,
+          message: locationError.message ?? null,
+          requestId
+        });
+        return res.status(500).json({ error: "Failed to load location", requestId });
+      }
       if (!locationRow) {
-        return res.status(404).json({ error: "Location not found" });
+        return res.status(404).json({ error: "Location not found", requestId });
       }
       if (activeLocationIds && !activeLocationIds.has(locationRow.id)) {
-        return res.status(404).json({ error: "Location not found" });
+        return res.status(404).json({ error: "Location not active", requestId });
       }
-      locationIds = [locationId];
+      locationIds = [locationRow.location_resource_name].filter(Boolean);
     } else {
-      const { data: locations } = (await supabaseAdmin
+      const { data: locations, error: locationsError } = (await supabaseAdmin
         .from("google_locations")
         .select("id, location_resource_name")
-        .eq("user_id", userId)) as { data: GoogleLocationRow[] | null; error: unknown };
+        .eq("user_id", userId)) as { data: GoogleLocationRow[] | null; error: { message?: string | null } | null };
+      if (locationsError) {
+        console.error("[reviews]", {
+          event: "locations_load_failed",
+          req_url: req.url ?? null,
+          query: parsedQuery,
+          user_id: userId,
+          message: locationsError.message ?? null,
+          requestId
+        });
+        return res.status(500).json({ error: "Failed to load locations", requestId });
+      }
       const filtered = activeLocationIds
         ? (locations ?? []).filter((location) =>
             activeLocationIds.has(location.id)
@@ -1212,24 +1305,51 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         : locations ?? [];
       locationIds = filtered
         .map((location) => location.location_resource_name)
-        .filter(Boolean);
+        .filter((value): value is string => typeof value === "string" && value.length > 0);
     }
 
-    if (!locationIds || locationIds.length === 0) {
-      throw new Error("No location selected");
+    if (locationIds.length === 0) {
+      console.log("[reviews]", {
+        event: "list_no_locations",
+        req_url: req.url ?? null,
+        query: parsedQuery,
+        location_id: locationId,
+        status: rawStatus,
+        limit,
+        offset,
+        user_id: userId,
+        requestId
+      });
+      return res.status(200).json({ ok: true, items: [], nextCursor: null, total: 0 });
     }
-    const selectedLocationId = locationIds[0];
+    const selectedLocationId = locationIds[0] ?? null;
 
-    const preset = filters.preset;
-    const from = filters.from;
-    const to = filters.to;
-    const timeZone = filters.tz;
-    const range = resolveDateRange(
-      preset as Parameters<typeof resolveDateRange>[0],
-      from,
-      to,
-      timeZone
-    );
+    let range: ReturnType<typeof resolveDateRange>;
+    try {
+      range = resolveDateRange(
+        preset as Parameters<typeof resolveDateRange>[0],
+        from,
+        to,
+        timeZone
+      );
+    } catch (error) {
+      console.error("[reviews]", {
+        event: "invalid_date_filters",
+        req_url: req.url ?? null,
+        query: parsedQuery,
+        location_id: locationId,
+        status: rawStatus,
+        limit,
+        offset,
+        user_id: userId,
+        message: error instanceof Error ? error.message : String(error),
+        requestId
+      });
+      return res.status(400).json({
+        error: "Invalid date filters",
+        requestId
+      });
+    }
     const rangeFrom =
       typeof range.from === "string" ? range.from : range.from.toISOString();
     const rangeTo =
@@ -1237,26 +1357,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     const rangeFromMs = new Date(rangeFrom).getTime();
     const rangeToMs = new Date(rangeTo).getTime();
 
-    const ratingMin = filters.rating_min ?? null;
-    const ratingMax = filters.rating_max ?? null;
-    const sentiment = filters.sentiment;
-    const statusNormalized = normalizeInboxStatus(filters.status);
-    const tags = filters.tags;
-
-    const limitParam = req.query.limit;
-    const limit = Math.min(
-      Math.max(Number(limitParam) || 50, 1),
-      200
-    );
-    const includeNoComment = parseBooleanQuery(
-      req.query.include_no_comment,
-      false
-    );
     const candidateLimit = Math.min(Math.max(limit * 6, limit), 500);
-    const cursorParam = req.query.cursor;
-    const cursor = parseCursor(
-      Array.isArray(cursorParam) ? cursorParam[0] : cursorParam
-    );
     const safeUserId = isUuid(userId) ? userId : null;
     if (!safeUserId) {
       return res.status(401).json({ error: "Unauthorized" });
@@ -1271,238 +1372,181 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           )
         )
       : 180;
-    const useRpcInboxPath =
-      statusNormalized === "new" ||
-      statusNormalized === "reading" ||
-      statusNormalized === "archived";
     const getSourceTime = (row: Pick<GoogleReviewRow, "update_time" | "create_time" | "created_at">) =>
       row.update_time ?? row.create_time ?? row.created_at ?? null;
 
     let baseRows: GoogleReviewRow[] = [];
     let total = 0;
 
-    if (useRpcInboxPath) {
-      const inboxRpcClient = supabaseUser as unknown as {
-        rpc: (
-          fn: string,
-          params: Record<string, unknown>
-        ) => Promise<{ data: InboxReviewRpcRow[] | null; error: { message?: string | null } | null }>;
-      };
-      const rpcResponses = await Promise.all(
-        locationIds.map((locationResourceName) =>
-          inboxRpcClient.rpc("get_inbox_reviews", {
-            p_location_id: locationResourceName,
-            p_limit: candidateLimit,
-            p_only_with_comment: !includeNoComment,
-            p_lookback_days: computedLookbackDays,
-            p_user_id: safeUserId
-          })
-        )
-      );
-      const rpcRows: InboxReviewRpcRow[] = [];
-      for (const response of rpcResponses) {
-        if (response.error) {
-          throw new Error(response.error.message ?? "Failed to load inbox reviews");
-        }
-        if (response.data) {
-          rpcRows.push(...response.data);
-        }
-      }
-      const allowedLocationSet = new Set(locationIds);
-      baseRows = rpcRows
-        .filter((row) => row.location_id && allowedLocationSet.has(row.location_id))
-        .map((row) => {
-          const mapped: GoogleReviewRow = {
-            id: row.review_pk ?? row.review_id ?? row.review_name ?? "",
-            review_id: row.google_review_id ?? row.review_name ?? "",
-            location_id: row.location_id ?? "",
-            author_name: row.author_name ?? "",
-            rating: row.rating,
-            comment: row.comment ?? "",
-            create_time: row.create_time,
-            update_time: row.update_time,
-            created_at: row.inserted_at ?? row.create_time ?? row.update_time,
-            status: row.status ?? null,
-            owner_reply: row.owner_reply ?? "",
-            draft_status: row.draft_status,
-            draft_preview: row.draft_preview ?? "",
-            draft_updated_at: row.draft_updated_at,
-            has_draft: Boolean(row.has_draft),
-            has_job_inflight: Boolean(row.has_job_inflight),
-            is_eligible_to_generate: Boolean(row.is_eligible_to_generate)
-          };
-          return {
-            ...mapped,
-            status: toInboxRowStatus(mapped)
-          };
-        });
-      total = baseRows.length;
+    let tableQuery = supabaseAdmin
+      .from("google_reviews")
+      .select(
+        "id, review_id, location_id, author_name, rating, comment, create_time, update_time, created_at, status, owner_reply"
+      )
+      .eq("user_id", safeUserId);
+    if (locationIds.length === 1) {
+      tableQuery = tableQuery.eq("location_id", locationIds[0]);
     } else {
-      let tableQuery = supabaseUser
-        .from("google_reviews")
-        .select(
-          "id, review_id, location_id, author_name, rating, comment, create_time, update_time, inserted_at, status, owner_reply"
-        )
-        .eq("user_id", userId);
-      if (locationIds.length === 1) {
-        tableQuery = tableQuery.eq("location_id", locationIds[0]);
-      } else {
-        tableQuery = tableQuery.in("location_id", locationIds);
-      }
-      if (statusNormalized === "replied") {
-        tableQuery = tableQuery
-          .not("owner_reply", "is", null)
-          .neq("owner_reply", "");
-      } else if (statusNormalized === "archived") {
-        tableQuery = tableQuery.or("status.eq.ignored,status.eq.archived");
-      }
-      if (!includeNoComment) {
-        tableQuery = tableQuery.not("comment", "is", null).neq("comment", "");
-      }
-      if (ratingMin !== null && Number.isFinite(ratingMin)) {
-        tableQuery = tableQuery.gte("rating", ratingMin);
-      }
-      if (ratingMax !== null && Number.isFinite(ratingMax)) {
-        tableQuery = tableQuery.lte("rating", ratingMax);
-      }
-      if (cursor) {
-        tableQuery = tableQuery.or(
-          `and(update_time.not.is.null,update_time.lt.${cursor.source_time}),` +
-            `and(update_time.not.is.null,update_time.eq.${cursor.source_time},id.lt.${cursor.id}),` +
-            `and(update_time.is.null,create_time.not.is.null,create_time.lt.${cursor.source_time}),` +
-            `and(update_time.is.null,create_time.not.is.null,create_time.eq.${cursor.source_time},id.lt.${cursor.id}),` +
-            `and(update_time.is.null,create_time.is.null,inserted_at.lt.${cursor.source_time}),` +
-            `and(update_time.is.null,create_time.is.null,inserted_at.eq.${cursor.source_time},id.lt.${cursor.id})`
-        );
-      }
-      const { data: tableRowsRaw, error: tableRowsError } = await tableQuery
-        .order("update_time", { ascending: false, nullsFirst: false })
-        .order("create_time", { ascending: false, nullsFirst: false })
-        .order("inserted_at", { ascending: false, nullsFirst: false })
-        .order("id", { ascending: false })
-        .limit(candidateLimit);
-      if (tableRowsError) {
-        throw new Error(tableRowsError.message ?? "Failed to load review history");
-      }
-      baseRows = ((tableRowsRaw ?? []) as Array<{
-        id: string | null;
+      tableQuery = tableQuery.in("location_id", locationIds);
+    }
+    tableQuery = tableQuery.or(
+      `and(update_time.gte.${rangeFrom},update_time.lte.${rangeTo}),` +
+        `and(update_time.is.null,create_time.gte.${rangeFrom},create_time.lte.${rangeTo}),` +
+        `and(update_time.is.null,create_time.is.null,created_at.gte.${rangeFrom},created_at.lte.${rangeTo})`
+    );
+    if (statusNormalized === "replied") {
+      tableQuery = tableQuery
+        .not("owner_reply", "is", null)
+        .neq("owner_reply", "");
+    } else if (statusNormalized === "archived") {
+      tableQuery = tableQuery.or("status.eq.ignored,status.eq.archived");
+    }
+    if (!includeNoComment) {
+      tableQuery = tableQuery.not("comment", "is", null).neq("comment", "");
+    }
+    if (ratingMin !== null) {
+      tableQuery = tableQuery.gte("rating", ratingMin);
+    }
+    if (ratingMax !== null) {
+      tableQuery = tableQuery.lte("rating", ratingMax);
+    }
+    if (cursor) {
+      tableQuery = tableQuery.or(
+        `and(update_time.not.is.null,update_time.lt.${cursor.source_time}),` +
+          `and(update_time.not.is.null,update_time.eq.${cursor.source_time},id.lt.${cursor.id}),` +
+          `and(update_time.is.null,create_time.not.is.null,create_time.lt.${cursor.source_time}),` +
+          `and(update_time.is.null,create_time.not.is.null,create_time.eq.${cursor.source_time},id.lt.${cursor.id}),` +
+          `and(update_time.is.null,create_time.is.null,created_at.lt.${cursor.source_time}),` +
+          `and(update_time.is.null,create_time.is.null,created_at.eq.${cursor.source_time},id.lt.${cursor.id})`
+      );
+    }
+    const { data: tableRowsRaw, error: tableRowsError } = await tableQuery
+      .order("update_time", { ascending: false, nullsFirst: false })
+      .order("create_time", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false, nullsFirst: false })
+      .order("id", { ascending: false })
+      .limit(candidateLimit + offset);
+    if (tableRowsError) {
+      console.error("[reviews]", {
+        event: "google_reviews_query_failed",
+        req_url: req.url ?? null,
+        query: parsedQuery,
+        table: "google_reviews",
+        user_id: safeUserId,
+        location_id: locationId,
+        location_ids_count: locationIds.length,
+        status: rawStatus,
+        statusNormalized,
+        limit,
+        offset,
+        message: tableRowsError.message ?? null,
+        requestId
+      });
+      throw new Error(tableRowsError.message ?? "Failed to load review history");
+    }
+    baseRows = ((tableRowsRaw ?? []) as Array<{
+      id: string | null;
+      review_id: string | null;
+      location_id: string | null;
+      author_name: string | null;
+      rating: number | null;
+      comment: string | null;
+      create_time: string | null;
+      update_time: string | null;
+      created_at: string | null;
+      status: string | null;
+      owner_reply: string | null;
+    }>).map((row) => {
+      const mapped: GoogleReviewRow = {
+        id: row.id ?? "",
+        review_id: row.review_id ?? "",
+        location_id: row.location_id ?? "",
+        author_name: row.author_name ?? "",
+        rating: row.rating,
+        comment: row.comment ?? "",
+        create_time: row.create_time,
+        update_time: row.update_time,
+        created_at: row.created_at ?? row.create_time ?? row.update_time,
+        status: row.status ?? null,
+        owner_reply: row.owner_reply ?? "",
+        draft_status: null,
+        draft_preview: "",
+        draft_updated_at: null,
+        has_draft: false,
+        has_job_inflight: false,
+        is_eligible_to_generate: false
+      };
+      return {
+        ...mapped,
+        status: toInboxRowStatus(mapped)
+      };
+    });
+
+    const tableReviewIds = baseRows.map((row) => row.id).filter(Boolean);
+    if (tableReviewIds.length > 0) {
+      const { data: draftRows } = await supabaseAdmin
+        .from("review_ai_replies")
+        .select("review_id, status, draft_text, updated_at")
+        .eq("user_id", safeUserId)
+        .eq("mode", "draft")
+        .in("review_id", tableReviewIds);
+      const { data: jobRows } = await supabaseAdmin
+        .from("ai_jobs")
+        .select("payload")
+        .in("status", AI_JOB_IN_FLIGHT_STATUSES)
+        .limit(500);
+      type DraftLookupRow = {
         review_id: string | null;
-        location_id: string | null;
-        author_name: string | null;
-        rating: number | null;
-        comment: string | null;
-        create_time: string | null;
-        update_time: string | null;
-        inserted_at: string | null;
         status: string | null;
-        owner_reply: string | null;
-      }>).map((row) => {
+        draft_text: string | null;
+        updated_at: string | null;
+      };
+      const typedDraftRows = (draftRows ?? []) as DraftLookupRow[];
+      const draftByReview = new Map<
+        string,
+        { status: string | null; draft_text: string | null; updated_at: string | null }
+      >(
+        typedDraftRows.map((row) => [
+          String(row.review_id ?? ""),
+          {
+            status: row.status ?? null,
+            draft_text: row.draft_text ?? null,
+            updated_at: row.updated_at ?? null
+          }
+        ])
+      );
+      const inflightReviewIds = new Set(
+        ((jobRows ?? []) as Array<{ payload?: Record<string, unknown> | null }>)
+          .filter((row) => {
+            const payload = row.payload ?? {};
+            const payloadUserId = payload.user_id;
+            return !payloadUserId || payloadUserId === safeUserId;
+          })
+          .map((row) => String(row.payload?.review_id ?? ""))
+          .filter(Boolean)
+      );
+      baseRows = baseRows.map((row) => {
+        const draft = draftByReview.get(row.id);
+        const hasDraft = Boolean(draft && isNonEmptyText(draft.draft_text));
+        const hasJobInflight = inflightReviewIds.has(row.id);
         const mapped: GoogleReviewRow = {
-          id: row.id ?? "",
-          review_id: row.review_id ?? "",
-          location_id: row.location_id ?? "",
-          author_name: row.author_name ?? "",
-          rating: row.rating,
-          comment: row.comment ?? "",
-          create_time: row.create_time,
-          update_time: row.update_time,
-          created_at: row.inserted_at ?? row.create_time ?? row.update_time,
-          status: row.status ?? null,
-          owner_reply: row.owner_reply ?? "",
-          draft_status: null,
-          draft_preview: "",
-          draft_updated_at: null,
-          has_draft: false,
-          has_job_inflight: false,
-          is_eligible_to_generate: false
+          ...row,
+          has_draft: hasDraft,
+          has_job_inflight: hasJobInflight,
+          draft_status: draft?.status ?? row.draft_status ?? null,
+          draft_preview: draft?.draft_text?.slice(0, 160) ?? row.draft_preview ?? "",
+          draft_updated_at: draft?.updated_at ?? row.draft_updated_at ?? null,
+          is_eligible_to_generate:
+            !isNonEmptyText(row.owner_reply) &&
+            isNonEmptyText(row.comment) &&
+            !hasDraft &&
+            !hasJobInflight
         };
         return {
           ...mapped,
           status: toInboxRowStatus(mapped)
         };
       });
-
-      const tableReviewIds = baseRows.map((row) => row.id).filter(Boolean);
-      if (tableReviewIds.length > 0) {
-        const { data: draftRows } = await supabaseAdmin
-          .from("review_ai_replies")
-          .select("review_id, status, draft_text, updated_at")
-          .eq("user_id", userId)
-          .eq("mode", "draft")
-          .in("review_id", tableReviewIds);
-        type DraftLookupRow = {
-          review_id: string | null;
-          status: string | null;
-          draft_text: string | null;
-          updated_at: string | null;
-        };
-        const typedDraftRows = (draftRows ?? []) as DraftLookupRow[];
-        const draftByReview = new Map<
-          string,
-          { status: string | null; draft_text: string | null; updated_at: string | null }
-        >(
-          typedDraftRows.map((row) => [
-            String(row.review_id ?? ""),
-            {
-              status: row.status ?? null,
-              draft_text: row.draft_text ?? null,
-              updated_at: row.updated_at ?? null
-            }
-          ])
-        );
-        baseRows = baseRows.map((row) => {
-          const draft = draftByReview.get(row.id);
-          const hasDraft = Boolean(draft && isNonEmptyText(draft.draft_text));
-          const mapped: GoogleReviewRow = {
-            ...row,
-            has_draft: hasDraft,
-            draft_status: draft?.status ?? row.draft_status ?? null,
-            draft_preview: draft?.draft_text?.slice(0, 160) ?? row.draft_preview ?? "",
-            draft_updated_at: draft?.updated_at ?? row.draft_updated_at ?? null,
-            is_eligible_to_generate:
-              !isNonEmptyText(row.owner_reply) &&
-              isNonEmptyText(row.comment) &&
-              !hasDraft
-          };
-          return {
-            ...mapped,
-            status: toInboxRowStatus(mapped)
-          };
-        });
-      }
-
-      let countQuery = supabaseUser
-        .from("google_reviews")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId);
-      if (locationIds.length === 1) {
-        countQuery = countQuery.eq("location_id", locationIds[0]);
-      } else {
-        countQuery = countQuery.in("location_id", locationIds);
-      }
-      if (statusNormalized === "replied") {
-        countQuery = countQuery
-          .not("owner_reply", "is", null)
-          .neq("owner_reply", "");
-      } else if (statusNormalized === "archived") {
-        countQuery = countQuery.or("status.eq.ignored,status.eq.archived");
-      }
-      if (!includeNoComment) {
-        countQuery = countQuery.not("comment", "is", null).neq("comment", "");
-      }
-      countQuery = countQuery.or(
-        `and(update_time.gte.${rangeFrom},update_time.lte.${rangeTo}),` +
-          `and(update_time.is.null,create_time.gte.${rangeFrom},create_time.lte.${rangeTo}),` +
-          `and(update_time.is.null,create_time.is.null,inserted_at.gte.${rangeFrom},inserted_at.lte.${rangeTo})`
-      );
-      if (ratingMin !== null && Number.isFinite(ratingMin)) {
-        countQuery = countQuery.gte("rating", ratingMin);
-      }
-      if (ratingMax !== null && Number.isFinite(ratingMax)) {
-        countQuery = countQuery.lte("rating", ratingMax);
-      }
-      const { count } = await countQuery;
-      total = Number(count ?? 0);
     }
 
     const rangeFilteredRows = baseRows.filter((row) => {
@@ -1541,28 +1585,40 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     });
 
     const reviewIds = rangeFilteredRows.map((row) => row.id).filter(Boolean);
-    const { data: insights } = (await supabaseAdmin
-      .from("review_ai_insights")
-      .select("review_pk, sentiment")
-      .in("review_pk", reviewIds)) as { data: ReviewInsightRow[] | null; error: unknown };
+    let insights: ReviewInsightRow[] = [];
+    if (reviewIds.length > 0) {
+      const { data } = (await supabaseAdmin
+        .from("review_ai_insights")
+        .select("review_pk, sentiment")
+        .in("review_pk", reviewIds)) as { data: ReviewInsightRow[] | null; error: unknown };
+      insights = data ?? [];
+    }
     const sentimentMap = new Map(
-      (insights ?? []).map((item) => [item.review_pk, item.sentiment])
+      insights.map((item) => [item.review_pk, item.sentiment])
     );
 
-    const { data: tagLinks } = (await supabaseAdmin
-      .from("review_ai_tags")
-      .select("review_pk, tag_id")
-      .in("review_pk", reviewIds)) as { data: ReviewTagLinkRow[] | null; error: unknown };
+    let tagLinks: ReviewTagLinkRow[] = [];
+    if (reviewIds.length > 0) {
+      const { data } = (await supabaseAdmin
+        .from("review_ai_tags")
+        .select("review_pk, tag_id")
+        .in("review_pk", reviewIds)) as { data: ReviewTagLinkRow[] | null; error: unknown };
+      tagLinks = data ?? [];
+    }
     const tagIds = Array.from(
-      new Set((tagLinks ?? []).map((item) => item.tag_id))
+      new Set(tagLinks.map((item) => item.tag_id))
     );
-    const { data: tagsData } = (await supabaseAdmin
-      .from("ai_tags")
-      .select("id, tag")
-      .in("id", tagIds)) as { data: AiTagRow[] | null; error: unknown };
-    const tagLookup = new Map((tagsData ?? []).map((item) => [item.id, item.tag]));
+    let tagsData: AiTagRow[] = [];
+    if (tagIds.length > 0) {
+      const { data } = (await supabaseAdmin
+        .from("ai_tags")
+        .select("id, tag")
+        .in("id", tagIds)) as { data: AiTagRow[] | null; error: unknown };
+      tagsData = data ?? [];
+    }
+    const tagLookup = new Map(tagsData.map((item) => [item.id, item.tag]));
     const tagsByReview = new Map<string, string[]>();
-    for (const link of tagLinks ?? []) {
+    for (const link of tagLinks) {
       const tag = tagLookup.get(link.tag_id);
       if (!tag) {
         continue;
@@ -1614,9 +1670,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         })
       : filtered;
 
-    const limited = cursorFiltered.slice(0, limit);
+    const offsetFiltered = offset > 0 ? cursorFiltered.slice(offset) : cursorFiltered;
+    const limited = offsetFiltered.slice(0, limit);
     const last = limited[limited.length - 1];
-    const hasMore = cursorFiltered.length > limit;
+    const hasMore = offsetFiltered.length > limit;
     const nextCursor =
       last && hasMore
         ? buildCursor({
@@ -1625,26 +1682,40 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           })
         : null;
 
-    if (useRpcInboxPath || sentiment || (tags && tags.length > 0)) {
-      total = filtered.length;
-    }
+    total = filtered.length;
 
-    if (process.env.NODE_ENV !== "production") {
-      console.info("[reviews] list", {
-        requestId,
-        path: useRpcInboxPath ? "rpc" : "table",
-        selectedLocationId,
-        locationCount: locationIds.length,
+    console.log("[reviews]", {
+      event: "list_success",
+      req_url: req.url ?? null,
+      query: parsedQuery,
+      parsed: {
+        location_id: locationId,
+        status: rawStatus,
         statusNormalized,
-        rangeFrom,
-        rangeTo,
-        lookbackDays: computedLookbackDays,
-        base: baseRows.length,
-        filtered: filtered.length,
-        limited: limited.length,
-        total
-      });
-    }
+        limit,
+        offset,
+        preset,
+        from,
+        to,
+        tz: timeZone,
+        rating_min: ratingMin,
+        rating_max: ratingMax,
+        sentiment,
+        tags
+      },
+      user_id: safeUserId,
+      table: "google_reviews",
+      selectedLocationId,
+      locationCount: locationIds.length,
+      rangeFrom,
+      rangeTo,
+      lookbackDays: computedLookbackDays,
+      base: baseRows.length,
+      filtered: filtered.length,
+      limited: limited.length,
+      total,
+      requestId
+    });
 
     return res.status(200).json({
       ok: true,
@@ -1660,7 +1731,8 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     const missingEnv = isMissingEnvError(err);
     console.error("[reviews] error", {
       route,
-      query: req.query,
+      req_url: req.url ?? null,
+      query: parsedQuery,
       userId,
       location_id: locationId,
       reason: missingEnv ? "missing_env" : undefined,
