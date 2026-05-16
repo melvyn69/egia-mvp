@@ -64,30 +64,54 @@ const OAuthCallback = () => {
       setSyncLoading(false);
       return;
     }
-    const response = await fetch("/api/google/gbp/sync", {
+    setSyncMessage("Synchronisation des établissements Google...");
+    const locationsResponse = await fetch("/api/google/gbp/sync?sync_now=1", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${jwt}`
-      }
+        Authorization: `Bearer ${jwt}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ sync_now: true })
     });
-    const data = await response.json().catch(() => null);
-    if (!response.ok || !data?.ok) {
-      if (response.status === 401 && data?.error === "reauth_required") {
+    const locationsData = await locationsResponse.json().catch(() => null);
+    if (!locationsResponse.ok || !locationsData?.ok) {
+      if (
+        locationsResponse.status === 401 &&
+        locationsData?.error === "reauth_required"
+      ) {
         setSyncMessage("Reconnecte Google.");
         setSyncDisabled(true);
       } else {
-        setSyncMessage("Erreur de synchronisation.");
+        setSyncMessage("Erreur de synchronisation des établissements.");
       }
-    } else {
-      if (data?.queued) {
-        setSyncMessage("Synchronisation planifiée. Suivi en cours...");
-      } else {
-        setSyncMessage(
-          `Synchronisation terminée: ${data?.locationsCount ?? 0} lieux.`
-        );
-      }
-      setSyncDisabled(false);
+      setSyncLoading(false);
+      return;
     }
+
+    setSyncMessage("Synchronisation des avis Google...");
+    const reviewsResponse = await fetch("/api/google/gbp/reviews/sync", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        "Content-Type": "application/json"
+      }
+    });
+    const reviewsData = await reviewsResponse.json().catch(() => null);
+    if (!reviewsResponse.ok || !reviewsData?.ok) {
+      setSyncMessage("Établissements synchronisés, mais erreur sur les avis.");
+      setSyncLoading(false);
+      return;
+    }
+
+    const locationsCount = reviewsData?.locationsCount ?? locationsData?.locationsCount ?? 0;
+    const reviewsCount = reviewsData?.reviewsCount ?? 0;
+    const locationsFailed = reviewsData?.locationsFailed ?? 0;
+    const failureSuffix =
+      locationsFailed > 0 ? ` ${locationsFailed} établissement(s) en erreur.` : "";
+    setSyncMessage(
+      `Synchronisation terminée: ${locationsCount} lieu(x), ${reviewsCount} avis.${failureSuffix}`
+    );
+    setSyncDisabled(false);
     setSyncLoading(false);
   };
 
