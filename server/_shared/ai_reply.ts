@@ -178,6 +178,33 @@ const toAiIdentityMeta = (identity: ResolvedAiIdentity): AiIdentityMeta => ({
   ai_identity_hash: hashAiIdentity(identity)
 });
 
+const isUuid = (value: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+
+const resolveBrandVoiceLocationId = async (params: {
+  supabaseAdmin: SupabaseClient<Database>;
+  userId: string;
+  locationId: string | null;
+}) => {
+  const locationId = params.locationId?.trim() ?? "";
+  if (!locationId) {
+    return null;
+  }
+  if (isUuid(locationId)) {
+    return locationId;
+  }
+  const { data, error } = await params.supabaseAdmin
+    .from("google_locations")
+    .select("id")
+    .eq("user_id", params.userId)
+    .eq("location_resource_name", locationId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(error.message ?? "google_locations identity lookup failed");
+  }
+  return data?.id ?? null;
+};
+
 const resolveDbAiIdentity = async (params: {
   supabaseAdmin: SupabaseClient<Database>;
   userId: string;
@@ -190,12 +217,17 @@ const resolveDbAiIdentity = async (params: {
     "id, enabled, tone, language_level, context, use_emojis, forbidden_words";
 
   try {
-    if (locationId) {
+    const brandVoiceLocationId = await resolveBrandVoiceLocationId({
+      supabaseAdmin,
+      userId,
+      locationId
+    });
+    if (brandVoiceLocationId) {
       const { data: locationRow, error: locationError } = await supabaseAdmin
         .from("brand_voice")
         .select(selectFields)
         .eq("user_id", userId)
-        .eq("location_id", locationId)
+        .eq("location_id", brandVoiceLocationId)
         .maybeSingle();
       if (locationError) {
         throw new Error(locationError.message ?? "brand_voice location lookup failed");

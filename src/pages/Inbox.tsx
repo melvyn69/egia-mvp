@@ -1396,6 +1396,12 @@ const Inbox = () => {
         setReplyHistory(rows);
         const latestDraft = rows.find((item: ReviewReply) => item.status === "draft");
         setDraftReplyId(latestDraft?.id ?? null);
+        if (latestDraft?.reply_text) {
+          setDrafts((prev) => ({
+            ...prev,
+            [selectedReview.id]: latestDraft.reply_text
+          }));
+        }
       }
       setReplyHistoryLoading(false);
     };
@@ -1472,7 +1478,7 @@ const Inbox = () => {
   }, [selectedReview, selectedReviewId]);
 
   useEffect(() => {
-    if (!selectedReview || !supabase) {
+    if (!selectedReview) {
       return;
     }
     const reviewId = selectedReview.id;
@@ -1504,122 +1510,17 @@ const Inbox = () => {
       return;
     }
 
-    if (autoDraftRequestedRef.current[reviewId]) {
-      return;
-    }
-    autoDraftRequestedRef.current[reviewId] = true;
     setAutoDraftStatusByReview((prev) => ({
       ...prev,
-      [reviewId]: "loading"
+      [reviewId]: "idle"
     }));
-
-    let cancelled = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    const fetchDraft = async () => {
-      const sbAny = supabase as unknown as {
-        from: (table: string) => {
-          select: (columns: string) => {
-            eq: (column: string, value: string) => {
-              maybeSingle: () => Promise<{
-                data?: { draft_text?: string | null; status?: string | null } | null;
-                error?: { message?: string | null } | null;
-              }>;
-            };
-          };
-        };
-      };
-      const { data, error } = await sbAny
-        .from("review_ai_replies")
-        .select("draft_text, status")
-        .eq("review_id", reviewId)
-        .maybeSingle();
-      if (error) {
-        return "";
-      }
-      return data?.draft_text ? String(data.draft_text).trim() : "";
-    };
-
-    const intervalMs = 2000;
-    const maxAttempts = 15;
-    let attempts = 0;
-
-    const poll = async () => {
-      if (cancelled) {
-        return;
-      }
-      const draftText = await fetchDraft();
-      if (cancelled) {
-        return;
-      }
-      if (draftText) {
-        setAiSuggestion({ reviewId, text: draftText, status: "draft" });
-        setAutoDraftStatusByReview((prev) => ({
-          ...prev,
-          [reviewId]: "ready"
-        }));
-        return;
-      }
-      attempts += 1;
-      if (attempts >= maxAttempts) {
-        setAutoDraftStatusByReview((prev) => ({
-          ...prev,
-          [reviewId]: "error"
-        }));
-        return;
-      }
-      timeoutId = setTimeout(poll, intervalMs);
-    };
-
-    const ensureDraft = async () => {
-      try {
-        const token = await getAccessToken(supabase);
-        const response = await fetch("/api/reviews?action=ensure_draft", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            review_id: reviewId,
-            location_id: selectedReview.locationId,
-            tone: tonePreset,
-            length: lengthPreset
-          })
-        });
-        if (!response.ok) {
-          setAutoDraftStatusByReview((prev) => ({
-            ...prev,
-            [reviewId]: "error"
-          }));
-          return;
-        }
-        void poll();
-      } catch {
-        setAutoDraftStatusByReview((prev) => ({
-          ...prev,
-          [reviewId]: "error"
-        }));
-      }
-    };
-
-    void ensureDraft();
-
-    return () => {
-      cancelled = true;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-    };
   }, [
     aiSuggestion?.text,
     aiSuggestion?.reviewId,
     aiSuggestionLoadedByReview,
-    lengthPreset,
     replyDirtyByReview,
     selectedReview,
-    selectedReviewId,
-    tonePreset
+    selectedReviewId
   ]);
 
   useEffect(() => {
@@ -1807,6 +1708,16 @@ const Inbox = () => {
               }
             ).skipped_reason ?? null
           : null;
+      const existingDraftText =
+        resultForReview &&
+        typeof resultForReview === "object" &&
+        "draft_text" in resultForReview &&
+        typeof (resultForReview as { draft_text?: unknown }).draft_text === "string"
+          ? (resultForReview as { draft_text: string }).draft_text.trim()
+          : "";
+      if (existingDraftText) {
+        return { draftText: existingDraftText, pending: false };
+      }
       if (skippedReason === "no_comment") {
         setGenerationError("Avis note seule: utilisez le modele court.");
         return { draftText: null, pending: false };
@@ -1882,12 +1793,14 @@ const Inbox = () => {
         ...prev,
         [selectedReview.id]: "ready"
       }));
-      await saveDraftReply(
-        selectedReview,
-        result.draftText,
-        tonePreset,
-        lengthPreset
-      );
+      if (!draftReplyId) {
+        await saveDraftReply(
+          selectedReview,
+          result.draftText,
+          tonePreset,
+          lengthPreset
+        );
+      }
     } catch {
       setGenerationError("Erreur lors de la generation.");
       setAutoDraftStatusByReview((prev) => ({

@@ -8,6 +8,8 @@ type Cursor = { source_time: string; id: string };
 
 type GoogleLocationRow = { id: string; location_resource_name: string };
 
+type SupabaseAdmin = NonNullable<Awaited<ReturnType<typeof requireUser>>>["supabaseAdmin"];
+
 type GoogleReviewRow = {
   id: string;
   review_id: string | null;
@@ -38,6 +40,8 @@ type PrepareDraftResultItem = {
   review_id: string;
   queued: boolean;
   skipped: boolean;
+  draft_text?: string | null;
+  status?: string | null;
   skipped_reason?:
     | "has_owner_reply"
     | "no_comment"
@@ -65,11 +69,29 @@ type ReviewToReplyRpcRow = {
 
 type ReviewEligibilityProbe = {
   id: string;
+  review_id: string | null;
+  location_id: string | null;
+  location_name: string | null;
   comment: string | null;
   owner_reply: string | null;
+  rating: number | null;
   create_time: string | null;
   update_time: string | null;
   created_at: string | null;
+};
+
+type ResolvedDraftLocation = {
+  requestedLocationId: string | null;
+  googleLocationResource: string | null;
+  googleLocationId: string | null;
+  businessId: string | null;
+};
+
+type ExistingDraftResult = {
+  source: "review_ai_replies" | "review_replies";
+  text: string;
+  status: string | null;
+  id?: string | null;
 };
 
 type CronStatus = {
@@ -153,6 +175,187 @@ const isNonEmptyText = (value: unknown) =>
 const isUuid = (value: unknown): value is string =>
   typeof value === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+
+const normalizeStringId = (value: unknown) => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const resolveDraftLocation = async (params: {
+  supabaseAdmin: SupabaseAdmin;
+  userId: string;
+  requestedLocationId: unknown;
+  reviewId?: string | null;
+  action: string;
+  requestId: string;
+}): Promise<ResolvedDraftLocation> => {
+  const requestedLocationId = normalizeStringId(params.requestedLocationId);
+
+  const fetchGoogleLocation = async (
+    column: "id" | "location_resource_name",
+    value: string
+  ): Promise<GoogleLocationRow | null> => {
+    const { data, error } = await (params.supabaseAdmin as any)
+      .from("google_locations")
+      .select("id, location_resource_name")
+      .eq("user_id", params.userId)
+      .eq(column, value)
+      .maybeSingle();
+    if (error) {
+      console.warn("[reviews] draft_location_lookup_failed", {
+        action: params.action,
+        requestId: params.requestId,
+        user_id: params.userId,
+        column,
+        value,
+        message: error.message ?? "unknown"
+      });
+      return null;
+    }
+    return data
+      ? {
+          id: String(data.id),
+          location_resource_name: String(data.location_resource_name)
+        }
+      : null;
+  };
+
+  let googleLocationResource: string | null = null;
+  let googleLocationId: string | null = null;
+
+  if (requestedLocationId) {
+    if (isUuid(requestedLocationId)) {
+      const locationRow = await fetchGoogleLocation("id", requestedLocationId);
+      googleLocationId = locationRow?.id ?? requestedLocationId;
+      googleLocationResource = locationRow?.location_resource_name ?? null;
+    } else {
+      const locationRow = await fetchGoogleLocation(
+        "location_resource_name",
+        requestedLocationId
+      );
+      googleLocationId = locationRow?.id ?? null;
+      googleLocationResource =
+        locationRow?.location_resource_name ?? requestedLocationId;
+    }
+  }
+
+  if (!googleLocationResource && params.reviewId) {
+    const { data: reviewRow, error: reviewError } = await (params.supabaseAdmin as any)
+      .from("google_reviews")
+      .select("location_id")
+      .eq("user_id", params.userId)
+      .eq("id", params.reviewId)
+      .maybeSingle();
+    if (reviewError) {
+      console.warn("[reviews] draft_review_location_lookup_failed", {
+        action: params.action,
+        requestId: params.requestId,
+        user_id: params.userId,
+        review_id: params.reviewId,
+        message: reviewError.message ?? "unknown"
+      });
+    }
+    const reviewLocation = normalizeStringId(reviewRow?.location_id);
+    if (reviewLocation) {
+      googleLocationResource = reviewLocation;
+      if (!googleLocationId) {
+        const locationRow = await fetchGoogleLocation(
+          "location_resource_name",
+          reviewLocation
+        );
+        googleLocationId = locationRow?.id ?? null;
+      }
+    }
+  }
+
+  return {
+    requestedLocationId,
+    googleLocationResource,
+    googleLocationId,
+    businessId: googleLocationId
+  };
+};
+
+const getExistingDraftForReview = async (
+  supabaseAdmin: SupabaseAdmin,
+  userId: string,
+  reviewId: string
+): Promise<ExistingDraftResult | null> => {
+  const { data: aiDraft, error: aiDraftError } = await (supabaseAdmin as any)
+    .from("review_ai_replies")
+    .select("status, draft_text")
+    .eq("review_id", reviewId)
+    .eq("user_id", userId)
+    .eq("mode", "draft")
+    .maybeSingle();
+  if (aiDraftError) {
+    console.warn("[reviews] draft_existing_ai_lookup_failed", {
+      user_id: userId,
+      review_id: reviewId,
+      message: aiDraftError.message ?? "unknown"
+    });
+  }
+  const aiText = aiDraft?.draft_text ? String(aiDraft.draft_text).trim() : "";
+  if (aiText) {
+    return {
+      source: "review_ai_replies",
+      text: aiText,
+      status: typeof aiDraft?.status === "string" ? aiDraft.status : null
+    };
+  }
+
+  const { data: replyRows, error: replyError } = await (supabaseAdmin as any)
+    .from("review_replies")
+    .select("id, reply_text, status, created_at")
+    .eq("review_id", reviewId)
+    .eq("user_id", userId)
+    .eq("status", "draft")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (replyError) {
+    console.warn("[reviews] draft_existing_reply_lookup_failed", {
+      user_id: userId,
+      review_id: reviewId,
+      message: replyError.message ?? "unknown"
+    });
+  }
+  const replyRow = Array.isArray(replyRows) ? replyRows[0] : null;
+  const replyText = replyRow?.reply_text ? String(replyRow.reply_text).trim() : "";
+  if (!replyText) {
+    return null;
+  }
+  return {
+    source: "review_replies",
+    id: typeof replyRow?.id === "string" ? replyRow.id : null,
+    text: replyText,
+    status: typeof replyRow?.status === "string" ? replyRow.status : null
+  };
+};
+
+const getInFlightReviewJob = async (
+  supabaseAdmin: SupabaseAdmin,
+  userId: string,
+  reviewId: string
+) => {
+  const { data, error } = await (supabaseAdmin as any)
+    .from("ai_jobs")
+    .select("id, status, payload")
+    .filter("payload->>review_id", "eq", reviewId)
+    .in("status", AI_JOB_IN_FLIGHT_STATUSES)
+    .limit(1);
+  if (error) {
+    console.warn("[reviews] draft_job_lookup_failed", {
+      user_id: userId,
+      review_id: reviewId,
+      message: error.message ?? "unknown"
+    });
+    return null;
+  }
+  return Array.isArray(data) ? data[0] ?? null : null;
+};
 
 const parseBooleanQuery = (value: unknown, defaultValue = false) => {
   const raw = Array.isArray(value) ? value[0] : value;
@@ -417,9 +620,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       }
       const payload = parseBody(req);
       const reviewId = String(payload?.review_id ?? "").trim();
-      const locationId = payload?.location_id
-        ? String(payload.location_id).trim()
-        : null;
+      const rawLocationId = normalizeStringId(payload?.location_id);
       const lookbackDays = Math.min(
         3650,
         Math.max(0, Number.parseInt(String(payload?.lookback_days ?? 180), 10) || 180)
@@ -427,24 +628,25 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       if (!reviewId) {
         return res.status(400).json({ error: "Missing review_id" });
       }
-      const identityHash = await resolveIdentityHash({
-        locationId,
-        reviewText: typeof payload?.review_text === "string" ? payload.review_text : null
+      const locationContext = await resolveDraftLocation({
+        supabaseAdmin,
+        userId,
+        requestedLocationId: rawLocationId,
+        reviewId,
+        action: "ensure_draft",
+        requestId
       });
 
-      const { data: existingDraft } = await supabaseAdmin
-        .from("review_ai_replies")
-        .select("status, draft_text")
-        .eq("review_id", reviewId)
-        .eq("user_id", userId)
-        .eq("mode", "draft")
-        .maybeSingle();
-      const existingText = existingDraft?.draft_text
-        ? String(existingDraft.draft_text).trim()
-        : "";
-      const existingStatus = String(existingDraft?.status ?? "").trim().toLowerCase();
-      if (existingText) {
-        if (existingStatus !== "draft") {
+      const existingDraft = await getExistingDraftForReview(
+        supabaseAdmin,
+        userId,
+        reviewId
+      );
+      if (existingDraft) {
+        if (
+          existingDraft.source === "review_ai_replies" &&
+          existingDraft.status?.toLowerCase() !== "draft"
+        ) {
           await supabaseAdmin
             .from("review_ai_replies")
             .update({ status: "draft", updated_at: new Date().toISOString() })
@@ -452,44 +654,59 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
             .eq("user_id", userId)
             .eq("mode", "draft");
         }
-        return res.status(200).json({ ok: true, status: "exists" });
+        console.log("[reviews] draft_context", {
+          action: "ensure_draft",
+          requestId,
+          user_id: userId,
+          review_id: reviewId,
+          requested_location_id: locationContext.requestedLocationId,
+          google_location_resource: locationContext.googleLocationResource,
+          resolved_google_location_id: locationContext.googleLocationId,
+          business_id: locationContext.businessId,
+          draft_existing: true,
+          draft_source: existingDraft.source,
+          job_existing: false
+        });
+        return res.status(200).json({
+          ok: true,
+          status: "exists",
+          draft_text: existingDraft.text,
+          source: existingDraft.source
+        });
       }
 
       const jobsTable = supabaseAdmin as unknown as {
         from: (table: string) => {
-          select: (columns: string) => {
-            filter: (column: string, operator: string, value: string) => {
-              in: (column: string, values: string[]) => {
-                limit: (count: number) => Promise<{
-                  data?:
-                    | Array<{
-                        id?: string | null;
-                        payload?: Record<string, unknown> | null;
-                      }>
-                    | null;
-                  error?: { message?: string | null } | null;
-                }>;
-              };
-            };
-          };
           insert: (values: Record<string, unknown>) => Promise<{
             error?: { message?: string | null; code?: string | null } | null;
           }>;
         };
       };
 
-      const { data: existingJob } = await jobsTable
-        .from("ai_jobs")
-        .select("id, payload")
-        .filter("payload->>review_id", "eq", reviewId)
-        .in("status", AI_JOB_IN_FLIGHT_STATUSES)
-        .limit(20);
-      const hasInFlightJob = Array.isArray(existingJob) && existingJob.length > 0;
-      if (hasInFlightJob) {
+      const existingJob = await getInFlightReviewJob(supabaseAdmin, userId, reviewId);
+      if (existingJob) {
+        console.log("[reviews] draft_context", {
+          action: "ensure_draft",
+          requestId,
+          user_id: userId,
+          review_id: reviewId,
+          requested_location_id: locationContext.requestedLocationId,
+          google_location_resource: locationContext.googleLocationResource,
+          resolved_google_location_id: locationContext.googleLocationId,
+          business_id: locationContext.businessId,
+          draft_existing: false,
+          job_existing: true,
+          job_id: existingJob.id ?? null
+        });
         return res
           .status(200)
-          .json({ ok: true, status: "already_running" });
+          .json({ ok: true, status: "processing" });
       }
+
+      const identityHash = await resolveIdentityHash({
+        locationId: locationContext.googleLocationId,
+        reviewText: typeof payload?.review_text === "string" ? payload.review_text : null
+      });
 
       const rpcClient = supabaseAdmin as unknown as {
         rpc: (
@@ -501,7 +718,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         "get_reviews_to_reply",
         {
           p_user_id: userId,
-          p_location_id: locationId,
+          p_location_id: locationContext.googleLocationResource,
           p_limit: 1,
           p_lookback_days: lookbackDays,
           p_review_id: reviewId
@@ -513,7 +730,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       if (!reviewRows || reviewRows.length === 0) {
         const { data: probe } = await supabaseAdmin
           .from("google_reviews")
-          .select("id, comment, owner_reply, create_time, update_time, created_at")
+          .select(
+            "id, review_id, location_id, location_name, comment, owner_reply, rating, create_time, update_time, created_at"
+          )
           .eq("user_id", userId)
           .eq("id", reviewId)
           .maybeSingle();
@@ -535,20 +754,37 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
             }
           }
         }
-        return res.status(200).json({
-          ok: true,
-          status: "skipped",
-          skipped_reason: skippedReason
-        });
+        if (skippedReason !== "already_has_draft") {
+          console.log("[reviews] draft_context", {
+            action: "ensure_draft",
+            requestId,
+            user_id: userId,
+            review_id: reviewId,
+            requested_location_id: locationContext.requestedLocationId,
+            google_location_resource: locationContext.googleLocationResource,
+            resolved_google_location_id: locationContext.googleLocationId,
+            business_id: locationContext.businessId,
+            draft_existing: false,
+            job_existing: false,
+            skipped_reason: skippedReason
+          });
+          return res.status(200).json({
+            ok: true,
+            status: "skipped",
+            skipped_reason: skippedReason
+          });
+        }
       }
 
+      const draftLocationId =
+        locationContext.googleLocationId ?? locationContext.googleLocationResource;
       let { error: draftUpsertError } = await supabaseAdmin
         .from("review_ai_replies")
         .upsert(
           {
             review_id: reviewId,
             user_id: userId,
-            location_id: locationId,
+            location_id: draftLocationId,
             mode: "draft",
             identity_hash: identityHash,
             status: "queued",
@@ -568,7 +804,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
             {
               review_id: reviewId,
               user_id: userId,
-              location_id: locationId,
+              location_id: draftLocationId,
               mode: "draft",
               identity_hash: identityHash,
               status: "queued",
@@ -600,14 +836,21 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
             .eq("user_id", userId)
             .eq("mode", "draft");
         }
-        return res.status(200).json({ ok: true, status: "exists" });
+        return res.status(200).json({
+          ok: true,
+          status: "exists",
+          draft_text: draftAfterUpsertText
+        });
       }
 
       const { error: enqueueError } = await jobsTable.from("ai_jobs").insert({
         type: "review_analyze",
         payload: {
           review_id: reviewId,
-          location_id: locationId,
+          location_id: locationContext.googleLocationId,
+          google_location_resource_name: locationContext.googleLocationResource,
+          business_id: locationContext.businessId,
+          requested_location_id: locationContext.requestedLocationId,
           user_id: userId,
           identity_hash: identityHash
         },
@@ -617,7 +860,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         if (enqueueError.code === "23505") {
           return res
             .status(200)
-            .json({ ok: true, status: "already_running" });
+            .json({ ok: true, status: "processing" });
         }
         await supabaseAdmin
           .from("review_ai_replies")
@@ -627,6 +870,20 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           .eq("mode", "draft");
         return res.status(500).json({ error: "Failed to enqueue draft" });
       }
+      console.log("[reviews] draft_context", {
+        action: "ensure_draft",
+        requestId,
+        user_id: userId,
+        review_id: reviewId,
+        requested_location_id: locationContext.requestedLocationId,
+        google_location_resource: locationContext.googleLocationResource,
+        resolved_google_location_id: locationContext.googleLocationId,
+        business_id: locationContext.businessId,
+        draft_existing: false,
+        job_existing: false,
+        identity_hash: identityHash,
+        status: "enqueued"
+      });
       return res.status(200).json({ ok: true, status: "enqueued" });
     }
 
@@ -651,21 +908,31 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         120,
         Math.max(1, Number.parseInt(String(cooldownRaw), 10) || 15)
       );
+      const locationContext = await resolveDraftLocation({
+        supabaseAdmin,
+        userId,
+        requestedLocationId: locationId,
+        reviewId: singleReviewId || null,
+        action: "prepare_drafts",
+        requestId
+      });
+      const reviewFilterLocationId =
+        locationContext.googleLocationResource ?? locationId;
+      const draftLocationId =
+        locationContext.googleLocationId ?? reviewFilterLocationId;
 
       const activeIds = await fetchActiveLocationIds(supabaseAdmin, userId);
-      if (activeIds && !activeIds.has(locationId)) {
-        const { data: locationRow } = await supabaseAdmin
-          .from("google_locations")
-          .select("id, location_resource_name")
-          .eq("user_id", userId)
-          .or(`id.eq.${locationId},location_resource_name.eq.${locationId}`)
-          .maybeSingle();
-        if (!locationRow) {
-          console.warn("[reviews] prepare_drafts location access not confirmed", {
-            userId,
-            locationId
-          });
-        }
+      if (
+        activeIds &&
+        (!locationContext.googleLocationId ||
+          !activeIds.has(locationContext.googleLocationId))
+      ) {
+        console.warn("[reviews] prepare_drafts location access not confirmed", {
+          userId,
+          requested_location_id: locationContext.requestedLocationId,
+          google_location_resource: locationContext.googleLocationResource,
+          resolved_google_location_id: locationContext.googleLocationId
+        });
       }
 
       const cooldownMs = cooldownMinutes * 60 * 1000;
@@ -674,7 +941,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           .from("ai_draft_runs")
           .select("last_run_at")
           .eq("user_id", userId)
-          .eq("location_id", locationId)
+          .eq("location_id", reviewFilterLocationId)
           .order("last_run_at", { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -686,7 +953,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           await supabaseAdmin.from("ai_draft_runs").upsert(
             {
               user_id: userId,
-              location_id: locationId,
+              location_id: reviewFilterLocationId,
               last_run_at: new Date().toISOString(),
               requested_limit: limit,
               generated_count: 0
@@ -708,18 +975,20 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         3650,
         Math.max(0, Number.parseInt(String(payload?.lookback_days ?? 180), 10) || 180)
       );
-      const locationIdentityHash = await resolveIdentityHash({ locationId });
+      const locationIdentityHash = await resolveIdentityHash({
+        locationId: locationContext.googleLocationId
+      });
       const rpcClient = supabaseAdmin as unknown as {
         rpc: (
           fn: string,
           params: Record<string, unknown>
         ) => Promise<{ data: ReviewToReplyRpcRow[] | null; error: { message?: string | null } | null }>;
       };
-      const { data: candidateRows, error: candidateError } = await rpcClient.rpc(
+      const { data: candidateRowsData, error: candidateError } = await rpcClient.rpc(
         "get_reviews_to_reply",
         {
           p_user_id: userId,
-          p_location_id: locationId,
+          p_location_id: reviewFilterLocationId,
           p_limit: limit,
           p_lookback_days: lookbackDays,
           p_review_id: singleReviewMode ? singleReviewId : null
@@ -728,14 +997,17 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       if (candidateError) {
         return res.status(500).json({ error: "Failed to load reviews to reply" });
       }
-      if (!candidateRows || candidateRows.length === 0) {
+      let candidateRows = candidateRowsData ?? [];
+      if (candidateRows.length === 0) {
         let singleResult: PrepareDraftResultItem[] = [];
         if (singleReviewMode) {
           const { data: probe } = await supabaseAdmin
             .from("google_reviews")
-            .select("id, comment, owner_reply, create_time, update_time, created_at")
+            .select(
+              "id, review_id, location_id, location_name, comment, owner_reply, rating, create_time, update_time, created_at"
+            )
             .eq("user_id", userId)
-            .eq("location_id", locationId)
+            .eq("location_id", reviewFilterLocationId)
             .eq("id", singleReviewId)
             .maybeSingle();
           if (!probe) {
@@ -756,78 +1028,78 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
               }
             }
             if (skippedReason === "already_has_draft") {
-              const { data: activeDraft } = await supabaseAdmin
-                .from("review_ai_replies")
-                .select("status")
-                .eq("review_id", singleReviewId)
-                .eq("user_id", userId)
-                .eq("mode", "draft")
-                .maybeSingle();
-              if (!activeDraft) {
-                const { data: activeJobs } = await (
-                  supabaseAdmin as unknown as {
-                    from: (table: string) => {
-                      select: (columns: string) => {
-                        filter: (column: string, operator: string, value: string) => {
-                          in: (column: string, values: string[]) => {
-                            limit: (count: number) => Promise<{
-                              data?:
-                                | Array<{ id?: string | null; payload?: Record<string, unknown> | null }>
-                                | null;
-                              error?: { message?: string | null } | null;
-                            }>;
-                          };
-                        };
-                      };
-                    };
+              const existingDraft = await getExistingDraftForReview(
+                supabaseAdmin,
+                userId,
+                singleReviewId
+              );
+              if (existingDraft) {
+                singleResult = [
+                  {
+                    review_id: singleReviewId,
+                    queued: false,
+                    skipped: true,
+                    skipped_reason: "already_has_draft",
+                    draft_text: existingDraft.text,
+                    status: existingDraft.status
                   }
-                )
-                  .from("ai_jobs")
-                  .select("id,payload")
-                  .filter("payload->>review_id", "eq", singleReviewId)
-                  .in("status", AI_JOB_IN_FLIGHT_STATUSES)
-                  .limit(20);
-                const hasLocationJobInProgress =
-                  Array.isArray(activeJobs) &&
-                  activeJobs.some((job) => {
-                    const payload = job?.payload;
-                    if (!payload || typeof payload !== "object") {
-                      return false;
-                    }
-                    return (payload as Record<string, unknown>).location_id === locationId;
-                  });
-                if (hasLocationJobInProgress) {
+                ];
+              } else {
+                const existingJob = await getInFlightReviewJob(
+                  supabaseAdmin,
+                  userId,
+                  singleReviewId
+                );
+                if (existingJob) {
                   skippedReason = "job_in_progress";
+                } else {
+                  candidateRows = [
+                    {
+                      review_pk: probeRow.id,
+                      user_id: userId,
+                      location_id: probeRow.location_id ?? reviewFilterLocationId,
+                      review_id: probeRow.review_id,
+                      location_name: probeRow.location_name,
+                      comment: probeRow.comment,
+                      rating: probeRow.rating,
+                      create_time: probeRow.create_time,
+                      update_time: probeRow.update_time
+                    }
+                  ];
                 }
               }
             }
           }
-          singleResult = [
-            {
-              review_id: singleReviewId,
-              queued: false,
-              skipped: true,
-              skipped_reason: skippedReason
-            }
-          ];
+          if (candidateRows.length === 0 && singleResult.length === 0) {
+            singleResult = [
+              {
+                review_id: singleReviewId,
+                queued: false,
+                skipped: true,
+                skipped_reason: skippedReason
+              }
+            ];
+          }
         }
-        await supabaseAdmin.from("ai_draft_runs").upsert(
-          {
-            user_id: userId,
-            location_id: locationId,
-            last_run_at: new Date().toISOString(),
-            requested_limit: limit,
-            generated_count: 0
-          },
-          { onConflict: "user_id,location_id" }
-        );
-        return res.status(200).json({
-          ok: true,
-          queued: 0,
-          skipped: singleResult.length,
-          limit,
-          results: singleResult
-        });
+        if (candidateRows.length === 0) {
+          await supabaseAdmin.from("ai_draft_runs").upsert(
+            {
+              user_id: userId,
+              location_id: reviewFilterLocationId,
+              last_run_at: new Date().toISOString(),
+              requested_limit: limit,
+              generated_count: 0
+            },
+            { onConflict: "user_id,location_id" }
+          );
+          return res.status(200).json({
+            ok: true,
+            queued: 0,
+            skipped: singleResult.length,
+            limit,
+            results: singleResult
+          });
+        }
       }
 
       let queued = 0;
@@ -869,7 +1141,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           skipped += 1;
           console.info("[prepare_drafts] enqueue_decision", {
             userId,
-            locationId,
+            locationId: reviewFilterLocationId,
+            google_location_resource: locationContext.googleLocationResource,
+            resolved_google_location_id: locationContext.googleLocationId,
+            business_id: locationContext.businessId,
             reviewId,
             identityHash: locationIdentityHash,
             decision: "skipped",
@@ -884,18 +1159,16 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           continue;
         }
 
-        const { data: existingDraftRow } = await supabaseAdmin
-          .from("review_ai_replies")
-          .select("status, draft_text")
-          .eq("review_id", reviewId)
-          .eq("user_id", userId)
-          .eq("mode", "draft")
-          .maybeSingle();
-        const existingDraftText = existingDraftRow?.draft_text
-          ? String(existingDraftRow.draft_text).trim()
-          : "";
-        if (existingDraftText) {
-          if (String(existingDraftRow?.status ?? "").toLowerCase() !== "draft") {
+        const existingDraft = await getExistingDraftForReview(
+          supabaseAdmin,
+          userId,
+          reviewId
+        );
+        if (existingDraft) {
+          if (
+            existingDraft.source === "review_ai_replies" &&
+            existingDraft.status?.toLowerCase() !== "draft"
+          ) {
             await supabaseAdmin
               .from("review_ai_replies")
               .update({ status: "draft", updated_at: new Date().toISOString() })
@@ -906,17 +1179,51 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           skipped += 1;
           console.info("[prepare_drafts] enqueue_decision", {
             userId,
-            locationId,
+            locationId: reviewFilterLocationId,
+            google_location_resource: locationContext.googleLocationResource,
+            resolved_google_location_id: locationContext.googleLocationId,
+            business_id: locationContext.businessId,
             reviewId,
             identityHash: locationIdentityHash,
             decision: "skipped",
-            reason: "already_has_draft"
+            reason: "already_has_draft",
+            draft_existing: true,
+            draft_source: existingDraft.source,
+            job_existing: false
           });
           results.push({
             review_id: reviewId,
             queued: false,
             skipped: true,
-            skipped_reason: "already_has_draft"
+            skipped_reason: "already_has_draft",
+            draft_text: existingDraft.text,
+            status: existingDraft.status
+          });
+          continue;
+        }
+
+        const existingJob = await getInFlightReviewJob(supabaseAdmin, userId, reviewId);
+        if (existingJob) {
+          skipped += 1;
+          console.info("[prepare_drafts] enqueue_decision", {
+            userId,
+            locationId: reviewFilterLocationId,
+            google_location_resource: locationContext.googleLocationResource,
+            resolved_google_location_id: locationContext.googleLocationId,
+            business_id: locationContext.businessId,
+            reviewId,
+            identityHash: locationIdentityHash,
+            decision: "skipped",
+            reason: "job_in_progress",
+            draft_existing: false,
+            job_existing: true,
+            job_id: existingJob.id ?? null
+          });
+          results.push({
+            review_id: reviewId,
+            queued: false,
+            skipped: true,
+            skipped_reason: "job_in_progress"
           });
           continue;
         }
@@ -924,7 +1231,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         const draftPayload = {
           review_id: reviewId,
           user_id: userId,
-          location_id: locationId,
+          location_id: draftLocationId,
           mode: "draft",
           identity_hash: locationIdentityHash,
           status: "queued",
@@ -948,7 +1255,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           skipped += 1;
           console.info("[prepare_drafts] enqueue_decision", {
             userId,
-            locationId,
+            locationId: reviewFilterLocationId,
+            google_location_resource: locationContext.googleLocationResource,
+            resolved_google_location_id: locationContext.googleLocationId,
+            business_id: locationContext.businessId,
             reviewId,
             identityHash: locationIdentityHash,
             decision: "skipped",
@@ -984,7 +1294,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           skipped += 1;
           console.info("[prepare_drafts] enqueue_decision", {
             userId,
-            locationId,
+            locationId: reviewFilterLocationId,
+            google_location_resource: locationContext.googleLocationResource,
+            resolved_google_location_id: locationContext.googleLocationId,
+            business_id: locationContext.businessId,
             reviewId,
             identityHash: locationIdentityHash,
             decision: "skipped",
@@ -994,7 +1307,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
             review_id: reviewId,
             queued: false,
             skipped: true,
-            skipped_reason: "already_has_draft"
+            skipped_reason: "already_has_draft",
+            draft_text: draftAfterUpsertValue,
+            status: "draft"
           });
           continue;
         }
@@ -1003,7 +1318,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           type: "review_analyze",
           payload: {
             review_id: reviewId,
-            location_id: locationId,
+            location_id: locationContext.googleLocationId,
+            google_location_resource_name: locationContext.googleLocationResource,
+            business_id: locationContext.businessId,
+            requested_location_id: locationContext.requestedLocationId,
             user_id: userId,
             identity_hash: locationIdentityHash
           },
@@ -1014,7 +1332,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
             skipped += 1;
             console.info("[prepare_drafts] enqueue_decision", {
               userId,
-              locationId,
+              locationId: reviewFilterLocationId,
+              google_location_resource: locationContext.googleLocationResource,
+              resolved_google_location_id: locationContext.googleLocationId,
+              business_id: locationContext.businessId,
               reviewId,
               identityHash: locationIdentityHash,
               decision: "skipped",
@@ -1037,7 +1358,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
             .eq("mode", "draft");
           console.info("[prepare_drafts] enqueue_decision", {
             userId,
-            locationId,
+            locationId: reviewFilterLocationId,
+            google_location_resource: locationContext.googleLocationResource,
+            resolved_google_location_id: locationContext.googleLocationId,
+            business_id: locationContext.businessId,
             reviewId,
             identityHash: locationIdentityHash,
             decision: "skipped",
@@ -1051,7 +1375,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
           });
           console.error("[reviews] prepare_drafts enqueue failed", {
             userId,
-            locationId,
+            locationId: reviewFilterLocationId,
+            google_location_resource: locationContext.googleLocationResource,
+            resolved_google_location_id: locationContext.googleLocationId,
+            business_id: locationContext.businessId,
             reviewId,
             message: enqueueError.message ?? "unknown"
           });
@@ -1060,7 +1387,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         queued += 1;
         console.info("[prepare_drafts] enqueue_decision", {
           userId,
-          locationId,
+          locationId: reviewFilterLocationId,
+          google_location_resource: locationContext.googleLocationResource,
+          resolved_google_location_id: locationContext.googleLocationId,
+          business_id: locationContext.businessId,
           reviewId,
           identityHash: locationIdentityHash,
           decision: "enqueued",
@@ -1079,7 +1409,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       if (noCommentSkipped > 0) {
         console.info("[reviews] prepare_drafts no_comment skipped", {
           userId,
-          locationId,
+          locationId: reviewFilterLocationId,
+          google_location_resource: locationContext.googleLocationResource,
+          resolved_google_location_id: locationContext.googleLocationId,
+          business_id: locationContext.businessId,
           count: noCommentSkipped
         });
       }
@@ -1087,7 +1420,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       await supabaseAdmin.from("ai_draft_runs").upsert(
         {
           user_id: userId,
-          location_id: locationId,
+          location_id: reviewFilterLocationId,
           last_run_at: new Date().toISOString(),
           requested_limit: limit,
           generated_count: queued
@@ -1116,6 +1449,21 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       if (!reviewId) {
         return res.status(400).json({ error: "Missing review_id" });
       }
+      const existingDraft = await getExistingDraftForReview(
+        supabaseAdmin,
+        userId,
+        reviewId
+      );
+      if (existingDraft) {
+        return res.status(200).json({
+          ok: true,
+          review_id: reviewId,
+          ready: true,
+          draft_text: existingDraft.text,
+          status: existingDraft.status ?? "draft",
+          source: existingDraft.source
+        });
+      }
       const { data: draftRows, error: draftError } = await supabaseAdmin
         .from("review_ai_replies")
         .select("draft_text, status, created_at")
@@ -1129,12 +1477,18 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       }
       const row = (draftRows ?? [])[0] ?? null;
       const draftText = row?.draft_text ? String(row.draft_text).trim() : "";
+      const existingJob = await getInFlightReviewJob(supabaseAdmin, userId, reviewId);
+      const status = existingJob
+        ? "processing"
+        : typeof row?.status === "string"
+          ? row.status
+          : null;
       return res.status(200).json({
         ok: true,
         review_id: reviewId,
         ready: draftText.length > 0,
         draft_text: draftText.length > 0 ? draftText : null,
-        status: typeof row?.status === "string" ? row.status : null
+        status
       });
     }
 
