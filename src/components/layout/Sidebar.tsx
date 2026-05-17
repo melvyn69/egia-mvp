@@ -14,6 +14,7 @@ import {
   Settings,
   Sparkles,
   Target,
+  Trophy,
   Users
 } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -123,6 +124,20 @@ const Sidebar = ({
         >
           <Target size={18} />
           Coach EGIA
+        </NavLink>
+        <NavLink
+          to="/progress"
+          className={({ isActive }) =>
+            cn(
+              navLinkBase,
+              isActive
+                ? "bg-ink text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            )
+          }
+        >
+          <Trophy size={18} />
+          Progression
         </NavLink>
         <NavLink
           to="/inbox"

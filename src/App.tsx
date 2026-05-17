@@ -13,6 +13,7 @@ import { Connect } from "./pages/Connect";
 import { Analytics } from "./pages/Analytics";
 import { Billing } from "./pages/Billing";
 import { BrandVoice } from "./pages/BrandVoice";
+import { Progress } from "./pages/Progress";
 import { Automation } from "./pages/Automation";
 import { AutomationBuilder } from "./pages/AutomationBuilder";
 import { TestLab } from "./pages/TestLab";
@@ -152,6 +153,13 @@ const App = () => {
       return {
         title: "Abonnement & Facturation",
         subtitle: "Gérez votre offre et vos factures en toute transparence."
+      };
+    }
+
+    if (location.pathname === "/progress") {
+      return {
+        title: "Progression",
+        subtitle: "Trophées, niveaux et montée en puissance business."
       };
     }
 
@@ -1014,6 +1022,16 @@ const App = () => {
                 <Route
                   path="/billing"
                   element={<Billing isAdmin={isAdminSession} />}
+                />
+                <Route
+                  path="/progress"
+                  element={
+                    <Progress
+                      session={session}
+                      googleStatus={googleConnection.status}
+                      locations={locations}
+                    />
+                  }
                 />
                 <Route
                   path="/connect"
