@@ -30,6 +30,11 @@ import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
 import { useGoogleConnectionStatus } from "./hooks/useGoogleConnectionStatus";
 import { isAdminUser } from "./lib/admin";
+import {
+  getNotifications,
+  NOTIFICATIONS_UPDATED_EVENT,
+  type AppNotificationBase
+} from "./lib/notifications";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 
@@ -72,6 +77,7 @@ const App = () => {
   >([]);
   const [importFailures, setImportFailures] = useState<SyncFailureRow[]>([]);
   const [errorToast, setErrorToast] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<AppNotificationBase[]>([]);
   const [locations, setLocations] = useState<
     Array<{
       id: string;
@@ -106,6 +112,21 @@ const App = () => {
   const googleConnection = useGoogleConnectionStatus(session);
   const googleConnected = googleConnection.status === "connected";
   const googleReauthRequired = googleConnection.status === "reauth_required";
+
+  useEffect(() => {
+    const refreshNotifications = () => {
+      setNotifications(getNotifications());
+    };
+
+    refreshNotifications();
+    window.addEventListener(NOTIFICATIONS_UPDATED_EVENT, refreshNotifications);
+    return () => {
+      window.removeEventListener(
+        NOTIFICATIONS_UPDATED_EVENT,
+        refreshNotifications
+      );
+    };
+  }, []);
 
   const pageMeta = useMemo(() => {
     if (location.pathname === "/auth/callback") {
@@ -1029,7 +1050,13 @@ const App = () => {
                 />
                 <Route
                   path="/billing"
-                  element={<Billing isAdmin={isAdminSession} />}
+                  element={
+                    <Billing
+                      isAdmin={isAdminSession}
+                      userId={session?.user.id ?? null}
+                      locations={locations}
+                    />
+                  }
                 />
                 <Route
                   path="/progress"
@@ -1038,6 +1065,7 @@ const App = () => {
                       session={session}
                       googleStatus={googleConnection.status}
                       locations={locations}
+                      notifications={notifications}
                     />
                   }
                 />
@@ -1045,8 +1073,10 @@ const App = () => {
                   path="/onboarding"
                   element={
                     <Onboarding
+                      session={session}
                       googleStatus={googleConnection.status}
                       locations={locations}
+                      notifications={notifications}
                     />
                   }
                 />

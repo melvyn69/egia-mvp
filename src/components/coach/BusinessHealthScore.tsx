@@ -11,6 +11,15 @@ import {
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
+import {
+  buildCoachResult,
+  type CoachDominantTag,
+  type CoachInput,
+  type CoachMilestone,
+  type CoachRecommendation as CoachEngineRecommendation,
+  type CoachResult,
+  type CoachScoreBreakdownItem
+} from "@/services/coach";
 
 type HealthLevel = {
   label: "Bronze" | "Silver" | "Gold";
@@ -52,17 +61,24 @@ type ScoreFactor = {
 };
 
 type BusinessHealthScoreInput = {
-  googleConnected: boolean;
-  locationsCount: number;
-  reviewsTotal: number;
+  googleConnected?: boolean | null;
+  locationsCount?: number | null;
+  reviewsTotal?: number | null;
+  reviewsWithText?: number | null;
   responseRate: number | null;
   avgRating: number | null;
-  aiSamples: number;
-  priorityCount: number;
-  activeLocationsCount: number;
-  alertSignalsReady: boolean;
-  competitorContextReady: boolean;
-  automationActiveCount?: number;
+  aiSamples?: number | null;
+  priorityCount?: number | null;
+  unansweredReviewsCount?: number | null;
+  activeLocationsCount?: number | null;
+  alertSignalsReady?: boolean | null;
+  alertsOpenCount?: number | null;
+  competitorContextReady?: boolean | null;
+  automationActiveCount?: number | null;
+  teamMembersCount?: number | null;
+  reportsCount?: number | null;
+  dominantTags?: CoachDominantTag[] | null;
+  accountCreatedAt?: string | Date | null;
 };
 
 type BusinessHealthScoreModel = {
@@ -74,6 +90,7 @@ type BusinessHealthScoreModel = {
   nextBestAction: HealthRecommendation;
   quickActions: QuickAction[];
   scoreFactors: ScoreFactor[];
+  dataQuality: CoachResult["dataQuality"];
 };
 
 type BusinessHealthScoreCardProps = {
@@ -81,9 +98,6 @@ type BusinessHealthScoreCardProps = {
   variant?: "dashboard" | "full";
   loading?: boolean;
 };
-
-const clampHealthScore = (score: number): number =>
-  Math.max(0, Math.min(100, Math.round(score)));
 
 const formatPercent = (value: number | null): string =>
   value === null ? "—" : `${Math.round(value)}%`;
@@ -118,20 +132,7 @@ const getHealthLevel = (score: number): HealthLevel => {
   };
 };
 
-const getStoredCompetitorContextStatus = (): boolean => {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  try {
-    const zoneLabel = window.localStorage.getItem("competitors_zone_label");
-    const rawHistory = window.localStorage.getItem("competitors_scan_history");
-    const history = rawHistory ? JSON.parse(rawHistory) : [];
-    return Boolean(zoneLabel) || (Array.isArray(history) && history.length > 0);
-  } catch {
-    return false;
-  }
-};
+const getStoredCompetitorContextStatus = (): null => null;
 
 const getPriorityStyle = (priority: HealthRecommendation["priority"]) => {
   switch (priority) {
@@ -167,75 +168,228 @@ const getPriorityStyle = (priority: HealthRecommendation["priority"]) => {
   }
 };
 
-const buildBusinessHealthScore = ({
+const isValidPercent = (value: number | null | undefined): value is number =>
+  typeof value === "number" &&
+  Number.isFinite(value) &&
+  value >= 0 &&
+  value <= 100;
+
+const isValidRating = (value: number | null | undefined): value is number =>
+  typeof value === "number" &&
+  Number.isFinite(value) &&
+  value >= 0 &&
+  value <= 5;
+
+const formatCountLabel = (
+  value: number | null | undefined,
+  singular: string,
+  plural: string
+): string => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return `Aucun ${singular}`;
+  }
+
+  const count = Math.floor(value);
+  return `${count} ${count > 1 ? plural : singular}`;
+};
+
+const getMilestone = (
+  result: CoachResult,
+  id: CoachMilestone["id"]
+): CoachMilestone | null =>
+  result.milestones.find((milestone) => milestone.id === id) ?? null;
+
+const getBreakdownItem = (
+  result: CoachResult,
+  id: CoachScoreBreakdownItem["id"]
+): CoachScoreBreakdownItem | null =>
+  result.score.breakdown.find((item) => item.id === id) ?? null;
+
+const hasRecommendation = (
+  result: CoachResult,
+  id: CoachEngineRecommendation["id"]
+): boolean => result.recommendations.some((item) => item.id === id);
+
+const buildCoachInput = ({
   googleConnected,
   locationsCount,
   reviewsTotal,
+  reviewsWithText,
   responseRate,
   avgRating,
   aiSamples,
   priorityCount,
+  unansweredReviewsCount,
   activeLocationsCount,
   alertSignalsReady,
+  alertsOpenCount,
   competitorContextReady,
-  automationActiveCount = 0
-}: BusinessHealthScoreInput): BusinessHealthScoreModel => {
-  const responseRateValid =
-    responseRate !== null && responseRate >= 0 && responseRate <= 100;
-  const hasReviews = reviewsTotal > 0;
-  const hasAiInsights = aiSamples > 0;
-  const activeLocationsReady = locationsCount > 0 && activeLocationsCount > 0;
-  const responseScore = responseRateValid ? Math.min(20, responseRate * 0.2) : 0;
-  const ratingScore = avgRating !== null ? Math.min(12, avgRating * 2.4) : 0;
-  const workloadScore = hasReviews
-    ? priorityCount === 0
-      ? 5
-      : priorityCount <= 3
-        ? 3
-        : 0
-    : 0;
-  const advancedSetupScore =
-    (activeLocationsReady ? 3 : 0) +
-    (alertSignalsReady ? 2 : 0) +
-    (competitorContextReady ? 3 : 0);
-  const score = clampHealthScore(
-    (googleConnected ? 15 : 0) +
-      (locationsCount > 0 ? 15 : 0) +
-      (hasReviews ? 15 : 0) +
-      responseScore +
-      ratingScore +
-      (hasAiInsights ? 10 : 0) +
-      workloadScore +
-      advancedSetupScore
-  );
-  const checklist: HealthChecklistItem[] = [
+  automationActiveCount,
+  teamMembersCount,
+  reportsCount,
+  dominantTags,
+  accountCreatedAt
+}: BusinessHealthScoreInput): CoachInput => ({
+  googleConnected,
+  activeLocationsCount,
+  totalLocationsCount: locationsCount,
+  totalReviews: reviewsTotal,
+  reviewsWithText,
+  averageRating: avgRating,
+  responseRate,
+  criticalReviewsCount: priorityCount,
+  unansweredReviewsCount,
+  aiInsightsReady:
+    typeof aiSamples === "number" && Number.isFinite(aiSamples)
+      ? aiSamples > 0
+      : undefined,
+  dominantTags,
+  alertsOpenCount:
+    alertsOpenCount !== undefined && alertsOpenCount !== null
+      ? alertsOpenCount
+      : alertSignalsReady === true
+        ? 0
+        : null,
+  automationCount: automationActiveCount,
+  teamMembersCount,
+  competitorWatchActive: competitorContextReady,
+  reportsCount,
+  accountCreatedAt
+});
+
+const mapRecommendationPriority = (
+  priority: CoachEngineRecommendation["priority"]
+): HealthRecommendation["priority"] => {
+  if (priority === "critical") {
+    return "critical";
+  }
+  if (priority === "high") {
+    return "business";
+  }
+  if (priority === "medium") {
+    return "optimization";
+  }
+  return "growth";
+};
+
+const recommendationRoutes: Record<
+  CoachEngineRecommendation["id"],
+  { href: string; cta: string; id: string }
+> = {
+  "prioritize-critical-reviews": {
+    id: "critical-reviews",
+    href: "/inbox?priority=critical&status=unanswered",
+    cta: "Prioriser"
+  },
+  "reply-to-reviews": {
+    id: "reply-rate",
+    href: "/inbox?status=unanswered",
+    cta: "Traiter"
+  },
+  "connect-google": {
+    id: "connect-google",
+    href: "/connect",
+    cta: "Connecter"
+  },
+  "import-locations": {
+    id: "import-locations",
+    href: "/settings?tab=locations",
+    cta: "Importer"
+  },
+  "calibrate-ai-voice": {
+    id: "ai-insights",
+    href: "/settings/brand-voice",
+    cta: "Configurer"
+  },
+  "activate-alerts": {
+    id: "alerts-next",
+    href: "/alerts",
+    cta: "Configurer"
+  },
+  "create-automation": {
+    id: "automation-next",
+    href: "/automation",
+    cta: "Automatiser"
+  },
+  "add-competitor-watch": {
+    id: "competitors-next",
+    href: "/competitors",
+    cta: "Comparer"
+  },
+  "create-report": {
+    id: "report-next",
+    href: "/reports",
+    cta: "Créer"
+  }
+};
+
+const mapRecommendation = (
+  recommendation: CoachEngineRecommendation
+): HealthRecommendation => {
+  const route = recommendationRoutes[recommendation.id];
+
+  return {
+    id: route.id,
+    label: recommendation.title,
+    detail: recommendation.description,
+    href: route.href,
+    cta: route.cta,
+    priority: mapRecommendationPriority(recommendation.priority),
+    reason: recommendation.reason,
+    impact: recommendation.impact
+  };
+};
+
+const buildChecklist = (
+  input: BusinessHealthScoreInput,
+  result: CoachResult
+): HealthChecklistItem[] => {
+  const googleMilestone = getMilestone(result, "google-connected");
+  const locationsMilestone = getMilestone(result, "first-location-imported");
+  const reviewsMilestone = getMilestone(result, "first-reviews-synced");
+  const competitorMilestone = getMilestone(result, "first-competitor-watch");
+  const aiBreakdown = getBreakdownItem(result, "ai-tags");
+  const alertsBreakdown = getBreakdownItem(result, "alerts");
+  const responseRateValid = isValidPercent(input.responseRate);
+  const locationsCount =
+    typeof input.locationsCount === "number" && Number.isFinite(input.locationsCount)
+      ? Math.max(0, Math.floor(input.locationsCount))
+      : 0;
+  const reviewsTotal =
+    typeof input.reviewsTotal === "number" && Number.isFinite(input.reviewsTotal)
+      ? Math.max(0, Math.floor(input.reviewsTotal))
+      : 0;
+  const aiReady = aiBreakdown !== null && aiBreakdown.points > 0;
+  const alertsReady = alertsBreakdown !== null && alertsBreakdown.status !== "missing";
+
+  return [
     {
       id: "google",
       label: "Connecter Google",
-      description: googleConnected
+      description: googleMilestone?.achieved
         ? "La source principale est connectée."
         : "Reliez Google Business Profile pour démarrer.",
-      complete: googleConnected,
+      complete: googleMilestone?.achieved ?? false,
       href: "/connect",
       cta: "Connecter"
     },
     {
       id: "locations",
       label: "Importer les établissements",
-      description: locationsCount
+      description: locationsMilestone?.achieved
         ? `${locationsCount} établissement${locationsCount > 1 ? "s" : ""} disponible${locationsCount > 1 ? "s" : ""}.`
         : "Ajoutez les fiches à piloter dans EGIA.",
-      complete: locationsCount > 0,
+      complete: locationsMilestone?.achieved ?? false,
       href: "/settings?tab=locations",
       cta: "Importer"
     },
     {
       id: "reviews",
       label: "Faire remonter les avis",
-      description: hasReviews
+      description: reviewsMilestone?.achieved
         ? `${reviewsTotal} avis analysables.`
         : "Synchronisez les premiers avis pour activer le coach.",
-      complete: hasReviews,
+      complete: reviewsMilestone?.achieved ?? false,
       href: "/inbox",
       cta: "Voir l'inbox"
     },
@@ -243,19 +397,19 @@ const buildBusinessHealthScore = ({
       id: "response-rate",
       label: "Atteindre 70% de réponse",
       description: responseRateValid
-        ? `Taux actuel: ${formatPercent(responseRate)}.`
+        ? `Taux actuel: ${formatPercent(input.responseRate)}.`
         : "Le taux apparaîtra après import des avis.",
-      complete: responseRateValid && responseRate >= 70,
+      complete: responseRateValid && !hasRecommendation(result, "reply-to-reviews"),
       href: "/inbox",
       cta: "Répondre"
     },
     {
       id: "ai-identity",
       label: "Calibrer la voix IA",
-      description: hasAiInsights
+      description: aiReady
         ? "Les premiers signaux IA sont disponibles."
         : "Définissez le ton de réponse pour gagner en constance.",
-      complete: hasAiInsights,
+      complete: aiReady,
       href: "/settings/brand-voice",
       cta: "Configurer"
     },
@@ -263,7 +417,7 @@ const buildBusinessHealthScore = ({
       id: "alerts",
       label: "Activer les alertes",
       description: "Recevez les signaux qui demandent une action rapide.",
-      complete: alertSignalsReady,
+      complete: alertsReady,
       href: "/alerts",
       cta: "Ouvrir"
     },
@@ -271,151 +425,71 @@ const buildBusinessHealthScore = ({
       id: "competitors",
       label: "Surveiller la concurrence",
       description: "Comparez votre réputation locale aux concurrents.",
-      complete: competitorContextReady,
+      complete: competitorMilestone?.achieved ?? false,
       href: "/competitors",
       cta: "Scanner"
     }
   ];
-  const recommendations: HealthRecommendation[] = [];
+};
 
-  if (priorityCount > 0) {
-    recommendations.push({
-      id: "critical-reviews",
-      label: "Traitez les avis critiques maintenant",
-      detail:
-        priorityCount === 1
-          ? "1 avis critique demande une réponse prioritaire."
-          : `${priorityCount} avis critiques demandent une réponse prioritaire.`,
-      href: "/inbox?priority=critical&status=unanswered",
-      cta: "Prioriser",
-      priority: "critical",
-      reason:
-        priorityCount === 1
-          ? "1 signal critique est détecté dans vos avis récents."
-          : `${priorityCount} signaux critiques sont détectés dans vos avis récents.`,
-      impact:
-        priorityCount === 1
-          ? "Répondre à cet avis pourrait améliorer votre score de +4 points."
-          : "Répondre aux avis critiques pourrait améliorer votre score de +6 points."
-    });
-  }
+const buildScoreFactors = (
+  input: BusinessHealthScoreInput,
+  result: CoachResult
+): ScoreFactor[] => {
+  const responseRateValid = isValidPercent(input.responseRate);
+  const ratingValue = isValidRating(input.avgRating) ? input.avgRating : null;
+  const automationMilestone = getMilestone(result, "first-automation");
+  const setupBreakdown = getBreakdownItem(result, "setup");
+  const reviewsMilestone = getMilestone(result, "first-reviews-synced");
+  const automationCount =
+    typeof input.automationActiveCount === "number" &&
+    Number.isFinite(input.automationActiveCount)
+      ? Math.max(0, Math.floor(input.automationActiveCount))
+      : 0;
 
-  if (!googleConnected) {
-    recommendations.push({
-      id: "connect-google",
-      label: "Connectez Google en premier",
-      detail: "Sans connexion Google, EGIA ne peut pas coacher la réputation.",
-      href: "/connect",
-      cta: "Connecter",
-      priority: "business",
-      reason: "Aucune source Google Business Profile n'est connectée.",
-      impact: "Connecter Google débloque les avis, les KPIs et les recommandations."
-    });
-  } else if (locationsCount === 0) {
-    recommendations.push({
-      id: "import-locations",
-      label: "Importez les établissements",
-      detail: "Le score devient utile dès qu'une fiche est suivie.",
-      href: "/settings?tab=locations",
-      cta: "Importer",
-      priority: "business",
-      reason: "Aucun établissement n'est encore disponible dans l'app.",
-      impact: "Importer vos fiches pourrait débloquer jusqu'à +15 points."
-    });
-  } else if (!hasReviews) {
-    recommendations.push({
-      id: "sync-reviews",
-      label: "Synchronisez les premiers avis",
-      detail: "Les avis déclenchent les priorités, le sentiment et les drafts.",
-      href: "/settings?tab=locations",
-      cta: "Synchroniser",
-      priority: "business",
-      reason: "Aucun avis exploitable n'est encore remonté dans le score.",
-      impact: "Synchroniser les avis active les signaux business du Coach."
-    });
-  }
+  return [
+    {
+      label: "Taux réponse",
+      value: responseRateValid ? formatPercent(input.responseRate) : "À mesurer",
+      complete: responseRateValid && !hasRecommendation(result, "reply-to-reviews")
+    },
+    {
+      label: "Volume traité",
+      value: reviewsMilestone?.achieved
+        ? formatCountLabel(input.reviewsTotal, "avis", "avis")
+        : "Aucun avis",
+      complete: reviewsMilestone?.achieved ?? false
+    },
+    {
+      label: "Réputation",
+      value: ratingValue !== null ? `${ratingValue.toFixed(1)}/5` : "À mesurer",
+      complete: ratingValue !== null && ratingValue >= 4
+    },
+    {
+      label: "Automatisations",
+      value: automationCount > 0 ? `${automationCount} active` : "À activer",
+      complete: automationMilestone?.achieved ?? false
+    },
+    {
+      label: "Activité équipe",
+      value:
+        setupBreakdown !== null && setupBreakdown.points >= 15
+          ? "Suivi actif"
+          : "À structurer",
+      complete: setupBreakdown !== null && setupBreakdown.points >= 15
+    }
+  ];
+};
 
-  if (hasReviews && (!responseRateValid || responseRate < 70)) {
-    recommendations.push({
-      id: "reply-rate",
-      label: "Augmentez le taux de réponse",
-      detail: "Objectif V1: répondre à au moins 70% des avis exploitables.",
-      href: "/inbox?status=unanswered",
-      cta: "Traiter",
-      priority: "business",
-      reason: responseRateValid
-        ? `Votre taux de réponse actuel est de ${formatPercent(responseRate)}.`
-        : "Le taux de réponse n'est pas encore suffisamment mesurable.",
-      impact: "Atteindre 70% de réponse pourrait améliorer votre score de +5 points."
-    });
-  }
-
-  if (hasReviews && !hasAiInsights) {
-    recommendations.push({
-      id: "ai-insights",
-      label: "Lancez la montée en qualité IA",
-      detail: "Calibrez la voix IA pour stabiliser les drafts de réponse.",
-      href: "/settings/brand-voice",
-      cta: "Configurer",
-      priority: "optimization",
-      reason: "Des avis existent, mais la couche IA n'est pas encore assez alimentée.",
-      impact: "Une voix IA calibrée rend les réponses plus rapides et cohérentes."
-    });
-  }
-
-  if (!alertSignalsReady) {
-    recommendations.push({
-      id: "alerts-next",
-      label: "Activez les alertes intelligentes",
-      detail: "Recevez les signaux réputation avant qu'ils deviennent urgents.",
-      href: "/alerts",
-      cta: "Configurer",
-      priority: "optimization",
-      reason: "Aucune alerte active n'est détectée côté interface.",
-      impact: "Les alertes réduisent le risque de manquer un avis sensible."
-    });
-  }
-
-  if (!competitorContextReady) {
-    recommendations.push({
-      id: "competitors-next",
-      label: "Ajoutez le contexte concurrentiel",
-      detail: "La veille donne au score une lecture marché plus actionnable.",
-      href: "/competitors",
-      cta: "Comparer",
-      priority: "growth",
-      reason: "Aucune veille concurrentielle active n'est détectée.",
-      impact: "La veille peut révéler des opportunités locales à fort levier."
-    });
-  }
-
-  if (automationActiveCount === 0) {
-    recommendations.push({
-      id: "automation-next",
-      label: "Automatisez une action répétitive",
-      detail: "Créez un premier scénario pour gagner du temps chaque semaine.",
-      href: "/automation",
-      cta: "Automatiser",
-      priority: "optimization",
-      reason: "Aucune automatisation active détectée.",
-      impact: "Une automatisation simple peut réduire le suivi manuel dès cette semaine."
-    });
-  }
-
-  if (score >= 85) {
-    recommendations.push({
-      id: "billing-scale",
-      label: "Préparez le passage au niveau supérieur",
-      detail: "Votre usage approche d'un niveau avancé, sécurisez la capacité.",
-      href: "/billing",
-      cta: "Voir l'offre",
-      priority: "growth",
-      reason: "Votre score est déjà élevé et les leviers restants sont avancés.",
-      impact: "Adapter l'offre évite de bloquer la croissance future."
-    });
-  }
-
-  const visibleRecommendations = recommendations.slice(0, 3);
+const buildBusinessHealthScore = (
+  input: BusinessHealthScoreInput
+): BusinessHealthScoreModel => {
+  const coachResult = buildCoachResult(buildCoachInput(input));
+  const score = coachResult.score.value;
+  const checklist = buildChecklist(input, coachResult);
+  const visibleRecommendations = coachResult.recommendations
+    .slice(0, 3)
+    .map(mapRecommendation);
   const nextBestAction = visibleRecommendations[0] ?? {
     id: "open-coach",
     label: "Pilotez les réponses du jour",
@@ -434,40 +508,15 @@ const buildBusinessHealthScore = ({
     completedChecklistCount: checklist.filter((item) => item.complete).length,
     recommendations: visibleRecommendations,
     nextBestAction,
-    scoreFactors: [
-      {
-        label: "Taux réponse",
-        value: responseRateValid ? formatPercent(responseRate) : "À mesurer",
-        complete: responseRateValid && responseRate >= 70
-      },
-      {
-        label: "Volume traité",
-        value: hasReviews ? `${reviewsTotal} avis` : "Aucun avis",
-        complete: hasReviews
-      },
-      {
-        label: "Réputation",
-        value: avgRating !== null ? `${avgRating.toFixed(1)}/5` : "À mesurer",
-        complete: avgRating !== null && avgRating >= 4
-      },
-      {
-        label: "Automatisations",
-        value: automationActiveCount > 0 ? `${automationActiveCount} active` : "À activer",
-        complete: automationActiveCount > 0
-      },
-      {
-        label: "Activité équipe",
-        value: activeLocationsReady ? "Suivi actif" : "À structurer",
-        complete: activeLocationsReady
-      }
-    ],
+    scoreFactors: buildScoreFactors(input, coachResult),
     quickActions: [
       { label: "Inbox", href: "/inbox" },
       { label: "Établissements", href: "/settings?tab=locations" },
       { label: "Voix IA", href: "/settings/brand-voice" },
       { label: "Alertes", href: "/alerts" },
       { label: "Veille", href: "/competitors" }
-    ]
+    ],
+    dataQuality: coachResult.dataQuality
   };
 };
 

@@ -1,4 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
+import type { QueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   Building2,
@@ -20,9 +23,18 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import type { GoogleConnectionStatus } from "../hooks/useGoogleConnectionStatus";
+import type { AppNotificationBase } from "../lib/notifications";
+import {
+  buildCoachResult,
+  type CoachMilestone,
+  type CoachResult,
+  type CoachScoreLevel
+} from "../services/coach";
 
 type OnboardingProps = {
+  session: Session | null;
   googleStatus: GoogleConnectionStatus;
+  notifications: AppNotificationBase[];
   locations: Array<{
     id: string;
     location_title: string | null;
@@ -33,7 +45,66 @@ type OnboardingProps = {
   }>;
 };
 
-type VoicePreset = "professionnel" | "chaleureux" | "premium" | "direct" | "luxe" | "humain";
+type VoicePreset =
+  | "professionnel"
+  | "chaleureux"
+  | "premium"
+  | "direct"
+  | "luxe"
+  | "humain";
+
+type StatusLabel = "Validé" | "À compléter" | "Non encore mesuré" | "À venir";
+
+type KpiSummaryCache = {
+  counts?: {
+    reviews_total?: number | null;
+    reviews_with_text?: number | null;
+    reviews_replied?: number | null;
+    reviews_replyable?: number | null;
+  };
+  ratings?: {
+    avg_rating?: number | null;
+  };
+  response?: {
+    response_rate_pct?: number | null;
+  };
+  sentiment?: {
+    sentiment_samples?: number | null;
+  };
+  top_tags?: Array<{ tag?: string | null; count?: number | null }>;
+};
+
+type AiKpiCache = {
+  sentiment?: {
+    samples?: number | null;
+  };
+  topTags?: Array<{ tag?: string | null; count?: number | null }>;
+  priorityCount?: number | null;
+};
+
+type AlertsCache = Array<{
+  resolved_at?: string | null;
+}>;
+
+type BusinessSettingsCache = {
+  active_location_ids?: unknown;
+};
+
+type CoachOnboardingCacheData = {
+  kpiSummary: KpiSummaryCache | null;
+  aiStats: AiKpiCache | null;
+  activeLocationsCount: number;
+  alertsOpenCount: number | null;
+  reportsCount: number | null;
+  teamMembersCount: number | null;
+  competitorWatchActive: boolean | null;
+};
+
+type StepState = {
+  label: (typeof steps)[number];
+  complete: boolean;
+  status: StatusLabel;
+};
 
 const voicePresets: Array<{
   id: VoicePreset;
@@ -82,22 +153,352 @@ const steps = [
   "Succès"
 ] as const;
 
-const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
+const getLastCachedData = <T,>(
+  queryClient: QueryClient,
+  queryKey: readonly unknown[]
+): T | null => {
+  const entries = queryClient.getQueriesData<T>({ queryKey });
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const data = entries[index]?.[1];
+    if (data !== undefined && data !== null) {
+      return data;
+    }
+  }
+  return null;
+};
+
+const getCachedArrayCount = <T,>(
+  queryClient: QueryClient,
+  queryKey: readonly unknown[]
+): number | null => {
+  const data = getLastCachedData<T[]>(queryClient, queryKey);
+  return Array.isArray(data) ? data.length : null;
+};
+
+const getActiveLocationsCount = (
+  businessSettings: BusinessSettingsCache | null,
+  fallbackCount: number
+): number => {
+  const activeLocationIds = businessSettings?.active_location_ids;
+  if (!Array.isArray(activeLocationIds)) {
+    return fallbackCount;
+  }
+
+  const count = activeLocationIds.filter(Boolean).length;
+  return count > 0 ? count : fallbackCount;
+};
+
+const getCachedAlertsOpenCount = (
+  queryClient: QueryClient,
+  userId: string | null
+): number | null => {
+  if (!userId) {
+    return null;
+  }
+
+  const alerts = getLastCachedData<AlertsCache>(queryClient, ["alerts", userId]);
+  if (!Array.isArray(alerts)) {
+    return null;
+  }
+
+  return alerts.filter((alert) => !alert.resolved_at).length;
+};
+
+const getCompetitorWatchActive = (
+  queryClient: QueryClient,
+  userId: string | null
+): boolean | null => {
+  if (!userId) {
+    return null;
+  }
+
+  const followed = queryClient.getQueriesData<unknown[]>({
+    queryKey: ["competitors-followed", userId]
+  });
+  if (followed.some(([, data]) => Array.isArray(data) && data.length > 0)) {
+    return true;
+  }
+
+  const radar = queryClient.getQueriesData<unknown[]>({
+    queryKey: ["competitors-radar", userId]
+  });
+  if (radar.some(([, data]) => Array.isArray(data) && data.length > 0)) {
+    return true;
+  }
+
+  return followed.length > 0 || radar.length > 0 ? false : null;
+};
+
+const readOnboardingCacheData = (
+  queryClient: QueryClient,
+  userId: string | null,
+  locationsCount: number
+): CoachOnboardingCacheData => {
+  if (!userId) {
+    return {
+      kpiSummary: null,
+      aiStats: null,
+      activeLocationsCount: locationsCount,
+      alertsOpenCount: null,
+      reportsCount: null,
+      teamMembersCount: null,
+      competitorWatchActive: null
+    };
+  }
+
+  const coachKpiSummary = getLastCachedData<KpiSummaryCache>(queryClient, [
+    "coach-health-kpi",
+    userId
+  ]);
+  const dashboardKpiSummary = getLastCachedData<KpiSummaryCache>(queryClient, [
+    "kpi-summary",
+    userId
+  ]);
+  const businessSettings = getLastCachedData<BusinessSettingsCache>(
+    queryClient,
+    ["business-settings", userId]
+  );
+  const reportsCount =
+    getCachedArrayCount<unknown>(queryClient, ["generated-reports", userId]) ??
+    getCachedArrayCount<unknown>(queryClient, ["reports", userId]);
+
+  return {
+    kpiSummary: coachKpiSummary ?? dashboardKpiSummary,
+    aiStats: getLastCachedData<AiKpiCache>(queryClient, ["ai-kpis", userId]),
+    activeLocationsCount: getActiveLocationsCount(
+      businessSettings,
+      locationsCount
+    ),
+    alertsOpenCount: getCachedAlertsOpenCount(queryClient, userId),
+    reportsCount,
+    teamMembersCount: getCachedArrayCount<unknown>(queryClient, [
+      "team-members",
+      userId
+    ]),
+    competitorWatchActive: getCompetitorWatchActive(queryClient, userId)
+  };
+};
+
+const getNotificationActionCount = (
+  notifications: AppNotificationBase[]
+): number =>
+  notifications.filter((notification) => notification.requiresAction === true)
+    .length;
+
+const getDominantTags = (
+  kpiSummary: KpiSummaryCache | null,
+  aiStats: AiKpiCache | null
+) =>
+  (aiStats?.topTags?.length ? aiStats.topTags : kpiSummary?.top_tags)?.filter(
+    (tag): tag is { tag: string; count?: number | null } =>
+      typeof tag.tag === "string" && tag.tag.trim().length > 0
+  ) ?? null;
+
+const getMilestone = (
+  result: CoachResult,
+  id: CoachMilestone["id"]
+): CoachMilestone => {
+  const milestone = result.milestones.find((item) => item.id === id);
+  if (!milestone) {
+    throw new Error(`Missing coach milestone: ${id}`);
+  }
+  return milestone;
+};
+
+const getMilestoneStatus = (milestone: CoachMilestone): StatusLabel => {
+  if (milestone.achieved) {
+    return "Validé";
+  }
+
+  return milestone.missingFields.length > 0 ? "Non encore mesuré" : "À compléter";
+};
+
+const getScoreLevelLabel = (level: CoachScoreLevel): string => {
+  switch (level) {
+    case "expert":
+      return "Expert";
+    case "gold":
+      return "Gold";
+    case "silver":
+      return "Silver";
+    case "bronze":
+    default:
+      return "Bronze";
+  }
+};
+
+const getStatusClass = (status: StatusLabel): string => {
+  if (status === "Validé") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  if (status === "Non encore mesuré") {
+    return "border-slate-200 bg-slate-50 text-slate-600";
+  }
+
+  if (status === "À venir") {
+    return "border-violet-200 bg-violet-50 text-violet-700";
+  }
+
+  return "border-amber-200 bg-amber-50 text-amber-700";
+};
+
+const formatMeasuredCount = (
+  value: number | null | undefined,
+  unit: string
+): string =>
+  typeof value === "number" && Number.isFinite(value)
+    ? `${value} ${unit}`
+    : "Non encore mesuré";
+
+const describeMilestone = (milestone: CoachMilestone): string => {
+  if (milestone.achieved && milestone.evidence) {
+    return `${milestone.description} ${milestone.evidence}.`;
+  }
+
+  if (!milestone.achieved && milestone.missingFields.length > 0) {
+    return `${milestone.description} Non encore mesuré.`;
+  }
+
+  return milestone.description;
+};
+
+const Onboarding = ({
+  session,
+  googleStatus,
+  locations,
+  notifications
+}: OnboardingProps) => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const userId = session?.user.id ?? null;
+  const [cacheVersion, setCacheVersion] = useState(0);
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedVoice, setSelectedVoice] = useState<VoicePreset>("premium");
-  const [selectedLocations, setSelectedLocations] = useState<string[]>(
-    locations.slice(0, 2).map((location) => location.id)
+  const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
+
+  useEffect(() => {
+    return queryClient.getQueryCache().subscribe(() => {
+      setCacheVersion((version) => version + 1);
+    });
+  }, [queryClient]);
+
+  useEffect(() => {
+    setSelectedLocations((previous) => {
+      const availableIds = new Set(locations.map((location) => location.id));
+      const stillAvailable = previous.filter((id) => availableIds.has(id));
+      if (stillAvailable.length > 0) {
+        return stillAvailable;
+      }
+      return locations.slice(0, 2).map((location) => location.id);
+    });
+  }, [locations]);
+
+  const cachedCoachData = useMemo(
+    () => readOnboardingCacheData(queryClient, userId, locations.length),
+    [cacheVersion, locations.length, queryClient, userId]
   );
-  const progress = Math.round(((currentStep + 1) / steps.length) * 100);
+  const kpiSummary = cachedCoachData.kpiSummary;
+  const aiStats = cachedCoachData.aiStats;
   const googleConnected = googleStatus === "connected";
-  const foundLocations = locations.length || 3;
-  const selectedCount = selectedLocations.length || Math.min(2, foundLocations);
-  const initialScore = useMemo(() => {
-    const base = googleConnected ? 42 : 28;
-    const locationBoost = Math.min(18, selectedCount * 6);
-    return Math.min(78, base + locationBoost + 12);
-  }, [googleConnected, selectedCount]);
+  const notificationActionCount = getNotificationActionCount(notifications);
+  const reviewsReplyable = kpiSummary?.counts?.reviews_replyable ?? null;
+  const reviewsReplied = kpiSummary?.counts?.reviews_replied ?? null;
+  const unansweredReviewsCount =
+    typeof reviewsReplyable === "number" && typeof reviewsReplied === "number"
+      ? Math.max(0, reviewsReplyable - reviewsReplied)
+      : null;
+  const aiSamples =
+    aiStats?.sentiment?.samples ?? kpiSummary?.sentiment?.sentiment_samples ?? null;
+  const dominantTags = getDominantTags(kpiSummary, aiStats);
+  const aiReady =
+    (typeof aiSamples === "number" && aiSamples > 0) ||
+    Boolean(dominantTags?.length);
+  const alertsOpenCount =
+    cachedCoachData.alertsOpenCount ?? notificationActionCount;
+  const activeLocationsCount =
+    selectedLocations.length > 0
+      ? selectedLocations.length
+      : cachedCoachData.activeLocationsCount;
+  const coachResult = buildCoachResult({
+    googleConnected,
+    activeLocationsCount,
+    totalLocationsCount: locations.length,
+    totalReviews: kpiSummary?.counts?.reviews_total,
+    reviewsWithText: kpiSummary?.counts?.reviews_with_text,
+    averageRating: kpiSummary?.ratings?.avg_rating,
+    responseRate: kpiSummary?.response?.response_rate_pct,
+    criticalReviewsCount: aiStats?.priorityCount ?? notificationActionCount,
+    unansweredReviewsCount,
+    aiInsightsReady:
+      typeof aiSamples === "number" && Number.isFinite(aiSamples)
+        ? aiReady
+        : undefined,
+    dominantTags,
+    alertsOpenCount,
+    automationCount: undefined,
+    teamMembersCount: cachedCoachData.teamMembersCount,
+    competitorWatchActive: cachedCoachData.competitorWatchActive,
+    reportsCount: cachedCoachData.reportsCount,
+    accountCreatedAt: session?.user.created_at ?? null
+  });
+  const accountMilestone = getMilestone(coachResult, "account-created");
+  const googleMilestone = getMilestone(coachResult, "google-connected");
+  const locationMilestone = getMilestone(coachResult, "first-location-imported");
+  const replyMilestone = getMilestone(coachResult, "first-review-replied");
+  const coachScoreMeasured =
+    googleConnected ||
+    locations.length > 0 ||
+    typeof kpiSummary?.counts?.reviews_total === "number";
+  const nextRecommendation = coachResult.recommendations[0] ?? null;
+  const scoreLevelLabel = getScoreLevelLabel(coachResult.score.level);
+  const selectedCount = selectedLocations.length;
+  const progress = Math.round(((currentStep + 1) / steps.length) * 100);
+  const stepStates: StepState[] = [
+    {
+      label: "Bienvenue",
+      complete: accountMilestone.achieved,
+      status: getMilestoneStatus(accountMilestone)
+    },
+    {
+      label: "Connexion",
+      complete: googleMilestone.achieved,
+      status: getMilestoneStatus(googleMilestone)
+    },
+    {
+      label: "Établissements",
+      complete: locationMilestone.achieved,
+      status: getMilestoneStatus(locationMilestone)
+    },
+    {
+      label: "Voix IA",
+      complete: aiReady,
+      status:
+        typeof aiSamples === "number" || dominantTags !== null
+          ? aiReady
+            ? "Validé"
+            : "À compléter"
+          : "Non encore mesuré"
+    },
+    {
+      label: "Première réponse",
+      complete: replyMilestone.achieved,
+      status: getMilestoneStatus(replyMilestone)
+    },
+    {
+      label: "Coach",
+      complete: coachScoreMeasured,
+      status: coachScoreMeasured ? "Validé" : "Non encore mesuré"
+    },
+    {
+      label: "Succès",
+      complete: googleMilestone.achieved && locationMilestone.achieved && coachScoreMeasured,
+      status:
+        googleMilestone.achieved && locationMilestone.achieved && coachScoreMeasured
+          ? "Validé"
+          : "À venir"
+    }
+  ];
 
   const next = () => setCurrentStep((step) => Math.min(step + 1, steps.length - 1));
   const back = () => setCurrentStep((step) => Math.max(step - 1, 0));
@@ -109,26 +510,9 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
     );
   };
 
-  const locationCards =
-    locations.length > 0
-      ? locations
-      : [
-          {
-            id: "mock-1",
-            location_title: "Établissement principal",
-            location_resource_name: "locations/mock-1"
-          },
-          {
-            id: "mock-2",
-            location_title: "Second établissement",
-            location_resource_name: "locations/mock-2"
-          },
-          {
-            id: "mock-3",
-            location_title: "Fiche à valider",
-            location_resource_name: "locations/mock-3"
-          }
-        ];
+  const renderStatusBadge = (status: StatusLabel) => (
+    <Badge className={getStatusClass(status)}>{status}</Badge>
+  );
 
   const renderStep = () => {
     if (currentStep === 0) {
@@ -143,7 +527,8 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
               Bienvenue dans EGIA
             </h1>
             <p className="mt-4 max-w-xl text-lg text-slate-300">
-              Construisons votre système réputation.
+              Construisons votre système réputation avec les données déjà
+              disponibles dans votre espace.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Button
@@ -166,21 +551,24 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
           </div>
           <div className="rounded-3xl border border-white/10 bg-white/10 p-5">
             <p className="text-sm font-semibold text-slate-200">
-              Premier moment de valeur
+              État de votre setup
             </p>
             <div className="mt-5 space-y-4">
-              {[
-                "Google relié",
-                "Établissements sélectionnés",
-                "Voix IA calibrée",
-                "Première réponse simulée",
-                "Coach activé"
-              ].map((item, index) => (
-                <div key={item} className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-emerald-300">
-                    {index + 1}
+              {stepStates.slice(1, 6).map((item, index) => (
+                <div key={item.label} className="flex items-center gap-3">
+                  <div
+                    className={`flex h-8 w-8 items-center justify-center rounded-full ${
+                      item.complete
+                        ? "bg-emerald-300 text-slate-950"
+                        : "bg-white/10 text-slate-300"
+                    }`}
+                  >
+                    {item.complete ? <Check size={15} /> : index + 1}
                   </div>
-                  <span className="text-sm text-slate-200">{item}</span>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm text-slate-200">{item.label}</span>
+                    <p className="text-xs text-slate-400">{item.status}</p>
+                  </div>
                 </div>
               ))}
             </div>
@@ -193,20 +581,34 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
       return (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
           <div>
-            <h2 className="text-3xl font-semibold text-slate-950">
-              Connectez Google en toute sécurité
-            </h2>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-3xl font-semibold text-slate-950">
+                Connectez Google en toute sécurité
+              </h2>
+              {renderStatusBadge(getMilestoneStatus(googleMilestone))}
+            </div>
             <p className="mt-3 max-w-2xl text-slate-500">
               EGIA lit vos établissements et avis pour générer un pilotage clair,
               des priorités et des réponses IA adaptées à votre marque.
             </p>
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
               {[
-                { icon: ShieldCheck, label: "Sécurisé", text: "Connexion Google officielle." },
+                {
+                  icon: ShieldCheck,
+                  label: "Sécurisé",
+                  text: "Connexion Google officielle."
+                },
                 { icon: Clock, label: "2 minutes", text: "Configuration rapide." },
-                { icon: Lock, label: "Contrôlé", text: "Aucune action sans validation." }
+                {
+                  icon: Lock,
+                  label: "Contrôlé",
+                  text: "Aucune action sans validation."
+                }
               ].map(({ icon: Icon, label, text }) => (
-                <div key={label} className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div
+                  key={label}
+                  className="rounded-2xl border border-slate-200 bg-white p-4"
+                >
                   <Icon size={20} className="text-emerald-600" />
                   <p className="mt-3 font-semibold text-slate-900">{label}</p>
                   <p className="mt-1 text-sm text-slate-500">{text}</p>
@@ -222,12 +624,12 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
                 </div>
                 <div>
                   <p className="font-semibold text-slate-900">
-                    {googleConnected ? "Google connecté" : "Connexion prête"}
+                    {googleConnected ? "Google connecté" : "Connexion à compléter"}
                   </p>
                   <p className="text-sm text-slate-500">
                     {googleConnected
                       ? "Votre compte est déjà relié."
-                      : "Vous pourrez relier Google depuis la page Connexion."}
+                      : "Reliez Google pour importer les établissements et avis."}
                   </p>
                 </div>
               </div>
@@ -235,7 +637,7 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
                 className="w-full"
                 onClick={() => (googleConnected ? next() : navigate("/connect"))}
               >
-                {googleConnected ? "Continuer" : "Ouvrir connexion Google"}
+                {googleConnected ? "Continuer" : "Connecter Google"}
               </Button>
             </CardContent>
           </Card>
@@ -247,63 +649,89 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
       return (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div>
-            <h2 className="text-3xl font-semibold text-slate-950">
-              Import établissements
-            </h2>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-3xl font-semibold text-slate-950">
+                Import établissements
+              </h2>
+              {renderStatusBadge(getMilestoneStatus(locationMilestone))}
+            </div>
             <p className="mt-3 text-slate-500">
-              Nous avons préparé une sélection pour lancer votre système sans
-              friction. Vous pourrez l’ajuster ensuite.
+              Sélectionnez les fiches à suivre. Si aucune fiche n’est encore
+              importée, lancez l’import depuis la connexion Google.
             </p>
             <div className="mt-6 space-y-3">
-              {locationCards.map((location, index) => {
-                const checked = selectedLocations.includes(location.id) || (!locations.length && index < 2);
+              {locations.length > 0 ? (
+                locations.map((location) => {
+                  const checked = selectedLocations.includes(location.id);
 
-                return (
-                  <button
-                    key={location.id}
-                    type="button"
-                    onClick={() => toggleLocation(location.id)}
-                    className="flex w-full items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:border-slate-300 hover:bg-slate-50"
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                        <Building2 size={18} />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-semibold text-slate-900">
-                          {location.location_title ?? location.location_resource_name}
-                        </p>
-                        <p className="truncate text-sm text-slate-500">
-                          Prêt pour le suivi réputation
-                        </p>
-                      </div>
-                    </div>
-                    <div
-                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border ${
-                        checked
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : "border-slate-200 text-slate-400"
-                      }`}
+                  return (
+                    <button
+                      key={location.id}
+                      type="button"
+                      onClick={() => toggleLocation(location.id)}
+                      className="flex w-full items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:border-slate-300 hover:bg-slate-50"
                     >
-                      {checked && <Check size={15} />}
-                    </div>
-                  </button>
-                );
-              })}
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
+                          <Building2 size={18} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-semibold text-slate-900">
+                            {location.location_title ??
+                              location.location_resource_name}
+                          </p>
+                          <p className="truncate text-sm text-slate-500">
+                            Prêt pour le suivi réputation
+                          </p>
+                        </div>
+                      </div>
+                      <div
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border ${
+                          checked
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 text-slate-400"
+                        }`}
+                      >
+                        {checked && <Check size={15} />}
+                      </div>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-5">
+                  <p className="font-semibold text-slate-900">
+                    Aucun établissement importé
+                  </p>
+                  <p className="mt-2 text-sm text-slate-500">
+                    À compléter depuis la connexion Google.
+                  </p>
+                  <Button className="mt-4" onClick={() => navigate("/connect")}>
+                    Importer établissements
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
           <Card>
             <CardContent className="pt-6">
               <div className="rounded-2xl bg-slate-950 p-5 text-white">
                 <div className="flex items-center gap-3">
-                  <div className="h-3 w-3 animate-pulse rounded-full bg-emerald-300" />
-                  <p className="text-sm font-semibold">Analyse premium en cours</p>
+                  <div
+                    className={`h-3 w-3 rounded-full ${
+                      locations.length > 0 ? "bg-emerald-300" : "bg-slate-500"
+                    }`}
+                  />
+                  <p className="text-sm font-semibold">Données réelles</p>
                 </div>
-                <p className="mt-4 text-4xl font-semibold">{foundLocations}</p>
-                <p className="text-sm text-slate-300">établissements trouvés</p>
-                <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/15">
-                  <div className="h-full w-2/3 animate-pulse rounded-full bg-emerald-300" />
-                </div>
+                <p className="mt-4 text-4xl font-semibold">
+                  {locations.length > 0 ? locations.length : "À compléter"}
+                </p>
+                <p className="text-sm text-slate-300">établissements importés</p>
+                <p className="mt-4 text-sm text-slate-300">
+                  {selectedCount > 0
+                    ? `${selectedCount} fiche${selectedCount > 1 ? "s" : ""} sélectionnée${selectedCount > 1 ? "s" : ""}.`
+                    : "Aucune fiche sélectionnée."}
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -313,36 +741,78 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
 
     if (currentStep === 3) {
       return (
-        <div>
-          <h2 className="text-3xl font-semibold text-slate-950">
-            Calibrez la voix IA
-          </h2>
-          <p className="mt-3 max-w-2xl text-slate-500">
-            Choisissez le style qui correspond à votre marque. EGIA l’utilisera
-            comme base pour les réponses.
-          </p>
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {voicePresets.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                onClick={() => setSelectedVoice(preset.id)}
-                className={`rounded-2xl border p-4 text-left transition ${
-                  selectedVoice === preset.id
-                    ? "border-slate-950 bg-white shadow-card"
-                    : "border-slate-200 bg-white hover:border-slate-300"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <p className="font-semibold text-slate-900">{preset.label}</p>
-                  {selectedVoice === preset.id && (
-                    <CheckCircle size={18} className="text-emerald-600" />
-                  )}
-                </div>
-                <p className="mt-2 text-sm text-slate-500">{preset.description}</p>
-              </button>
-            ))}
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <div>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-3xl font-semibold text-slate-950">
+                Calibrez la voix IA
+              </h2>
+              {renderStatusBadge(stepStates[3].status)}
+            </div>
+            <p className="mt-3 max-w-2xl text-slate-500">
+              Choisissez le style qui correspond à votre marque. EGIA l’utilisera
+              comme base pour les réponses.
+            </p>
+            <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {voicePresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => setSelectedVoice(preset.id)}
+                  className={`rounded-2xl border p-4 text-left transition ${
+                    selectedVoice === preset.id
+                      ? "border-slate-950 bg-white shadow-card"
+                      : "border-slate-200 bg-white hover:border-slate-300"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-semibold text-slate-900">{preset.label}</p>
+                    {selectedVoice === preset.id && (
+                      <CheckCircle size={18} className="text-emerald-600" />
+                    )}
+                  </div>
+                  <p className="mt-2 text-sm text-slate-500">
+                    {preset.description}
+                  </p>
+                </button>
+              ))}
+            </div>
           </div>
+          <Card>
+            <CardContent className="space-y-4 pt-6">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-50 text-violet-700">
+                  <Wand2 size={22} />
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-900">
+                    {aiReady ? "IA déjà alimentée" : "Voix IA à compléter"}
+                  </p>
+                  <p className="text-sm text-slate-500">
+                    {aiReady
+                      ? `${formatMeasuredCount(aiSamples, "avis analysé(s)")}.`
+                      : stepStates[3].status}
+                  </p>
+                </div>
+              </div>
+              {dominantTags?.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {dominantTags.slice(0, 4).map((tag) => (
+                    <Badge key={tag.tag} variant="neutral">
+                      {tag.tag}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
+              <Button
+                variant={aiReady ? "outline" : "default"}
+                className="w-full"
+                onClick={() => navigate("/settings/brand-voice")}
+              >
+                Configurer voix IA
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       );
     }
@@ -351,46 +821,76 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
       return (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)]">
           <div>
-            <h2 className="text-3xl font-semibold text-slate-950">
-              Première réponse IA
-            </h2>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-3xl font-semibold text-slate-950">
+                Première réponse IA
+              </h2>
+              {renderStatusBadge(getMilestoneStatus(replyMilestone))}
+            </div>
             <p className="mt-3 text-slate-500">
-              Simulation de génération : EGIA transforme un avis client en réponse
-              prête à valider.
+              L’étape se valide quand au moins un avis répondu est mesuré par les
+              KPIs déjà chargés.
             </p>
             <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-5">
               <div className="flex items-start gap-3">
                 <MessageSquare size={20} className="mt-1 text-amber-600" />
                 <div>
-                  <p className="font-semibold text-slate-900">Avis client</p>
+                  <p className="font-semibold text-slate-900">
+                    {replyMilestone.achieved
+                      ? "Premier avis répondu"
+                      : "Avis à traiter"}
+                  </p>
                   <p className="mt-2 text-sm text-slate-600">
-                    “Service rapide, mais l’accueil pourrait être plus chaleureux.”
+                    {describeMilestone(replyMilestone)}
                   </p>
                 </div>
               </div>
+              <Button className="mt-5" onClick={() => navigate("/inbox")}>
+                Ouvrir Inbox
+              </Button>
             </div>
           </div>
           <div className="rounded-3xl border border-slate-200 bg-slate-950 p-5 text-white">
             <div className="flex items-center gap-3">
               <Wand2 size={20} className="text-emerald-300" />
-              <p className="font-semibold">Génération IA</p>
+              <p className="font-semibold">Données avis</p>
             </div>
-            <div className="mt-5 space-y-3">
-              <div className="h-2 w-2/3 animate-pulse rounded-full bg-white/20" />
-              <div className="h-2 w-5/6 animate-pulse rounded-full bg-white/20" />
-              <div className="h-2 w-1/2 animate-pulse rounded-full bg-white/20" />
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {[
+                {
+                  label: "Avis synchronisés",
+                  value: formatMeasuredCount(
+                    kpiSummary?.counts?.reviews_total ?? null,
+                    "avis"
+                  )
+                },
+                {
+                  label: "Taux réponse",
+                  value:
+                    typeof kpiSummary?.response?.response_rate_pct === "number"
+                      ? `${Math.round(kpiSummary.response.response_rate_pct)}%`
+                      : "Non encore mesuré"
+                },
+                {
+                  label: "À répondre",
+                  value:
+                    typeof unansweredReviewsCount === "number"
+                      ? String(unansweredReviewsCount)
+                      : "Non encore mesuré"
+                },
+                {
+                  label: "Priorités",
+                  value: String(aiStats?.priorityCount ?? notificationActionCount)
+                }
+              ].map((item) => (
+                <div key={item.label} className="rounded-2xl bg-white/10 p-4">
+                  <p className="text-xs font-semibold uppercase text-slate-400">
+                    {item.label}
+                  </p>
+                  <p className="mt-2 text-lg font-semibold">{item.value}</p>
+                </div>
+              ))}
             </div>
-            <div className="mt-6 rounded-2xl bg-white p-4 text-slate-800">
-              <p className="text-sm">
-                Merci pour votre retour. Nous sommes ravis que la rapidité du
-                service ait répondu à vos attentes. Votre remarque sur l’accueil
-                est bien prise en compte afin d’améliorer l’expérience dès votre
-                prochaine visite.
-              </p>
-            </div>
-            <Badge className="mt-4 border-emerald-200 bg-emerald-50 text-emerald-700">
-              Votre assistant réputation est prêt.
-            </Badge>
           </div>
         </div>
       );
@@ -400,9 +900,12 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
       return (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
           <div>
-            <h2 className="text-3xl font-semibold text-slate-950">
-              Découvrez votre Coach EGIA
-            </h2>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-3xl font-semibold text-slate-950">
+                Découvrez votre Coach EGIA
+              </h2>
+              {renderStatusBadge(stepStates[5].status)}
+            </div>
             <p className="mt-3 text-slate-500">
               Le Coach transforme vos signaux réputation en actions simples,
               priorisées et mesurables.
@@ -410,26 +913,33 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
             <div className="mt-6 rounded-3xl bg-slate-950 p-5 text-white">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-slate-400">Score initial</p>
-                  <p className="mt-1 text-5xl font-semibold">{initialScore}</p>
+                  <p className="text-sm text-slate-400">Score Coach</p>
+                  <p className="mt-1 text-5xl font-semibold">
+                    {coachScoreMeasured
+                      ? coachResult.score.value
+                      : "Non encore mesuré"}
+                  </p>
                 </div>
                 <Badge className="border-amber-200 bg-amber-50 text-amber-700">
-                  Bronze avancé
+                  {scoreLevelLabel}
                 </Badge>
               </div>
               <div className="mt-6 h-2 overflow-hidden rounded-full bg-white/15">
                 <div
                   className="h-full rounded-full bg-amber-300 transition-all duration-700"
-                  style={{ width: `${initialScore}%` }}
+                  style={{ width: `${coachResult.score.value}%` }}
                 />
               </div>
               <div className="mt-6 rounded-2xl border border-white/10 bg-white/10 p-4">
                 <p className="text-xs font-semibold uppercase text-slate-400">
                   Prochaine action
                 </p>
-                <p className="mt-1 font-semibold">Répondre aux avis prioritaires</p>
+                <p className="mt-1 font-semibold">
+                  {nextRecommendation?.title ?? "Ouvrir le Coach"}
+                </p>
                 <p className="mt-1 text-sm text-slate-300">
-                  Votre premier levier de progression est identifié.
+                  {nextRecommendation?.description ??
+                    "Le Coach est prêt à consolider vos priorités."}
                 </p>
               </div>
             </div>
@@ -437,17 +947,40 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
           <Card>
             <CardContent className="space-y-4 pt-6">
               {[
-                { icon: Target, label: "Priorités prêtes" },
-                { icon: Trophy, label: "Progression débloquée" },
-                { icon: Radar, label: "Veille disponible" }
-              ].map(({ icon: Icon, label }) => (
+                {
+                  icon: Target,
+                  label: "Priorités",
+                  detail: nextRecommendation ? "Prêtes" : "À compléter"
+                },
+                {
+                  icon: Trophy,
+                  label: "Progression",
+                  detail: scoreLevelLabel
+                },
+                {
+                  icon: Radar,
+                  label: "Veille",
+                  detail:
+                    cachedCoachData.competitorWatchActive === null
+                      ? "Non encore mesuré"
+                      : cachedCoachData.competitorWatchActive
+                        ? "Active"
+                        : "À compléter"
+                }
+              ].map(({ icon: Icon, label, detail }) => (
                 <div key={label} className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
                     <Icon size={18} />
                   </div>
-                  <p className="font-semibold text-slate-900">{label}</p>
+                  <div>
+                    <p className="font-semibold text-slate-900">{label}</p>
+                    <p className="text-sm text-slate-500">{detail}</p>
+                  </div>
                 </div>
               ))}
+              <Button className="w-full" onClick={() => navigate("/coach")}>
+                Ouvrir Coach
+              </Button>
             </CardContent>
           </Card>
         </div>
@@ -463,17 +996,35 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
           Système réputation activé
         </h2>
         <p className="mt-3 text-slate-500">
-          Votre assistant réputation est configuré. Vous pouvez maintenant piloter
-          les avis, les réponses et la progression depuis EGIA.
+          Votre assistant réputation est prêt à être piloté. Les données absentes
+          resteront explicitement marquées comme non encore mesurées.
         </p>
         <div className="mt-8 grid gap-3 sm:grid-cols-4">
           {[
-            { label: "Score", value: `${initialScore}/100` },
-            { label: "Établissements", value: String(selectedCount) },
-            { label: "IA", value: "Prête" },
-            { label: "Progression", value: "Débloquée" }
+            {
+              label: "Score",
+              value: coachScoreMeasured
+                ? `${coachResult.score.value}/100`
+                : "Non mesuré"
+            },
+            {
+              label: "Établissements",
+              value:
+                locations.length > 0 ? String(locations.length) : "À compléter"
+            },
+            {
+              label: "IA",
+              value: aiReady ? "Prête" : stepStates[3].status
+            },
+            {
+              label: "Avis",
+              value: formatMeasuredCount(kpiSummary?.counts?.reviews_total, "avis")
+            }
           ].map((item) => (
-            <div key={item.label} className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div
+              key={item.label}
+              className="rounded-2xl border border-slate-200 bg-white p-4"
+            >
               <p className="text-xs font-semibold uppercase text-slate-400">
                 {item.label}
               </p>
@@ -483,10 +1034,15 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
             </div>
           ))}
         </div>
-        <Button size="lg" className="mt-8" onClick={() => navigate("/")}>
-          Accéder au Dashboard
-          <ArrowRight size={18} />
-        </Button>
+        <div className="mt-8 flex flex-col gap-2 sm:flex-row sm:justify-center">
+          <Button size="lg" onClick={() => navigate("/")}>
+            Accéder au Dashboard
+            <ArrowRight size={18} />
+          </Button>
+          <Button size="lg" variant="outline" onClick={() => navigate("/coach")}>
+            Ouvrir Coach
+          </Button>
+        </div>
       </div>
     );
   };
@@ -515,12 +1071,21 @@ const Onboarding = ({ googleStatus, locations }: OnboardingProps) => {
             />
           </div>
           <div className="mt-4 grid gap-2 text-[11px] font-semibold text-slate-400 sm:grid-cols-7">
-            {steps.map((step, index) => (
+            {stepStates.map((step, index) => (
               <div
-                key={step}
-                className={index <= currentStep ? "text-white" : "text-slate-500"}
+                key={step.label}
+                className={`min-w-0 rounded-xl px-2 py-1 ${
+                  index === currentStep
+                    ? "bg-white/10 text-white"
+                    : step.complete
+                      ? "text-emerald-200"
+                      : "text-slate-500"
+                }`}
               >
-                {step}
+                <span className="block truncate">{step.label}</span>
+                <span className="mt-0.5 block truncate text-[10px] font-medium">
+                  {step.status}
+                </span>
               </div>
             ))}
           </div>
