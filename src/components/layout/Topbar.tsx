@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Menu, Search, Sparkles } from "lucide-react";
+import { Bell, Menu, Sparkles } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   getUnreadNotificationCount,
@@ -78,38 +78,38 @@ const Topbar = ({
   };
 
   return (
-    <div className="flex flex-col gap-4 border-b border-slate-200 bg-white/70 px-4 py-4 backdrop-blur md:px-6 md:py-5 lg:flex-row lg:items-center lg:justify-between">
-      <div className="flex items-start gap-3">
+    <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-white/70 px-4 py-4 backdrop-blur md:px-6 md:py-5 lg:items-center">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
         {onToggleMenu && (
           <Button
             variant="ghost"
             size="sm"
-            className="mt-1 rounded-xl lg:hidden"
+            className="mt-0.5 shrink-0 rounded-xl lg:hidden"
             onClick={onToggleMenu}
             aria-label={isMenuOpen ? "Fermer le menu" : "Ouvrir le menu"}
           >
             <Menu size={18} />
           </Button>
         )}
-        <div>
+        <div className="min-w-0">
           <p className="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-slate-400">
             <Sparkles size={14} />
             EGIA LIVE
           </p>
-          <h1 className="text-2xl font-semibold text-slate-900 md:text-3xl">
+          <h1 className="truncate text-xl font-semibold text-slate-900 md:text-3xl">
             {title}
           </h1>
-          {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
+          {subtitle && (
+            <p className="mt-1 line-clamp-2 text-sm text-slate-500">
+              {subtitle}
+            </p>
+          )}
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-500 lg:flex">
-          <Search size={16} />
-          Rechercher un lieu
-        </div>
+      <div className="flex shrink-0 items-center gap-2 md:gap-3">
         {userEmail && (
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="hidden h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm sm:flex">
             {brandingQuery.isLoading ? (
               <Skeleton className="h-8 w-8 rounded-lg" />
             ) : logoUrl ? (
@@ -141,7 +141,7 @@ const Topbar = ({
           </Button>
         )}
         {userEmail && (
-          <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-4 py-2">
+          <div className="hidden items-center gap-3 rounded-full border border-slate-200 bg-white px-4 py-2 md:flex">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
               {userEmail.slice(0, 2).toUpperCase()}
             </div>
@@ -151,12 +151,12 @@ const Topbar = ({
             </div>
             {onDebugSession && (
               <Button variant="ghost" size="sm" onClick={onDebugSession}>
-                Debug session
+                Diagnostic
               </Button>
             )}
             {onSignOut && (
               <Button variant="outline" size="sm" onClick={onSignOut}>
-                Se deconnecter
+                Se déconnecter
               </Button>
             )}
           </div>

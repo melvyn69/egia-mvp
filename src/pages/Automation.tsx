@@ -47,12 +47,12 @@ const templateCards = [
   },
   {
     id: "recovery",
-    title: "Récupération Client",
+    title: "Récupération client",
     description: "Alerte immédiate pour avis négatif (win-back)."
   },
   {
     id: "autopilot",
-    title: "Pilote Automatique",
+    title: "Pilote automatique",
     description: "Répondre automatiquement aux avis positifs."
   }
 ];
@@ -185,9 +185,9 @@ const Automation = ({ session, locations }: AutomationProps) => {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold text-slate-900">
-              Automatisation
+              Automatisations
             </h1>
-            <Badge variant="neutral">PRO</Badge>
+            <Badge variant="neutral">Bêta privée</Badge>
           </div>
           <p className="text-sm text-slate-500">
             Configurez le pilote automatique pour votre e-réputation.
@@ -199,10 +199,10 @@ const Automation = ({ session, locations }: AutomationProps) => {
             onClick={handleRunNow}
             disabled={running}
           >
-            {running ? "Exécution..." : "Actionner l’auto maintenant"}
+            {running ? "Exécution..." : "Lancer maintenant"}
           </Button>
           <Button onClick={() => navigate("/automation/builder")}>
-            Créer manuellement
+            Créer un scénario
           </Button>
         </div>
       </div>
@@ -216,15 +216,10 @@ const Automation = ({ session, locations }: AutomationProps) => {
                 Automatisation exécutée.
               </p>
               <p className="text-xs text-slate-500">
-                Traité: {runResult?.processed ?? 0} · Alertes:{" "}
-                {runResult?.inserted ?? 0} · Cooldown:{" "}
+                Avis traités : {runResult?.processed ?? 0} · Alertes :{" "}
+                {runResult?.inserted ?? 0} · Mis en pause :{" "}
                 {runResult?.skippedCooldown ?? 0}
               </p>
-              {runResult?.last_cursor && (
-                <p className="text-xs text-slate-400">
-                  Dernier curseur: {runResult.last_cursor}
-                </p>
-              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -321,7 +316,7 @@ const Automation = ({ session, locations }: AutomationProps) => {
                     disabled
                     title="Bientôt disponible"
                   >
-                    Actionner l’auto maintenant
+                    Lancer maintenant
                   </Button>
                   <Button
                     variant="outline"

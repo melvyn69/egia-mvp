@@ -9,6 +9,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { supabase, supabaseUrl } from "../lib/supabase";
+import { cn } from "../lib/utils";
 
 const statusTabs = [
   { id: "new", label: "Nouveau" },
@@ -433,6 +434,10 @@ const Inbox = () => {
   const [batchGenerating, setBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [batchError, setBatchError] = useState<string | null>(null);
+  const [mobileInboxView, setMobileInboxView] = useState<
+    "reviews" | "details" | "reply"
+  >("reviews");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [highlightReviewId, setHighlightReviewId] = useState<string | null>(null);
   const pendingReviewIdRef = useRef<string | null>(null);
   const autoDraftRequestedRef = useRef<Record<string, boolean>>({});
@@ -1593,12 +1598,12 @@ const Inbox = () => {
         );
       })
       .catch((error) => {
-        setSessionError(error instanceof Error ? error.message : "Unknown error");
+        setSessionError(error instanceof Error ? error.message : "Erreur inconnue");
       });
   }, []);
 
   const handleInvalidJwt = async () => {
-    setGenerationError("Session expirée, reconnecte-toi");
+    setGenerationError("Session expirée, reconnectez-vous.");
     const supabaseClient = supabase;
     if (!supabaseClient) {
       return;
@@ -1639,9 +1644,9 @@ const Inbox = () => {
       return "Merci pour votre note et votre confiance. Au plaisir de vous accueillir de nouveau.";
     }
     if (review.rating === 3) {
-      return "Merci pour votre note. Nous restons attentifs a votre experience et serions ravis de vous accueillir a nouveau.";
+      return "Merci pour votre note. Nous restons attentifs à votre expérience et serions ravis de vous accueillir à nouveau.";
     }
-    return "Merci pour votre note. Nous prenons votre retour au serieux et travaillons a ameliorer votre prochaine experience.";
+    return "Merci pour votre note. Nous prenons votre retour au sérieux et travaillons à améliorer votre prochaine expérience.";
   };
 
   const saveDraftReply = useCallback(
@@ -1656,7 +1661,7 @@ const Inbox = () => {
       }
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session?.user) {
-        setGenerationError("Connecte-toi pour sauvegarder le brouillon.");
+        setGenerationError("Connectez-vous pour sauvegarder le brouillon.");
         return false;
       }
       const locationId = uuidRegex.test(review.locationId) ? review.locationId : null;
@@ -1711,7 +1716,7 @@ const Inbox = () => {
       });
       const enqueuePayload = await enqueueResponse.json().catch(() => null);
       if (enqueueResponse.status === 401) {
-        setGenerationError("Session expiree, reconnecte-toi.");
+        setGenerationError("Session expirée, reconnectez-vous.");
         return { draftText: null, pending: false };
       }
       if (enqueueResponse.status === 403) {
@@ -1721,8 +1726,8 @@ const Inbox = () => {
       if (!enqueueResponse.ok) {
         setGenerationError(
           enqueueResponse.status === 503
-            ? "IA non configuree."
-            : "Impossible de generer une reponse pour le moment."
+            ? "IA non configurée."
+            : "Impossible de générer une réponse pour le moment."
         );
         return { draftText: null, pending: false };
       }
@@ -1752,11 +1757,11 @@ const Inbox = () => {
         return { draftText: existingDraftText, pending: false };
       }
       if (skippedReason === "no_comment") {
-        setGenerationError("Avis note seule: utilisez le modele court.");
+        setGenerationError("Avis note seule : utilisez le modèle court.");
         return { draftText: null, pending: false };
       }
       if (skippedReason === "has_owner_reply" || skippedReason === "already_replied") {
-        setGenerationError("Avis deja repondu.");
+        setGenerationError("Avis déjà répondu.");
         return { draftText: null, pending: false };
       }
 
@@ -1771,7 +1776,7 @@ const Inbox = () => {
         );
         const statusPayload = await statusResponse.json().catch(() => null);
         if (statusResponse.status === 401) {
-          setGenerationError("Session expiree, reconnecte-toi.");
+          setGenerationError("Session expirée, reconnectez-vous.");
           return { draftText: null, pending: false };
         }
         if (statusResponse.status === 403) {
@@ -1790,7 +1795,7 @@ const Inbox = () => {
           : "";
         const hasJobInflight = Boolean(statusPayload?.has_job_inflight);
         if (statusResponse.ok && status === "error") {
-          setGenerationError("Generation IA en erreur.");
+          setGenerationError("Génération IA en erreur.");
           return { draftText: null, pending: false };
         }
         if (
@@ -1805,7 +1810,7 @@ const Inbox = () => {
           window.setTimeout(resolve, intervalMs);
         });
       }
-      setGenerationError("Generation en cours. Reviens dans quelques secondes.");
+      setGenerationError("Génération en cours. Revenez dans quelques secondes.");
       return { draftText: null, pending: false };
     },
     []
@@ -1821,11 +1826,11 @@ const Inbox = () => {
       return;
     }
     if (isReviewNoteOnly(selectedReview)) {
-      setGenerationError("Avis note seule: utilisez le modele court.");
+      setGenerationError("Avis note seule : utilisez le modèle court.");
       return;
     }
     if (selectedReviewHasRealReply) {
-      setGenerationError("Avis deja repondu.");
+      setGenerationError("Avis déjà répondu.");
       return;
     }
     setIsGenerating(true);
@@ -1859,7 +1864,7 @@ const Inbox = () => {
         );
       }
     } catch {
-      setGenerationError("Erreur lors de la generation.");
+      setGenerationError("Erreur lors de la génération.");
       setAutoDraftStatusByReview((prev) => ({
         ...prev,
         [selectedReview.id]: "error"
@@ -2012,7 +2017,7 @@ const Inbox = () => {
         return;
       }
       if (response.status === 401) {
-        setGenerationError("Session expirée, reconnecte-toi.");
+        setGenerationError("Session expirée, reconnectez-vous.");
         return;
       }
       if (response.status === 409) {
@@ -2119,7 +2124,7 @@ const Inbox = () => {
       }
     } catch (error) {
       if (error instanceof Error && error.message === "No session / not authenticated") {
-        setGenerationError("Connecte-toi pour publier la réponse.");
+        setGenerationError("Connectez-vous pour publier la réponse.");
       } else {
         setGenerationError("Impossible d'envoyer la réponse.");
       }
@@ -2137,7 +2142,7 @@ const Inbox = () => {
       return;
     }
     if (!activeLocationId) {
-      setBatchError("Selectionne un lieu.");
+      setBatchError("Sélectionnez un lieu.");
       return;
     }
     if (filteredReviews.length === 0) {
@@ -2313,188 +2318,256 @@ const Inbox = () => {
         )}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.05fr_1.4fr_1.05fr]">
-        <Card>
+      <div className="grid grid-cols-3 gap-1 rounded-2xl border border-slate-200 bg-white p-1 lg:hidden">
+        <button
+          type="button"
+          onClick={() => setMobileInboxView("reviews")}
+          className={cn(
+            "rounded-xl px-2 py-2 text-xs font-semibold transition",
+            mobileInboxView === "reviews"
+              ? "bg-ink text-white"
+              : "text-slate-600"
+          )}
+        >
+          Avis
+          <span className="ml-1 text-[10px] opacity-70">
+            {totalReviewsCount ?? reviews.length}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileInboxView("details")}
+          disabled={!selectedReview}
+          className={cn(
+            "rounded-xl px-2 py-2 text-xs font-semibold transition disabled:opacity-40",
+            mobileInboxView === "details"
+              ? "bg-ink text-white"
+              : "text-slate-600"
+          )}
+        >
+          Détails
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileInboxView("reply")}
+          disabled={!selectedReview}
+          className={cn(
+            "rounded-xl px-2 py-2 text-xs font-semibold transition disabled:opacity-40",
+            mobileInboxView === "reply"
+              ? "bg-ink text-white"
+              : "text-slate-600"
+          )}
+        >
+          Réponse
+        </button>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[1.05fr_1.4fr_1.05fr] lg:gap-6">
+        <Card
+          className={cn(
+            mobileInboxView === "reviews" ? "block" : "hidden",
+            "lg:block"
+          )}
+        >
           <CardHeader className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              {statusTabs.map((tab) => (
-                <Button
-                  key={tab.id}
-                  variant={statusFilter === tab.id ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setStatusFilter(tab.id)}
-                >
-                  {tab.label}
-                </Button>
-              ))}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap gap-2">
+                {statusTabs.map((tab) => (
+                  <Button
+                    key={tab.id}
+                    variant={statusFilter === tab.id ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setStatusFilter(tab.id)}
+                  >
+                    {tab.label}
+                  </Button>
+                ))}
+              </div>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={handleGenerateBatch}
-                disabled={batchGenerating || eligibleFilteredReviews.length === 0}
+                className="lg:hidden"
+                onClick={() => setFiltersOpen((current) => !current)}
               >
-                {batchGenerating
-                  ? `Génération ${batchProgress.current}/${batchProgress.total}`
-                  : "Générer pour tous"}
+                {filtersOpen ? "Masquer filtres" : "Filtres"}
               </Button>
-              {batchError && (
-                <span className="text-xs font-medium text-amber-700">
-                  {batchError}
-                </span>
-              )}
             </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">Lieu</label>
-              <select
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                value={selectedLocation}
-                onChange={(event) => setSelectedLocation(event.target.value)}
-              >
-                {locations.map((location) => (
-                  <option key={location.id} value={location.id}>
-                    {location.label}
-                  </option>
-                ))}
-              </select>
-              {isAdmin && locationOptions.length > 0 && (
-                <div className="mt-3 space-y-2 text-xs text-slate-600">
-                  {locationOptions.map((location) => (
-                    <div
-                      key={location.id}
-                      className="flex flex-wrap items-center justify-between gap-2"
-                    >
-                      <span className="font-medium">{location.label}</span>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          disabled={aiRunLocationLoading === location.id}
-                          onClick={() =>
-                            handleRunAiForSpecificLocation(location.id)
-                          }
-                        >
-                          {aiRunLocationLoading === location.id
-                            ? "Lancement..."
-                            : "Lancer analyse IA (ce lieu)"}
-                        </Button>
-                      </div>
-                      {aiRunLocationResult[location.id] && (
-                        <span className="w-full text-[11px] text-slate-500">
-                          {aiRunLocationResult[location.id]}
-                        </span>
-                      )}
-                    </div>
+            <div
+              className={cn(
+                "space-y-4",
+                filtersOpen ? "block" : "hidden",
+                "lg:block"
+              )}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleGenerateBatch}
+                  disabled={batchGenerating || eligibleFilteredReviews.length === 0}
+                >
+                  {batchGenerating
+                    ? `Génération ${batchProgress.current}/${batchProgress.total}`
+                    : "Générer pour tous"}
+                </Button>
+                {batchError && (
+                  <span className="text-xs font-medium text-amber-700">
+                    {batchError}
+                  </span>
+                )}
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500">Lieu</label>
+                <select
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                  value={selectedLocation}
+                  onChange={(event) => setSelectedLocation(event.target.value)}
+                >
+                  {locations.map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.label}
+                    </option>
                   ))}
-                </div>
-              )}
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Période
-              </label>
-              <select
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                value={datePreset}
-                onChange={(event) =>
-                  setDatePreset(
-                    event.target.value as typeof datePreset
-                  )
-                }
-              >
-                <option value="all_time">Tout</option>
-                <option value="this_week">Cette semaine</option>
-                <option value="this_month">Ce mois</option>
-                <option value="this_quarter">Ce trimestre</option>
-                <option value="this_year">Cette année</option>
-                <option value="last_year">Année dernière</option>
-                <option value="custom">Personnalisé</option>
-              </select>
-              {datePreset === "custom" && (
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <input
-                    type="date"
-                    className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
-                    value={dateFrom}
-                    onChange={(event) => setDateFrom(event.target.value)}
-                  />
-                  <input
-                    type="date"
-                    className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
-                    value={dateTo}
-                    onChange={(event) => setDateTo(event.target.value)}
-                  />
-                </div>
-              )}
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Sentiment
-              </label>
-              <select
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                value={sentimentFilter}
-                onChange={(event) =>
-                  setSentimentFilter(
-                    event.target.value as typeof sentimentFilter
-                  )
-                }
-              >
-                <option value="all">Tous</option>
-                <option value="positive">Positif</option>
-                <option value="neutral">Neutre</option>
-                <option value="negative">Négatif</option>
-              </select>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-xs font-semibold text-slate-500">
-                  Note min
-                </label>
-                <select
-                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                  value={ratingMin}
-                  onChange={(event) => setRatingMin(event.target.value)}
-                >
-                  <option value="">—</option>
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="3">3</option>
-                  <option value="4">4</option>
-                  <option value="5">5</option>
                 </select>
+                {isAdmin && locationOptions.length > 0 && (
+                  <div className="mt-3 space-y-2 text-xs text-slate-600">
+                    {locationOptions.map((location) => (
+                      <div
+                        key={location.id}
+                        className="flex flex-wrap items-center justify-between gap-2"
+                      >
+                        <span className="font-medium">{location.label}</span>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={aiRunLocationLoading === location.id}
+                            onClick={() =>
+                              handleRunAiForSpecificLocation(location.id)
+                            }
+                          >
+                            {aiRunLocationLoading === location.id
+                              ? "Lancement..."
+                              : "Lancer analyse IA (ce lieu)"}
+                          </Button>
+                        </div>
+                        {aiRunLocationResult[location.id] && (
+                          <span className="w-full text-[11px] text-slate-500">
+                            {aiRunLocationResult[location.id]}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500">
-                  Note max
+                  Période
                 </label>
                 <select
                   className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                  value={ratingMax}
-                  onChange={(event) => setRatingMax(event.target.value)}
+                  value={datePreset}
+                  onChange={(event) =>
+                    setDatePreset(
+                      event.target.value as typeof datePreset
+                    )
+                  }
                 >
-                  <option value="">—</option>
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="3">3</option>
-                  <option value="4">4</option>
-                  <option value="5">5</option>
+                  <option value="all_time">Tout</option>
+                  <option value="this_week">Cette semaine</option>
+                  <option value="this_month">Ce mois</option>
+                  <option value="this_quarter">Ce trimestre</option>
+                  <option value="this_year">Cette année</option>
+                  <option value="last_year">Année dernière</option>
+                  <option value="custom">Personnalisé</option>
+                </select>
+                {datePreset === "custom" && (
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <input
+                      type="date"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                      value={dateFrom}
+                      onChange={(event) => setDateFrom(event.target.value)}
+                    />
+                    <input
+                      type="date"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                      value={dateTo}
+                      onChange={(event) => setDateTo(event.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500">
+                  Sentiment
+                </label>
+                <select
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                  value={sentimentFilter}
+                  onChange={(event) =>
+                    setSentimentFilter(
+                      event.target.value as typeof sentimentFilter
+                    )
+                  }
+                >
+                  <option value="all">Tous</option>
+                  <option value="positive">Positif</option>
+                  <option value="neutral">Neutre</option>
+                  <option value="negative">Négatif</option>
                 </select>
               </div>
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Tags (séparés par des virgules)
-              </label>
-              <input
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                value={tagFilter}
-                onChange={(event) => setTagFilter(event.target.value)}
-                placeholder="accueil, attente..."
-              />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-semibold text-slate-500">
+                    Note min
+                  </label>
+                  <select
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                    value={ratingMin}
+                    onChange={(event) => setRatingMin(event.target.value)}
+                  >
+                    <option value="">—</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500">
+                    Note max
+                  </label>
+                  <select
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                    value={ratingMax}
+                    onChange={(event) => setRatingMax(event.target.value)}
+                  >
+                    <option value="">—</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500">
+                  Tags (séparés par des virgules)
+                </label>
+                <input
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                  value={tagFilter}
+                  onChange={(event) => setTagFilter(event.target.value)}
+                  placeholder="accueil, attente..."
+                />
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -2536,7 +2609,10 @@ const Inbox = () => {
                     <button
                       key={review.id}
                       type="button"
-                      onClick={() => setSelectedReviewId(review.id)}
+                      onClick={() => {
+                        setSelectedReviewId(review.id);
+                        setMobileInboxView("details");
+                      }}
                       id={`review-${review.id}`}
                       className={`w-full rounded-2xl border p-4 text-left transition hover:border-slate-300 ${
                         selectedReviewId === review.id
@@ -2561,7 +2637,7 @@ const Inbox = () => {
                           {statusLabelMap[safeStatus]}
                         </Badge>
                         {draftByReview[review.id] && (
-                          <Badge variant="success">Draft saved</Badge>
+                          <Badge variant="success">Brouillon enregistré</Badge>
                         )}
                         {review.aiPriority && (
                           <Badge variant="warning">À traiter</Badge>
@@ -2615,9 +2691,24 @@ const Inbox = () => {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
+        <Card
+          className={cn(
+            mobileInboxView === "details" ? "block" : "hidden",
+            "lg:block"
+          )}
+        >
+          <CardHeader className="flex flex-row items-center justify-between gap-3">
             <CardTitle>Détails de l'avis</CardTitle>
+            {selectedReview && (
+              <Button
+                type="button"
+                size="sm"
+                className="lg:hidden"
+                onClick={() => setMobileInboxView("reply")}
+              >
+                Répondre
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
             {!selectedReview ? (
@@ -2713,9 +2804,26 @@ const Inbox = () => {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card
+          className={cn(
+            mobileInboxView === "reply" ? "block" : "hidden",
+            "lg:block"
+          )}
+        >
           <CardHeader className="space-y-3">
-            <CardTitle>Réponse</CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle>Réponse</CardTitle>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="lg:hidden"
+                onClick={() => setMobileInboxView("details")}
+                disabled={!selectedReview}
+              >
+                Voir l'avis
+              </Button>
+            </div>
             <div className="flex items-center gap-2">
               <Button
                 variant={replyTab === "reply" ? "default" : "outline"}
@@ -2745,7 +2853,7 @@ const Inbox = () => {
                           <span>
                             {selectedReview.ownerReplyTime
                               ? formatRelativeDate(selectedReview.ownerReplyTime)
-                              : "Reponse Google"}
+                              : "Réponse Google"}
                           </span>
                           <span>Envoyé</span>
                         </div>
@@ -2880,25 +2988,25 @@ const Inbox = () => {
                 )}
                 {autoDraftStatus === "loading" && canGenerateForSelectedReview && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                    Generation en cours...
+                    Génération en cours...
                   </div>
                 )}
                 {autoDraftStatus === "error" && canGenerateForSelectedReview && (
                   <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
-                    Impossible de generer un brouillon pour le moment.
+                    Impossible de générer un brouillon pour le moment.
                   </div>
                 )}
                 {selectedReviewIsNoteOnly && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                    Avis note seule: generation automatique desactivee.
+                    Avis note seule : génération automatique désactivée.
                   </div>
                 )}
 
                 <div>
                   <textarea
                     id="reply-editor"
-                    className="min-h-[220px] w-full rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700"
-                    placeholder="Rediger une reponse..."
+                    className="min-h-[180px] w-full rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 lg:min-h-[220px]"
+                    placeholder="Rédiger une réponse..."
                     value={replyText}
                     onChange={(event) => {
                       const next = event.target.value;
@@ -2917,10 +3025,10 @@ const Inbox = () => {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="sticky bottom-20 z-20 -mx-4 flex flex-wrap gap-2 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur lg:static lg:bottom-auto lg:z-auto lg:mx-0 lg:border-t-0 lg:bg-transparent lg:px-0 lg:py-0 lg:backdrop-blur-none">
                   {selectedReviewHasRealReply ? (
                     <Button type="button" variant="outline" disabled>
-                      Avis repondu
+                      Avis répondu
                     </Button>
                   ) : !hasSavedDraft ? (
                     <>
@@ -2935,7 +3043,7 @@ const Inbox = () => {
                           !canGenerateForSelectedReview
                         }
                       >
-                        {isGenerating ? "Generation..." : "Generer (IA)"}
+                        {isGenerating ? "Génération..." : "Générer (IA)"}
                       </Button>
                       {selectedReviewIsNoteOnly ? (
                         <Button
@@ -2944,7 +3052,7 @@ const Inbox = () => {
                           onClick={handleUseNoteOnlyTemplate}
                           disabled={!selectedReview}
                         >
-                          Modele note seule
+                          Modèle note seule
                         </Button>
                       ) : (
                         <Button
@@ -2958,7 +3066,7 @@ const Inbox = () => {
                           }}
                           disabled={!selectedReview}
                         >
-                          Ecrire moi-meme
+                          Écrire moi-même
                         </Button>
                       )}
                     </>
@@ -2997,7 +3105,7 @@ const Inbox = () => {
                           !canGenerateForSelectedReview
                         }
                       >
-                        Regenerer
+                        Régénérer
                       </Button>
                     </>
                   )}

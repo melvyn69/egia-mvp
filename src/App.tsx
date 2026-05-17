@@ -4,6 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase, supabaseAnonKey, supabaseUrl } from "./lib/supabase";
 import { startGoogleConnection } from "./lib/googleAuth";
 import { Sidebar } from "./components/layout/Sidebar";
+import { MobileBottomNav } from "./components/layout/MobileBottomNav";
 import { Topbar } from "./components/layout/Topbar";
 import { Dashboard } from "./pages/Dashboard";
 import { Inbox } from "./pages/Inbox";
@@ -93,8 +94,9 @@ const App = () => {
     location.pathname === "/google_oauth_callback" ||
     location.pathname === "/auth/callback";
   const debugModeEnabled =
-    new URLSearchParams(location.search).get("debug") === "1" ||
-    import.meta.env.VITE_ENABLE_DEBUG_SESSION === "1";
+    import.meta.env.DEV &&
+    (new URLSearchParams(location.search).get("debug") === "1" ||
+      import.meta.env.VITE_ENABLE_DEBUG_SESSION === "1");
   const googleConnection = useGoogleConnectionStatus(session);
   const googleConnected = googleConnection.status === "connected";
   const googleReauthRequired = googleConnection.status === "reauth_required";
@@ -144,21 +146,21 @@ const App = () => {
 
     if (location.pathname === "/settings/brand-voice") {
       return {
-        title: "Brand Voice",
-        subtitle: "Uniformiser le ton des reponses IA."
+        title: "Voix de marque",
+        subtitle: "Uniformiser le ton des réponses IA."
       };
     }
     if (location.pathname === "/settings/test-lab") {
       return {
-        title: "Test Lab",
-        subtitle: "Simulation de reponse IA sans ecriture."
+        title: "Laboratoire de test",
+        subtitle: "Simulation de réponse IA sans écriture."
       };
     }
 
     if (location.pathname === "/reports") {
       return {
         title: "Rapports",
-        subtitle: "PDF et syntheses pour vos etablissements."
+        subtitle: "PDF et synthèses pour vos établissements."
       };
     }
 
@@ -199,14 +201,14 @@ const App = () => {
 
     if (location.pathname === "/sync-status") {
       return {
-        title: "Sync status",
+        title: "Statut de synchronisation",
         subtitle: "Suivi des synchronisations Google et erreurs."
       };
     }
 
     if (location.pathname === "/ai-job-health") {
       return {
-        title: "AI Job Health",
+        title: "Santé des jobs IA",
         subtitle: "État des jobs IA, files et traitements."
       };
     }
@@ -374,7 +376,7 @@ const App = () => {
       return;
     }
 
-    setAuthMessage("Lien de connexion envoye. Verifie ta boite mail.");
+    setAuthMessage("Lien de connexion envoyé. Vérifiez votre boîte mail.");
   };
 
   const handleConnectGoogle = async () => {
@@ -392,7 +394,7 @@ const App = () => {
       const message =
         error instanceof Error
           ? error.message
-          : "Impossible de demarrer la connexion Google.";
+          : "Impossible de démarrer la connexion Google.";
       setGoogleError(message);
       showErrorToast(message);
     }
@@ -431,8 +433,8 @@ const App = () => {
           "Impossible de synchroniser les lieux."
         );
         if (response.status === 401 && apiMessage === "reauth_required") {
-          setLocationsError("Reconnecte Google.");
-          showErrorToast("Reconnecte Google.");
+          setLocationsError("Reconnectez Google.");
+          showErrorToast("Reconnectez Google.");
           void googleConnection.refresh();
           return;
         }
@@ -595,7 +597,7 @@ const App = () => {
     setOnboardingProgress([]);
 
     if (!supabase || !session) {
-      const message = "Connecte-toi puis reconnecte Google.";
+      const message = "Connectez-vous puis reconnectez Google.";
       setSyncAllMessage(message);
       setLastLogStatus("error");
       setLastLogMessage("Session Supabase manquante.");
@@ -603,7 +605,7 @@ const App = () => {
       return;
     }
     if (googleConnection.status === "reauth_required") {
-      const message = "Reconnecte Google avant la synchronisation.";
+      const message = "Reconnectez Google avant la synchronisation.";
       setSyncAllMessage(message);
       setLastLogStatus("error");
       setLastLogMessage("Reconnexion Google requise.");
@@ -621,7 +623,7 @@ const App = () => {
 
     setSyncAllLoading(true);
     setLastLogStatus("running");
-    setLastLogMessage("Import des etablissements...");
+    setLastLogMessage("Import des établissements...");
 
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -643,10 +645,10 @@ const App = () => {
       if (!importResponse.ok || !importData?.ok) {
         const message = getApiErrorMessage(importData, "Import des lieux impossible.");
         if (importResponse.status === 401 && message === "reauth_required") {
-          setSyncAllMessage("Reconnecte Google.");
+          setSyncAllMessage("Reconnectez Google.");
           setLastLogStatus("error");
           setLastLogMessage("Reconnexion Google requise.");
-          showErrorToast("Reconnecte Google.");
+          showErrorToast("Reconnectez Google.");
           void googleConnection.refresh();
           return;
         }
@@ -667,7 +669,7 @@ const App = () => {
       const listData = await listResponse.json().catch(() => null);
       if (!listResponse.ok || !listData?.ok) {
         throw new Error(
-          getApiErrorMessage(listData, "Impossible de charger les etablissements.")
+          getApiErrorMessage(listData, "Impossible de charger les établissements.")
         );
       }
 
@@ -681,12 +683,12 @@ const App = () => {
         : [];
 
       if (targets.length === 0) {
-        setSyncAllMessage("Aucun etablissement a synchroniser.");
+        setSyncAllMessage("Aucun établissement à synchroniser.");
         setLastLogStatus(failures.length > 0 ? "error" : "success");
         setLastLogMessage(
           failures.length > 0
-            ? "Import partiel termine avec erreurs."
-            : "Import termine."
+            ? "Import partiel terminé avec erreurs."
+            : "Import terminé."
         );
         return;
       }
@@ -700,18 +702,18 @@ const App = () => {
         }))
       );
 
-      setLastLogMessage("Synchronisation des avis par etablissement...");
+      setLastLogMessage("Synchronisation des avis par établissement...");
       const result = await runReviewSyncForLocations(jwt, targets);
       await fetchLocations(session.user.id);
 
       const summary =
-        `Sync terminee: ${result.done}/${targets.length} OK` +
+        `Synchronisation terminée : ${result.done}/${targets.length} OK` +
         (result.failed > 0 ? `, ${result.failed} en erreur.` : ".");
       setSyncAllMessage(summary);
       setLastLogStatus(result.failed > 0 || failures.length > 0 ? "error" : "success");
       setLastLogMessage(summary);
       if (result.failed > 0 || failures.length > 0) {
-        showErrorToast("Certaines synchronisations ont echoue.");
+        showErrorToast("Certaines synchronisations ont échoué.");
       }
       void googleConnection.refresh();
     } catch (error) {
@@ -740,13 +742,13 @@ const App = () => {
       .map((item) => ({ locationId: item.locationId, label: item.label }));
 
     if (failedTargets.length === 0) {
-      setSyncAllMessage("Aucun etablissement en echec a relancer.");
+      setSyncAllMessage("Aucun établissement en échec à relancer.");
       return;
     }
 
     setRetryFailedLoading(true);
     setLastLogStatus("running");
-    setLastLogMessage("Retry des etablissements en echec...");
+    setLastLogMessage("Relance des établissements en échec...");
 
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -756,18 +758,18 @@ const App = () => {
       }
       const result = await runReviewSyncForLocations(jwt, failedTargets);
       const summary =
-        `Retry termine: ${result.done}/${failedTargets.length} OK` +
+        `Relance terminée : ${result.done}/${failedTargets.length} OK` +
         (result.failed > 0 ? `, ${result.failed} en erreur.` : ".");
       setSyncAllMessage(summary);
       setLastLogStatus(result.failed > 0 ? "error" : "success");
       setLastLogMessage(summary);
       if (result.failed > 0) {
-        showErrorToast("Des etablissements restent en erreur.");
+        showErrorToast("Des établissements restent en erreur.");
       }
       void googleConnection.refresh();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Retry impossible.";
+        error instanceof Error ? error.message : "Relance impossible.";
       setSyncAllMessage(message);
       setLastLogStatus("error");
       setLastLogMessage(message);
@@ -800,7 +802,7 @@ const App = () => {
       google_last_error: googleConnection.lastError ?? null,
       google_last_checked_at: googleConnection.lastCheckedAt ?? null
     });
-    showErrorToast("Debug session journalisé dans la console.");
+    showErrorToast("Diagnostic de session journalisé dans la console.");
   };
 
   const authPanel = (
@@ -809,7 +811,7 @@ const App = () => {
         <CardHeader>
           <CardTitle>Bienvenue sur EGIA</CardTitle>
           <p className="text-sm text-slate-500">
-            Connectez-vous pour acceder au tableau de bord.
+            Connectez-vous pour accéder au tableau de bord.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -846,7 +848,7 @@ const App = () => {
   return (
     <div className="min-h-screen bg-sand">
       <div className="flex">
-        <Sidebar />
+        {session && <Sidebar />}
         <div className="flex min-h-screen flex-1 flex-col">
           <Topbar
             title={pageMeta.title}
@@ -855,11 +857,13 @@ const App = () => {
             session={session}
             onSignOut={session ? handleSignOut : undefined}
             onDebugSession={debugModeEnabled ? handleDebugSession : undefined}
-            onToggleMenu={() => setMobileMenuOpen((prev) => !prev)}
+            onToggleMenu={
+              session ? () => setMobileMenuOpen((prev) => !prev) : undefined
+            }
             isMenuOpen={mobileMenuOpen}
           />
 
-          <main className="flex-1 space-y-6 bg-gradient-to-br from-sand via-white to-clay px-4 py-6 md:px-6 md:py-8">
+          <main className="flex-1 space-y-6 bg-gradient-to-br from-sand via-white to-clay px-4 py-6 pb-24 md:px-6 md:py-8 lg:pb-8">
             {envMissing && (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
                 Variables d&apos;env Supabase manquantes. Ajoutez
@@ -979,7 +983,7 @@ const App = () => {
           </main>
         </div>
       </div>
-      {mobileMenuOpen && (
+      {session && mobileMenuOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <button
             type="button"
@@ -996,6 +1000,7 @@ const App = () => {
           </div>
         </div>
       )}
+      {session && <MobileBottomNav />}
       {errorToast && (
         <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 shadow-lg">
           <div className="flex items-start justify-between gap-3">

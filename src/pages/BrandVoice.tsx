@@ -306,7 +306,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
         <>
           <Card>
             <CardHeader>
-              <CardTitle>Appliquer a</CardTitle>
+              <CardTitle>Appliquer à</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap items-center gap-2">
@@ -319,7 +319,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
                     setError(null);
                   }}
                 >
-                  <option value="">Tous les etablissements</option>
+                  <option value="">Tous les établissements</option>
                   {locations.map((location) => (
                     <option key={location.id} value={location.id}>
                       {location.location_title || location.location_resource_name}
@@ -327,7 +327,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
                   ))}
                 </select>
                 {usingGlobalFallback && selectedLocationId && (
-                  <Badge variant="neutral">Regle globale</Badge>
+                  <Badge variant="neutral">Règle globale</Badge>
                 )}
               </div>
             </CardContent>

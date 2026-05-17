@@ -69,50 +69,50 @@ type TabId =
 const tabs: Array<{ id: TabId; label: string; description: string }> = [
   {
     id: "integrations",
-    label: "Integrations",
-    description: "Connexions et sources de donnees."
+    label: "Intégrations",
+    description: "Connexions et sources de données."
   },
   {
     id: "ai-identity",
-    label: "Identite IA",
-    description: "Ton, style, et regles de langage."
+    label: "Identité IA",
+    description: "Ton, style et règles de langage."
   },
   {
     id: "locations",
-    label: "Etablissements",
-    description: "Parametrage des lieux suivis."
+    label: "Établissements",
+    description: "Paramétrage des lieux suivis."
   },
   {
     id: "mobile",
     label: "App Mobile",
-    description: "Acces et notifications mobiles."
+    description: "Accès et notifications mobiles."
   },
   {
     id: "team",
-    label: "Equipe",
+    label: "Équipe",
     description: "Collaborateurs et invitations."
   },
   {
     id: "profile",
-    label: "Mon Profil",
+    label: "Mon profil",
     description: "Informations personnelles."
   },
   {
     id: "company",
     label: "Entreprise",
-    description: "Preferences business et rapports."
+    description: "Préférences business et rapports."
   },
   {
     id: "alerts",
     label: "Alertes intelligentes",
-    description: "Surveillance proactive et signaux a fort impact."
+    description: "Surveillance proactive et signaux à fort impact."
   }
 ];
 
 const roleLabel = (value: string | null) => {
-  if (!value) return "Editeur";
+  if (!value) return "Éditeur";
   if (value.toLowerCase() === "admin") return "Admin";
-  return "Editeur";
+  return "Éditeur";
 };
 
 const initialsFromName = (value: string) => {
@@ -224,7 +224,7 @@ const Settings = ({ session }: SettingsProps) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb = supabaseClient as any;
   const userId = session?.user?.id ?? null;
-  const [activeTab, setActiveTab] = useState<TabId>("team");
+  const [activeTab, setActiveTab] = useState<TabId>("locations");
   const [inviteFirstName, setInviteFirstName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("editor");
@@ -467,7 +467,7 @@ const Settings = ({ session }: SettingsProps) => {
       .upsert(payload, { onConflict: "business_id" });
     if (error) {
       console.error("business_settings save error:", error);
-      setLocationsError("Impossible de sauvegarder les etablissements actifs.");
+      setLocationsError("Impossible de sauvegarder les établissements actifs.");
     } else {
       setLocationsError(null);
     }
@@ -499,7 +499,7 @@ const Settings = ({ session }: SettingsProps) => {
       const message =
         error instanceof Error
           ? error.message
-          : "Impossible de demarrer la connexion Google.";
+          : "Impossible de démarrer la connexion Google.";
       setGoogleError(message);
     }
   };
@@ -602,7 +602,7 @@ const Settings = ({ session }: SettingsProps) => {
       }
       if (payload?.emailSent === false) {
         successMessage =
-          "Invitation creee, mais l'email n'a pas ete envoye. Vous pouvez renvoyer.";
+          "Invitation créée, mais l'email n'a pas été envoyé. Vous pouvez renvoyer.";
       }
     } catch {
       setInviteError("Impossible d'envoyer l'invitation.");
@@ -614,7 +614,7 @@ const Settings = ({ session }: SettingsProps) => {
     setInviteEmail("");
     setInviteRole("editor");
     setInviteMonthly(false);
-    setInviteSuccess(successMessage ?? "Invitation envoyee.");
+    setInviteSuccess(successMessage ?? "Invitation envoyée.");
     await queryClient.invalidateQueries({
       queryKey: ["team-invitations", userId]
     });
@@ -662,10 +662,10 @@ const Settings = ({ session }: SettingsProps) => {
       }
       if (payload?.emailSent === false) {
         setInviteSuccess(
-          "Invitation renvoyee, mais l'email n'a pas ete envoye."
+          "Invitation renvoyée, mais l'email n'a pas été envoyé."
         );
       } else {
-        setInviteSuccess("Invitation renvoyee.");
+        setInviteSuccess("Invitation renvoyée.");
       }
       void queryClient.invalidateQueries({
         queryKey: ["team-invitations", userId]
@@ -733,7 +733,7 @@ const Settings = ({ session }: SettingsProps) => {
         ...(old as BusinessSettingsRow | null),
         monthly_report_enabled: previous
       }));
-      setCompanyError("Impossible de sauvegarder le parametre.");
+      setCompanyError("Impossible de sauvegarder le paramètre.");
     }
     setUpdatingCompany(false);
   };
@@ -750,7 +750,7 @@ const Settings = ({ session }: SettingsProps) => {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-xs text-slate-500">
-                Le rapport mensuel est envoye automatiquement par email aux
+                Le rapport mensuel est envoyé automatiquement par email aux
                 membres actifs.
               </p>
               {teamMembersQuery.isLoading ? (
@@ -765,7 +765,7 @@ const Settings = ({ session }: SettingsProps) => {
               ) : (
                 teamMembers.map((member) => {
                   const name = member.first_name || "Collaborateur";
-                  const email = member.email ?? "Non renseigne";
+                  const email = member.email ?? "Non renseigné";
                   const role = roleLabel(member.role);
                   const canToggle = Boolean(member.email && member.email.trim());
                   return (
@@ -787,7 +787,7 @@ const Settings = ({ session }: SettingsProps) => {
                             )}
                             {!canToggle && (
                               <Badge variant="neutral">
-                                Aucun email configure
+                                Aucun email configuré
                               </Badge>
                             )}
                           </div>
@@ -800,7 +800,7 @@ const Settings = ({ session }: SettingsProps) => {
                           onClick={() => {
                             if (!canToggle) {
                               setToggleError(
-                                "Ajoutez un email a ce collaborateur pour activer l'envoi du rapport."
+                                "Ajoutez un email à ce collaborateur pour activer l'envoi du rapport."
                               );
                             }
                           }}
@@ -880,7 +880,7 @@ const Settings = ({ session }: SettingsProps) => {
             <CardContent className="space-y-4">
               <div className="grid gap-3">
                 <label className="text-xs font-semibold text-slate-600">
-                  Prenom
+                  Prénom
                   <input
                     className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
                     value={inviteFirstName}
@@ -898,13 +898,13 @@ const Settings = ({ session }: SettingsProps) => {
                   />
                 </label>
                 <label className="text-xs font-semibold text-slate-600">
-                  Role
+                  Rôle
                   <select
                     className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
                     value={inviteRole}
                     onChange={(event) => setInviteRole(event.target.value)}
                   >
-                    <option value="editor">Editeur</option>
+                    <option value="editor">Éditeur</option>
                     <option value="admin">Admin</option>
                   </select>
                 </label>
@@ -918,7 +918,7 @@ const Settings = ({ session }: SettingsProps) => {
                   />
                 </label>
                 <p className="text-xs text-slate-500">
-                  Le rapport mensuel est envoye automatiquement par email aux
+                  Le rapport mensuel est envoyé automatiquement par email aux
                   membres actifs.
                 </p>
               </div>
@@ -931,7 +931,7 @@ const Settings = ({ session }: SettingsProps) => {
               )}
 
               <Button onClick={handleInvite} disabled={inviteSending}>
-                Envoyer l'invitation
+                Envoyer l’invitation
               </Button>
             </CardContent>
           </Card>
@@ -953,7 +953,7 @@ const Settings = ({ session }: SettingsProps) => {
                 <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">
-                      Activer l'envoi du rapport mensuel
+                      Activer l’envoi du rapport mensuel
                     </p>
                     <p className="text-xs text-slate-500">
                       Les collaborateurs opt-in recevront le rapport chaque mois.
@@ -987,7 +987,7 @@ const Settings = ({ session }: SettingsProps) => {
           id: "google",
           name: "Google Business Profile",
           type: "Source d'avis",
-          description: "Synchronisation des avis et reponses en temps reel.",
+          description: "Synchronisation des avis et réponses en temps réel.",
           status: googleActive ? "active" : "inactive",
           actionLabel: googleActive ? null : "Connecter",
           accent: "bg-emerald-50 border-emerald-200",
@@ -997,7 +997,7 @@ const Settings = ({ session }: SettingsProps) => {
           id: "facebook",
           name: "Facebook Pages",
           type: "Source d'avis",
-          description: "Gerez les avis et commentaires de vos pages.",
+          description: "Gérez les avis et commentaires de vos pages.",
           status: "soon",
           actionLabel: null,
           accent: "bg-slate-50 border-slate-200",
@@ -1134,7 +1134,7 @@ const Settings = ({ session }: SettingsProps) => {
               Pilotage business
             </h2>
             <p className="text-sm text-slate-500">
-              Suivez la sante des lieux connectes et des avis a traiter.
+              Suivez la santé des lieux connectés et des avis à traiter.
             </p>
           </div>
 
@@ -1148,33 +1148,33 @@ const Settings = ({ session }: SettingsProps) => {
                   {locationsQuery.isLoading ? "…" : activeCount}
                 </p>
                 <p className="text-xs text-slate-500">
-                  Etablissements suivis dans le dashboard.
+                  Établissements suivis dans le dashboard.
                 </p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>Derniere synchro</CardTitle>
+                <CardTitle>Dernière synchro</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-3xl font-semibold text-slate-900">
                   {lastSyncQuery.isLoading ? "…" : formatRelativeTime(lastSync)}
                 </p>
                 <p className="text-xs text-slate-500">
-                  Derniere activite connue cote Google.
+                  Dernière activité connue côté Google.
                 </p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>Avis a traiter</CardTitle>
+                <CardTitle>Avis à traiter</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-3xl font-semibold text-slate-900">
                   {reviewsNeedingReplyQuery.isLoading ? "…" : totalNeedsReply}
                 </p>
                 <p className="text-xs text-slate-500">
-                  Avis nécessitant une reponse.
+                  Avis nécessitant une réponse.
                 </p>
               </CardContent>
             </Card>
@@ -1183,12 +1183,12 @@ const Settings = ({ session }: SettingsProps) => {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               {connected ? (
-                <Badge variant="success">Google connecte</Badge>
+                <Badge variant="success">Google connecté</Badge>
               ) : (
                 <Badge variant="warning">Connexion requise</Badge>
               )}
               <p className="text-sm text-slate-600">
-                Synchronisez vos avis et mettez a jour vos fiches en temps reel.
+                Synchronisez vos avis et mettez à jour vos fiches en temps réel.
               </p>
             </div>
             <Button onClick={handleSyncLocations} disabled={syncingLocations}>
@@ -1202,14 +1202,14 @@ const Settings = ({ session }: SettingsProps) => {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-slate-600">
-                Synchronisez vos avis et mettez a jour vos fiches en temps reel.
+                Synchronisez vos avis et mettez à jour vos fiches en temps réel.
               </p>
               {googleConnectionQuery.isLoading ? (
                 <Skeleton className="h-10 w-48" />
               ) : (
                 <div className="flex flex-wrap items-center gap-3">
                   {connected ? (
-                    <Badge variant="success">Google connecte</Badge>
+                    <Badge variant="success">Google connecté</Badge>
                   ) : (
                     <Badge variant="warning">Connexion requise</Badge>
                   )}
@@ -1224,13 +1224,13 @@ const Settings = ({ session }: SettingsProps) => {
                     >
                       {syncingLocations
                         ? "Synchronisation..."
-                        : "Synchroniser mes etablissements & avis"}
+                        : "Synchroniser mes établissements & avis"}
                     </Button>
                   )}
                 </div>
               )}
               <p className="text-xs text-slate-500">
-                Autorisation requise pour acceder aux avis, repondre et publier.
+                Autorisation requise pour accéder aux avis, répondre et publier.
               </p>
               {googleError && (
                 <p className="text-xs text-rose-600">{googleError}</p>
@@ -1240,19 +1240,19 @@ const Settings = ({ session }: SettingsProps) => {
 
           <Card>
             <CardHeader>
-              <CardTitle>Vos etablissements</CardTitle>
+              <CardTitle>Vos établissements</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm text-slate-600">
-                  Lieux connectes et statut d'activation.
+                  Lieux connectés et statut d’activation.
                 </p>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => navigate("/sync-status")}
                 >
-                  Voir le statut de sync
+                  Voir le statut de synchronisation
                 </Button>
               </div>
               {locationsNotice && (
@@ -1274,8 +1274,8 @@ const Settings = ({ session }: SettingsProps) => {
                 </div>
               ) : locations.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500">
-                  Aucun etablissement. Cliquez sur “Importer depuis Google” pour
-                  demarrer.
+                  Aucun établissement. Cliquez sur “Importer depuis Google” pour
+                  démarrer.
                 </div>
               ) : (
                 <div className="grid gap-4 md:grid-cols-2">
@@ -1297,7 +1297,7 @@ const Settings = ({ session }: SettingsProps) => {
                               </p>
                               {needsReplyCount > 0 && (
                                 <Badge variant="warning">
-                                  {needsReplyCount} avis a traiter
+                                  {needsReplyCount} avis à traiter
                                 </Badge>
                               )}
                             </div>
@@ -1306,7 +1306,7 @@ const Settings = ({ session }: SettingsProps) => {
                             )}
                           </div>
                           <div className="flex items-center justify-between text-xs text-slate-500">
-                            <span>Derniere synchro: {lastSyncLabel}</span>
+                            <span>Dernière synchro : {lastSyncLabel}</span>
                             {location.website_uri ? (
                               <a
                                 href={location.website_uri}
@@ -1341,7 +1341,7 @@ const Settings = ({ session }: SettingsProps) => {
                                 navigate(`/inbox?locationId=${location.id}`)
                               }
                             >
-                              Ouvrir la boite de reception
+                              Ouvrir la boîte de réception
                             </Button>
                           </div>
                         </CardContent>
@@ -1352,7 +1352,7 @@ const Settings = ({ session }: SettingsProps) => {
               )}
               {locations.length > 0 && activeCount === 0 && (
                 <p className="text-xs text-amber-600">
-                  Aucun lieu actif. Activez au moins un etablissement pour
+                  Aucun lieu actif. Activez au moins un établissement pour
                   recevoir les alertes et rapports.
                 </p>
               )}
@@ -1379,17 +1379,7 @@ const Settings = ({ session }: SettingsProps) => {
                 variant="outline"
                 onClick={() => navigate("/sync-status")}
               >
-                Mapper Google
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() =>
-                  setLocationsNotice(
-                    "Ajout manuel indisponible pour l'instant."
-                  )
-                }
-              >
-                Ajouter manuellement
+                Voir le statut de synchronisation
               </Button>
             </CardContent>
           </Card>
@@ -1520,9 +1510,9 @@ const Settings = ({ session }: SettingsProps) => {
     <div className="space-y-6">
       <div>
         <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-          Parametres
+          Paramètres
         </p>
-        <h1 className="text-2xl font-semibold text-slate-900">Settings</h1>
+        <h1 className="text-2xl font-semibold text-slate-900">Paramètres</h1>
       </div>
 
       <div className="flex flex-wrap gap-2">

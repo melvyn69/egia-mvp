@@ -202,12 +202,12 @@ const SettingsProfile = ({ session }: SettingsProfileProps) => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Securite</CardTitle>
+          <CardTitle>Sécurité</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {provider === "google" ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-              Votre compte est connecte via Google. La gestion du mot de passe
+              Votre compte est connecté via Google. La gestion du mot de passe
               se fait depuis Google.
             </div>
           ) : (

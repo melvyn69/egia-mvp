@@ -1225,10 +1225,10 @@ const formatCountDelta = (delta: number | null) => {
             <h1 className="text-3xl font-semibold text-slate-900">
               Veille concurrentielle
             </h1>
-            <Badge variant="neutral">GROWTH</Badge>
+            <Badge variant="neutral">Analyse locale</Badge>
           </div>
           <p className="text-sm text-slate-500">
-            Surveillez votre marché et anticipez les mouvements adverses.
+            Surveillez votre marché et anticipez les évolutions locales.
           </p>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             <Badge variant={googleConnected ? "success" : "neutral"}>
@@ -1238,11 +1238,11 @@ const formatCountDelta = (delta: number | null) => {
               {enabled ? "Veille activée" : "Veille désactivée"}
             </Badge>
             {sectorLabel ? (
-              <Badge variant="neutral">Secteur: {sectorLabel}</Badge>
+              <Badge variant="neutral">Secteur : {sectorLabel}</Badge>
             ) : (
               <Badge variant="neutral">Secteur manquant</Badge>
             )}
-            <Badge variant="neutral">Rayon: {statusRadius} km</Badge>
+            <Badge variant="neutral">Rayon : {statusRadius} km</Badge>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1257,7 +1257,7 @@ const formatCountDelta = (delta: number | null) => {
                   : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
               }`}
             >
-              {tab === "selection" && "Ma Selection"}
+              {tab === "selection" && "Ma sélection"}
               {tab === "radar" && "Radar"}
               {tab === "swot" && "Analyse SWOT"}
             </button>
@@ -1329,7 +1329,7 @@ const formatCountDelta = (delta: number | null) => {
         <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
           <Card className="relative z-30 overflow-visible">
             <CardHeader>
-              <CardTitle className="text-base text-slate-600">NOUVELLE ANALYSE</CardTitle>
+              <CardTitle className="text-base text-slate-600">Nouvelle analyse</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {locationsEmpty ? (

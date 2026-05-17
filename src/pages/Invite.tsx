@@ -41,7 +41,7 @@ const Invite = ({ session }: InviteProps) => {
       setError("Impossible d'envoyer le lien de connexion.");
       return;
     }
-    setMessage("Lien de connexion envoye. Verifie ta boite mail.");
+    setMessage("Lien de connexion envoyé. Vérifiez votre boîte mail.");
   };
 
   const handleAccept = async () => {
@@ -65,7 +65,7 @@ const Invite = ({ session }: InviteProps) => {
         return;
       }
       setStatus("accepted");
-      setMessage("Invitation acceptee. Vous pouvez acceder a l'app.");
+      setMessage("Invitation acceptée. Vous pouvez accéder à l'app.");
       navigate("/settings?tab=equipe", { replace: true });
     } catch {
       setError("Impossible d'accepter l'invitation.");

@@ -68,6 +68,14 @@ const Connect = ({
     locationProgress.length > 0
       ? Math.round((doneCount / locationProgress.length) * 100)
       : 0;
+  const logStatusLabel =
+    lastLogStatus === "running"
+      ? "En cours"
+      : lastLogStatus === "success"
+        ? "Terminé"
+        : lastLogStatus === "error"
+          ? "Erreur"
+          : "-";
 
   return (
     <div className="space-y-6">
@@ -77,7 +85,7 @@ const Connect = ({
             Connecter Google Business Profile
           </CardTitle>
           <p className="text-sm text-slate-200">
-            Import robuste des etablissements + sync avis sans crash global.
+            Importez vos établissements Google et lancez la synchronisation des avis.
           </p>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -92,7 +100,7 @@ const Connect = ({
               onClick={onSync}
               disabled={syncLoading || syncDisabled}
             >
-              {syncLoading ? "Import en cours..." : "Importer mes etablissements"}
+              {syncLoading ? "Import en cours..." : "Importer mes établissements"}
             </Button>
           )}
 
@@ -103,7 +111,9 @@ const Connect = ({
               onClick={onRetryFailed}
               disabled={syncLoading || retryLoading}
             >
-              {retryLoading ? "Retry en cours..." : `Retry failed (${failedCount})`}
+              {retryLoading
+                ? "Nouvelle tentative en cours..."
+                : `Relancer les échecs (${failedCount})`}
             </Button>
           )}
 
@@ -111,7 +121,7 @@ const Connect = ({
             <p className="text-xs text-slate-200/80">{syncMessage}</p>
           )}
           <p className="text-xs text-slate-200/80">
-            Autorisation requise pour acceder aux avis, repondre et publier.
+            Autorisation requise pour accéder aux avis, répondre et publier.
           </p>
         </CardContent>
       </Card>
@@ -119,13 +129,13 @@ const Connect = ({
       {locationProgress.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Progression sync etablissements</CardTitle>
+            <CardTitle>Progression de la synchronisation</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
               <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
                 <span>
-                  {doneCount}/{locationProgress.length} termines
+                  {doneCount}/{locationProgress.length} terminés
                 </span>
                 <span>{progressPct}%</span>
               </div>
@@ -153,7 +163,7 @@ const Connect = ({
                       )}
                       {(item.status === "done" || item.status === "error") && (
                         <p className="text-xs text-slate-500">
-                          inserted {item.inserted ?? 0} · updated {item.updated ?? 0} · skipped {item.skipped ?? 0}
+                          Ajoutés {item.inserted ?? 0} · Mis à jour {item.updated ?? 0} · Ignorés {item.skipped ?? 0}
                         </p>
                       )}
                     </div>
@@ -176,7 +186,7 @@ const Connect = ({
       {importFailures.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Erreurs import etablissements</CardTitle>
+            <CardTitle>Erreurs d'import des établissements</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-rose-700">
             {importFailures.map((failure, index) => (
@@ -192,18 +202,18 @@ const Connect = ({
         {[
           {
             icon: <ShieldCheck size={18} />,
-            title: "Connexion securisee",
-            description: "OAuth Google officiel, aucun mot de passe stocke."
+            title: "Connexion sécurisée",
+            description: "OAuth Google officiel, aucun mot de passe stocké."
           },
           {
             icon: <Link2 size={18} />,
-            title: "Donnees centralisees",
+            title: "Données centralisées",
             description: "Toutes vos fiches dans un seul tableau."
           },
           {
             icon: <CheckCircle2 size={18} />,
-            title: "Temps reel",
-            description: "Reponses aux avis et insights instantanes."
+            title: "Temps réel",
+            description: "Réponses aux avis et insights instantanés."
           }
         ].map((item) => (
           <Card key={item.title}>
@@ -224,15 +234,15 @@ const Connect = ({
 
       <Card>
         <CardHeader>
-          <CardTitle>Logs</CardTitle>
+          <CardTitle>Historique de synchronisation</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-slate-600">
           <p>
-            <span className="font-semibold text-slate-700">Status:</span>{" "}
-            {lastLogStatus ?? "-"}
+            <span className="font-semibold text-slate-700">Statut :</span>{" "}
+            {logStatusLabel}
           </p>
           <p>
-            <span className="font-semibold text-slate-700">Dernier message:</span>{" "}
+            <span className="font-semibold text-slate-700">Dernier message :</span>{" "}
             {lastLogMessage ?? "-"}
           </p>
         </CardContent>

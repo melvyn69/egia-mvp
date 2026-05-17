@@ -17,7 +17,7 @@ const TestLab = ({ session }: TestLabProps) => {
 
   const handleGenerate = async () => {
     if (!session?.access_token) {
-      setError("Connectez-vous pour generer une reponse.");
+      setError("Connectez-vous pour générer une réponse.");
       return;
     }
     if (!reviewText.trim()) {
@@ -42,13 +42,13 @@ const TestLab = ({ session }: TestLabProps) => {
       });
       const payload = await res.json().catch(() => null);
       if (!res.ok || !payload) {
-        setError("Impossible de generer la reponse.");
+        setError("Impossible de générer la réponse.");
         setLoading(false);
         return;
       }
       setResponse(payload.reply_text ?? "—");
     } catch {
-      setError("Impossible de generer la reponse.");
+      setError("Impossible de générer la réponse.");
     } finally {
       setLoading(false);
     }
@@ -57,9 +57,11 @@ const TestLab = ({ session }: TestLabProps) => {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold text-slate-900">Test Lab</h2>
+        <h2 className="text-2xl font-semibold text-slate-900">
+          Laboratoire de test
+        </h2>
         <p className="text-sm text-slate-500">
-          Simulation de reponse IA sans ecriture en base.
+          Simulation de réponse IA sans écriture en base.
         </p>
       </div>
 
@@ -88,7 +90,7 @@ const TestLab = ({ session }: TestLabProps) => {
               ))}
             </select>
             <Button onClick={handleGenerate} disabled={loading}>
-              {loading ? "Generation..." : "Generer la reponse test"}
+              {loading ? "Génération..." : "Générer la réponse test"}
             </Button>
           </div>
         </CardContent>
@@ -96,7 +98,7 @@ const TestLab = ({ session }: TestLabProps) => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Reponse generee</CardTitle>
+          <CardTitle>Réponse générée</CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -106,7 +108,7 @@ const TestLab = ({ session }: TestLabProps) => {
           ) : response ? (
             <p className="text-sm text-slate-700">{response}</p>
           ) : (
-            <p className="text-sm text-slate-500">Aucune reponse generee.</p>
+            <p className="text-sm text-slate-500">Aucune réponse générée.</p>
           )}
         </CardContent>
       </Card>

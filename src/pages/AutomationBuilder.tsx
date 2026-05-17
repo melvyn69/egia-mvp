@@ -32,32 +32,32 @@ type ActionInput = {
   };
 };
 
-const triggerOptions = [{ id: "new_review", label: "Nouvel avis recu" }];
+const triggerOptions = [{ id: "new_review", label: "Nouvel avis reçu" }];
 
 const conditionFieldOptions = [
   { id: "rating", label: "Note" },
-  { id: "no_reply_hours", label: "Pas de reponse (heures)" },
-  { id: "sentiment", label: "Sentiment negatif" }
+  { id: "no_reply_hours", label: "Pas de réponse (heures)" },
+  { id: "sentiment", label: "Sentiment négatif" }
 ] as const;
 
 const operatorOptions = [
-  { id: "eq", label: "Egal a" },
-  { id: "gte", label: "Superieur ou egal" },
-  { id: "lte", label: "Inferieur ou egal" }
+  { id: "eq", label: "Égal à" },
+  { id: "gte", label: "Supérieur ou égal" },
+  { id: "lte", label: "Inférieur ou égal" }
 ] as const;
 
 const actionOptions = [
-  { id: "create_alert", label: "Creer une alerte", disabled: false }
+  { id: "create_alert", label: "Créer une alerte", disabled: false }
 ] as const;
 
 const alertTypeOptions = [
   { id: "LOW_RATING", label: "Note basse" },
-  { id: "NO_REPLY", label: "Sans reponse" },
-  { id: "NEGATIVE_SENTIMENT", label: "Sentiment negatif" }
+  { id: "NO_REPLY", label: "Sans réponse" },
+  { id: "NEGATIVE_SENTIMENT", label: "Sentiment négatif" }
 ] as const;
 
 const severityOptions = [
-  { id: "high", label: "Elevee" },
+  { id: "high", label: "Élevée" },
   { id: "medium", label: "Moyenne" },
   { id: "low", label: "Faible" }
 ] as const;
@@ -409,8 +409,8 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
           condition.field === "rating"
             ? "Note"
             : condition.field === "no_reply_hours"
-              ? "Pas de reponse"
-              : "Sentiment negatif"
+              ? "Pas de réponse"
+              : "Sentiment négatif"
       }));
       const { error: insertConditionsError } = await supabaseClient
         .from("automation_conditions")
@@ -491,7 +491,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
             Automatisations
           </h2>
           <p className="text-sm text-slate-500">
-            Definissez le declencheur, les conditions et les actions.
+            Définissez le déclencheur, les conditions et les actions.
           </p>
         </div>
         <Card>
@@ -507,10 +507,10 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-semibold text-slate-900">
-          {isEditing ? "Edition du workflow" : "Nouveau workflow"}
+          {isEditing ? "Édition du workflow" : "Nouveau workflow"}
         </h2>
         <p className="text-sm text-slate-500">
-          Definissez le declencheur, les conditions et les actions.
+          Définissez le déclencheur, les conditions et les actions.
         </p>
       </div>
 
@@ -520,7 +520,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
         <>
           <Card>
             <CardHeader>
-              <CardTitle>Parametres</CardTitle>
+              <CardTitle>Paramètres</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
@@ -529,13 +529,13 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                   className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
-                  placeholder="Ex: Gestion des avis negatifs"
+                  placeholder="Ex : Gestion des avis négatifs"
                 />
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <label className="text-xs font-semibold text-slate-500">
-                    Declencheur
+                    Déclencheur
                   </label>
                   <select
                     className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
@@ -551,7 +551,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-500">
-                    Appliquer a
+                    Appliquer à
                   </label>
                   <div className="mt-1 flex items-center gap-2 text-sm text-slate-600">
                     <label className="flex items-center gap-2">
@@ -561,7 +561,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                         checked={locationScope === "all"}
                         onChange={() => setLocationScope("all")}
                       />
-                      Tous les etablissements
+                      Tous les établissements
                     </label>
                     <label className="flex items-center gap-2">
                       <input
@@ -570,7 +570,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                         checked={locationScope === "selected"}
                         onChange={() => setLocationScope("selected")}
                       />
-                      Salons selectionnes
+                      Salons sélectionnés
                     </label>
                   </div>
                 </div>
@@ -616,7 +616,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
             <CardContent className="space-y-3">
               {conditions.length === 0 && (
                 <p className="text-sm text-slate-500">
-                  Aucune condition. Le workflow s'applique a tous les avis.
+                  Aucune condition. Le workflow s'applique à tous les avis.
                 </p>
               )}
               {conditions.map((condition, index) => (
@@ -674,8 +674,8 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                         updateCondition(index, { value: event.target.value })
                       }
                     >
-                      <option value="negative">Negatif</option>
-                      <option value="very_negative">Tres negatif</option>
+                      <option value="negative">Négatif</option>
+                      <option value="very_negative">Très négatif</option>
                     </select>
                   ) : (
                     <input
@@ -698,7 +698,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                 </div>
               ))}
               <Button variant="outline" size="sm" onClick={addCondition}>
-                Ajouter condition
+                Ajouter une condition
               </Button>
             </CardContent>
           </Card>
@@ -779,7 +779,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                       </div>
                       <div className="flex items-center gap-2">
                         <label className="text-xs font-semibold text-slate-500">
-                          Priorite
+                          Priorité
                         </label>
                         <select
                           className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
@@ -803,7 +803,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                       </div>
                       <div className="flex items-center gap-2">
                         <label className="text-xs font-semibold text-slate-500">
-                          Cooldown (h)
+                          Pause entre alertes (h)
                         </label>
                         <input
                           className="w-24 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
@@ -825,7 +825,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                 </div>
               ))}
               <Button variant="outline" size="sm" onClick={addAction}>
-                Ajouter action
+                Ajouter une action
               </Button>
             </CardContent>
           </Card>
@@ -849,15 +849,10 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                       Automatisation exécutée.
                     </p>
                     <p className="text-xs text-slate-500">
-                      Traité: {runNowResult?.processed ?? 0} · Alertes:{" "}
-                      {runNowResult?.inserted ?? 0} · Cooldown:{" "}
+                      Avis traités : {runNowResult?.processed ?? 0} · Alertes :{" "}
+                      {runNowResult?.inserted ?? 0} · Mis en pause :{" "}
                       {runNowResult?.skippedCooldown ?? 0}
                     </p>
-                    {runNowResult?.last_cursor && (
-                      <p className="text-xs text-slate-400">
-                        Dernier curseur: {runNowResult.last_cursor}
-                      </p>
-                    )}
                     {runNowResult?.inserted && runNowResult.inserted > 0 && (
                       <Button
                         variant="outline"
@@ -865,7 +860,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                         className="mt-2"
                         onClick={() => navigate("/alerts")}
                       >
-                        Ouvrir Alertes
+                        Ouvrir les alertes
                       </Button>
                     )}
                   </div>

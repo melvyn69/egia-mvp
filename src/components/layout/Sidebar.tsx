@@ -1,20 +1,14 @@
-import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
   Bell,
   Building2,
-  FileText,
   LayoutDashboard,
-  Link2,
   Mailbox,
   Radar,
-  RefreshCw,
-  Activity,
   Settings,
-  Sparkles,
-  Users
+  Sparkles
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { supabase } from "../../lib/supabase";
@@ -23,6 +17,8 @@ import { InstallAppCTA } from "../InstallAppCTA";
 
 const navLinkBase =
   "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition";
+
+const SHOW_AUTOMATION_NAV = false;
 
 type SidebarProps = {
   variant?: "desktop" | "mobile";
@@ -36,32 +32,7 @@ const Sidebar = ({
   onNavigate
 }: SidebarProps) => {
   const queryClient = useQueryClient();
-  const [hasSession, setHasSession] = useState(false);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    const sb = supabase;
-    if (!sb) {
-      return;
-    }
-    let active = true;
-    const loadSession = async () => {
-      const { data } = await sb.auth.getSession();
-      if (active) {
-        setHasSession(Boolean(data.session));
-      }
-    };
-    loadSession();
-    const { data: subscription } = sb.auth.onAuthStateChange(
-      (_event, session) => {
-        setHasSession(Boolean(session));
-      }
-    );
-    return () => {
-      active = false;
-      subscription?.subscription?.unsubscribe();
-    };
-  }, []);
 
   const prefetchAnalytics = async () => {
     if (!supabase) {
@@ -97,7 +68,7 @@ const Sidebar = ({
 
   const baseClasses =
     variant === "mobile"
-      ? "flex h-full w-72 flex-col justify-between border-r border-slate-200 bg-white/90 px-4 py-6 shadow-soft backdrop-blur-lg"
+      ? "flex h-full w-[min(20rem,calc(100vw-2rem))] flex-col justify-between overflow-y-auto border-r border-slate-200 bg-white/90 px-4 py-6 shadow-soft backdrop-blur-lg"
       : "sticky top-0 hidden h-screen w-64 flex-col justify-between border-r border-slate-200 bg-white/80 px-4 py-6 shadow-soft backdrop-blur-lg lg:flex";
 
   return (
@@ -132,7 +103,7 @@ const Sidebar = ({
           Dashboard
         </NavLink>
         <NavLink
-          to="/connect"
+          to="/inbox"
           className={({ isActive }) =>
             cn(
               navLinkBase,
@@ -142,8 +113,8 @@ const Sidebar = ({
             )
           }
         >
-          <Link2 size={18} />
-          Connexion Google
+          <Mailbox size={18} />
+          Boîte de réception
         </NavLink>
         <NavLink
           to="/analytics"
@@ -160,50 +131,6 @@ const Sidebar = ({
         >
           <BarChart3 size={18} />
           Analytics
-        </NavLink>
-        <NavLink
-          to="/reports"
-          className={({ isActive }) =>
-            cn(
-              navLinkBase,
-              isActive
-                ? "bg-ink text-white shadow"
-                : "text-slate-600 hover:bg-slate-100"
-            )
-          }
-        >
-          <FileText size={18} />
-          Rapports
-        </NavLink>
-        {hasSession && (
-          <NavLink
-            to="/team"
-            className={({ isActive }) =>
-              cn(
-                navLinkBase,
-                isActive
-                  ? "bg-ink text-white shadow"
-                  : "text-slate-600 hover:bg-slate-100"
-              )
-            }
-          >
-            <Users size={18} />
-            Équipe
-          </NavLink>
-        )}
-        <NavLink
-          to="/inbox"
-          className={({ isActive }) =>
-            cn(
-              navLinkBase,
-              isActive
-                ? "bg-ink text-white shadow"
-                : "text-slate-600 hover:bg-slate-100"
-            )
-          }
-        >
-          <Mailbox size={18} />
-          Boîte de réception
         </NavLink>
         <NavLink
           to="/alerts"
@@ -233,20 +160,22 @@ const Sidebar = ({
           <Radar size={18} />
           Veille concurrentielle
         </NavLink>
-        <NavLink
-          to="/automation"
-          className={({ isActive }) =>
-            cn(
-              navLinkBase,
-              isActive
-                ? "bg-ink text-white shadow"
-                : "text-slate-600 hover:bg-slate-100"
-            )
-          }
-        >
-          <Sparkles size={18} />
-          Automatisations
-        </NavLink>
+        {SHOW_AUTOMATION_NAV && (
+          <NavLink
+            to="/automation"
+            className={({ isActive }) =>
+              cn(
+                navLinkBase,
+                isActive
+                  ? "bg-ink text-white shadow"
+                  : "text-slate-600 hover:bg-slate-100"
+              )
+            }
+          >
+            <Sparkles size={18} />
+            Automatisations
+          </NavLink>
+        )}
         <NavLink
           to="/settings"
           className={({ isActive }) =>
@@ -259,35 +188,7 @@ const Sidebar = ({
           }
         >
           <Settings size={18} />
-          Parametres
-        </NavLink>
-        <NavLink
-          to="/sync-status"
-          className={({ isActive }) =>
-            cn(
-              navLinkBase,
-              isActive
-                ? "bg-ink text-white shadow"
-                : "text-slate-600 hover:bg-slate-100"
-            )
-          }
-        >
-          <RefreshCw size={18} />
-          Sync status
-        </NavLink>
-        <NavLink
-          to="/ai-job-health"
-          className={({ isActive }) =>
-            cn(
-              navLinkBase,
-              isActive
-                ? "bg-ink text-white shadow"
-                : "text-slate-600 hover:bg-slate-100"
-            )
-          }
-        >
-          <Activity size={18} />
-          AI Job Health
+          Paramètres
         </NavLink>
       </nav>
     </div>
@@ -300,13 +201,13 @@ const Sidebar = ({
       </div>
       <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-[#f7f3ec] via-white to-[#f3efe7] p-4">
         <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-          Status
+          Statut
         </p>
         <p className="mt-2 text-sm font-medium text-slate-700">
           Suivi des avis et des performances
         </p>
         <p className="mt-2 text-xs text-slate-500">
-          Derniere mise a jour: aujourd'hui
+          Dernière mise à jour : aujourd’hui
         </p>
       </div>
     </div>

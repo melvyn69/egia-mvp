@@ -24,14 +24,14 @@ type AlertRow = {
 };
 
 const ruleLabelMap: Record<string, string> = {
-  NEGATIVE_NO_REPLY: "Avis negatif sans reponse",
-  RATING_DROP: "Baisse de satisfaction recente",
-  NEGATIVE_SPIKE: "Pic d'avis negatifs",
-  LONG_NEGATIVE: "Avis detaille et sensible",
+  NEGATIVE_NO_REPLY: "Avis négatif sans réponse",
+  RATING_DROP: "Baisse de satisfaction récente",
+  NEGATIVE_SPIKE: "Pic d'avis négatifs",
+  LONG_NEGATIVE: "Avis détaillé et sensible",
   AUTO_RATING_DROP: "Concurrence en hausse de note",
-  AUTO_NEGATIVE_REVIEW: "Avis negatif detecte",
+  AUTO_NEGATIVE_REVIEW: "Avis négatif détecté",
   AUTO_VOLUME_DROP: "Volume d'avis en baisse",
-  AUTO_WEEKLY_SUMMARY: "Resume hebdomadaire"
+  AUTO_WEEKLY_SUMMARY: "Résumé hebdomadaire"
 };
 
 const alertTitleByType: Record<string, string> = {
@@ -256,7 +256,7 @@ const Alerts = ({ session }: AlertsProps) => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Alertes a traiter</CardTitle>
+          <CardTitle>Alertes à traiter</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {alertsQuery.isLoading ? (
@@ -267,11 +267,11 @@ const Alerts = ({ session }: AlertsProps) => {
           ) : formattedAlerts.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-6 py-8 text-center">
               <p className="text-sm font-semibold text-slate-900">
-                Tout est sous controle
+                Tout est sous contrôle
               </p>
               <p className="mt-2 text-sm text-slate-500">
                 EGIA ne remonte une alerte que lorsqu'une action est vraiment
-                necessaire.
+                nécessaire.
               </p>
               <div className="mt-4 flex flex-col items-center gap-2">
                 <Button

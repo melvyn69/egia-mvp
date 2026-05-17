@@ -20,12 +20,12 @@ const SettingsAlertesIntelligentes = () => {
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-slate-600">
           <p>
-            EGIA surveille en continu les signaux qui meritent une action
-            rapide, sans vous surcharger. Vous gardez le controle sur le niveau
-            de sensibilite et le type d'alertes prioritaires.
+            EGIA surveille en continu les signaux qui méritent une action
+            rapide, sans vous surcharger. Vous gardez le contrôle sur le niveau
+            de sensibilité et le type d'alertes prioritaires.
           </p>
           <p>
-            Les regles peuvent evoluer, mais votre experience reste stable et
+            Les règles peuvent évoluer, mais votre expérience reste stable et
             transparente.
           </p>
         </CardContent>
@@ -42,7 +42,7 @@ const SettingsAlertesIntelligentes = () => {
                 Activer la surveillance intelligente
               </p>
               <p className="text-xs text-slate-500">
-                EGIA vous alerte uniquement lorsqu'une action est conseillee.
+                EGIA vous alerte uniquement lorsqu'une action est conseillée.
               </p>
             </div>
             <input
@@ -62,12 +62,12 @@ const SettingsAlertesIntelligentes = () => {
               disabled={!enabled}
             >
               <option value="strict">Strict (alertes exigeantes)</option>
-              <option value="standard">Equilibre (recommande)</option>
+              <option value="standard">Équilibre (recommandé)</option>
               <option value="relaxed">Confort (moins de signaux)</option>
             </select>
           </label>
           <p className="text-xs text-slate-500">
-            Ajustez la sensibilite selon votre capacite de reaction.
+            Ajustez la sensibilité selon votre capacité de réaction.
           </p>
         </CardContent>
       </Card>
@@ -78,7 +78,7 @@ const SettingsAlertesIntelligentes = () => {
         </CardHeader>
         <CardContent className="space-y-3">
           <label className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-700">
-            Baisse notable de reputation
+            Baisse notable de réputation
             <input
               type="checkbox"
               className="h-4 w-4 accent-ink"
@@ -93,7 +93,7 @@ const SettingsAlertesIntelligentes = () => {
             />
           </label>
           <label className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-700">
-            Avis sensibles sans reponse
+            Avis sensibles sans réponse
             <input
               type="checkbox"
               className="h-4 w-4 accent-ink"
@@ -108,7 +108,7 @@ const SettingsAlertesIntelligentes = () => {
             />
           </label>
           <label className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-700">
-            Pic d'avis negatifs
+            Pic d'avis négatifs
             <input
               type="checkbox"
               className="h-4 w-4 accent-ink"
@@ -123,7 +123,7 @@ const SettingsAlertesIntelligentes = () => {
             />
           </label>
           <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-400">
-            Avis detaille et sensible (V2)
+            Avis détaillé et sensible (V2)
             <input
               type="checkbox"
               className="h-4 w-4"

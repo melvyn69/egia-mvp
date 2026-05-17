@@ -149,7 +149,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
       });
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || "Impossible d'enregistrer l'entite.");
+        throw new Error(text || "Impossible d'enregistrer l'entité.");
       }
       const result = (await response.json()) as { data?: LegalEntity };
       const saved = result.data ?? null;
@@ -157,7 +157,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
         setSelectedId(saved.id);
         setFormState(saved);
       }
-      setStatusMessage("Entite enregistree.");
+      setStatusMessage("Entité enregistrée.");
       await queryClient.invalidateQueries({
         queryKey: ["legal-entities", session?.user?.id]
       });
@@ -166,7 +166,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "Impossible d'enregistrer l'entite."
+          : "Impossible d'enregistrer l'entité."
       );
       return null;
     } finally {
@@ -192,9 +192,9 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
       });
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || "Impossible de definir le default.");
+        throw new Error(text || "Impossible de définir l'entité par défaut.");
       }
-      setStatusMessage("Entite par defaut mise a jour.");
+      setStatusMessage("Entité par défaut mise à jour.");
       await queryClient.invalidateQueries({
         queryKey: ["legal-entities", session?.user?.id]
       });
@@ -202,7 +202,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "Impossible de definir le default."
+          : "Impossible de définir l'entité par défaut."
       );
     }
   };
@@ -225,11 +225,11 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
       });
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || "Impossible de supprimer l'entite.");
+        throw new Error(text || "Impossible de supprimer l'entité.");
       }
       setSelectedId("new");
       setFormState(emptyEntity());
-      setStatusMessage("Entite supprimee.");
+      setStatusMessage("Entité supprimée.");
       await queryClient.invalidateQueries({
         queryKey: ["legal-entities", session?.user?.id]
       });
@@ -237,7 +237,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "Impossible de supprimer l'entite."
+          : "Impossible de supprimer l'entité."
       );
     }
   };
@@ -352,7 +352,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
     <div className="grid gap-6 lg:grid-cols-[1.1fr_1.6fr]">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Entites legales</CardTitle>
+          <CardTitle>Entités légales</CardTitle>
           <Button
             variant="outline"
             size="sm"
@@ -372,7 +372,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             </div>
           ) : entities.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500">
-              Aucune entite configuree pour le moment.
+              Aucune entité configurée pour le moment.
             </div>
           ) : (
             entities.map((entity) => (
@@ -388,13 +388,13 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
               >
                 <div>
                   <p className="font-semibold">
-                    {entity.company_name ?? "Entite"}
+                    {entity.company_name ?? "Entité"}
                   </p>
                   <p className="text-xs text-slate-500">
-                    {entity.legal_name ?? "Raison sociale non definie"}
+                    {entity.legal_name ?? "Raison sociale non définie"}
                   </p>
                 </div>
-                {entity.is_default && <Badge variant="success">Par defaut</Badge>}
+                {entity.is_default && <Badge variant="success">Par défaut</Badge>}
               </button>
             ))
           )}
@@ -403,7 +403,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Details de l'entite</CardTitle>
+          <CardTitle>Détails de l'entité</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-2">
@@ -472,7 +472,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
               />
             </label>
             <label className="text-xs font-semibold text-slate-600">
-              Telephone facturation
+              Téléphone facturation
               <input
                 className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
                 value={formState.billing_phone ?? ""}
@@ -527,14 +527,14 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
               />
             </label>
             <label className="text-xs font-semibold text-slate-600">
-              Region
+              Région
               <input
                 className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
                 value={formState.billing_region ?? ""}
                 onChange={(event) =>
                   updateField("billing_region", event.target.value)
                 }
-                placeholder="Ile-de-France"
+                placeholder="Île-de-France"
               />
             </label>
             <label className="text-xs font-semibold text-slate-600">
@@ -594,12 +594,12 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
                   className="h-14 w-14 rounded-lg border border-slate-200 object-contain"
                 />
                 <p className="text-xs text-slate-500">
-                  Logo actif pour cette entite.
+                  Logo actif pour cette entité.
                 </p>
               </div>
             ) : (
               <p className="mt-4 text-xs text-slate-400">
-                Aucun logo charge pour le moment.
+                Aucun logo chargé pour le moment.
               </p>
             )}
           </div>
@@ -620,7 +620,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
               onClick={handleSetDefault}
               disabled={!selectedEntity?.id || Boolean(selectedEntity?.is_default)}
             >
-              Definir par defaut
+              Définir par défaut
             </Button>
             <Button
               variant="outline"

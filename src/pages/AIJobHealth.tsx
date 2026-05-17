@@ -390,7 +390,7 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-2xl font-semibold text-slate-900">
-              AI Job Health
+              Santé des jobs IA
             </h2>
             <p className="text-sm text-slate-500">
               Suivi interne des traitements IA par établissement.
@@ -404,7 +404,7 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
               Rafraîchir
             </Button>
             <Button onClick={triggerRun} disabled={runLoading}>
-              {runLoading ? "Lancement..." : "Run AI Analysis Now"}
+              {runLoading ? "Lancement..." : "Lancer l'analyse IA"}
             </Button>
           </div>
         </div>
@@ -507,7 +507,7 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
                     >
                       {runLocationLoading === item.locationId
                         ? "Lancement..."
-                        : "Run (location)"}
+                        : "Lancer pour ce lieu"}
                     </Button>
                   </div>
                   {runLocationMessage[item.locationId] && (
@@ -522,7 +522,7 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
 
           <Card>
             <CardHeader>
-              <CardTitle>Last 20 AI Runs</CardTitle>
+              <CardTitle>20 derniers runs IA</CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-slate-600">
               {filteredRuns.length === 0 ? (
@@ -584,7 +584,7 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
           <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-xl">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-slate-900">
-                Run details
+                Détails du run
               </h3>
               <Button variant="outline" size="sm" onClick={() => setSelectedRun(null)}>
                 Fermer
@@ -621,7 +621,7 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
                       size="sm"
                       onClick={() => handleCopyMeta(selectedRun.meta)}
                     >
-                      Copy JSON
+                      Copier le JSON
                     </Button>
                   </div>
                 </div>
