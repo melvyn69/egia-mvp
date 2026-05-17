@@ -1,10 +1,14 @@
 import {
   ArrowRight,
+  BarChart3,
   Check,
   CreditCard,
   FileText,
   Lock,
-  ShieldCheck
+  ShieldCheck,
+  Sparkles,
+  TrendingUp,
+  Zap
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "../components/ui/badge";
@@ -27,12 +31,52 @@ type PricingPlan = {
   dark?: boolean;
 };
 
-const usageItems = [
-  { label: "Réponses IA mensuelles", current: 450, limit: 500 },
-  { label: "Établissements", current: 2, limit: 3 },
-  { label: "Membres d’équipe", current: 3, limit: 10 },
-  { label: "Automatisations actives", current: 1, limit: 5 },
-  { label: "Rapports PDF", current: 0, limit: 10 }
+type UsageItem = {
+  label: string;
+  current: number;
+  limit: number;
+  projection: string;
+  attention?: boolean;
+};
+
+const usageItems: UsageItem[] = [
+  {
+    label: "Réponses IA mensuelles",
+    current: 450,
+    limit: 500,
+    projection: "Projection : 540 réponses d’ici fin de mois",
+    attention: true
+  },
+  {
+    label: "Établissements",
+    current: 2,
+    limit: 3,
+    projection: "Encore 1 fiche disponible sur Growth"
+  },
+  {
+    label: "Membres d’équipe",
+    current: 3,
+    limit: 10,
+    projection: "Capacité équipe confortable"
+  },
+  {
+    label: "Automatisations actives",
+    current: 1,
+    limit: 5,
+    projection: "4 workflows avancés encore disponibles"
+  },
+  {
+    label: "Rapports PDF",
+    current: 0,
+    limit: 10,
+    projection: "10 rapports inclus ce mois-ci"
+  }
+];
+
+const businessValue = [
+  { label: "Avis traités", value: "452", detail: "signaux consolidés" },
+  { label: "Réputation améliorée", value: "+18%", detail: "pilotage plus régulier" },
+  { label: "Automatisations exécutées", value: "24", detail: "actions gagnées" }
 ] as const;
 
 const plans: PricingPlan[] = [
@@ -167,30 +211,49 @@ const Billing = ({ isAdmin }: BillingProps) => {
 
       <Card className="bg-white">
         <CardHeader>
-          <CardTitle>Usage & Limites</CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle>Usage & Limites</CardTitle>
+              <p className="mt-1 text-sm text-slate-500">
+                Visualisez votre trajectoire avant d’atteindre les plafonds.
+              </p>
+            </div>
+            <Badge variant="warning">Attention volume IA</Badge>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
             <div className="space-y-5">
               {usageItems.map((item) => {
                 const percent = Math.min(100, (item.current / item.limit) * 100);
+                const isHighUsage = percent >= 85;
 
                 return (
                   <div key={item.label} className="space-y-2">
                     <div className="flex items-center justify-between gap-3 text-sm">
-                      <span className="font-medium text-slate-800">
-                        {item.label}
-                      </span>
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="font-medium text-slate-800">
+                          {item.label}
+                        </span>
+                        {item.attention && (
+                          <Badge variant="warning">Presque plein</Badge>
+                        )}
+                      </div>
                       <span className="text-slate-500">
                         {item.current} / {item.limit}
                       </span>
                     </div>
                     <div className="h-2 overflow-hidden rounded-full bg-slate-100">
                       <div
-                        className="h-full rounded-full bg-slate-950 transition-all duration-700"
+                        className={`h-full rounded-full transition-all duration-700 ${
+                          isHighUsage ? "bg-amber-500" : "bg-slate-950"
+                        }`}
                         style={{ width: `${percent}%` }}
                       />
                     </div>
+                    <p className={isHighUsage ? "text-xs text-amber-700" : "text-xs text-slate-500"}>
+                      {item.projection}
+                    </p>
                   </div>
                 );
               })}
@@ -204,11 +267,96 @@ const Billing = ({ isAdmin }: BillingProps) => {
                 Passez au plan supérieur pour débloquer plus de volume et des
                 fonctionnalités avancées.
               </p>
+              <div className="mt-4 space-y-2 text-sm text-slate-700">
+                <div className="flex items-center gap-2">
+                  <Zap size={15} className="text-violet-700" />
+                  Débloquez les workflows avancés
+                </div>
+                <div className="flex items-center gap-2">
+                  <BuildingIcon />
+                  Passez au pilotage multi-sites
+                </div>
+              </div>
               <Button className="mt-5 bg-violet-700 hover:bg-violet-800" onClick={scrollToPricing}>
                 Voir les offres
                 <ArrowRight size={16} />
               </Button>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)]">
+        <Card className="overflow-hidden border-slate-900 bg-slate-950 text-white">
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-emerald-300">
+                <TrendingUp size={22} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-300">ROI EGIA</p>
+                <h2 className="mt-2 text-2xl font-semibold leading-tight">
+                  EGIA vous a déjà économisé environ 11h ce mois-ci.
+                </h2>
+                <p className="mt-3 text-sm text-slate-300">
+                  Estimation basée sur les réponses IA préparées, les avis
+                  centralisés et les actions automatisées.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white">
+          <CardHeader>
+            <CardTitle>Valeur business générée</CardTitle>
+            <p className="text-sm text-slate-500">
+              Une lecture simple de ce que votre abonnement transforme déjà.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {businessValue.map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                >
+                  <p className="text-xs font-semibold uppercase text-slate-400">
+                    {item.label}
+                  </p>
+                  <p className="mt-2 text-2xl font-semibold text-slate-950">
+                    {item.value}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <Card className="bg-gradient-to-br from-white via-violet-50 to-slate-100">
+        <CardContent className="grid gap-5 pt-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white px-3 py-1 text-xs font-semibold text-violet-700">
+              <Sparkles size={14} />
+              Upgrade recommandé
+            </div>
+            <h2 className="mt-3 text-2xl font-semibold text-slate-950">
+              Débloquez les workflows avancés et passez au pilotage multi-sites.
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm text-slate-600">
+              Votre volume IA approche de la limite Growth. Le prochain niveau
+              sécurise plus de capacité, de contrôle et de pilotage réseau.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row lg:flex-col">
+            <Button className="bg-violet-700 hover:bg-violet-800" onClick={scrollToPricing}>
+              Comparer les offres
+            </Button>
+            <Button variant="outline" disabled title="Bientôt disponible">
+              Contacter l’équipe
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -355,8 +503,26 @@ const Billing = ({ isAdmin }: BillingProps) => {
           </div>
         </CardContent>
       </Card>
+
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 p-3 shadow-[0_-16px_36px_-24px_rgba(15,23,42,0.6)] backdrop-blur lg:hidden">
+        <div className="mx-auto flex max-w-lg items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-950">
+              90% du quota IA utilisé
+            </p>
+            <p className="truncate text-xs text-slate-500">
+              Anticipez avant la limite mensuelle.
+            </p>
+          </div>
+          <Button size="sm" className="bg-violet-700 hover:bg-violet-800" onClick={scrollToPricing}>
+            Upgrade
+          </Button>
+        </div>
+      </div>
     </div>
   );
 };
+
+const BuildingIcon = () => <BarChart3 size={15} className="text-violet-700" />;
 
 export { Billing };

@@ -14,6 +14,7 @@ import { Analytics } from "./pages/Analytics";
 import { Billing } from "./pages/Billing";
 import { BrandVoice } from "./pages/BrandVoice";
 import { Progress } from "./pages/Progress";
+import { Onboarding } from "./pages/Onboarding";
 import { Automation } from "./pages/Automation";
 import { AutomationBuilder } from "./pages/AutomationBuilder";
 import { TestLab } from "./pages/TestLab";
@@ -160,6 +161,13 @@ const App = () => {
       return {
         title: "Progression",
         subtitle: "Trophées, niveaux et montée en puissance business."
+      };
+    }
+
+    if (location.pathname === "/onboarding") {
+      return {
+        title: "Bienvenue dans EGIA",
+        subtitle: "Construisons votre système réputation."
       };
     }
 
@@ -1028,6 +1036,15 @@ const App = () => {
                   element={
                     <Progress
                       session={session}
+                      googleStatus={googleConnection.status}
+                      locations={locations}
+                    />
+                  }
+                />
+                <Route
+                  path="/onboarding"
+                  element={
+                    <Onboarding
                       googleStatus={googleConnection.status}
                       locations={locations}
                     />

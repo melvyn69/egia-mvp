@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import {
   ArrowRight,
+  AlertTriangle,
   CheckCircle,
   Medal,
   Sparkles,
@@ -34,11 +35,20 @@ type HealthRecommendation = {
   detail: string;
   href: string;
   cta: string;
+  priority: "critical" | "business" | "optimization" | "growth";
+  reason: string;
+  impact: string;
 };
 
 type QuickAction = {
   label: string;
   href: string;
+};
+
+type ScoreFactor = {
+  label: string;
+  value: string;
+  complete: boolean;
 };
 
 type BusinessHealthScoreInput = {
@@ -52,6 +62,7 @@ type BusinessHealthScoreInput = {
   activeLocationsCount: number;
   alertSignalsReady: boolean;
   competitorContextReady: boolean;
+  automationActiveCount?: number;
 };
 
 type BusinessHealthScoreModel = {
@@ -62,6 +73,7 @@ type BusinessHealthScoreModel = {
   recommendations: HealthRecommendation[];
   nextBestAction: HealthRecommendation;
   quickActions: QuickAction[];
+  scoreFactors: ScoreFactor[];
 };
 
 type BusinessHealthScoreCardProps = {
@@ -121,6 +133,40 @@ const getStoredCompetitorContextStatus = (): boolean => {
   }
 };
 
+const getPriorityStyle = (priority: HealthRecommendation["priority"]) => {
+  switch (priority) {
+    case "critical":
+      return {
+        label: "Critique",
+        badgeClass: "border-red-200 bg-red-50 text-red-700",
+        iconClass: "text-red-600",
+        borderClass: "border-red-100 bg-red-50/40"
+      };
+    case "business":
+      return {
+        label: "Business",
+        badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
+        iconClass: "text-amber-600",
+        borderClass: "border-amber-100 bg-amber-50/40"
+      };
+    case "optimization":
+      return {
+        label: "Optimisation",
+        badgeClass: "border-blue-200 bg-blue-50 text-blue-700",
+        iconClass: "text-blue-600",
+        borderClass: "border-blue-100 bg-blue-50/40"
+      };
+    case "growth":
+    default:
+      return {
+        label: "Croissance",
+        badgeClass: "border-violet-200 bg-violet-50 text-violet-700",
+        iconClass: "text-violet-600",
+        borderClass: "border-violet-100 bg-violet-50/40"
+      };
+  }
+};
+
 const buildBusinessHealthScore = ({
   googleConnected,
   locationsCount,
@@ -131,7 +177,8 @@ const buildBusinessHealthScore = ({
   priorityCount,
   activeLocationsCount,
   alertSignalsReady,
-  competitorContextReady
+  competitorContextReady,
+  automationActiveCount = 0
 }: BusinessHealthScoreInput): BusinessHealthScoreModel => {
   const responseRateValid =
     responseRate !== null && responseRate >= 0 && responseRate <= 100;
@@ -231,13 +278,38 @@ const buildBusinessHealthScore = ({
   ];
   const recommendations: HealthRecommendation[] = [];
 
+  if (priorityCount > 0) {
+    recommendations.push({
+      id: "critical-reviews",
+      label: "Traitez les avis critiques maintenant",
+      detail:
+        priorityCount === 1
+          ? "1 avis critique demande une réponse prioritaire."
+          : `${priorityCount} avis critiques demandent une réponse prioritaire.`,
+      href: "/inbox?priority=critical&status=unanswered",
+      cta: "Prioriser",
+      priority: "critical",
+      reason:
+        priorityCount === 1
+          ? "1 signal critique est détecté dans vos avis récents."
+          : `${priorityCount} signaux critiques sont détectés dans vos avis récents.`,
+      impact:
+        priorityCount === 1
+          ? "Répondre à cet avis pourrait améliorer votre score de +4 points."
+          : "Répondre aux avis critiques pourrait améliorer votre score de +6 points."
+    });
+  }
+
   if (!googleConnected) {
     recommendations.push({
       id: "connect-google",
       label: "Connectez Google en premier",
       detail: "Sans connexion Google, EGIA ne peut pas coacher la réputation.",
       href: "/connect",
-      cta: "Connecter"
+      cta: "Connecter",
+      priority: "business",
+      reason: "Aucune source Google Business Profile n'est connectée.",
+      impact: "Connecter Google débloque les avis, les KPIs et les recommandations."
     });
   } else if (locationsCount === 0) {
     recommendations.push({
@@ -245,7 +317,10 @@ const buildBusinessHealthScore = ({
       label: "Importez les établissements",
       detail: "Le score devient utile dès qu'une fiche est suivie.",
       href: "/settings?tab=locations",
-      cta: "Importer"
+      cta: "Importer",
+      priority: "business",
+      reason: "Aucun établissement n'est encore disponible dans l'app.",
+      impact: "Importer vos fiches pourrait débloquer jusqu'à +15 points."
     });
   } else if (!hasReviews) {
     recommendations.push({
@@ -253,7 +328,10 @@ const buildBusinessHealthScore = ({
       label: "Synchronisez les premiers avis",
       detail: "Les avis déclenchent les priorités, le sentiment et les drafts.",
       href: "/settings?tab=locations",
-      cta: "Synchroniser"
+      cta: "Synchroniser",
+      priority: "business",
+      reason: "Aucun avis exploitable n'est encore remonté dans le score.",
+      impact: "Synchroniser les avis active les signaux business du Coach."
     });
   }
 
@@ -262,18 +340,13 @@ const buildBusinessHealthScore = ({
       id: "reply-rate",
       label: "Augmentez le taux de réponse",
       detail: "Objectif V1: répondre à au moins 70% des avis exploitables.",
-      href: "/inbox",
-      cta: "Traiter"
-    });
-  }
-
-  if (priorityCount > 0) {
-    recommendations.push({
-      id: "priority-reviews",
-      label: "Traitez les avis critiques",
-      detail: `${priorityCount} avis demandent une action prioritaire.`,
-      href: "/inbox",
-      cta: "Prioriser"
+      href: "/inbox?status=unanswered",
+      cta: "Traiter",
+      priority: "business",
+      reason: responseRateValid
+        ? `Votre taux de réponse actuel est de ${formatPercent(responseRate)}.`
+        : "Le taux de réponse n'est pas encore suffisamment mesurable.",
+      impact: "Atteindre 70% de réponse pourrait améliorer votre score de +5 points."
     });
   }
 
@@ -283,26 +356,64 @@ const buildBusinessHealthScore = ({
       label: "Lancez la montée en qualité IA",
       detail: "Calibrez la voix IA pour stabiliser les drafts de réponse.",
       href: "/settings/brand-voice",
-      cta: "Configurer"
+      cta: "Configurer",
+      priority: "optimization",
+      reason: "Des avis existent, mais la couche IA n'est pas encore assez alimentée.",
+      impact: "Une voix IA calibrée rend les réponses plus rapides et cohérentes."
     });
   }
 
-  recommendations.push(
-    {
+  if (!alertSignalsReady) {
+    recommendations.push({
       id: "alerts-next",
-      label: "Mettez les alertes sous contrôle",
-      detail: "Gardez les signaux réputation au bon endroit avant la vente.",
+      label: "Activez les alertes intelligentes",
+      detail: "Recevez les signaux réputation avant qu'ils deviennent urgents.",
       href: "/alerts",
-      cta: "Voir"
-    },
-    {
+      cta: "Configurer",
+      priority: "optimization",
+      reason: "Aucune alerte active n'est détectée côté interface.",
+      impact: "Les alertes réduisent le risque de manquer un avis sensible."
+    });
+  }
+
+  if (!competitorContextReady) {
+    recommendations.push({
       id: "competitors-next",
       label: "Ajoutez le contexte concurrentiel",
       detail: "La veille donne au score une lecture marché plus actionnable.",
       href: "/competitors",
-      cta: "Comparer"
-    }
-  );
+      cta: "Comparer",
+      priority: "growth",
+      reason: "Aucune veille concurrentielle active n'est détectée.",
+      impact: "La veille peut révéler des opportunités locales à fort levier."
+    });
+  }
+
+  if (automationActiveCount === 0) {
+    recommendations.push({
+      id: "automation-next",
+      label: "Automatisez une action répétitive",
+      detail: "Créez un premier scénario pour gagner du temps chaque semaine.",
+      href: "/automation",
+      cta: "Automatiser",
+      priority: "optimization",
+      reason: "Aucune automatisation active détectée.",
+      impact: "Une automatisation simple peut réduire le suivi manuel dès cette semaine."
+    });
+  }
+
+  if (score >= 85) {
+    recommendations.push({
+      id: "billing-scale",
+      label: "Préparez le passage au niveau supérieur",
+      detail: "Votre usage approche d'un niveau avancé, sécurisez la capacité.",
+      href: "/billing",
+      cta: "Voir l'offre",
+      priority: "growth",
+      reason: "Votre score est déjà élevé et les leviers restants sont avancés.",
+      impact: "Adapter l'offre évite de bloquer la croissance future."
+    });
+  }
 
   const visibleRecommendations = recommendations.slice(0, 3);
   const nextBestAction = visibleRecommendations[0] ?? {
@@ -310,7 +421,10 @@ const buildBusinessHealthScore = ({
     label: "Pilotez les réponses du jour",
     detail: "Le socle est prêt, gardez le rythme opérationnel.",
     href: "/inbox",
-    cta: "Ouvrir"
+    cta: "Ouvrir",
+    priority: "optimization",
+    reason: "Le score ne détecte pas de blocage immédiat.",
+    impact: "Un pilotage régulier maintient votre niveau de réputation."
   };
 
   return {
@@ -320,6 +434,33 @@ const buildBusinessHealthScore = ({
     completedChecklistCount: checklist.filter((item) => item.complete).length,
     recommendations: visibleRecommendations,
     nextBestAction,
+    scoreFactors: [
+      {
+        label: "Taux réponse",
+        value: responseRateValid ? formatPercent(responseRate) : "À mesurer",
+        complete: responseRateValid && responseRate >= 70
+      },
+      {
+        label: "Volume traité",
+        value: hasReviews ? `${reviewsTotal} avis` : "Aucun avis",
+        complete: hasReviews
+      },
+      {
+        label: "Réputation",
+        value: avgRating !== null ? `${avgRating.toFixed(1)}/5` : "À mesurer",
+        complete: avgRating !== null && avgRating >= 4
+      },
+      {
+        label: "Automatisations",
+        value: automationActiveCount > 0 ? `${automationActiveCount} active` : "À activer",
+        complete: automationActiveCount > 0
+      },
+      {
+        label: "Activité équipe",
+        value: activeLocationsReady ? "Suivi actif" : "À structurer",
+        complete: activeLocationsReady
+      }
+    ],
     quickActions: [
       { label: "Inbox", href: "/inbox" },
       { label: "Établissements", href: "/settings?tab=locations" },
@@ -397,6 +538,7 @@ const DashboardScoreCard = ({
 }) => {
   const navigate = useNavigate();
   const todoItems = model.checklist.filter((item) => !item.complete).slice(0, 3);
+  const nextPriorityStyle = getPriorityStyle(model.nextBestAction.priority);
 
   return (
     <Card className="overflow-hidden">
@@ -441,11 +583,16 @@ const DashboardScoreCard = ({
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
                   <div className="flex items-start gap-3">
-                    <Target className={model.level.accentClass} size={20} />
+                    <Target className={nextPriorityStyle.iconClass} size={20} />
                     <div className="min-w-0">
-                      <p className="text-xs font-semibold uppercase text-slate-400">
-                        Prochaine action
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-xs font-semibold uppercase text-slate-400">
+                          Prochaine action
+                        </p>
+                        <Badge className={nextPriorityStyle.badgeClass}>
+                          {nextPriorityStyle.label}
+                        </Badge>
+                      </div>
                       <p className="mt-1 font-semibold">{model.nextBestAction.label}</p>
                       <p className="mt-1 text-sm text-slate-300">
                         {model.nextBestAction.detail}
@@ -541,6 +688,7 @@ const FullScorePanel = ({
   loading?: boolean;
 }) => {
   const navigate = useNavigate();
+  const nextPriorityStyle = getPriorityStyle(model.nextBestAction.priority);
 
   return (
     <Card className="overflow-hidden">
@@ -573,8 +721,30 @@ const FullScorePanel = ({
             </div>
 
             <div className="mt-6 grid gap-5 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-center">
-              <div className="mx-auto sm:mx-0">
+              <div className="mx-auto w-full max-w-[180px] sm:mx-0">
                 <ScoreRing model={model} />
+                <div className="mt-4 rounded-2xl border border-white/10 bg-white/10 p-3">
+                  <p className="text-xs font-semibold uppercase text-slate-400">
+                    Calculé selon :
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {model.scoreFactors.map((factor) => (
+                      <div
+                        key={factor.label}
+                        className="flex items-center justify-between gap-3 text-xs"
+                      >
+                        <span className="text-slate-400">{factor.label}</span>
+                        <span
+                          className={
+                            factor.complete ? "text-emerald-300" : "text-slate-200"
+                          }
+                        >
+                          {factor.value}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
               <div className="min-w-0 space-y-4">
                 <div>
@@ -594,15 +764,29 @@ const FullScorePanel = ({
 
                 <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
                   <div className="flex items-start gap-3">
-                    <Target className={model.level.accentClass} size={20} />
+                    <Target className={nextPriorityStyle.iconClass} size={20} />
                     <div className="min-w-0">
-                      <p className="text-xs font-semibold uppercase text-slate-400">
-                        Prochaine action
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-xs font-semibold uppercase text-slate-400">
+                          Prochaine action
+                        </p>
+                        <Badge className={nextPriorityStyle.badgeClass}>
+                          {nextPriorityStyle.label}
+                        </Badge>
+                      </div>
                       <p className="mt-1 font-semibold">{model.nextBestAction.label}</p>
                       <p className="mt-1 text-sm text-slate-300">
                         {model.nextBestAction.detail}
                       </p>
+                      <div className="mt-3 rounded-xl border border-white/10 bg-slate-950/20 p-3 text-xs text-slate-300">
+                        <p className="font-semibold text-slate-200">
+                          Pourquoi cette recommandation ?
+                        </p>
+                        <p className="mt-1">{model.nextBestAction.reason}</p>
+                        <p className="mt-2 font-semibold text-emerald-300">
+                          {model.nextBestAction.impact}
+                        </p>
+                      </div>
                     </div>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
@@ -679,27 +863,66 @@ const FullScorePanel = ({
                 Recommandations prioritaires
               </p>
               <div className="mt-3 space-y-3">
-                {model.recommendations.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-start justify-between gap-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-900">
-                        {item.label}
-                      </p>
-                      <p className="text-xs text-slate-500">{item.detail}</p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="shrink-0"
-                      onClick={() => navigate(item.href)}
+                {model.recommendations.map((item) => {
+                  const priorityStyle = getPriorityStyle(item.priority);
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`rounded-2xl border p-3 ${priorityStyle.borderClass}`}
                     >
-                      {item.cta}
-                    </Button>
-                  </div>
-                ))}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge className={priorityStyle.badgeClass}>
+                              {priorityStyle.label}
+                            </Badge>
+                            <p className="text-sm font-semibold text-slate-900">
+                              {item.label}
+                            </p>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-600">
+                            {item.detail}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="shrink-0"
+                          onClick={() => navigate(item.href)}
+                        >
+                          {item.cta}
+                        </Button>
+                      </div>
+                      <div className="mt-3 grid gap-2 rounded-xl bg-white/70 p-3 text-xs text-slate-600">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle
+                            size={14}
+                            className={`${priorityStyle.iconClass} mt-0.5 shrink-0`}
+                          />
+                          <div>
+                            <p className="font-semibold text-slate-800">
+                              Pourquoi cette recommandation ?
+                            </p>
+                            <p className="mt-0.5">{item.reason}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <TrendingUp
+                            size={14}
+                            className="mt-0.5 shrink-0 text-emerald-600"
+                          />
+                          <div>
+                            <p className="font-semibold text-slate-800">
+                              Impact estimé
+                            </p>
+                            <p className="mt-0.5">{item.impact}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
