@@ -9,6 +9,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { supabase, supabaseUrl } from "../lib/supabase";
+import { isAdminUser } from "../lib/admin";
 import { cn } from "../lib/utils";
 
 const statusTabs = [
@@ -655,14 +656,7 @@ const Inbox = () => {
   });
 
   const sessionUserId = sessionQuery.data?.user?.id ?? null;
-  const adminEmails = String(import.meta.env.VITE_ADMIN_EMAILS ?? "")
-    .split(",")
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean);
-  const isAdmin =
-    adminEmails.length > 0 &&
-    Boolean(sessionQuery.data?.user?.email) &&
-    adminEmails.includes(String(sessionQuery.data?.user?.email).toLowerCase());
+  const isAdmin = isAdminUser(sessionQuery.data?.user?.email);
 
   const locationsQuery = useQuery({
     queryKey: ["inbox-locations", sessionUserId],
@@ -2451,7 +2445,7 @@ const Inbox = () => {
                           >
                             {aiRunLocationLoading === location.id
                               ? "Lancement..."
-                              : "Lancer analyse IA (ce lieu)"}
+                              : "Admin : analyser ce lieu"}
                           </Button>
                         </div>
                         {aiRunLocationResult[location.id] && (

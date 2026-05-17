@@ -21,6 +21,7 @@ import { supabase } from "../lib/supabase";
 
 type CompetitorsProps = {
   session: Session | null;
+  isAdmin?: boolean;
 };
 
 type LocationOption = {
@@ -247,7 +248,13 @@ const renderChipList = (items: string[]) => {
   );
 };
 
-const Competitors = ({ session }: CompetitorsProps) => {
+const passiveQueryOptions = {
+  staleTime: 5 * 60 * 1000,
+  refetchOnMount: false,
+  refetchOnWindowFocus: false
+} as const;
+
+const Competitors = ({ session, isAdmin = false }: CompetitorsProps) => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>("selection");
@@ -298,7 +305,8 @@ const Competitors = ({ session }: CompetitorsProps) => {
       if (error) throw error;
       return (data ?? []) as LocationOption[];
     },
-    enabled: Boolean(userId)
+    enabled: Boolean(userId),
+    ...passiveQueryOptions
   });
 
   const settingsQuery = useQuery({
@@ -315,7 +323,8 @@ const Competitors = ({ session }: CompetitorsProps) => {
       if (error) throw error;
       return (data ?? null) as SettingsRow | null;
     },
-    enabled: Boolean(userId)
+    enabled: Boolean(userId),
+    ...passiveQueryOptions
   });
 
   useEffect(() => {
@@ -376,7 +385,8 @@ const Competitors = ({ session }: CompetitorsProps) => {
       }
       return payload.items as CompetitorRow[];
     },
-    enabled: Boolean(token && selectedLocationId)
+    enabled: Boolean(token && selectedLocationId),
+    ...passiveQueryOptions
   });
 
   const followedQuery = useQuery({
@@ -401,7 +411,8 @@ const Competitors = ({ session }: CompetitorsProps) => {
       }
       return payload.items as CompetitorRow[];
     },
-    enabled: Boolean(token && selectedLocationId)
+    enabled: Boolean(token && selectedLocationId),
+    ...passiveQueryOptions
   });
 
   const selfStatsQuery = useQuery({
@@ -428,7 +439,8 @@ const Competitors = ({ session }: CompetitorsProps) => {
           : null;
       return { avg: rating, count: reviewCount };
     },
-    enabled: Boolean(token && selectedLocationId)
+    enabled: Boolean(token && selectedLocationId),
+    ...passiveQueryOptions
   });
 
   const scanMutation = useMutation({
@@ -627,7 +639,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
         navigate(`/reports?report_id=${reportId}`);
         setToast({
           type: "success",
-          message: "Rapport généré. Télécharge-le depuis Rapports."
+          message: "Rapport généré. Téléchargez-le depuis Rapports."
         });
         return;
       }
@@ -2246,14 +2258,16 @@ const formatCountDelta = (delta: number | null) => {
               <Eye size={18} />
               Analyse SWOT
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleGenerateBenchmark}
-              disabled={benchmarkLoading || !selectedLocationId}
-            >
-              {benchmarkLoading ? "Génération..." : "Générer un rapport"}
-            </Button>
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGenerateBenchmark}
+                disabled={benchmarkLoading || !selectedLocationId}
+              >
+                {benchmarkLoading ? "Génération..." : "Générer un rapport"}
+              </Button>
+            )}
           </div>
 
           <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">

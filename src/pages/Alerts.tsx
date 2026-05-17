@@ -115,7 +115,10 @@ const Alerts = ({ session }: AlertsProps) => {
       const payload = (await response.json()) as { alerts?: AlertRow[] };
       return payload.alerts ?? [];
     },
-    enabled: Boolean(accessToken)
+    enabled: Boolean(accessToken),
+    staleTime: 5 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false
   });
 
   const handleResolve = async (alert: AlertRow) => {

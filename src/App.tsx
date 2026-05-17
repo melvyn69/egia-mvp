@@ -1032,7 +1032,9 @@ const App = () => {
                 <Route path="/alerts" element={<Alerts session={session} />} />
                 <Route
                   path="/competitors"
-                  element={<Competitors session={session} />}
+                  element={
+                    <Competitors session={session} isAdmin={isAdminSession} />
+                  }
                 />
                 <Route
                   path="/reports"

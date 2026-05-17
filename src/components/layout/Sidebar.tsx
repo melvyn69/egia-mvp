@@ -1,14 +1,18 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  Activity,
   BarChart3,
   Bell,
   Building2,
+  FileText,
   LayoutDashboard,
   Mailbox,
   Radar,
+  RefreshCw,
   Settings,
-  Sparkles
+  Sparkles,
+  Users
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { supabase } from "../../lib/supabase";
@@ -212,7 +216,7 @@ const Sidebar = ({
               Automatisations
             </NavLink>
             <NavLink
-              to="/automation/builder"
+              to="/reports"
               className={({ isActive }) =>
                 cn(
                   navLinkBase,
@@ -222,8 +226,36 @@ const Sidebar = ({
                 )
               }
             >
-              <Sparkles size={18} />
-              Builder
+              <FileText size={18} />
+              Rapports
+            </NavLink>
+            <NavLink
+              to="/team"
+              className={({ isActive }) =>
+                cn(
+                  navLinkBase,
+                  isActive
+                    ? "bg-ink text-white shadow"
+                    : "text-slate-600 hover:bg-slate-100"
+                )
+              }
+            >
+              <Users size={18} />
+              Équipe
+            </NavLink>
+            <NavLink
+              to="/sync-status"
+              className={({ isActive }) =>
+                cn(
+                  navLinkBase,
+                  isActive
+                    ? "bg-ink text-white shadow"
+                    : "text-slate-600 hover:bg-slate-100"
+                )
+              }
+            >
+              <RefreshCw size={18} />
+              Statut sync
             </NavLink>
             <NavLink
               to="/ai-job-health"
@@ -236,22 +268,8 @@ const Sidebar = ({
                 )
               }
             >
-              <Sparkles size={18} />
+              <Activity size={18} />
               Santé IA
-            </NavLink>
-            <NavLink
-              to="/settings/test-lab"
-              className={({ isActive }) =>
-                cn(
-                  navLinkBase,
-                  isActive
-                    ? "bg-ink text-white shadow"
-                    : "text-slate-600 hover:bg-slate-100"
-                )
-              }
-            >
-              <Sparkles size={18} />
-              Test Lab
             </NavLink>
           </div>
         )}
