@@ -24,12 +24,14 @@ type SidebarProps = {
   variant?: "desktop" | "mobile";
   className?: string;
   onNavigate?: () => void;
+  showAdminLinks?: boolean;
 };
 
 const Sidebar = ({
   variant = "desktop",
   className,
-  onNavigate
+  onNavigate,
+  showAdminLinks = false
 }: SidebarProps) => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -190,6 +192,69 @@ const Sidebar = ({
           <Settings size={18} />
           Paramètres
         </NavLink>
+        {showAdminLinks && (
+          <div className="space-y-2 border-t border-slate-200 pt-3">
+            <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+              Admin
+            </p>
+            <NavLink
+              to="/automation"
+              className={({ isActive }) =>
+                cn(
+                  navLinkBase,
+                  isActive
+                    ? "bg-ink text-white shadow"
+                    : "text-slate-600 hover:bg-slate-100"
+                )
+              }
+            >
+              <Sparkles size={18} />
+              Automatisations
+            </NavLink>
+            <NavLink
+              to="/automation/builder"
+              className={({ isActive }) =>
+                cn(
+                  navLinkBase,
+                  isActive
+                    ? "bg-ink text-white shadow"
+                    : "text-slate-600 hover:bg-slate-100"
+                )
+              }
+            >
+              <Sparkles size={18} />
+              Builder
+            </NavLink>
+            <NavLink
+              to="/ai-job-health"
+              className={({ isActive }) =>
+                cn(
+                  navLinkBase,
+                  isActive
+                    ? "bg-ink text-white shadow"
+                    : "text-slate-600 hover:bg-slate-100"
+                )
+              }
+            >
+              <Sparkles size={18} />
+              Santé IA
+            </NavLink>
+            <NavLink
+              to="/settings/test-lab"
+              className={({ isActive }) =>
+                cn(
+                  navLinkBase,
+                  isActive
+                    ? "bg-ink text-white shadow"
+                    : "text-slate-600 hover:bg-slate-100"
+                )
+              }
+            >
+              <Sparkles size={18} />
+              Test Lab
+            </NavLink>
+          </div>
+        )}
       </nav>
     </div>
 

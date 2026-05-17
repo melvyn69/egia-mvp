@@ -25,6 +25,7 @@ import AIJobHealth from "./pages/AIJobHealth";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
 import { useGoogleConnectionStatus } from "./hooks/useGoogleConnectionStatus";
+import { isAdminUser } from "./lib/admin";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 
@@ -54,6 +55,8 @@ const App = () => {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [passwordSignInLoading, setPasswordSignInLoading] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
   const [syncAllLoading, setSyncAllLoading] = useState(false);
   const [syncAllMessage, setSyncAllMessage] = useState<string | null>(null);
@@ -93,10 +96,9 @@ const App = () => {
   const isCallbackPath =
     location.pathname === "/google_oauth_callback" ||
     location.pathname === "/auth/callback";
-  const debugModeEnabled =
-    import.meta.env.DEV &&
-    (new URLSearchParams(location.search).get("debug") === "1" ||
-      import.meta.env.VITE_ENABLE_DEBUG_SESSION === "1");
+  const isAdminSession = isAdminUser(session?.user.email);
+  const passwordLoginEnabled =
+    import.meta.env.VITE_ENABLE_PASSWORD_LOGIN === "true";
   const googleConnection = useGoogleConnectionStatus(session);
   const googleConnected = googleConnection.status === "connected";
   const googleReauthRequired = googleConnection.status === "reauth_required";
@@ -377,6 +379,56 @@ const App = () => {
     }
 
     setAuthMessage("Lien de connexion envoyé. Vérifiez votre boîte mail.");
+  };
+
+  const handlePasswordSignIn = async () => {
+    setAuthError(null);
+    setAuthMessage(null);
+
+    if (!supabase || envMissing) {
+      setAuthError(
+        "Auth Supabase non configurée. Vérifiez les variables d'environnement."
+      );
+      return;
+    }
+
+    if (!authEmail.trim()) {
+      setAuthError("Email requis.");
+      return;
+    }
+    if (!authPassword) {
+      setAuthError("Mot de passe requis.");
+      return;
+    }
+
+    setPasswordSignInLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({
+      email: authEmail.trim(),
+      password: authPassword
+    });
+    setPasswordSignInLoading(false);
+
+    if (!error) {
+      setAuthPassword("");
+      return;
+    }
+
+    const lowerMessage = error.message.toLowerCase();
+    if (
+      lowerMessage.includes("invalid login credentials") ||
+      lowerMessage.includes("invalid credentials")
+    ) {
+      setAuthError("Mot de passe incorrect ou email inconnu.");
+      return;
+    }
+    if (lowerMessage.includes("email not confirmed")) {
+      setAuthError(
+        "Email non confirmé. Confirmez l'email Supabase avant de vous connecter."
+      );
+      return;
+    }
+
+    setAuthError(error.message || "Connexion admin impossible.");
   };
 
   const handleConnectGoogle = async () => {
@@ -840,6 +892,31 @@ const App = () => {
           <Button onClick={handleSignIn} disabled={envMissing}>
             Recevoir le lien de connexion
           </Button>
+          {passwordLoginEnabled && (
+            <div className="space-y-3 border-t border-slate-200 pt-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">
+                  Mot de passe admin
+                </label>
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  placeholder="Mot de passe"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 outline-none focus:border-ink/60 focus:ring-2 focus:ring-ink/10"
+                />
+              </div>
+              <Button
+                variant="outline"
+                onClick={handlePasswordSignIn}
+                disabled={envMissing || passwordSignInLoading}
+              >
+                {passwordSignInLoading
+                  ? "Connexion..."
+                  : "Connexion admin"}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
@@ -848,7 +925,7 @@ const App = () => {
   return (
     <div className="min-h-screen bg-sand">
       <div className="flex">
-        {session && <Sidebar />}
+        {session && <Sidebar showAdminLinks={isAdminSession} />}
         <div className="flex min-h-screen flex-1 flex-col">
           <Topbar
             title={pageMeta.title}
@@ -856,7 +933,7 @@ const App = () => {
             userEmail={session?.user.email}
             session={session}
             onSignOut={session ? handleSignOut : undefined}
-            onDebugSession={debugModeEnabled ? handleDebugSession : undefined}
+            onDebugSession={isAdminSession ? handleDebugSession : undefined}
             onToggleMenu={
               session ? () => setMobileMenuOpen((prev) => !prev) : undefined
             }
@@ -996,6 +1073,7 @@ const App = () => {
               variant="mobile"
               className="h-full"
               onNavigate={() => setMobileMenuOpen(false)}
+              showAdminLinks={isAdminSession}
             />
           </div>
         </div>
