@@ -12,17 +12,16 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
 import {
-  buildCoachResult,
-  type CoachDominantTag,
   type CoachInput,
   type CoachMilestone,
   type CoachRecommendation as CoachEngineRecommendation,
   type CoachResult,
-  type CoachScoreBreakdownItem
+  type CoachScoreBreakdownItem,
+  type CoachScoreLevel
 } from "@/services/coach";
 
 type HealthLevel = {
-  label: "Bronze" | "Silver" | "Gold";
+  label: "Bronze" | "Silver" | "Gold" | "Expert";
   badgeClass: string;
   accentClass: string;
   progressClass: string;
@@ -60,32 +59,13 @@ type ScoreFactor = {
   complete: boolean;
 };
 
-type BusinessHealthScoreInput = {
-  googleConnected?: boolean | null;
-  locationsCount?: number | null;
-  reviewsTotal?: number | null;
-  reviewsWithText?: number | null;
-  responseRate: number | null;
-  avgRating: number | null;
-  aiSamples?: number | null;
-  priorityCount?: number | null;
-  unansweredReviewsCount?: number | null;
-  activeLocationsCount?: number | null;
-  alertSignalsReady?: boolean | null;
-  alertsOpenCount?: number | null;
-  competitorContextReady?: boolean | null;
-  automationActiveCount?: number | null;
-  teamMembersCount?: number | null;
-  reportsCount?: number | null;
-  dominantTags?: CoachDominantTag[] | null;
-  accountCreatedAt?: string | Date | null;
-};
-
 type BusinessHealthScoreModel = {
   score: number;
   level: HealthLevel;
   checklist: HealthChecklistItem[];
   completedChecklistCount: number;
+  completedMilestones: CoachMilestone[];
+  nextMilestone: CoachMilestone;
   recommendations: HealthRecommendation[];
   nextBestAction: HealthRecommendation;
   quickActions: QuickAction[];
@@ -102,37 +82,43 @@ type BusinessHealthScoreCardProps = {
 const formatPercent = (value: number | null): string =>
   value === null ? "—" : `${Math.round(value)}%`;
 
-const getHealthLevel = (score: number): HealthLevel => {
-  if (score >= 75) {
-    return {
-      label: "Gold",
-      badgeClass: "border-amber-300 bg-amber-100 text-amber-800 gap-2",
-      accentClass: "text-amber-300",
-      progressClass: "bg-amber-300",
-      ringColor: "#fbbf24"
+const getHealthLevel = (level: CoachScoreLevel): HealthLevel => {
+  switch (level) {
+    case "expert":
+      return {
+        label: "Expert",
+        badgeClass: "border-amber-300 bg-amber-100 text-amber-800 gap-2",
+        accentClass: "text-amber-300",
+        progressClass: "bg-amber-300",
+        ringColor: "#fbbf24"
     };
+    case "gold":
+      return {
+        label: "Gold",
+        badgeClass: "border-amber-300 bg-amber-100 text-amber-800 gap-2",
+        accentClass: "text-amber-300",
+        progressClass: "bg-amber-300",
+        ringColor: "#fbbf24"
+      };
+    case "silver":
+      return {
+        label: "Silver",
+        badgeClass: "border-slate-200 bg-slate-100 text-slate-700 gap-2",
+        accentClass: "text-slate-200",
+        progressClass: "bg-slate-200",
+        ringColor: "#cbd5e1"
+      };
+    case "bronze":
+    default:
+      return {
+        label: "Bronze",
+        badgeClass: "border-orange-300 bg-orange-100 text-orange-800 gap-2",
+        accentClass: "text-orange-300",
+        progressClass: "bg-orange-300",
+        ringColor: "#fb923c"
+      };
   }
-
-  if (score >= 45) {
-    return {
-      label: "Silver",
-      badgeClass: "border-slate-200 bg-slate-100 text-slate-700 gap-2",
-      accentClass: "text-slate-200",
-      progressClass: "bg-slate-200",
-      ringColor: "#cbd5e1"
-    };
-  }
-
-  return {
-    label: "Bronze",
-    badgeClass: "border-orange-300 bg-orange-100 text-orange-800 gap-2",
-    accentClass: "text-orange-300",
-    progressClass: "bg-orange-300",
-    ringColor: "#fb923c"
-  };
 };
-
-const getStoredCompetitorContextStatus = (): null => null;
 
 const getPriorityStyle = (priority: HealthRecommendation["priority"]) => {
   switch (priority) {
@@ -209,53 +195,6 @@ const hasRecommendation = (
   result: CoachResult,
   id: CoachEngineRecommendation["id"]
 ): boolean => result.recommendations.some((item) => item.id === id);
-
-const buildCoachInput = ({
-  googleConnected,
-  locationsCount,
-  reviewsTotal,
-  reviewsWithText,
-  responseRate,
-  avgRating,
-  aiSamples,
-  priorityCount,
-  unansweredReviewsCount,
-  activeLocationsCount,
-  alertSignalsReady,
-  alertsOpenCount,
-  competitorContextReady,
-  automationActiveCount,
-  teamMembersCount,
-  reportsCount,
-  dominantTags,
-  accountCreatedAt
-}: BusinessHealthScoreInput): CoachInput => ({
-  googleConnected,
-  activeLocationsCount,
-  totalLocationsCount: locationsCount,
-  totalReviews: reviewsTotal,
-  reviewsWithText,
-  averageRating: avgRating,
-  responseRate,
-  criticalReviewsCount: priorityCount,
-  unansweredReviewsCount,
-  aiInsightsReady:
-    typeof aiSamples === "number" && Number.isFinite(aiSamples)
-      ? aiSamples > 0
-      : undefined,
-  dominantTags,
-  alertsOpenCount:
-    alertsOpenCount !== undefined && alertsOpenCount !== null
-      ? alertsOpenCount
-      : alertSignalsReady === true
-        ? 0
-        : null,
-  automationCount: automationActiveCount,
-  teamMembersCount,
-  competitorWatchActive: competitorContextReady,
-  reportsCount,
-  accountCreatedAt
-});
 
 const mapRecommendationPriority = (
   priority: CoachEngineRecommendation["priority"]
@@ -341,7 +280,7 @@ const mapRecommendation = (
 };
 
 const buildChecklist = (
-  input: BusinessHealthScoreInput,
+  input: CoachInput,
   result: CoachResult
 ): HealthChecklistItem[] => {
   const googleMilestone = getMilestone(result, "google-connected");
@@ -351,13 +290,18 @@ const buildChecklist = (
   const aiBreakdown = getBreakdownItem(result, "ai-tags");
   const alertsBreakdown = getBreakdownItem(result, "alerts");
   const responseRateValid = isValidPercent(input.responseRate);
+  const responseRateValue: number | null =
+    responseRateValid && typeof input.responseRate === "number"
+      ? input.responseRate
+      : null;
   const locationsCount =
-    typeof input.locationsCount === "number" && Number.isFinite(input.locationsCount)
-      ? Math.max(0, Math.floor(input.locationsCount))
+    typeof input.totalLocationsCount === "number" &&
+    Number.isFinite(input.totalLocationsCount)
+      ? Math.max(0, Math.floor(input.totalLocationsCount))
       : 0;
   const reviewsTotal =
-    typeof input.reviewsTotal === "number" && Number.isFinite(input.reviewsTotal)
-      ? Math.max(0, Math.floor(input.reviewsTotal))
+    typeof input.totalReviews === "number" && Number.isFinite(input.totalReviews)
+      ? Math.max(0, Math.floor(input.totalReviews))
       : 0;
   const aiReady = aiBreakdown !== null && aiBreakdown.points > 0;
   const alertsReady = alertsBreakdown !== null && alertsBreakdown.status !== "missing";
@@ -397,7 +341,7 @@ const buildChecklist = (
       id: "response-rate",
       label: "Atteindre 70% de réponse",
       description: responseRateValid
-        ? `Taux actuel: ${formatPercent(input.responseRate)}.`
+        ? `Taux actuel: ${formatPercent(responseRateValue)}.`
         : "Le taux apparaîtra après import des avis.",
       complete: responseRateValid && !hasRecommendation(result, "reply-to-reviews"),
       href: "/inbox",
@@ -433,30 +377,36 @@ const buildChecklist = (
 };
 
 const buildScoreFactors = (
-  input: BusinessHealthScoreInput,
+  input: CoachInput,
   result: CoachResult
 ): ScoreFactor[] => {
   const responseRateValid = isValidPercent(input.responseRate);
-  const ratingValue = isValidRating(input.avgRating) ? input.avgRating : null;
+  const responseRateValue: number | null =
+    responseRateValid && typeof input.responseRate === "number"
+      ? input.responseRate
+      : null;
+  const ratingValue = isValidRating(input.averageRating)
+    ? input.averageRating
+    : null;
   const automationMilestone = getMilestone(result, "first-automation");
   const setupBreakdown = getBreakdownItem(result, "setup");
   const reviewsMilestone = getMilestone(result, "first-reviews-synced");
   const automationCount =
-    typeof input.automationActiveCount === "number" &&
-    Number.isFinite(input.automationActiveCount)
-      ? Math.max(0, Math.floor(input.automationActiveCount))
+    typeof input.automationCount === "number" &&
+    Number.isFinite(input.automationCount)
+      ? Math.max(0, Math.floor(input.automationCount))
       : 0;
 
   return [
     {
       label: "Taux réponse",
-      value: responseRateValid ? formatPercent(input.responseRate) : "À mesurer",
+      value: responseRateValid ? formatPercent(responseRateValue) : "À mesurer",
       complete: responseRateValid && !hasRecommendation(result, "reply-to-reviews")
     },
     {
       label: "Volume traité",
       value: reviewsMilestone?.achieved
-        ? formatCountLabel(input.reviewsTotal, "avis", "avis")
+        ? formatCountLabel(input.totalReviews, "avis", "avis")
         : "Aucun avis",
       complete: reviewsMilestone?.achieved ?? false
     },
@@ -481,12 +431,18 @@ const buildScoreFactors = (
   ];
 };
 
-const buildBusinessHealthScore = (
-  input: BusinessHealthScoreInput
+const buildBusinessHealthScoreModel = (
+  coachResult: CoachResult,
+  input: CoachInput
 ): BusinessHealthScoreModel => {
-  const coachResult = buildCoachResult(buildCoachInput(input));
   const score = coachResult.score.value;
   const checklist = buildChecklist(input, coachResult);
+  const completedMilestones = coachResult.milestones.filter(
+    (milestone) => milestone.achieved
+  );
+  const nextMilestone =
+    coachResult.milestones.find((milestone) => !milestone.achieved) ??
+    coachResult.milestones[coachResult.milestones.length - 1];
   const visibleRecommendations = coachResult.recommendations
     .slice(0, 3)
     .map(mapRecommendation);
@@ -503,9 +459,11 @@ const buildBusinessHealthScore = (
 
   return {
     score,
-    level: getHealthLevel(score),
+    level: getHealthLevel(coachResult.score.level),
     checklist,
     completedChecklistCount: checklist.filter((item) => item.complete).length,
+    completedMilestones,
+    nextMilestone,
     recommendations: visibleRecommendations,
     nextBestAction,
     scoreFactors: buildScoreFactors(input, coachResult),
@@ -1012,7 +970,6 @@ const BusinessHealthScoreCard = ({
 
 export {
   BusinessHealthScoreCard,
-  buildBusinessHealthScore,
-  getStoredCompetitorContextStatus
+  buildBusinessHealthScoreModel
 };
-export type { BusinessHealthScoreInput, BusinessHealthScoreModel };
+export type { BusinessHealthScoreModel };

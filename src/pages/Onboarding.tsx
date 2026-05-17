@@ -1,7 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import type { QueryClient } from "@tanstack/react-query";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   Building2,
@@ -25,10 +23,10 @@ import { Card, CardContent } from "../components/ui/card";
 import type { GoogleConnectionStatus } from "../hooks/useGoogleConnectionStatus";
 import type { AppNotificationBase } from "../lib/notifications";
 import {
-  buildCoachResult,
   type CoachMilestone,
   type CoachResult,
-  type CoachScoreLevel
+  type CoachScoreLevel,
+  useCoachResult
 } from "../services/coach";
 
 type OnboardingProps = {
@@ -54,51 +52,6 @@ type VoicePreset =
   | "humain";
 
 type StatusLabel = "Validé" | "À compléter" | "Non encore mesuré" | "À venir";
-
-type KpiSummaryCache = {
-  counts?: {
-    reviews_total?: number | null;
-    reviews_with_text?: number | null;
-    reviews_replied?: number | null;
-    reviews_replyable?: number | null;
-  };
-  ratings?: {
-    avg_rating?: number | null;
-  };
-  response?: {
-    response_rate_pct?: number | null;
-  };
-  sentiment?: {
-    sentiment_samples?: number | null;
-  };
-  top_tags?: Array<{ tag?: string | null; count?: number | null }>;
-};
-
-type AiKpiCache = {
-  sentiment?: {
-    samples?: number | null;
-  };
-  topTags?: Array<{ tag?: string | null; count?: number | null }>;
-  priorityCount?: number | null;
-};
-
-type AlertsCache = Array<{
-  resolved_at?: string | null;
-}>;
-
-type BusinessSettingsCache = {
-  active_location_ids?: unknown;
-};
-
-type CoachOnboardingCacheData = {
-  kpiSummary: KpiSummaryCache | null;
-  aiStats: AiKpiCache | null;
-  activeLocationsCount: number;
-  alertsOpenCount: number | null;
-  reportsCount: number | null;
-  teamMembersCount: number | null;
-  competitorWatchActive: boolean | null;
-};
 
 type StepState = {
   label: (typeof steps)[number];
@@ -152,147 +105,6 @@ const steps = [
   "Coach",
   "Succès"
 ] as const;
-
-const getLastCachedData = <T,>(
-  queryClient: QueryClient,
-  queryKey: readonly unknown[]
-): T | null => {
-  const entries = queryClient.getQueriesData<T>({ queryKey });
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const data = entries[index]?.[1];
-    if (data !== undefined && data !== null) {
-      return data;
-    }
-  }
-  return null;
-};
-
-const getCachedArrayCount = <T,>(
-  queryClient: QueryClient,
-  queryKey: readonly unknown[]
-): number | null => {
-  const data = getLastCachedData<T[]>(queryClient, queryKey);
-  return Array.isArray(data) ? data.length : null;
-};
-
-const getActiveLocationsCount = (
-  businessSettings: BusinessSettingsCache | null,
-  fallbackCount: number
-): number => {
-  const activeLocationIds = businessSettings?.active_location_ids;
-  if (!Array.isArray(activeLocationIds)) {
-    return fallbackCount;
-  }
-
-  const count = activeLocationIds.filter(Boolean).length;
-  return count > 0 ? count : fallbackCount;
-};
-
-const getCachedAlertsOpenCount = (
-  queryClient: QueryClient,
-  userId: string | null
-): number | null => {
-  if (!userId) {
-    return null;
-  }
-
-  const alerts = getLastCachedData<AlertsCache>(queryClient, ["alerts", userId]);
-  if (!Array.isArray(alerts)) {
-    return null;
-  }
-
-  return alerts.filter((alert) => !alert.resolved_at).length;
-};
-
-const getCompetitorWatchActive = (
-  queryClient: QueryClient,
-  userId: string | null
-): boolean | null => {
-  if (!userId) {
-    return null;
-  }
-
-  const followed = queryClient.getQueriesData<unknown[]>({
-    queryKey: ["competitors-followed", userId]
-  });
-  if (followed.some(([, data]) => Array.isArray(data) && data.length > 0)) {
-    return true;
-  }
-
-  const radar = queryClient.getQueriesData<unknown[]>({
-    queryKey: ["competitors-radar", userId]
-  });
-  if (radar.some(([, data]) => Array.isArray(data) && data.length > 0)) {
-    return true;
-  }
-
-  return followed.length > 0 || radar.length > 0 ? false : null;
-};
-
-const readOnboardingCacheData = (
-  queryClient: QueryClient,
-  userId: string | null,
-  locationsCount: number
-): CoachOnboardingCacheData => {
-  if (!userId) {
-    return {
-      kpiSummary: null,
-      aiStats: null,
-      activeLocationsCount: locationsCount,
-      alertsOpenCount: null,
-      reportsCount: null,
-      teamMembersCount: null,
-      competitorWatchActive: null
-    };
-  }
-
-  const coachKpiSummary = getLastCachedData<KpiSummaryCache>(queryClient, [
-    "coach-health-kpi",
-    userId
-  ]);
-  const dashboardKpiSummary = getLastCachedData<KpiSummaryCache>(queryClient, [
-    "kpi-summary",
-    userId
-  ]);
-  const businessSettings = getLastCachedData<BusinessSettingsCache>(
-    queryClient,
-    ["business-settings", userId]
-  );
-  const reportsCount =
-    getCachedArrayCount<unknown>(queryClient, ["generated-reports", userId]) ??
-    getCachedArrayCount<unknown>(queryClient, ["reports", userId]);
-
-  return {
-    kpiSummary: coachKpiSummary ?? dashboardKpiSummary,
-    aiStats: getLastCachedData<AiKpiCache>(queryClient, ["ai-kpis", userId]),
-    activeLocationsCount: getActiveLocationsCount(
-      businessSettings,
-      locationsCount
-    ),
-    alertsOpenCount: getCachedAlertsOpenCount(queryClient, userId),
-    reportsCount,
-    teamMembersCount: getCachedArrayCount<unknown>(queryClient, [
-      "team-members",
-      userId
-    ]),
-    competitorWatchActive: getCompetitorWatchActive(queryClient, userId)
-  };
-};
-
-const getNotificationActionCount = (
-  notifications: AppNotificationBase[]
-): number =>
-  notifications.filter((notification) => notification.requiresAction === true)
-    .length;
-
-const getDominantTags = (
-  kpiSummary: KpiSummaryCache | null,
-  aiStats: AiKpiCache | null
-) =>
-  (aiStats?.topTags?.length ? aiStats.topTags : kpiSummary?.top_tags)?.filter(
-    (tag): tag is { tag: string; count?: number | null } =>
-      typeof tag.tag === "string" && tag.tag.trim().length > 0
-  ) ?? null;
 
 const getMilestone = (
   result: CoachResult,
@@ -370,18 +182,15 @@ const Onboarding = ({
   notifications
 }: OnboardingProps) => {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const userId = session?.user.id ?? null;
-  const [cacheVersion, setCacheVersion] = useState(0);
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedVoice, setSelectedVoice] = useState<VoicePreset>("premium");
   const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
-
-  useEffect(() => {
-    return queryClient.getQueryCache().subscribe(() => {
-      setCacheVersion((version) => version + 1);
-    });
-  }, [queryClient]);
+  const coach = useCoachResult({
+    session,
+    googleStatus,
+    locations,
+    notifications
+  });
 
   useEffect(() => {
     setSelectedLocations((previous) => {
@@ -394,54 +203,17 @@ const Onboarding = ({
     });
   }, [locations]);
 
-  const cachedCoachData = useMemo(
-    () => readOnboardingCacheData(queryClient, userId, locations.length),
-    [cacheVersion, locations.length, queryClient, userId]
-  );
-  const kpiSummary = cachedCoachData.kpiSummary;
-  const aiStats = cachedCoachData.aiStats;
+  const kpiSummary = coach.kpiSummary;
+  const aiStats = coach.aiStats;
   const googleConnected = googleStatus === "connected";
-  const notificationActionCount = getNotificationActionCount(notifications);
-  const reviewsReplyable = kpiSummary?.counts?.reviews_replyable ?? null;
-  const reviewsReplied = kpiSummary?.counts?.reviews_replied ?? null;
-  const unansweredReviewsCount =
-    typeof reviewsReplyable === "number" && typeof reviewsReplied === "number"
-      ? Math.max(0, reviewsReplyable - reviewsReplied)
-      : null;
-  const aiSamples =
-    aiStats?.sentiment?.samples ?? kpiSummary?.sentiment?.sentiment_samples ?? null;
-  const dominantTags = getDominantTags(kpiSummary, aiStats);
+  const notificationActionCount = coach.coachMetrics.notificationActionCount;
+  const unansweredReviewsCount = coach.coachMetrics.unansweredReviewsCount;
+  const aiSamples = coach.coachMetrics.aiSamples;
+  const dominantTags = coach.coachMetrics.dominantTags;
   const aiReady =
     (typeof aiSamples === "number" && aiSamples > 0) ||
     Boolean(dominantTags?.length);
-  const alertsOpenCount =
-    cachedCoachData.alertsOpenCount ?? notificationActionCount;
-  const activeLocationsCount =
-    selectedLocations.length > 0
-      ? selectedLocations.length
-      : cachedCoachData.activeLocationsCount;
-  const coachResult = buildCoachResult({
-    googleConnected,
-    activeLocationsCount,
-    totalLocationsCount: locations.length,
-    totalReviews: kpiSummary?.counts?.reviews_total,
-    reviewsWithText: kpiSummary?.counts?.reviews_with_text,
-    averageRating: kpiSummary?.ratings?.avg_rating,
-    responseRate: kpiSummary?.response?.response_rate_pct,
-    criticalReviewsCount: aiStats?.priorityCount ?? notificationActionCount,
-    unansweredReviewsCount,
-    aiInsightsReady:
-      typeof aiSamples === "number" && Number.isFinite(aiSamples)
-        ? aiReady
-        : undefined,
-    dominantTags,
-    alertsOpenCount,
-    automationCount: undefined,
-    teamMembersCount: cachedCoachData.teamMembersCount,
-    competitorWatchActive: cachedCoachData.competitorWatchActive,
-    reportsCount: cachedCoachData.reportsCount,
-    accountCreatedAt: session?.user.created_at ?? null
-  });
+  const coachResult = coach.coachResult;
   const accountMilestone = getMilestone(coachResult, "account-created");
   const googleMilestone = getMilestone(coachResult, "google-connected");
   const locationMilestone = getMilestone(coachResult, "first-location-imported");
@@ -797,11 +569,15 @@ const Onboarding = ({
               </div>
               {dominantTags?.length ? (
                 <div className="flex flex-wrap gap-2">
-                  {dominantTags.slice(0, 4).map((tag) => (
-                    <Badge key={tag.tag} variant="neutral">
-                      {tag.tag}
-                    </Badge>
-                  ))}
+                  {dominantTags.slice(0, 4).map((tag) => {
+                    const label =
+                      typeof tag === "string" ? tag : tag.tag ?? tag.label ?? "";
+                    return (
+                      <Badge key={label} variant="neutral">
+                        {label}
+                      </Badge>
+                    );
+                  })}
                 </div>
               ) : null}
               <Button
@@ -961,9 +737,9 @@ const Onboarding = ({
                   icon: Radar,
                   label: "Veille",
                   detail:
-                    cachedCoachData.competitorWatchActive === null
+                    coach.cacheData.competitorWatchActive === null
                       ? "Non encore mesuré"
-                      : cachedCoachData.competitorWatchActive
+                      : coach.cacheData.competitorWatchActive
                         ? "Active"
                         : "À compléter"
                 }
