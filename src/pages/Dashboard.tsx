@@ -1,20 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
-import { useNavigate } from "react-router-dom";
 import {
-  ArrowRight,
   AlertTriangle,
   Bell,
   CheckCircle,
-  Medal,
   MapPin,
   MessageSquare,
-  RefreshCw,
-  Sparkles,
-  Target,
-  TrendingUp
+  RefreshCw
 } from "lucide-react";
+import {
+  BusinessHealthScoreCard,
+  buildBusinessHealthScore,
+  getStoredCompetitorContextStatus
+} from "../components/coach/BusinessHealthScore";
 import { GoogleConnectionBadge } from "../components/GoogleConnectionBadge";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -126,78 +125,6 @@ type AiInsightRow = {
 type AiTagRow = {
   tag?: string | null;
   category?: string | null;
-};
-
-type HealthLevel = {
-  label: "Bronze" | "Silver" | "Gold";
-  badgeClass: string;
-  accentClass: string;
-  progressClass: string;
-  next: string;
-};
-
-type HealthChecklistItem = {
-  id: string;
-  label: string;
-  description: string;
-  complete: boolean;
-  href: string;
-  cta: string;
-};
-
-type HealthRecommendation = {
-  id: string;
-  label: string;
-  detail: string;
-  href: string;
-  cta: string;
-};
-
-const clampHealthScore = (score: number): number =>
-  Math.max(0, Math.min(100, Math.round(score)));
-
-const getHealthLevel = (score: number): HealthLevel => {
-  if (score >= 75) {
-    return {
-      label: "Gold",
-      badgeClass: "border-amber-300 bg-amber-100 text-amber-800",
-      accentClass: "text-amber-300",
-      progressClass: "bg-amber-300",
-      next: "Optimiser la croissance"
-    };
-  }
-
-  if (score >= 45) {
-    return {
-      label: "Silver",
-      badgeClass: "border-slate-200 bg-slate-100 text-slate-700",
-      accentClass: "text-slate-200",
-      progressClass: "bg-slate-200",
-      next: "Accélérer les réponses"
-    };
-  }
-
-  return {
-    label: "Bronze",
-    badgeClass: "border-orange-300 bg-orange-100 text-orange-800",
-    accentClass: "text-orange-300",
-    progressClass: "bg-orange-300",
-    next: "Finaliser la configuration"
-  };
-};
-
-const hasStoredCompetitorContext = (): boolean => {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  try {
-    const zoneLabel = window.localStorage.getItem("competitors_zone_label");
-    const rawHistory = window.localStorage.getItem("competitors_scan_history");
-    const history = rawHistory ? JSON.parse(rawHistory) : [];
-    return Boolean(zoneLabel) || (Array.isArray(history) && history.length > 0);
-  } catch {
-    return false;
-  }
 };
 
 const getGreeting = (): string => {
@@ -506,7 +433,6 @@ const Dashboard = ({
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
   const prevSyncingRef = useRef<boolean>(syncing);
   const prevLocationsErrorRef = useRef<string | null>(locationsError);
-  const navigate = useNavigate();
 
   const [readNotificationIds] = useState<Set<string>>(
     getReadNotificationIds
@@ -1006,201 +932,20 @@ const Dashboard = ({
   const aiSamples = aiKpiData?.sentiment.samples ?? 0;
   const aiTrend = aiKpiData?.trend ?? [];
   const googleConnected = googleStatus === "connected";
-  const locationsCount = locations.length;
   const reviewsTotal = kpiData?.counts.reviews_total ?? 0;
   const avgRating = kpiData?.ratings.avg_rating ?? null;
-  const hasReviews = reviewsTotal > 0;
-  const hasAiInsights = aiSamples > 0;
-  const activeLocationsReady =
-    locationsCount > 0 && selectedActiveIds.length > 0;
-  const priorityCount = aiKpiData?.priorityCount ?? 0;
-  const alertSignalsReady = notificationsWithStatus.length > 0;
-  const competitorContextReady = hasStoredCompetitorContext();
-  const responseScore = responseRateValid ? Math.min(20, responseRate * 0.2) : 0;
-  const ratingScore = avgRating !== null ? Math.min(12, avgRating * 2.4) : 0;
-  const workloadScore = hasReviews
-    ? priorityCount === 0
-      ? 5
-      : priorityCount <= 3
-        ? 3
-        : 0
-    : 0;
-  const advancedSetupScore =
-    (activeLocationsReady ? 3 : 0) +
-    (alertSignalsReady ? 2 : 0) +
-    (competitorContextReady ? 3 : 0);
-  const healthScore = clampHealthScore(
-    (googleConnected ? 15 : 0) +
-      (locationsCount > 0 ? 15 : 0) +
-      (hasReviews ? 15 : 0) +
-      responseScore +
-      ratingScore +
-      (hasAiInsights ? 10 : 0) +
-      workloadScore +
-      advancedSetupScore
-  );
-  const healthLevel = getHealthLevel(healthScore);
-  const healthRingColor =
-    healthScore >= 75 ? "#fbbf24" : healthScore >= 45 ? "#cbd5e1" : "#fb923c";
-  const healthChecklist: HealthChecklistItem[] = [
-    {
-      id: "google",
-      label: "Connecter Google",
-      description: googleConnected
-        ? "La source principale est connectée."
-        : "Reliez Google Business Profile pour démarrer.",
-      complete: googleConnected,
-      href: "/connect",
-      cta: "Connecter"
-    },
-    {
-      id: "locations",
-      label: "Importer les établissements",
-      description: locationsCount
-        ? `${locationsCount} établissement${locationsCount > 1 ? "s" : ""} disponible${locationsCount > 1 ? "s" : ""}.`
-        : "Ajoutez les fiches à piloter dans EGIA.",
-      complete: locationsCount > 0,
-      href: "/settings?tab=locations",
-      cta: "Importer"
-    },
-    {
-      id: "reviews",
-      label: "Faire remonter les avis",
-      description: hasReviews
-        ? `${reviewsTotal} avis analysables sur la période.`
-        : "Synchronisez les premiers avis pour activer le coach.",
-      complete: hasReviews,
-      href: "/inbox",
-      cta: "Voir l'inbox"
-    },
-    {
-      id: "response-rate",
-      label: "Atteindre 70% de réponse",
-      description: responseRateValid
-        ? `Taux actuel: ${formatPercent(responseRate)}.`
-        : "Le taux apparaîtra après import des avis.",
-      complete: responseRateValid && responseRate >= 70,
-      href: "/inbox",
-      cta: "Répondre"
-    },
-    {
-      id: "ai-identity",
-      label: "Calibrer la voix IA",
-      description: hasAiInsights
-        ? "Les premiers signaux IA sont disponibles."
-        : "Définissez le ton de réponse pour gagner en constance.",
-      complete: hasAiInsights,
-      href: "/settings/brand-voice",
-      cta: "Configurer"
-    },
-    {
-      id: "alerts",
-      label: "Activer les alertes",
-      description: "Recevez les signaux qui demandent une action rapide.",
-      complete: alertSignalsReady,
-      href: "/alerts",
-      cta: "Ouvrir"
-    },
-    {
-      id: "competitors",
-      label: "Surveiller la concurrence",
-      description: "Comparez votre réputation locale aux concurrents.",
-      complete: competitorContextReady,
-      href: "/competitors",
-      cta: "Scanner"
-    }
-  ];
-  const completedChecklistCount = healthChecklist.filter((item) => item.complete).length;
-  const recommendations: HealthRecommendation[] = [];
-
-  if (!googleConnected) {
-    recommendations.push({
-      id: "connect-google",
-      label: "Connectez Google en premier",
-      detail: "Sans connexion Google, EGIA ne peut pas coacher la réputation.",
-      href: "/connect",
-      cta: "Connecter"
-    });
-  } else if (locationsCount === 0) {
-    recommendations.push({
-      id: "import-locations",
-      label: "Importez les établissements",
-      detail: "Le score devient utile dès qu'une fiche est suivie.",
-      href: "/settings?tab=locations",
-      cta: "Importer"
-    });
-  } else if (!hasReviews) {
-    recommendations.push({
-      id: "sync-reviews",
-      label: "Synchronisez les premiers avis",
-      detail: "Les avis déclenchent les priorités, le sentiment et les drafts.",
-      href: "/settings?tab=locations",
-      cta: "Synchroniser"
-    });
-  }
-
-  if (hasReviews && (!responseRateValid || responseRate < 70)) {
-    recommendations.push({
-      id: "reply-rate",
-      label: "Augmentez le taux de réponse",
-      detail: "Objectif V1: répondre à au moins 70% des avis exploitables.",
-      href: "/inbox",
-      cta: "Traiter"
-    });
-  }
-
-  if (priorityCount > 0) {
-    recommendations.push({
-      id: "priority-reviews",
-      label: "Traitez les avis critiques",
-      detail: `${priorityCount} avis demandent une action prioritaire.`,
-      href: "/inbox",
-      cta: "Prioriser"
-    });
-  }
-
-  if (hasReviews && !hasAiInsights) {
-    recommendations.push({
-      id: "ai-insights",
-      label: "Lancez la montée en qualité IA",
-      detail: "Calibrez la voix IA pour stabiliser les drafts de réponse.",
-      href: "/settings/brand-voice",
-      cta: "Configurer"
-    });
-  }
-
-  recommendations.push(
-    {
-      id: "alerts-next",
-      label: "Mettez les alertes sous contrôle",
-      detail: "Gardez les signaux réputation au bon endroit avant la vente.",
-      href: "/alerts",
-      cta: "Voir"
-    },
-    {
-      id: "competitors-next",
-      label: "Ajoutez le contexte concurrentiel",
-      detail: "La veille donne au score une lecture marché plus actionnable.",
-      href: "/competitors",
-      cta: "Comparer"
-    }
-  );
-
-  const healthRecommendations = recommendations.slice(0, 3);
-  const nextBestAction = healthRecommendations[0] ?? {
-    id: "open-inbox",
-    label: "Pilotez les réponses du jour",
-    detail: "Le socle est prêt, gardez le rythme opérationnel.",
-    href: "/inbox",
-    cta: "Ouvrir"
-  };
-  const quickActions = [
-    { label: "Inbox", href: "/inbox" },
-    { label: "Établissements", href: "/settings?tab=locations" },
-    { label: "Voix IA", href: "/settings/brand-voice" },
-    { label: "Alertes", href: "/alerts" },
-    { label: "Veille", href: "/competitors" }
-  ];
+  const healthModel = buildBusinessHealthScore({
+    googleConnected,
+    locationsCount: locations.length,
+    reviewsTotal,
+    responseRate: responseRateValid ? responseRate : null,
+    avgRating,
+    aiSamples,
+    priorityCount: aiKpiData?.priorityCount ?? 0,
+    activeLocationsCount: selectedActiveIds.length,
+    alertSignalsReady: notificationsWithStatus.length > 0,
+    competitorContextReady: getStoredCompetitorContextStatus()
+  });
 
   return (
     <div className="space-y-6">
@@ -1208,186 +953,11 @@ const Dashboard = ({
         <h2 className="text-2xl font-semibold text-slate-900">{greetingText}</h2>
       </div>
 
-      <Card className="overflow-hidden">
-        <CardContent className="p-0">
-          <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)]">
-            <div className="bg-slate-950 p-5 text-white sm:p-6">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0 space-y-2">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold text-slate-100">
-                    <Sparkles size={14} />
-                    Coach business EGIA
-                  </div>
-                  <div>
-                    <h3 className="text-2xl font-semibold leading-tight sm:text-3xl">
-                      Business Health Score
-                    </h3>
-                    <p className="mt-2 max-w-xl text-sm text-slate-300">
-                      Un score simple pour savoir quoi faire maintenant et faire
-                      progresser votre réputation locale.
-                    </p>
-                  </div>
-                </div>
-                <Badge className={healthLevel.badgeClass}>
-                  <Medal size={14} />
-                  Niveau {healthLevel.label}
-                </Badge>
-              </div>
-
-              <div className="mt-6 grid gap-5 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-center">
-                <div
-                  className="relative mx-auto flex h-32 w-32 items-center justify-center rounded-full p-2 sm:mx-0"
-                  style={{
-                    background: `conic-gradient(${healthRingColor} ${healthScore * 3.6}deg, rgba(255,255,255,0.14) 0deg)`
-                  }}
-                >
-                  <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-slate-950">
-                    <span className="text-4xl font-semibold">{healthScore}</span>
-                    <span className="text-xs font-semibold text-slate-400">/100</span>
-                  </div>
-                </div>
-
-                <div className="min-w-0 space-y-4">
-                  <div>
-                    <div className="flex items-center justify-between gap-3 text-xs font-semibold text-slate-300">
-                      <span>Progression commerciale</span>
-                      <span>{completedChecklistCount}/{healthChecklist.length} étapes</span>
-                    </div>
-                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/15">
-                      <div
-                        className={`h-full rounded-full ${healthLevel.progressClass} transition-all duration-700`}
-                        style={{ width: `${healthScore}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
-                    <div className="flex items-start gap-3">
-                      <Target className={healthLevel.accentClass} size={20} />
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold uppercase text-slate-400">
-                          Next best action
-                        </p>
-                        <p className="mt-1 font-semibold">{nextBestAction.label}</p>
-                        <p className="mt-1 text-sm text-slate-300">
-                          {nextBestAction.detail}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        className="bg-white text-slate-950 hover:bg-slate-100"
-                        onClick={() => navigate(nextBestAction.href)}
-                      >
-                        {nextBestAction.cta}
-                        <ArrowRight size={15} />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="border-white/20 text-white hover:bg-white/10"
-                        onClick={() => navigate("/inbox")}
-                      >
-                        Ouvrir l'inbox
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-5 p-5 sm:p-6">
-              <div>
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">
-                      Checklist intelligente
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Les actions qui augmentent le score.
-                    </p>
-                  </div>
-                  <TrendingUp size={18} className="text-emerald-600" />
-                </div>
-                <div className="mt-4 grid gap-2">
-                  {healthChecklist.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => navigate(item.href)}
-                      className="flex w-full items-start gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-slate-300 hover:bg-slate-50"
-                    >
-                      <span
-                        className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
-                          item.complete
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : "border-slate-200 bg-slate-50 text-slate-400"
-                        }`}
-                      >
-                        <CheckCircle size={14} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold text-slate-900">
-                          {item.label}
-                        </span>
-                        <span className="mt-0.5 block text-xs text-slate-500">
-                          {item.description}
-                        </span>
-                      </span>
-                      <span className="hidden text-xs font-semibold text-slate-500 sm:inline">
-                        {item.complete ? "OK" : item.cta}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm font-semibold text-slate-900">
-                  Recommandations prioritaires
-                </p>
-                <div className="mt-3 space-y-3">
-                  {healthRecommendations.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex items-start justify-between gap-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-slate-900">
-                          {item.label}
-                        </p>
-                        <p className="text-xs text-slate-500">{item.detail}</p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="shrink-0"
-                        onClick={() => navigate(item.href)}
-                      >
-                        {item.cta}
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {quickActions.map((action) => (
-                  <Button
-                    key={action.href}
-                    size="sm"
-                    variant="outline"
-                    onClick={() => navigate(action.href)}
-                  >
-                    {action.label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <BusinessHealthScoreCard
+        model={healthModel}
+        variant="dashboard"
+        loading={kpiLoading || aiKpiLoading}
+      />
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-end gap-3">

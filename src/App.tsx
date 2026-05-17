@@ -7,9 +7,11 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { MobileBottomNav } from "./components/layout/MobileBottomNav";
 import { Topbar } from "./components/layout/Topbar";
 import { Dashboard } from "./pages/Dashboard";
+import { Coach } from "./pages/Coach";
 import { Inbox } from "./pages/Inbox";
 import { Connect } from "./pages/Connect";
 import { Analytics } from "./pages/Analytics";
+import { Billing } from "./pages/Billing";
 import { BrandVoice } from "./pages/BrandVoice";
 import { Automation } from "./pages/Automation";
 import { AutomationBuilder } from "./pages/AutomationBuilder";
@@ -132,10 +134,24 @@ const App = () => {
       };
     }
 
+    if (location.pathname === "/coach") {
+      return {
+        title: "Coach EGIA",
+        subtitle: "Score réputation, priorités et prochaines actions."
+      };
+    }
+
     if (location.pathname === "/analytics") {
       return {
         title: "Analytics",
         subtitle: "Tendances, répartition et thèmes clients."
+      };
+    }
+
+    if (location.pathname === "/billing") {
+      return {
+        title: "Abonnement & Facturation",
+        subtitle: "Gérez votre offre et vos factures en toute transparence."
       };
     }
 
@@ -982,6 +998,22 @@ const App = () => {
                       locationsError={locationsError}
                     />
                   }
+                />
+                <Route
+                  path="/coach"
+                  element={
+                    <Coach
+                      session={session}
+                      googleStatus={googleConnection.status}
+                      locations={locations}
+                      locationsLoading={locationsLoading}
+                      locationsError={locationsError}
+                    />
+                  }
+                />
+                <Route
+                  path="/billing"
+                  element={<Billing isAdmin={isAdminSession} />}
                 />
                 <Route
                   path="/connect"

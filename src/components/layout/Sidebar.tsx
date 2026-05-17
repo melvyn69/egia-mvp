@@ -5,6 +5,7 @@ import {
   BarChart3,
   Bell,
   Building2,
+  CreditCard,
   FileText,
   LayoutDashboard,
   Mailbox,
@@ -12,6 +13,7 @@ import {
   RefreshCw,
   Settings,
   Sparkles,
+  Target,
   Users
 } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -107,6 +109,20 @@ const Sidebar = ({
         >
           <LayoutDashboard size={18} />
           Dashboard
+        </NavLink>
+        <NavLink
+          to="/coach"
+          className={({ isActive }) =>
+            cn(
+              navLinkBase,
+              isActive
+                ? "bg-ink text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            )
+          }
+        >
+          <Target size={18} />
+          Coach EGIA
         </NavLink>
         <NavLink
           to="/inbox"
@@ -214,6 +230,20 @@ const Sidebar = ({
             >
               <Sparkles size={18} />
               Automatisations
+            </NavLink>
+            <NavLink
+              to="/billing"
+              className={({ isActive }) =>
+                cn(
+                  navLinkBase,
+                  isActive
+                    ? "bg-ink text-white shadow"
+                    : "text-slate-600 hover:bg-slate-100"
+                )
+              }
+            >
+              <CreditCard size={18} />
+              Facturation
             </NavLink>
             <NavLink
               to="/reports"
