@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   Award,
@@ -46,7 +47,7 @@ type Achievement = {
   description: string;
   unlocked: boolean;
   date?: string;
-  statusLabel?: "À venir" | "Non encore mesuré" | "Débloqué";
+  statusLabel?: MilestoneStatusLabel;
 };
 
 type TrophyItem = Achievement & {
@@ -58,8 +59,18 @@ type FeatureUnlock = {
   description: string;
   unlocked: boolean;
   icon: typeof Sparkles;
-  statusLabel: "À venir" | "Non encore mesuré" | "Débloqué";
+  statusLabel: MilestoneStatusLabel;
 };
+
+type MilestoneStatusLabel =
+  | "À venir"
+  | "Bientôt disponible"
+  | "Non encore mesuré"
+  | "Débloqué";
+
+const plannedMilestoneIds = new Set<CoachMilestone["id"]>([
+  "first-automation"
+]);
 
 const formatDate = (value?: string | null): string | undefined => {
   if (!value) {
@@ -111,11 +122,16 @@ const getProgressLevel = (level: CoachScoreLevel) => {
   }
 };
 
-const getMilestoneStatus = (
-  milestone: CoachMilestone
-): "À venir" | "Non encore mesuré" | "Débloqué" => {
+const getMilestoneStatus = (milestone: CoachMilestone): MilestoneStatusLabel => {
   if (milestone.achieved) {
     return "Débloqué";
+  }
+
+  if (
+    plannedMilestoneIds.has(milestone.id) &&
+    milestone.missingFields.length > 0
+  ) {
+    return "Bientôt disponible";
   }
 
   return milestone.missingFields.length > 0 ? "Non encore mesuré" : "À venir";
@@ -134,6 +150,10 @@ const describeMilestone = (milestone: CoachMilestone): string => {
   }
 
   if (!milestone.achieved && milestone.missingFields.length > 0) {
+    if (plannedMilestoneIds.has(milestone.id)) {
+      return `${milestone.description} Bientôt disponible.`;
+    }
+
     return `${milestone.description} Non encore mesuré.`;
   }
 
@@ -173,6 +193,27 @@ const getMilestone = (
   return milestone;
 };
 
+const timelineMilestoneIds: CoachMilestone["id"][] = [
+  "account-created",
+  "google-connected",
+  "first-location-imported",
+  "first-reviews-synced",
+  "first-review-replied",
+  "response-rate-90"
+];
+
+const trophyIconsByMilestone: Partial<
+  Record<CoachMilestone["id"], typeof Trophy>
+> = {
+  "first-review-replied": Trophy,
+  "reviews-treated-50": Star,
+  "response-rate-90": BarChart3,
+  "reviews-synced-100": Award,
+  "first-automation": Zap,
+  "first-competitor-watch": Radar,
+  "first-pdf-report": FileText
+};
+
 const Progress = ({
   session,
   googleStatus,
@@ -192,53 +233,50 @@ const Progress = ({
   const nextMilestone = coach.nextMilestone;
   const progressScore = coachResult.score.value;
   const level = getProgressLevel(coachResult.score.level);
+  const completedMilestoneIds = useMemo(
+    () => new Set(coach.completedMilestones.map((milestone) => milestone.id)),
+    [coach.completedMilestones]
+  );
+  const toProgressAchievement = (milestone: CoachMilestone): Achievement => ({
+    ...toAchievement(milestone),
+    unlocked: completedMilestoneIds.has(milestone.id)
+  });
 
-  const timeline: Achievement[] = [
-    toAchievement(getMilestone(milestones, "account-created")),
-    toAchievement(getMilestone(milestones, "google-connected")),
-    toAchievement(getMilestone(milestones, "first-location-imported")),
-    toAchievement(getMilestone(milestones, "first-reviews-synced")),
-    toAchievement(getMilestone(milestones, "first-automation")),
-    toAchievement(getMilestone(milestones, "first-pdf-report"))
-  ];
+  const timeline = useMemo<Achievement[]>(
+    () =>
+      timelineMilestoneIds.map((id) =>
+        toProgressAchievement(getMilestone(milestones, id))
+      ),
+    [completedMilestoneIds, milestones]
+  );
 
-  const trophies: TrophyItem[] = [
-    {
-      icon: Trophy,
-      ...toAchievement(getMilestone(milestones, "first-review-replied"))
-    },
-    {
-      icon: Star,
-      ...toAchievement(getMilestone(milestones, "reviews-treated-50"))
-    },
-    {
-      icon: BarChart3,
-      ...toAchievement(getMilestone(milestones, "response-rate-90"))
-    },
-    {
-      icon: Zap,
-      ...toAchievement(getMilestone(milestones, "first-automation"))
-    },
-    {
-      icon: Award,
-      ...toAchievement(getMilestone(milestones, "reviews-synced-100"))
-    },
-    {
-      icon: Radar,
-      ...toAchievement(getMilestone(milestones, "first-competitor-watch"))
-    },
-    {
-      icon: FileText,
-      ...toAchievement(getMilestone(milestones, "first-pdf-report"))
-    }
-  ];
+  const trophies = useMemo<TrophyItem[]>(
+    () =>
+      milestones.flatMap((milestone) => {
+        const icon = trophyIconsByMilestone[milestone.id];
+        if (!icon) {
+          return [];
+        }
+
+        return [
+          {
+            icon,
+            ...toProgressAchievement(milestone)
+          }
+        ];
+      }),
+    [completedMilestoneIds, milestones]
+  );
   const automationMilestone = getMilestone(milestones, "first-automation");
   const competitorMilestone = getMilestone(milestones, "first-competitor-watch");
   const reportMilestone = getMilestone(milestones, "first-pdf-report");
+  const aiBreakdown = coachResult.score.breakdown.find(
+    (item) => item.id === "ai-tags"
+  );
   const aiFeatureUnlocked =
-    typeof aiSamples === "number" && Number.isFinite(aiSamples) && aiSamples > 0;
+    aiBreakdown !== undefined && aiBreakdown.points > 0;
   const aiFeatureStatus =
-    typeof aiSamples === "number" && Number.isFinite(aiSamples)
+    aiBreakdown !== undefined && aiBreakdown.status !== "missing"
       ? aiFeatureUnlocked
         ? "Débloqué"
         : "À venir"
@@ -264,9 +302,9 @@ const Progress = ({
     {
       icon: Sparkles,
       label: "Widgets",
-      description: "Preuves sociales intégrables. À venir.",
+      description: "Preuves sociales intégrables. Bientôt disponible.",
       unlocked: false,
-      statusLabel: "À venir"
+      statusLabel: "Bientôt disponible"
     },
     {
       icon: FileText,
@@ -285,9 +323,9 @@ const Progress = ({
     {
       icon: Users,
       label: "Social Studio",
-      description: "Activation marque et contenus. À venir.",
+      description: "Activation marque et contenus. Bientôt disponible.",
       unlocked: false,
-      statusLabel: "À venir"
+      statusLabel: "Bientôt disponible"
     }
   ];
 

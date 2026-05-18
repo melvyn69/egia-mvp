@@ -17,10 +17,22 @@ import { useNavigate } from "react-router-dom";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import type { GoogleConnectionStatus } from "../hooks/useGoogleConnectionStatus";
+import type { AppNotificationBase } from "../lib/notifications";
+import {
+  buildCoachResultFromFrontendData,
+  readCoachFrontendCacheData,
+  type CoachFrontendCacheData,
+  type CoachScoreLevel
+} from "../services/coach";
+import { getCoachNotificationActionCount } from "../services/coach/frontend";
 
 type BillingProps = {
   isAdmin: boolean;
   userId: string | null;
+  googleStatus: GoogleConnectionStatus;
+  notifications: AppNotificationBase[];
+  accountCreatedAt?: string | null;
   locations: Array<{
     id: string;
     location_title: string | null;
@@ -61,25 +73,6 @@ type BusinessValueItem = {
   source: BillingDataSource;
 };
 
-type KpiSummaryCache = {
-  counts?: {
-    reviews_total?: number | null;
-    reviews_replied?: number | null;
-  };
-  response?: {
-    response_rate_pct?: number | null;
-  };
-  sentiment?: {
-    sentiment_samples?: number | null;
-  };
-};
-
-type AiKpiCache = {
-  sentiment?: {
-    samples?: number | null;
-  };
-};
-
 type InboxReviewRow = {
   id?: string | null;
   has_draft?: boolean | null;
@@ -94,12 +87,8 @@ type InboxCache = {
   }>;
 };
 
-type BillingCacheData = {
-  kpiSummary: KpiSummaryCache | null;
-  aiStats: AiKpiCache | null;
+type BillingCacheData = CoachFrontendCacheData & {
   draftCount: number | null;
-  reportsCount: number | null;
-  teamMembersCount: number | null;
 };
 
 const sourceMeta: Record<
@@ -170,28 +159,6 @@ const formatPercent = (value: number): string => `${Math.round(value)}%`;
 const toFiniteNumber = (value: number | null | undefined): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
 
-const getLastCachedData = <T,>(
-  queryClient: QueryClient,
-  queryKey: readonly unknown[]
-): T | null => {
-  const entries = queryClient.getQueriesData<T>({ queryKey });
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const data = entries[index]?.[1];
-    if (data !== undefined && data !== null) {
-      return data;
-    }
-  }
-  return null;
-};
-
-const getCachedArrayCount = <T,>(
-  queryClient: QueryClient,
-  queryKey: readonly unknown[]
-): number | null => {
-  const data = getLastCachedData<T[]>(queryClient, queryKey);
-  return Array.isArray(data) ? data.length : null;
-};
-
 const getCachedInboxDraftCount = (
   queryClient: QueryClient,
   userId: string | null
@@ -236,45 +203,45 @@ const getCachedInboxDraftCount = (
 
 const readBillingCacheData = (
   queryClient: QueryClient,
-  userId: string | null
+  userId: string | null,
+  locationsCount: number
 ): BillingCacheData => {
+  const coachCacheData = readCoachFrontendCacheData(
+    queryClient,
+    userId,
+    locationsCount
+  );
+
   if (!userId) {
     return {
-      kpiSummary: null,
-      aiStats: null,
-      draftCount: null,
-      reportsCount: null,
-      teamMembersCount: null
+      ...coachCacheData,
+      draftCount: null
     };
   }
 
-  const coachKpiSummary = getLastCachedData<KpiSummaryCache>(queryClient, [
-    "coach-health-kpi",
-    userId
-  ]);
-  const dashboardKpiSummary = getLastCachedData<KpiSummaryCache>(queryClient, [
-    "kpi-summary",
-    userId
-  ]);
-
   return {
-    kpiSummary: coachKpiSummary ?? dashboardKpiSummary,
-    aiStats: getLastCachedData<AiKpiCache>(queryClient, ["ai-kpis", userId]),
-    draftCount: getCachedInboxDraftCount(queryClient, userId),
-    reportsCount:
-      getCachedArrayCount<unknown>(queryClient, [
-        "generated-reports",
-        userId
-      ]) ?? getCachedArrayCount<unknown>(queryClient, ["reports", userId]),
-    teamMembersCount: getCachedArrayCount<unknown>(queryClient, [
-      "team-members",
-      userId
-    ])
+    ...coachCacheData,
+    draftCount: getCachedInboxDraftCount(queryClient, userId)
   };
 };
 
 const getUsagePercent = (item: UsageItem): number =>
   item.current === null ? 0 : Math.min(100, (item.current / item.limit) * 100);
+
+const getCoachLevelLabel = (level: CoachScoreLevel): string => {
+  switch (level) {
+    case "bronze":
+      return "Bronze";
+    case "silver":
+      return "Silver";
+    case "gold":
+      return "Gold";
+    case "expert":
+      return "Expert";
+    default:
+      return "Bronze";
+  }
+};
 
 const scrollToPricing = () => {
   document.getElementById("billing-pricing")?.scrollIntoView({
@@ -308,7 +275,14 @@ const AccessReserved = () => {
   );
 };
 
-const Billing = ({ isAdmin, userId, locations }: BillingProps) => {
+const Billing = ({
+  isAdmin,
+  userId,
+  googleStatus,
+  notifications,
+  accountCreatedAt,
+  locations
+}: BillingProps) => {
   const queryClient = useQueryClient();
   const [cacheVersion, setCacheVersion] = useState(0);
 
@@ -319,8 +293,12 @@ const Billing = ({ isAdmin, userId, locations }: BillingProps) => {
   }, [queryClient]);
 
   const cachedBillingData = useMemo(
-    () => readBillingCacheData(queryClient, userId),
-    [cacheVersion, queryClient, userId]
+    () => readBillingCacheData(queryClient, userId, locations.length),
+    [cacheVersion, locations.length, queryClient, userId]
+  );
+  const notificationActionCount = useMemo(
+    () => getCoachNotificationActionCount(notifications),
+    [notifications]
   );
   const reviewsTotal = toFiniteNumber(
     cachedBillingData.kpiSummary?.counts?.reviews_total
@@ -335,24 +313,67 @@ const Billing = ({ isAdmin, userId, locations }: BillingProps) => {
     cachedBillingData.aiStats?.sentiment?.samples ??
       cachedBillingData.kpiSummary?.sentiment?.sentiment_samples
   );
+  const coachBillingData = useMemo(
+    () =>
+      buildCoachResultFromFrontendData({
+        googleConnected: googleStatus === "connected",
+        locationsCount: locations.length,
+        activeLocationsCount: cachedBillingData.activeLocationsCount,
+        kpiSummary: cachedBillingData.kpiSummary,
+        aiStats: cachedBillingData.aiStats,
+        alertsOpenCount:
+          cachedBillingData.alertsOpenCount ?? notificationActionCount,
+        reportsCount: cachedBillingData.reportsCount,
+        teamMembersCount: cachedBillingData.teamMembersCount,
+        competitorWatchActive: cachedBillingData.competitorWatchActive,
+        notificationActionCount,
+        accountCreatedAt
+      }),
+    [
+      accountCreatedAt,
+      cachedBillingData.activeLocationsCount,
+      cachedBillingData.aiStats,
+      cachedBillingData.alertsOpenCount,
+      cachedBillingData.competitorWatchActive,
+      cachedBillingData.kpiSummary,
+      cachedBillingData.reportsCount,
+      cachedBillingData.teamMembersCount,
+      googleStatus,
+      locations.length,
+      notificationActionCount
+    ]
+  );
+  const coachResult = coachBillingData.result;
+  const coachHasMeasuredSignals =
+    googleStatus !== "unknown" ||
+    locations.length > 0 ||
+    reviewsTotal !== null ||
+    responseRate !== null ||
+    aiSamples !== null;
+  const coachSource: BillingDataSource =
+    coachResult.dataQuality.status === "complete"
+      ? "real"
+      : coachHasMeasuredSignals
+        ? "estimated"
+        : "planned";
   const aiUsage =
     cachedBillingData.draftCount !== null
       ? {
           current: cachedBillingData.draftCount,
           source: "real" as const,
-          projection: "Donnée issue des drafts déjà présents en cache Inbox."
+          projection: "Donnée issue des brouillons déjà disponibles."
         }
       : aiSamples !== null
         ? {
             current: aiSamples,
             source: "estimated" as const,
             projection:
-              "Estimé depuis les avis analysés IA déjà disponibles en cache."
+              "Estimé depuis les avis déjà analysés par l’IA."
           }
         : {
             current: null,
             source: "planned" as const,
-            projection: "Bientôt disponible : aucun cache d’usage IA chargé."
+            projection: "Bientôt disponible : usage IA à connecter."
           };
   const usageItems = useMemo<UsageItem[]>(
     () => [
@@ -383,8 +404,8 @@ const Billing = ({ isAdmin, userId, locations }: BillingProps) => {
         limit: 10,
         projection:
           cachedBillingData.teamMembersCount !== null
-            ? "Donnée équipe issue du cache existant."
-            : "Bientôt disponible : ouvrez l’équipe pour charger cette donnée.",
+            ? "Donnée équipe déjà disponible."
+            : "Bientôt disponible : ouvrez l’équipe pour mesurer cette donnée.",
         source:
           cachedBillingData.teamMembersCount !== null ? "real" : "planned"
       },
@@ -393,7 +414,7 @@ const Billing = ({ isAdmin, userId, locations }: BillingProps) => {
         current: null,
         limit: 5,
         projection:
-          "Bientôt disponible : aucun cache workflow n’est exposé sans fetch.",
+          "Bientôt disponible : usage workflows à connecter côté facturation.",
         source: "planned"
       },
       {
@@ -402,8 +423,8 @@ const Billing = ({ isAdmin, userId, locations }: BillingProps) => {
         limit: 10,
         projection:
           cachedBillingData.reportsCount !== null
-            ? "Donnée rapports issue du cache existant."
-            : "Bientôt disponible : ouvrez les rapports pour charger cette donnée.",
+            ? "Donnée rapports déjà disponible."
+            : "Bientôt disponible : ouvrez les rapports pour mesurer cette donnée.",
         source: cachedBillingData.reportsCount !== null ? "real" : "planned"
       }
     ],
@@ -439,7 +460,7 @@ const Billing = ({ isAdmin, userId, locations }: BillingProps) => {
         detail:
           reviewsTotal !== null
             ? "donnée KPI disponible"
-            : "KPI pas encore chargé dans le cache",
+            : "volume d’avis à connecter",
         source: reviewsTotal !== null ? "real" : "planned"
       },
       {
@@ -453,19 +474,35 @@ const Billing = ({ isAdmin, userId, locations }: BillingProps) => {
         source: responseRate !== null ? "real" : "planned"
       },
       {
-        label: "Avis traités",
+        label: "Score Coach",
         value:
-          reviewsReplied !== null
-            ? formatNumber(reviewsReplied)
-            : "Non mesuré",
+          coachSource === "planned"
+            ? "Non mesuré"
+            : `${coachResult.score.value}/100`,
         detail:
-          reviewsReplied !== null
-            ? "réponses déjà détectées"
-            : "réponses non encore en cache",
-        source: reviewsReplied !== null ? "real" : "planned"
+          coachSource === "real"
+            ? "score Coach centralisé"
+            : coachSource === "estimated"
+              ? "calculé avec les signaux disponibles"
+              : "score Coach à connecter",
+        source: coachSource
+      },
+      {
+        label: "Niveau Coach",
+        value:
+          coachSource === "planned"
+            ? "Non mesuré"
+            : getCoachLevelLabel(coachResult.score.level),
+        detail:
+          coachSource === "real"
+            ? "niveau Coach centralisé"
+            : coachSource === "estimated"
+              ? "niveau ajusté aux données disponibles"
+              : "niveau Coach à connecter",
+        source: coachSource
       }
     ],
-    [responseRate, reviewsReplied, reviewsTotal]
+    [coachResult.score.level, coachResult.score.value, coachSource, responseRate, reviewsTotal]
   );
   const roiBase =
     aiUsage.current ?? reviewsReplied ?? (reviewsTotal !== null ? 0 : null);
@@ -475,7 +512,7 @@ const Billing = ({ isAdmin, userId, locations }: BillingProps) => {
     estimatedHoursSaved !== null
       ? `EGIA a économisé environ ${formatNumber(
           estimatedHoursSaved
-        )}h estimées sur les données en cache.`
+        )}h estimées sur les signaux disponibles.`
       : "ROI en préparation : temps économisé non encore mesuré.";
   const upgradeDescription =
     primaryUsage.source !== "planned" && primaryUsagePercent >= 80
@@ -651,8 +688,8 @@ const Billing = ({ isAdmin, userId, locations }: BillingProps) => {
                   {roiHeadline}
                 </h2>
                 <p className="mt-3 text-sm text-slate-300">
-                  Estimation basée uniquement sur les drafts, avis et KPIs déjà
-                  présents dans le cache frontend.
+                  Estimation basée uniquement sur les brouillons, avis et KPIs
+                  déjà disponibles côté frontend.
                 </p>
               </div>
             </div>
@@ -667,7 +704,7 @@ const Billing = ({ isAdmin, userId, locations }: BillingProps) => {
             </p>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {businessValue.map((item) => (
                 <div
                   key={item.label}

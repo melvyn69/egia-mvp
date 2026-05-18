@@ -51,7 +51,14 @@ type VoicePreset =
   | "luxe"
   | "humain";
 
-type StatusLabel = "Validé" | "À compléter" | "Non encore mesuré" | "À venir";
+type StatusLabel =
+  | "Validé"
+  | "À compléter"
+  | "À connecter"
+  | "Non encore mesuré"
+  | "À venir"
+  | "Bientôt disponible"
+  | "Simulation";
 
 type StepState = {
   label: (typeof steps)[number];
@@ -122,6 +129,13 @@ const getMilestoneStatus = (milestone: CoachMilestone): StatusLabel => {
     return "Validé";
   }
 
+  if (
+    milestone.id === "google-connected" ||
+    milestone.id === "first-location-imported"
+  ) {
+    return "À connecter";
+  }
+
   return milestone.missingFields.length > 0 ? "Non encore mesuré" : "À compléter";
 };
 
@@ -139,6 +153,20 @@ const getScoreLevelLabel = (level: CoachScoreLevel): string => {
   }
 };
 
+const getScoreLevelClass = (level: CoachScoreLevel): string => {
+  switch (level) {
+    case "expert":
+      return "border-violet-200 bg-violet-50 text-violet-700";
+    case "gold":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    case "silver":
+      return "border-slate-200 bg-slate-100 text-slate-700";
+    case "bronze":
+    default:
+      return "border-orange-200 bg-orange-50 text-orange-700";
+  }
+};
+
 const getStatusClass = (status: StatusLabel): string => {
   if (status === "Validé") {
     return "border-emerald-200 bg-emerald-50 text-emerald-700";
@@ -148,8 +176,12 @@ const getStatusClass = (status: StatusLabel): string => {
     return "border-slate-200 bg-slate-50 text-slate-600";
   }
 
-  if (status === "À venir") {
+  if (status === "À venir" || status === "Bientôt disponible") {
     return "border-violet-200 bg-violet-50 text-violet-700";
+  }
+
+  if (status === "Simulation") {
+    return "border-slate-200 bg-white text-slate-600";
   }
 
   return "border-amber-200 bg-amber-50 text-amber-700";
@@ -210,20 +242,35 @@ const Onboarding = ({
   const unansweredReviewsCount = coach.coachMetrics.unansweredReviewsCount;
   const aiSamples = coach.coachMetrics.aiSamples;
   const dominantTags = coach.coachMetrics.dominantTags;
-  const aiReady =
-    (typeof aiSamples === "number" && aiSamples > 0) ||
-    Boolean(dominantTags?.length);
   const coachResult = coach.coachResult;
+  const aiBreakdown = coachResult.score.breakdown.find(
+    (item) => item.id === "ai-tags"
+  );
+  const aiReady =
+    aiBreakdown !== undefined
+      ? aiBreakdown.points > 0
+      : (typeof aiSamples === "number" && aiSamples > 0) ||
+        Boolean(dominantTags?.length);
   const accountMilestone = getMilestone(coachResult, "account-created");
   const googleMilestone = getMilestone(coachResult, "google-connected");
   const locationMilestone = getMilestone(coachResult, "first-location-imported");
   const replyMilestone = getMilestone(coachResult, "first-review-replied");
+  const nextCoachMilestone = coach.nextMilestone;
+  const aiStatus: StatusLabel =
+    aiBreakdown !== undefined && aiBreakdown.status !== "missing"
+      ? aiReady
+        ? "Validé"
+        : "À connecter"
+      : "Non encore mesuré";
   const coachScoreMeasured =
-    googleConnected ||
-    locations.length > 0 ||
-    typeof kpiSummary?.counts?.reviews_total === "number";
+    coachResult.dataQuality.status !== "low" ||
+    coach.completedMilestones.length > 0;
   const nextRecommendation = coachResult.recommendations[0] ?? null;
+  const nextActionTitle = nextRecommendation?.title ?? nextCoachMilestone.label;
+  const nextActionDescription =
+    nextRecommendation?.description ?? describeMilestone(nextCoachMilestone);
   const scoreLevelLabel = getScoreLevelLabel(coachResult.score.level);
+  const scoreLevelClass = getScoreLevelClass(coachResult.score.level);
   const selectedCount = selectedLocations.length;
   const progress = Math.round(((currentStep + 1) / steps.length) * 100);
   const stepStates: StepState[] = [
@@ -245,12 +292,7 @@ const Onboarding = ({
     {
       label: "Voix IA",
       complete: aiReady,
-      status:
-        typeof aiSamples === "number" || dominantTags !== null
-          ? aiReady
-            ? "Validé"
-            : "À compléter"
-          : "Non encore mesuré"
+      status: aiStatus
     },
     {
       label: "Première réponse",
@@ -264,7 +306,8 @@ const Onboarding = ({
     },
     {
       label: "Succès",
-      complete: googleMilestone.achieved && locationMilestone.achieved && coachScoreMeasured,
+      complete:
+        googleMilestone.achieved && locationMilestone.achieved && coachScoreMeasured,
       status:
         googleMilestone.achieved && locationMilestone.achieved && coachScoreMeasured
           ? "Validé"
@@ -426,10 +469,12 @@ const Onboarding = ({
                 Import établissements
               </h2>
               {renderStatusBadge(getMilestoneStatus(locationMilestone))}
+              {renderStatusBadge("Simulation")}
             </div>
             <p className="mt-3 text-slate-500">
               Sélectionnez les fiches à suivre. Si aucune fiche n’est encore
-              importée, lancez l’import depuis la connexion Google.
+              importée, lancez l’import depuis la connexion Google. La sélection
+              affichée ici prépare le suivi, sans persistance pour l’instant.
             </p>
             <div className="mt-6 space-y-3">
               {locations.length > 0 ? (
@@ -501,8 +546,8 @@ const Onboarding = ({
                 <p className="text-sm text-slate-300">établissements importés</p>
                 <p className="mt-4 text-sm text-slate-300">
                   {selectedCount > 0
-                    ? `${selectedCount} fiche${selectedCount > 1 ? "s" : ""} sélectionnée${selectedCount > 1 ? "s" : ""}.`
-                    : "Aucune fiche sélectionnée."}
+                    ? `Simulation : ${selectedCount} fiche${selectedCount > 1 ? "s" : ""} sélectionnée${selectedCount > 1 ? "s" : ""}.`
+                    : "Simulation : aucune fiche sélectionnée."}
                 </p>
               </div>
             </CardContent>
@@ -520,10 +565,12 @@ const Onboarding = ({
                 Calibrez la voix IA
               </h2>
               {renderStatusBadge(stepStates[3].status)}
+              {renderStatusBadge("Simulation")}
             </div>
             <p className="mt-3 max-w-2xl text-slate-500">
               Choisissez le style qui correspond à votre marque. EGIA l’utilisera
-              comme base pour les réponses.
+              comme base pour les réponses. Ce choix est une simulation tant que
+              la voix de marque n’est pas configurée.
             </p>
             <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {voicePresets.map((preset) => (
@@ -585,7 +632,7 @@ const Onboarding = ({
                 className="w-full"
                 onClick={() => navigate("/settings/brand-voice")}
               >
-                Configurer voix IA
+                {aiReady ? "Ouvrir voix IA" : "Configurer voix IA"}
               </Button>
             </CardContent>
           </Card>
@@ -691,12 +738,10 @@ const Onboarding = ({
                 <div>
                   <p className="text-sm text-slate-400">Score Coach</p>
                   <p className="mt-1 text-5xl font-semibold">
-                    {coachScoreMeasured
-                      ? coachResult.score.value
-                      : "Non encore mesuré"}
+                    {coachResult.score.value}
                   </p>
                 </div>
-                <Badge className="border-amber-200 bg-amber-50 text-amber-700">
+                <Badge className={scoreLevelClass}>
                   {scoreLevelLabel}
                 </Badge>
               </div>
@@ -711,11 +756,10 @@ const Onboarding = ({
                   Prochaine action
                 </p>
                 <p className="mt-1 font-semibold">
-                  {nextRecommendation?.title ?? "Ouvrir le Coach"}
+                  {nextActionTitle}
                 </p>
                 <p className="mt-1 text-sm text-slate-300">
-                  {nextRecommendation?.description ??
-                    "Le Coach est prêt à consolider vos priorités."}
+                  {nextActionDescription}
                 </p>
               </div>
             </div>
@@ -726,12 +770,14 @@ const Onboarding = ({
                 {
                   icon: Target,
                   label: "Priorités",
-                  detail: nextRecommendation ? "Prêtes" : "À compléter"
+                  detail: nextRecommendation ? "Prêtes" : nextCoachMilestone.label
                 },
                 {
                   icon: Trophy,
                   label: "Progression",
-                  detail: scoreLevelLabel
+                  detail: nextCoachMilestone.achieved
+                    ? scoreLevelLabel
+                    : nextCoachMilestone.label
                 },
                 {
                   icon: Radar,
@@ -741,7 +787,7 @@ const Onboarding = ({
                       ? "Non encore mesuré"
                       : coach.cacheData.competitorWatchActive
                         ? "Active"
-                        : "À compléter"
+                        : "À connecter"
                 }
               ].map(({ icon: Icon, label, detail }) => (
                 <div key={label} className="flex items-center gap-3">
@@ -779,9 +825,7 @@ const Onboarding = ({
           {[
             {
               label: "Score",
-              value: coachScoreMeasured
-                ? `${coachResult.score.value}/100`
-                : "Non mesuré"
+              value: `${coachResult.score.value}/100`
             },
             {
               label: "Établissements",
@@ -789,8 +833,8 @@ const Onboarding = ({
                 locations.length > 0 ? String(locations.length) : "À compléter"
             },
             {
-              label: "IA",
-              value: aiReady ? "Prête" : stepStates[3].status
+              label: "Niveau",
+              value: scoreLevelLabel
             },
             {
               label: "Avis",

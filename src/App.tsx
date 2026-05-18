@@ -1054,6 +1054,9 @@ const App = () => {
                     <Billing
                       isAdmin={isAdminSession}
                       userId={session?.user.id ?? null}
+                      googleStatus={googleConnection.status}
+                      notifications={notifications}
+                      accountCreatedAt={session?.user.created_at ?? null}
                       locations={locations}
                     />
                   }
