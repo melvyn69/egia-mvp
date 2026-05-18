@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   Award,
@@ -272,17 +272,20 @@ const Progress = ({
   const hasLimitedProgressData = !completedMilestoneIds.has("first-reviews-synced");
   const recentlyUnlocked =
     coach.completedMilestones[coach.completedMilestones.length - 1] ?? null;
-  const toProgressAchievement = (milestone: CoachMilestone): Achievement => ({
-    ...toAchievement(milestone),
-    unlocked: completedMilestoneIds.has(milestone.id)
-  });
+  const toProgressAchievement = useCallback(
+    (milestone: CoachMilestone): Achievement => ({
+      ...toAchievement(milestone),
+      unlocked: completedMilestoneIds.has(milestone.id)
+    }),
+    [completedMilestoneIds]
+  );
 
   const timeline = useMemo<Achievement[]>(
     () =>
       timelineMilestoneIds.map((id) =>
         toProgressAchievement(getMilestone(milestones, id))
       ),
-    [completedMilestoneIds, milestones]
+    [milestones, toProgressAchievement]
   );
 
   const trophies = useMemo<TrophyItem[]>(
@@ -300,7 +303,7 @@ const Progress = ({
           }
         ];
       }),
-    [completedMilestoneIds, milestones]
+    [milestones, toProgressAchievement]
   );
   const automationMilestone = getMilestone(milestones, "first-automation");
   const competitorMilestone = getMilestone(milestones, "first-competitor-watch");

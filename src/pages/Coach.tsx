@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
+import { useNavigate } from "react-router-dom";
 import {
   BusinessHealthScoreCard,
   buildBusinessHealthScoreModel
@@ -9,7 +10,6 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import type { GoogleConnectionStatus } from "../hooks/useGoogleConnectionStatus";
 import { type CoachKpiSummaryCache, useCoachResult } from "../services/coach";
-import { useNavigate } from "react-router-dom";
 
 type CoachProps = {
   session: Session | null;

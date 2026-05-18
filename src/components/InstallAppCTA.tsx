@@ -49,9 +49,3 @@ const InstallAppCTA = ({ onFallback, className }: InstallAppCTAProps) => {
 };
 
 export { InstallAppCTA };
-
-// Manual test plan:
-// 1) Chrome desktop incognito: CTA visible if installable, prompt appears on click.
-// 2) Android Chrome: same behavior as desktop.
-// 3) iPhone Safari: CTA visible, click opens /settings?tab=mobile via fallback.
-// 4) Installed PWA: CTA hidden.

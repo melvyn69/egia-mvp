@@ -887,9 +887,3 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
 };
 
 export { AutomationBuilder };
-
-// Manual test plan:
-// 1) Ouvrir /automation?template=vip -> conditions/actions pre-remplies, nom auto si vide.
-// 2) Ajouter condition "Pas de reponse" + heures -> sauvegarder -> reload -> valeurs conservees.
-// 3) Ajouter action "Creer une alerte" + type/severite/cooldown -> sauvegarder -> reload -> valeurs conservees.
-// 4) Verifier que user_id est bien rempli (RLS OK) lors des inserts.

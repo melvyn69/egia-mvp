@@ -373,8 +373,3 @@ const Alerts = ({ session }: AlertsProps) => {
 };
 
 export default Alerts;
-
-// Manual test plan:
-// 1) Ouvrir /alerts -> les alertes API s'affichent.
-// 2) Marquer comme traite -> disparait et reste apres refresh.
-// 3) Actualiser -> refetch sans erreur.

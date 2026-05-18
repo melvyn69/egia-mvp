@@ -2427,16 +2427,3 @@ const formatCountDelta = (delta: number | null) => {
 };
 
 export { Competitors };
-
-// Manual test plan:
-// 1) Header + onglets visibles, panneau "Nouvelle analyse" sticky en desktop.
-// 2) Rayon 5 km cliquable et met à jour le select.
-// 3) Lancer l'analyse -> overlay sonar visible puis disparition + message "Scan terminé".
-// 4) Historique: un scan ajoute une entrée, clic restaure mot-clé/rayon/zone.
-// 5) Radar: cartes "Détail par concurrent", suivre/unfollow OK, pagination client.
-// 6) SWOT: synthèse sombre + 4 cartes SWOT + actions recommandées.
-// 7) Mobile/tablette: colonnes empilées, pas d'overflow.
-//
-// Data audit (non disponible dans le payload actuel):
-// - opening_date, business_status, price_level, services/attributes, horaires,
-//   site web, telephone, categories, photos, statut d'ouverture.

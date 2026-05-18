@@ -1543,10 +1543,3 @@ const Settings = ({ session }: SettingsProps) => {
 };
 
 export default Settings;
-
-// Manual test plan:
-// 1) /settings?tab=locations (non connecte): bouton connexion visible.
-// 2) Connecte: badge Google connecte + bouton sync.
-// 3) Import/sync: liste rafraichie apres action.
-// 4) Aucun lieu: bloc vide affiche.
-// 5) npm run build.

@@ -15,8 +15,7 @@ const variantStyles: Record<BadgeVariant, string> = {
 const Badge = ({ className, variant = "neutral", ...props }: BadgeProps) => (
   <span
     className={cn(
-      "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium",
-      "transition-colors duration-150",
+      "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-colors duration-150",
       variantStyles[variant],
       className
     )}
