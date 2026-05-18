@@ -5,6 +5,19 @@ import {
   useQuery,
   useQueryClient
 } from "@tanstack/react-query";
+import {
+  Archive,
+  Bot,
+  ChevronLeft,
+  ChevronRight,
+  Command,
+  Focus,
+  MessageSquareReply,
+  Sparkles,
+  Tag,
+  UserPlus,
+  Zap
+} from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -23,6 +36,13 @@ const statusTabs = [
 type StatusFilter = (typeof statusTabs)[number]["id"];
 type ReviewStatus = "new" | "reading" | "replied" | "archived";
 type AiSentiment = "positive" | "neutral" | "negative";
+type SmartFilter = "all" | "critical" | "urgent" | "positive" | "automated";
+type ReviewPriorityKind =
+  | "critical"
+  | "urgent"
+  | "normal"
+  | "positive"
+  | "automated";
 
 const isReviewStatus = (value: string | null | undefined): value is ReviewStatus =>
   value === "new" ||
@@ -341,11 +361,11 @@ const formatSinceMinutes = (iso: string | null): string => {
 const formatStatusIcon = (status: ReviewCronStatus["status"]) => {
   switch (status) {
     case "done":
-      return "✅";
+      return "OK";
     case "running":
-      return "⏳";
+      return "En cours";
     case "error":
-      return "❌";
+      return "Erreur";
     case "idle":
       return "—";
     default:
@@ -368,6 +388,158 @@ const toDateInputValue = (date: Date) => {
 const isReviewNoteOnly = (review: Pick<Review, "text"> | null) =>
   !review?.text || review.text.trim().length === 0;
 
+const priorityMeta: Record<
+  ReviewPriorityKind,
+  {
+    label: string;
+    shortLabel: string;
+    badgeClass: string;
+    borderClass: string;
+    surfaceClass: string;
+    dotClass: string;
+  }
+> = {
+  critical: {
+    label: "Critique",
+    shortLabel: "Critique",
+    badgeClass: "border-rose-200 bg-rose-50 text-rose-700",
+    borderClass: "border-rose-200",
+    surfaceClass: "bg-rose-50/50",
+    dotClass: "bg-rose-500"
+  },
+  urgent: {
+    label: "Urgente",
+    shortLabel: "Urgent",
+    badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
+    borderClass: "border-amber-200",
+    surfaceClass: "bg-amber-50/50",
+    dotClass: "bg-amber-500"
+  },
+  normal: {
+    label: "Normale",
+    shortLabel: "Normal",
+    badgeClass: "border-slate-200 bg-slate-50 text-slate-600",
+    borderClass: "border-slate-200",
+    surfaceClass: "bg-white",
+    dotClass: "bg-slate-300"
+  },
+  positive: {
+    label: "Positive",
+    shortLabel: "Positif",
+    badgeClass: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    borderClass: "border-emerald-200",
+    surfaceClass: "bg-emerald-50/40",
+    dotClass: "bg-emerald-500"
+  },
+  automated: {
+    label: "Automatisée",
+    shortLabel: "Auto",
+    badgeClass: "border-violet-200 bg-violet-50 text-violet-700",
+    borderClass: "border-violet-200",
+    surfaceClass: "bg-violet-50/40",
+    dotClass: "bg-violet-500"
+  }
+};
+
+const getReviewPriority = (
+  review: Review,
+  hasSavedDraftForReview: boolean
+): ReviewPriorityKind => {
+  const isAutomated =
+    hasSavedDraftForReview ||
+    review.hasDraft === true ||
+    review.hasJobInflight === true ||
+    review.draftStatus === "draft";
+
+  if (
+    review.aiPriority ||
+    review.aiSentiment === "negative" ||
+    review.rating <= 2
+  ) {
+    return "critical";
+  }
+
+  if (
+    review.status !== "replied" &&
+    review.status !== "archived" &&
+    (review.rating === 3 || review.aiPriorityScore > 0)
+  ) {
+    return "urgent";
+  }
+
+  if (isAutomated) {
+    return "automated";
+  }
+
+  if (review.rating >= 4 || review.aiSentiment === "positive") {
+    return "positive";
+  }
+
+  return "normal";
+};
+
+const getAiConfidenceLabel = (review: Review): string => {
+  if (review.aiStatus !== "ready") {
+    return "Non encore mesuré";
+  }
+  if (typeof review.aiScore !== "number") {
+    return "Confiance IA partielle";
+  }
+
+  const confidence = Math.round(Math.max(0, Math.min(1, review.aiScore)) * 100);
+  return `${confidence}% confiance IA`;
+};
+
+const buildReviewSignals = (
+  review: Review,
+  hasSavedDraftForReview: boolean
+) => {
+  const priority = getReviewPriority(review, hasSavedDraftForReview);
+  const isAnswered = review.status === "replied" || Boolean(review.ownerReply);
+  const hasDraft =
+    hasSavedDraftForReview ||
+    review.hasDraft === true ||
+    review.draftStatus === "draft";
+  const summary =
+    review.aiSummary?.trim() ||
+    (review.text.trim()
+      ? truncateText(review.text.trim(), 92)
+      : "Avis sans commentaire exploitable.");
+  const risk =
+    priority === "critical"
+      ? "Risque réputationnel élevé"
+      : priority === "urgent"
+        ? "Risque réputationnel modéré"
+        : "Risque contenu faible";
+  const urgency =
+    isAnswered
+      ? "Suivi terminé"
+      : priority === "critical"
+        ? "À traiter en priorité"
+        : priority === "urgent"
+          ? "À traiter aujourd’hui"
+          : hasDraft
+            ? "Brouillon prêt"
+            : "À planifier";
+  const opportunity =
+    priority === "positive"
+      ? "Transformer l’avis en preuve sociale"
+      : priority === "automated"
+        ? "Valider le brouillon et accélérer la réponse"
+        : priority === "critical"
+          ? "Réduire le risque public avec une réponse claire"
+          : "Installer une réponse cohérente et utile";
+
+  return {
+    priority,
+    summary,
+    risk,
+    urgency,
+    opportunity,
+    confidence: getAiConfidenceLabel(review)
+  };
+};
+
 const Inbox = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("new");
   const [selectedLocation, setSelectedLocation] = useState("all");
@@ -386,6 +558,7 @@ const Inbox = () => {
     return toDateInputValue(date);
   });
   const [dateTo, setDateTo] = useState(() => toDateInputValue(new Date()));
+  const [smartFilter, setSmartFilter] = useState<SmartFilter>("all");
   const [sentimentFilter, setSentimentFilter] = useState<
     "all" | "positive" | "neutral" | "negative"
   >("all");
@@ -438,6 +611,7 @@ const Inbox = () => {
   const [mobileInboxView, setMobileInboxView] = useState<
     "reviews" | "details" | "reply"
   >("reviews");
+  const [focusMode, setFocusMode] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [highlightReviewId, setHighlightReviewId] = useState<string | null>(null);
   const pendingReviewIdRef = useRef<string | null>(null);
@@ -884,9 +1058,77 @@ const Inbox = () => {
         selectedLocation === "all"
           ? true
           : review.locationId === selectedLocation;
-      return matchesStatus && matchesLocation;
+      const priority = getReviewPriority(review, Boolean(draftByReview[review.id]));
+      const matchesSmartFilter =
+        smartFilter === "all" ? true : priority === smartFilter;
+      return matchesStatus && matchesLocation && matchesSmartFilter;
     });
-  }, [reviews, statusFilter, selectedLocation]);
+  }, [draftByReview, reviews, smartFilter, statusFilter, selectedLocation]);
+
+  const inboxPriorityCounts = useMemo(() => {
+    const counts: Record<ReviewPriorityKind, number> = {
+      critical: 0,
+      urgent: 0,
+      normal: 0,
+      positive: 0,
+      automated: 0
+    };
+
+    reviews.forEach((review: Review) => {
+      const priority = getReviewPriority(review, Boolean(draftByReview[review.id]));
+      counts[priority] += 1;
+    });
+
+    return counts;
+  }, [draftByReview, reviews]);
+
+  const operationalMetrics = useMemo(() => {
+    const unanswered = reviews.filter(
+      (review: Review) =>
+        review.status !== "replied" && review.status !== "archived"
+    ).length;
+    const readyDrafts = reviews.filter(
+      (review: Review) =>
+        draftByReview[review.id] ||
+        review.hasDraft === true ||
+        review.draftStatus === "draft"
+    ).length;
+    const aiReady = reviews.filter(
+      (review: Review) => review.aiStatus === "ready"
+    ).length;
+
+    return {
+      unanswered,
+      readyDrafts,
+      aiReady
+    };
+  }, [draftByReview, reviews]);
+  const smartViews = useMemo(
+    () =>
+      [
+        {
+          id: "critical" as const,
+          label: "Critiques",
+          count: inboxPriorityCounts.critical
+        },
+        {
+          id: "urgent" as const,
+          label: "Urgentes",
+          count: inboxPriorityCounts.urgent
+        },
+        {
+          id: "automated" as const,
+          label: "Brouillons prêts",
+          count: inboxPriorityCounts.automated
+        },
+        {
+          id: "positive" as const,
+          label: "Opportunités",
+          count: inboxPriorityCounts.positive
+        }
+      ],
+    [inboxPriorityCounts]
+  );
 
   const eligibleFilteredReviews = useMemo(
     () => filteredReviews.filter((review: Review) => review.isEligibleToGenerate === true),
@@ -949,6 +1191,43 @@ const Inbox = () => {
   const selectedReview = useMemo(() => {
     return reviews.find((review: Review) => review.id === selectedReviewId) ?? null;
   }, [reviews, selectedReviewId]);
+  const selectedReviewIndex = useMemo(
+    () =>
+      filteredReviews.findIndex(
+        (review: Review) => review.id === selectedReviewId
+      ),
+    [filteredReviews, selectedReviewId]
+  );
+  const selectedReviewSignals = selectedReview
+    ? buildReviewSignals(selectedReview, Boolean(draftByReview[selectedReview.id]))
+    : null;
+  const selectedPriorityMeta = selectedReviewSignals
+    ? priorityMeta[selectedReviewSignals.priority]
+    : null;
+  const selectAdjacentReview = (direction: "previous" | "next") => {
+    if (filteredReviews.length === 0) {
+      return;
+    }
+    const fallbackIndex = direction === "previous" ? filteredReviews.length - 1 : 0;
+    const nextIndex =
+      selectedReviewIndex >= 0
+        ? direction === "previous"
+          ? selectedReviewIndex - 1
+          : selectedReviewIndex + 1
+        : fallbackIndex;
+    const resolvedIndex =
+      nextIndex < 0
+        ? filteredReviews.length - 1
+        : nextIndex >= filteredReviews.length
+          ? 0
+          : nextIndex;
+    const nextReview = filteredReviews[resolvedIndex];
+    if (!nextReview) {
+      return;
+    }
+    setSelectedReviewId(nextReview.id);
+    setMobileInboxView("details");
+  };
   const selectedReviewIsNoteOnly = isReviewNoteOnly(selectedReview);
   const selectedReviewHasRealReply = Boolean(
     selectedReview?.ownerReply?.trim() ||
@@ -2169,11 +2448,79 @@ const Inbox = () => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold text-slate-900">Boîte de réception</h2>
-        <p className="text-sm text-slate-500">
-          Réponses aux avis et suivi des interactions clients.
-        </p>
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+              <Command size={14} />
+              Cockpit opérationnel
+            </div>
+            <h2 className="mt-3 text-2xl font-semibold text-slate-950">
+              Inbox EGIA
+            </h2>
+            <p className="mt-1 max-w-2xl text-sm text-slate-500">
+              Priorisez, rédigez et pilotez les réponses clients depuis une vue
+              dense, calme et actionnable.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant={focusMode ? "default" : "outline"}
+              size="sm"
+              onClick={() => setFocusMode((current) => !current)}
+              disabled={!selectedReview}
+              title="Mettre l'avis actif au premier plan"
+            >
+              <Focus size={15} />
+              Focus
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setMobileInboxView("reply")}
+              disabled={!selectedReview}
+            >
+              <MessageSquareReply size={15} />
+              Répondre
+            </Button>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-semibold uppercase text-slate-400">
+              À traiter
+            </p>
+            <p className="mt-1 text-xl font-semibold text-slate-950">
+              {operationalMetrics.unanswered}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-rose-100 bg-rose-50/50 p-3">
+            <p className="text-xs font-semibold uppercase text-rose-400">
+              Critiques
+            </p>
+            <p className="mt-1 text-xl font-semibold text-rose-700">
+              {inboxPriorityCounts.critical}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-violet-100 bg-violet-50/50 p-3">
+            <p className="text-xs font-semibold uppercase text-violet-400">
+              Brouillons prêts
+            </p>
+            <p className="mt-1 text-xl font-semibold text-violet-700">
+              {operationalMetrics.readyDrafts}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-3">
+            <p className="text-xs font-semibold uppercase text-emerald-500">
+              IA analysée
+            </p>
+            <p className="mt-1 text-xl font-semibold text-emerald-700">
+              {operationalMetrics.aiReady}
+            </p>
+          </div>
+        </div>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
           <span>Synchronisation automatique toutes les 5 minutes</span>
           <span>•</span>
@@ -2198,7 +2545,7 @@ const Inbox = () => {
             <>
               <span>•</span>
               <span className="text-amber-700">
-                ⚠️ Certaines fiches Google n&apos;ont pas pu être synchronisées
+                Attention : certaines fiches Google n&apos;ont pas pu être synchronisées
               </span>
             </>
           )}
@@ -2356,15 +2703,39 @@ const Inbox = () => {
         </button>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1.05fr_1.4fr_1.05fr] lg:gap-6">
+      <div
+        className={cn(
+          "grid gap-4 lg:gap-6",
+          focusMode
+            ? "lg:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.9fr)]"
+            : "lg:grid-cols-[1.05fr_1.4fr_1.05fr]"
+        )}
+      >
         <Card
           className={cn(
             mobileInboxView === "reviews" ? "block" : "hidden",
-            "lg:block"
+            focusMode ? "lg:hidden" : "lg:block"
           )}
         >
           <CardHeader className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle>Flux priorisé</CardTitle>
+                <p className="mt-1 text-xs text-slate-500">
+                  Vues rapides et filtres opérationnels sans changer votre flux.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="lg:hidden"
+                onClick={() => setFiltersOpen((current) => !current)}
+              >
+                {filtersOpen ? "Masquer filtres" : "Filtres"}
+              </Button>
+            </div>
+            <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
                 {statusTabs.map((tab) => (
                   <Button
@@ -2377,15 +2748,45 @@ const Inbox = () => {
                   </Button>
                 ))}
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="lg:hidden"
-                onClick={() => setFiltersOpen((current) => !current)}
-              >
-                {filtersOpen ? "Masquer filtres" : "Filtres"}
-              </Button>
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase text-slate-400">
+                  Vues intelligentes
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSmartFilter("all")}
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                      smartFilter === "all"
+                        ? "border-slate-900 bg-slate-950 text-white"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                    )}
+                  >
+                    Tout
+                  </button>
+                  {smartViews.map((view) => {
+                    const meta = priorityMeta[view.id];
+
+                    return (
+                      <button
+                        key={view.id}
+                        type="button"
+                        onClick={() => setSmartFilter(view.id)}
+                        className={cn(
+                          "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                          smartFilter === view.id
+                            ? meta.badgeClass
+                            : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                        )}
+                      >
+                        {view.label}
+                        <span className="ml-1 opacity-70">{view.count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
             <div
               className={cn(
@@ -2566,10 +2967,46 @@ const Inbox = () => {
           </CardHeader>
           <CardContent className="space-y-3">
             {reviewsLoading ? (
-              <p className="text-sm text-slate-500">Chargement des avis...</p>
+              <div className="space-y-3">
+                {[0, 1, 2].map((item) => (
+                  <div
+                    key={item}
+                    className="animate-pulse rounded-2xl border border-slate-200 bg-white p-4"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="space-y-2">
+                        <div className="h-3 w-28 rounded-full bg-slate-200" />
+                        <div className="h-2.5 w-40 rounded-full bg-slate-100" />
+                      </div>
+                      <div className="h-6 w-20 rounded-full bg-slate-100" />
+                    </div>
+                    <div className="mt-4 h-3 w-full rounded-full bg-slate-100" />
+                    <div className="mt-2 h-3 w-2/3 rounded-full bg-slate-100" />
+                  </div>
+                ))}
+              </div>
             ) : filteredReviews.length === 0 ? (
-              <div className="space-y-1 text-sm text-slate-500">
-                <p>Aucun avis à afficher.</p>
+              <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+                <p className="font-semibold text-slate-900">
+                  Aucun avis dans cette vue.
+                </p>
+                <p className="mt-1">
+                  Ajustez les filtres ou revenez à la vue complète pour reprendre
+                  le flux opérationnel.
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setSmartFilter("all");
+                      setStatusFilter("all");
+                    }}
+                  >
+                    Réinitialiser la vue
+                  </Button>
+                </div>
                 {datePreset === "this_month" && (
                   <div className="mt-2 space-y-2 text-xs text-slate-500">
                     <p>
@@ -2599,6 +3036,11 @@ const Inbox = () => {
                     ? review.aiSentiment
                     : null;
                   const rating = asNumber(review.rating);
+                  const signals = buildReviewSignals(
+                    review,
+                    Boolean(draftByReview[review.id])
+                  );
+                  const priority = priorityMeta[signals.priority];
                   return (
                     <button
                       key={review.id}
@@ -2608,10 +3050,10 @@ const Inbox = () => {
                         setMobileInboxView("details");
                       }}
                       id={`review-${review.id}`}
-                      className={`w-full rounded-2xl border p-4 text-left transition hover:border-slate-300 ${
+                      className={`group w-full rounded-2xl border p-4 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-sm ${
                         selectedReviewId === review.id
-                          ? "border-slate-400 bg-slate-50"
-                          : "border-slate-200"
+                          ? `${priority.borderClass} ${priority.surfaceClass} shadow-sm`
+                          : `${priority.borderClass} bg-white`
                       } ${
                         highlightReviewId === review.id
                           ? "ring-2 ring-emerald-400 ring-offset-2"
@@ -2619,22 +3061,43 @@ const Inbox = () => {
                       }`}
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">
-                            {review.authorName}
-                          </p>
-                          <p className="text-xs text-slate-500">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`h-2.5 w-2.5 rounded-full ${priority.dotClass}`}
+                            />
+                            <p className="truncate text-sm font-semibold text-slate-900">
+                              {review.authorName}
+                            </p>
+                          </div>
+                          <p className="mt-1 truncate text-xs text-slate-500">
                             {review.locationName}
                           </p>
                         </div>
-                        <Badge variant={statusVariantMap[safeStatus]}>
-                          {statusLabelMap[safeStatus]}
-                        </Badge>
+                        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                          <Badge className={priority.badgeClass}>
+                            {priority.shortLabel}
+                          </Badge>
+                          <Badge variant={statusVariantMap[safeStatus]}>
+                            {statusLabelMap[safeStatus]}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+                        <span>
+                          {"★".repeat(Math.max(0, Math.min(5, rating)))}
+                          {"☆".repeat(5 - Math.max(0, Math.min(5, rating)))}
+                        </span>
+                        <span>{review.source}</span>
+                        <span>•</span>
+                        <span>{formatDate(review.createdAt)}</span>
+                      </div>
+                      <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-700">
+                        {signals.summary}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-1.5">
                         {draftByReview[review.id] && (
-                          <Badge variant="success">Brouillon enregistré</Badge>
-                        )}
-                        {review.aiPriority && (
-                          <Badge variant="warning">À traiter</Badge>
+                          <Badge variant="success">Brouillon prêt</Badge>
                         )}
                         {isReviewNoteOnly(review) && (
                           <Badge variant="neutral">Note seule</Badge>
@@ -2649,22 +3112,24 @@ const Inbox = () => {
                           {review.aiStatus === "ready"
                             ? safeSentiment
                               ? aiSentimentLabelMap[safeSentiment]
-                              : "IA"
-                            : "En attente IA"}
+                              : "IA prête"
+                            : "IA à compléter"}
                         </Badge>
                       </div>
-                      <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-                        <span>
-                          {"★".repeat(Math.max(0, Math.min(5, rating)))}
-                          {"☆".repeat(5 - Math.max(0, Math.min(5, rating)))}
-                        </span>
-                        <span>{review.source}</span>
-                        <span>•</span>
-                        <span>{formatDate(review.createdAt)}</span>
+                      <div className="mt-3 grid gap-1.5 rounded-xl border border-white/70 bg-white/65 p-2 text-[11px] text-slate-600 opacity-90 transition group-hover:opacity-100">
+                        <div className="flex items-center justify-between gap-2">
+                          <span>Risque</span>
+                          <span className="font-semibold text-slate-800">
+                            {signals.risk}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span>Urgence</span>
+                          <span className="font-semibold text-slate-800">
+                            {signals.urgency}
+                          </span>
+                        </div>
                       </div>
-                      <p className="mt-3 line-clamp-2 text-sm text-slate-600">
-                        {review.text || "Avis sans commentaire."}
-                      </p>
                     </button>
                   );
                 })}
@@ -2688,21 +3153,49 @@ const Inbox = () => {
         <Card
           className={cn(
             mobileInboxView === "details" ? "block" : "hidden",
-            "lg:block"
+            "lg:block",
+            focusMode && "border-slate-300 shadow-sm"
           )}
         >
           <CardHeader className="flex flex-row items-center justify-between gap-3">
-            <CardTitle>Détails de l'avis</CardTitle>
-            {selectedReview && (
+            <div>
+              <CardTitle>Lecture active</CardTitle>
+              <p className="mt-1 text-xs text-slate-500">
+                Analyse rapide, contexte client et prochaine action.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
               <Button
                 type="button"
                 size="sm"
-                className="lg:hidden"
-                onClick={() => setMobileInboxView("reply")}
+                variant="outline"
+                onClick={() => selectAdjacentReview("previous")}
+                disabled={filteredReviews.length <= 1}
+                title="Avis précédent"
               >
-                Répondre
+                <ChevronLeft size={15} />
               </Button>
-            )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => selectAdjacentReview("next")}
+                disabled={filteredReviews.length <= 1}
+                title="Avis suivant"
+              >
+                <ChevronRight size={15} />
+              </Button>
+              {selectedReview && (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="lg:hidden"
+                  onClick={() => setMobileInboxView("reply")}
+                >
+                  Répondre
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             {!selectedReview ? (
@@ -2724,7 +3217,12 @@ const Inbox = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {selectedPriorityMeta && (
+                    <Badge className={selectedPriorityMeta.badgeClass}>
+                      {selectedPriorityMeta.label}
+                    </Badge>
+                  )}
                   <Badge variant="neutral">{selectedReview.rating}★</Badge>
                   <Badge variant={statusVariantMap[selectedReview.status]}>
                     {statusLabelMap[selectedReview.status]}
@@ -2732,6 +3230,115 @@ const Inbox = () => {
                   {selectedReviewIsNoteOnly && (
                     <Badge variant="neutral">Note seule</Badge>
                   )}
+                </div>
+
+                {selectedReviewSignals && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Résumé IA
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-slate-700">
+                        {selectedReviewSignals.summary}
+                      </p>
+                    </div>
+                    <div className="grid gap-2">
+                      {[
+                        ["Risque", selectedReviewSignals.risk],
+                        ["Urgence", selectedReviewSignals.urgency],
+                        ["Opportunité", selectedReviewSignals.opportunity],
+                        ["Confiance", selectedReviewSignals.confidence]
+                      ].map(([label, value]) => (
+                        <div
+                          key={label}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
+                        >
+                          <span className="font-semibold uppercase text-slate-400">
+                            {label}
+                          </span>
+                          <span className="text-right font-semibold text-slate-800">
+                            {value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                  <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase text-slate-400">
+                    <Zap size={14} />
+                    Actions rapides
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => setMobileInboxView("reply")}
+                    >
+                      <MessageSquareReply size={15} />
+                      Répondre
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleGenerate}
+                      disabled={
+                        isGenerating ||
+                        !isSupabaseAvailable ||
+                        isCooldownActive ||
+                        !canGenerateForSelectedReview
+                      }
+                    >
+                      <Bot size={15} />
+                      Générer IA
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled
+                      title="À connecter"
+                    >
+                      <Tag size={15} />
+                      Tagger
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled
+                      title="À connecter"
+                    >
+                      <Sparkles size={15} />
+                      Prioriser
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled
+                      title="À connecter"
+                    >
+                      <UserPlus size={15} />
+                      Assigner
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled
+                      title="À connecter"
+                    >
+                      <Archive size={15} />
+                      Archiver
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Tag, priorité, assignation et archivage sont préparés côté
+                    interface et restent à connecter.
+                  </p>
                 </div>
 
                 <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
@@ -2801,7 +3408,8 @@ const Inbox = () => {
         <Card
           className={cn(
             mobileInboxView === "reply" ? "block" : "hidden",
-            "lg:block"
+            "lg:block",
+            focusMode && "border-slate-300 shadow-sm"
           )}
         >
           <CardHeader className="space-y-3">
