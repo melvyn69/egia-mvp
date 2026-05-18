@@ -2986,13 +2986,13 @@ const Inbox = () => {
                 ))}
               </div>
             ) : filteredReviews.length === 0 ? (
-              <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+              <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500 transition-colors duration-200 hover:border-slate-300 hover:bg-white">
                 <p className="font-semibold text-slate-900">
-                  Aucun avis dans cette vue.
+                  Aucun avis à traiter dans cette vue.
                 </p>
                 <p className="mt-1">
-                  Ajustez les filtres ou revenez à la vue complète pour reprendre
-                  le flux opérationnel.
+                  Votre flux est propre pour ce segment. Revenez à la vue complète
+                  ou ajustez les filtres pour reprendre le pilotage opérationnel.
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Button
@@ -3010,7 +3010,8 @@ const Inbox = () => {
                 {datePreset === "this_month" && (
                   <div className="mt-2 space-y-2 text-xs text-slate-500">
                     <p>
-                      Aucun avis pour ce mois. Essayez “30 derniers jours” ou “Tout”.
+                      Aucun avis sur cette période. Passez sur “Tout” pour
+                      vérifier le backlog complet.
                     </p>
                     <Button
                       type="button"
@@ -3023,7 +3024,9 @@ const Inbox = () => {
                   </div>
                 )}
                 {selectedLocation !== "all" && (
-                  <p>Aucun avis sur cette fiche.</p>
+                  <p className="mt-2 text-xs">
+                    Cette fiche ne contient aucun avis dans les filtres actifs.
+                  </p>
                 )}
               </div>
             ) : (

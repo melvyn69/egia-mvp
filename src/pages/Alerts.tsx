@@ -264,17 +264,18 @@ const Alerts = ({ session }: AlertsProps) => {
         <CardContent className="space-y-4">
           {alertsQuery.isLoading ? (
             <div className="space-y-3">
-              <Skeleton className="h-20 w-full" />
-              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
             </div>
           ) : formattedAlerts.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-6 py-8 text-center">
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-8 text-center transition-colors duration-200 hover:border-slate-300 hover:bg-white">
               <p className="text-sm font-semibold text-slate-900">
-                Tout est sous contrôle
+                Aucun signal prioritaire à traiter.
               </p>
               <p className="mt-2 text-sm text-slate-500">
-                EGIA ne remonte une alerte que lorsqu'une action est vraiment
-                nécessaire.
+                EGIA garde les alertes silencieuses tant qu’aucun avis ne demande
+                une action rapide. Vous pouvez revenir à l’Inbox pour traiter le
+                flux courant.
               </p>
               <div className="mt-4 flex flex-col items-center gap-2">
                 <Button

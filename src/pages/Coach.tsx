@@ -5,9 +5,11 @@ import {
   BusinessHealthScoreCard,
   buildBusinessHealthScoreModel
 } from "../components/coach/BusinessHealthScore";
+import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import type { GoogleConnectionStatus } from "../hooks/useGoogleConnectionStatus";
 import { type CoachKpiSummaryCache, useCoachResult } from "../services/coach";
+import { useNavigate } from "react-router-dom";
 
 type CoachProps = {
   session: Session | null;
@@ -31,6 +33,7 @@ const Coach = ({
   locationsLoading,
   locationsError
 }: CoachProps) => {
+  const navigate = useNavigate();
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
   const kpiQuery = useQuery<CoachKpiSummaryCache>({
     queryKey: ["coach-health-kpi", session?.user?.id ?? null, timeZone],
@@ -70,6 +73,29 @@ const Coach = ({
 
   return (
     <div className="space-y-6">
+      {googleStatus !== "connected" && (
+        <Card className="border-dashed bg-white/90">
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+            <div>
+              <p className="text-sm font-semibold text-slate-950">
+                Connectez Google pour activer le pilotage complet.
+              </p>
+              <p className="mt-1 text-sm text-slate-500">
+                Le Coach reste visible, mais les priorités deviennent vraiment
+                actionnables après synchronisation des fiches et avis.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              className="w-full sm:w-auto"
+              onClick={() => navigate("/connect")}
+            >
+              Connecter Google
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       <BusinessHealthScoreCard
         model={healthModel}
         variant="full"

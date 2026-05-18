@@ -478,8 +478,13 @@ const Billing = ({ isAdmin }: BillingProps) => {
           <FileText size={20} className="text-slate-400" />
         </CardHeader>
         <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
-          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-sm text-slate-500 sm:hidden">
-            Aucune facture disponible.
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-sm text-slate-500 transition-colors duration-200 hover:border-slate-300 hover:bg-white sm:hidden">
+            <p className="font-semibold text-slate-900">
+              Aucune facture disponible.
+            </p>
+            <p className="mt-1">
+              L’historique apparaîtra ici dès l’activation du portail de paiement.
+            </p>
           </div>
           <div className="hidden overflow-x-auto sm:block">
             <table className="w-full min-w-[620px] border-separate border-spacing-0 text-left text-sm">
@@ -498,7 +503,8 @@ const Billing = ({ isAdmin }: BillingProps) => {
                     colSpan={5}
                     className="py-10 text-center text-sm text-slate-500"
                   >
-                    Aucune facture disponible.
+                    Aucune facture disponible pour le moment. Les documents
+                    apparaîtront dès que la facturation sera connectée.
                   </td>
                 </tr>
               </tbody>

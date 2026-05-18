@@ -5,7 +5,7 @@ type CardProps = React.HTMLAttributes<HTMLDivElement>;
 const Card = ({ className, ...props }: CardProps) => (
   <div
     className={cn(
-      "rounded-2xl border border-slate-200 bg-white shadow-card",
+      "rounded-2xl border border-slate-200 bg-white shadow-card transition-[border-color,box-shadow,transform] duration-200 ease-out hover:border-slate-300 hover:shadow-soft",
       className
     )}
     {...props}

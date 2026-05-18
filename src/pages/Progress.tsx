@@ -269,6 +269,7 @@ const Progress = ({
     () => new Set(coach.completedMilestones.map((milestone) => milestone.id)),
     [coach.completedMilestones]
   );
+  const hasLimitedProgressData = !completedMilestoneIds.has("first-reviews-synced");
   const recentlyUnlocked =
     coach.completedMilestones[coach.completedMilestones.length - 1] ?? null;
   const toProgressAchievement = (milestone: CoachMilestone): Achievement => ({
@@ -492,6 +493,30 @@ const Progress = ({
           </Card>
         ))}
       </section>
+
+      {hasLimitedProgressData && (
+        <Card className="border-dashed bg-white/90">
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+            <div>
+              <p className="text-sm font-semibold text-slate-950">
+                Progression en cours de calibration.
+              </p>
+              <p className="mt-1 text-sm text-slate-500">
+                Les premiers jalons deviennent plus précis après import des avis
+                Google et synchronisation des établissements.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={() => navigate("/connect")}
+            >
+              Vérifier la connexion
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,0.78fr)_minmax(0,1fr)]">
         <Card className="bg-white">
