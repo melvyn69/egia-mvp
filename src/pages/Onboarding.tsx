@@ -772,8 +772,8 @@ const Onboarding = ({
           Système réputation activé
         </h2>
         <p className="mt-3 text-slate-500">
-          Votre assistant réputation est prêt à être piloté. Les données absentes
-          resteront explicitement marquées comme non encore mesurées.
+          Votre assistant réputation est prêt à être piloté. Les indicateurs à
+          compléter resteront explicitement marqués comme non encore mesurés.
         </p>
         <div className="mt-8 grid gap-3 sm:grid-cols-4">
           {[

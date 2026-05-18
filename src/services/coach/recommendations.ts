@@ -97,7 +97,7 @@ export const buildCoachRecommendations = (
         priority: "high",
         title: "Connecter Google Business Profile",
         description: "La source principale doit être connectée avant le pilotage.",
-        reason: "Aucune connexion Google fiable n'est disponible dans l'input.",
+        reason: "Votre pilotage réputation doit encore être relié à Google.",
         impact: "La connexion débloque les établissements, avis et KPIs.",
         sourceFields: ["googleConnected"]
       })
@@ -112,8 +112,8 @@ export const buildCoachRecommendations = (
         priority: "high",
         title: "Importer un premier établissement",
         description: "Le Coach a besoin d'au moins une fiche à piloter.",
-        reason: "Aucun établissement total ou actif n'est détecté.",
-        impact: "Les établissements débloquent le socle de scoring.",
+        reason: "Aucun établissement n'est encore prêt pour le suivi réputation.",
+        impact: "Les établissements débloquent le socle du pilotage.",
         sourceFields: ["totalLocationsCount", "activeLocationsCount"]
       })
     );
@@ -127,7 +127,7 @@ export const buildCoachRecommendations = (
         priority: "medium",
         title: "Calibrer la voix IA",
         description: "La qualité IA n'est pas encore considérée comme prête.",
-        reason: "Le signal aiInsightsReady est faux ou absent.",
+        reason: "La voix IA doit encore être affinée avec vos premiers signaux.",
         impact: "Une voix IA calibrée améliore la cohérence des réponses.",
         sourceFields: ["aiInsightsReady", "dominantTags"]
       })
@@ -141,8 +141,8 @@ export const buildCoachRecommendations = (
         id: "activate-alerts",
         priority: "medium",
         title: "Activer des alertes fiables",
-        description: "Le moteur ne reçoit pas de signal d'alertes exploitable.",
-        reason: "alertsOpenCount est absent, nul ou invalide.",
+        description: "Aucun système d'alerte avancé n'est encore configuré.",
+        reason: "Les alertes doivent encore être configurées pour sécuriser le suivi.",
         impact: "Un signal d'alertes fiable évite de manquer les sujets urgents.",
         sourceFields: ["alertsOpenCount"]
       })
@@ -156,8 +156,8 @@ export const buildCoachRecommendations = (
         id: "create-automation",
         priority: "medium",
         title: "Créer une première automatisation",
-        description: "Aucune automatisation active n'est détectée.",
-        reason: "automationCount vaut 0 après normalisation.",
+        description: "Aucune automatisation active n'a encore été détectée.",
+        reason: "Les actions récurrentes peuvent encore être automatisées.",
         impact: "Une automatisation réduit le suivi manuel récurrent.",
         sourceFields: ["automationCount"]
       })
@@ -172,7 +172,7 @@ export const buildCoachRecommendations = (
         priority: "low",
         title: "Ajouter une veille concurrentielle",
         description: "La réputation locale manque encore de contexte marché.",
-        reason: "competitorWatchActive est faux ou absent.",
+        reason: "La veille concurrentielle n'est pas encore activée.",
         impact: "La veille aide à prioriser les opportunités locales.",
         sourceFields: ["competitorWatchActive"]
       })
@@ -187,7 +187,7 @@ export const buildCoachRecommendations = (
         priority: "low",
         title: "Créer un premier rapport PDF",
         description: "Aucun rapport généré n'est détecté.",
-        reason: "reportsCount vaut 0 après normalisation.",
+        reason: "Aucun reporting partageable n'a encore été préparé.",
         impact: "Un rapport rend la progression partageable et pilotable.",
         sourceFields: ["reportsCount"]
       })

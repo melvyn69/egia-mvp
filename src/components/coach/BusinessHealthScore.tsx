@@ -262,6 +262,33 @@ const recommendationRoutes: Record<
   }
 };
 
+const businessReasonByRecommendation: Record<
+  CoachEngineRecommendation["id"],
+  string
+> = {
+  "prioritize-critical-reviews":
+    "Des avis sensibles demandent une prise en charge rapide.",
+  "reply-to-reviews":
+    "Le rythme de réponse peut encore progresser pour renforcer la réputation.",
+  "connect-google":
+    "Votre pilotage réputation doit encore être relié à Google.",
+  "import-locations":
+    "Aucun établissement n'est encore prêt pour le suivi réputation.",
+  "calibrate-ai-voice":
+    "La voix IA doit encore être affinée avec vos premiers signaux.",
+  "activate-alerts":
+    "Aucun système d'alerte avancé n'est encore configuré.",
+  "create-automation":
+    "Aucune automatisation active n'a encore été détectée.",
+  "add-competitor-watch":
+    "La veille concurrentielle n'est pas encore activée.",
+  "create-report": "Aucun reporting partageable n'a encore été préparé."
+};
+
+const mapRecommendationReason = (
+  recommendation: CoachEngineRecommendation
+): string => businessReasonByRecommendation[recommendation.id];
+
 const mapRecommendation = (
   recommendation: CoachEngineRecommendation
 ): HealthRecommendation => {
@@ -274,7 +301,7 @@ const mapRecommendation = (
     href: route.href,
     cta: route.cta,
     priority: mapRecommendationPriority(recommendation.priority),
-    reason: recommendation.reason,
+    reason: mapRecommendationReason(recommendation),
     impact: recommendation.impact
   };
 };
