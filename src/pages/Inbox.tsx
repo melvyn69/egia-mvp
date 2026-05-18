@@ -163,13 +163,6 @@ const statusLabelMap: Record<ReviewStatus, string> = {
   archived: "Ignoré"
 };
 
-const statusVariantMap: Record<ReviewStatus, "warning" | "success" | "neutral"> = {
-  new: "warning",
-  reading: "warning",
-  replied: "success",
-  archived: "neutral"
-};
-
 const aiSentimentLabelMap: Record<AiSentiment, string> = {
   positive: "Positif",
   neutral: "Neutre",
@@ -2447,20 +2440,20 @@ const Inbox = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
               <Command size={14} />
               Cockpit opérationnel
             </div>
-            <h2 className="mt-3 text-2xl font-semibold text-slate-950">
+            <h2 className="mt-2 text-2xl font-semibold text-slate-950">
               Inbox EGIA
             </h2>
             <p className="mt-1 max-w-2xl text-sm text-slate-500">
               Priorisez, rédigez et pilotez les réponses clients depuis une vue
-              dense, calme et actionnable.
+              calme, lisible et actionnable.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -2487,41 +2480,41 @@ const Inbox = () => {
             </Button>
           </div>
         </div>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+        <div className="mt-3 grid gap-px overflow-hidden rounded-2xl border border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="bg-white px-3 py-2.5">
             <p className="text-xs font-semibold uppercase text-slate-400">
               À traiter
             </p>
-            <p className="mt-1 text-xl font-semibold text-slate-950">
+            <p className="text-lg font-semibold text-slate-950">
               {operationalMetrics.unanswered}
             </p>
           </div>
-          <div className="rounded-2xl border border-rose-100 bg-rose-50/50 p-3">
-            <p className="text-xs font-semibold uppercase text-rose-400">
+          <div className="bg-white px-3 py-2.5">
+            <p className="text-xs font-semibold uppercase text-slate-400">
               Critiques
             </p>
-            <p className="mt-1 text-xl font-semibold text-rose-700">
+            <p className="text-lg font-semibold text-rose-700">
               {inboxPriorityCounts.critical}
             </p>
           </div>
-          <div className="rounded-2xl border border-violet-100 bg-violet-50/50 p-3">
-            <p className="text-xs font-semibold uppercase text-violet-400">
+          <div className="bg-white px-3 py-2.5">
+            <p className="text-xs font-semibold uppercase text-slate-400">
               Brouillons prêts
             </p>
-            <p className="mt-1 text-xl font-semibold text-violet-700">
+            <p className="text-lg font-semibold text-slate-950">
               {operationalMetrics.readyDrafts}
             </p>
           </div>
-          <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-3">
-            <p className="text-xs font-semibold uppercase text-emerald-500">
+          <div className="bg-white px-3 py-2.5">
+            <p className="text-xs font-semibold uppercase text-slate-400">
               IA analysée
             </p>
-            <p className="mt-1 text-xl font-semibold text-emerald-700">
+            <p className="text-lg font-semibold text-slate-950">
               {operationalMetrics.aiReady}
             </p>
           </div>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
           <span>Synchronisation automatique toutes les 5 minutes</span>
           <span>•</span>
           <span>Dernière synchronisation : {formatSinceMinutes(lastCronSyncAt)}</span>
@@ -2556,25 +2549,25 @@ const Inbox = () => {
             </>
           )}
         </div>
-        <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-700">
-          <div className="flex items-center justify-between">
-            <span>Import avis Google</span>
-            <span>
-              {formatStatusIcon(importStatus.status)}{" "}
-              {totalReviewsCount ?? reviews.length} avis
-            </span>
+        <div className="mt-3 grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700 sm:grid-cols-2">
+          <div className="rounded-xl bg-white px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-semibold text-slate-900">Import Google</span>
+              <span className="text-slate-500">
+                {formatStatusIcon(importStatus.status)} ·{" "}
+                {totalReviewsCount ?? reviews.length} avis
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Dernier run : {formatSinceMinutes(importStatus.last_run_at ?? null)}
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Affichés : {reviews.length} / {totalReviewsCount ?? reviews.length}
+            </p>
           </div>
-          <div className="mt-1 text-[11px] text-slate-500">
-            Dernier run :{" "}
-            {formatSinceMinutes(importStatus.last_run_at ?? null)}
-          </div>
-          <div className="mt-2 text-[11px] text-slate-500">
-            Avis affichés : {reviews.length} /{" "}
-            {totalReviewsCount ?? reviews.length}
-          </div>
-          <div className="mt-3 flex items-center justify-between">
-            <span>Analyse IA</span>
-            <span>
+          <div className="rounded-xl bg-white px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-semibold text-slate-900">Analyse IA</span>
               <span
                 className={`inline-flex items-center gap-2 rounded-full px-2 py-0.5 text-[11px] font-semibold ${aiStatusUi.badgeClass}`}
               >
@@ -2584,26 +2577,26 @@ const Inbox = () => {
                 {aiStatusUi.label}
                 {aiStatusUi.countText ? ` · ${aiStatusUi.countText}` : ""}
               </span>
-            </span>
-          </div>
-          <div className="mt-1 text-[11px] text-slate-500">
-            Dernière analyse :{" "}
-            {aiStatusDisplay.lastRunAt
-              ? formatSinceMinutes(aiStatusDisplay.lastRunAt)
-              : "Jamais"}
-          </div>
-          {(prepareDraftLoading || prepareDraftMessage) && (
-            <div className="mt-1 text-[11px] text-slate-500">
-              {prepareDraftLoading ? "Préparation des brouillons…" : prepareDraftMessage}
             </div>
-          )}
-          {aiStatusUi.errorText && (
-            <div className="mt-1 text-[11px] text-rose-600">
-              {aiStatusUi.errorText}
-            </div>
-          )}
+            <p className="mt-1 text-[11px] text-slate-500">
+              Dernière analyse :{" "}
+              {aiStatusDisplay.lastRunAt
+                ? formatSinceMinutes(aiStatusDisplay.lastRunAt)
+                : "Jamais"}
+            </p>
+            {(prepareDraftLoading || prepareDraftMessage) && (
+              <p className="mt-1 text-[11px] text-slate-500">
+                {prepareDraftLoading ? "Préparation des brouillons…" : prepareDraftMessage}
+              </p>
+            )}
+            {aiStatusUi.errorText && (
+              <p className="mt-1 text-[11px] text-rose-600">
+                {aiStatusUi.errorText}
+              </p>
+            )}
+          </div>
           {isAdmin && activeLocationId && (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600 sm:col-span-2">
               {aiStatusDisplay.missing === 0 ? (
                 <>
                   <Button
@@ -2705,19 +2698,20 @@ const Inbox = () => {
 
       <div
         className={cn(
-          "grid gap-4 lg:gap-6",
+          "grid gap-4 lg:items-start lg:gap-5",
           focusMode
-            ? "lg:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.9fr)]"
-            : "lg:grid-cols-[1.05fr_1.4fr_1.05fr]"
+            ? "lg:grid-cols-[minmax(0,1.28fr)_minmax(340px,0.9fr)]"
+            : "lg:grid-cols-[minmax(280px,0.92fr)_minmax(0,1.34fr)_minmax(300px,0.95fr)]"
         )}
       >
         <Card
           className={cn(
             mobileInboxView === "reviews" ? "block" : "hidden",
-            focusMode ? "lg:hidden" : "lg:block"
+            focusMode ? "lg:hidden" : "lg:block",
+            "h-fit"
           )}
         >
-          <CardHeader className="space-y-4">
+          <CardHeader className="space-y-3 p-3 sm:p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <CardTitle>Flux priorisé</CardTitle>
@@ -2736,12 +2730,17 @@ const Inbox = () => {
               </Button>
             </div>
             <div className="space-y-3">
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1 sm:grid-cols-3">
                 {statusTabs.map((tab) => (
                   <Button
                     key={tab.id}
                     variant={statusFilter === tab.id ? "default" : "outline"}
                     size="sm"
+                    className={cn(
+                      "w-full rounded-xl px-2 shadow-none",
+                      statusFilter !== tab.id &&
+                        "border-transparent bg-transparent hover:bg-white"
+                    )}
                     onClick={() => setStatusFilter(tab.id)}
                   >
                     {tab.label}
@@ -2752,18 +2751,19 @@ const Inbox = () => {
                 <p className="mb-2 text-xs font-semibold uppercase text-slate-400">
                   Vues intelligentes
                 </p>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid gap-2 sm:grid-cols-2">
                   <button
                     type="button"
                     onClick={() => setSmartFilter("all")}
                     className={cn(
-                      "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                      "flex items-center justify-between rounded-xl border px-3 py-2 text-xs font-semibold transition",
                       smartFilter === "all"
                         ? "border-slate-900 bg-slate-950 text-white"
                         : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
                     )}
                   >
-                    Tout
+                    <span>Tout</span>
+                    <span className="opacity-70">{reviews.length}</span>
                   </button>
                   {smartViews.map((view) => {
                     const meta = priorityMeta[view.id];
@@ -2774,14 +2774,14 @@ const Inbox = () => {
                         type="button"
                         onClick={() => setSmartFilter(view.id)}
                         className={cn(
-                          "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                          "flex items-center justify-between rounded-xl border px-3 py-2 text-xs font-semibold transition",
                           smartFilter === view.id
                             ? meta.badgeClass
                             : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
                         )}
                       >
-                        {view.label}
-                        <span className="ml-1 opacity-70">{view.count}</span>
+                        <span>{view.label}</span>
+                        <span className="opacity-70">{view.count}</span>
                       </button>
                     );
                   })}
@@ -2790,7 +2790,7 @@ const Inbox = () => {
             </div>
             <div
               className={cn(
-                "space-y-4",
+                "space-y-3",
                 filtersOpen ? "block" : "hidden",
                 "lg:block"
               )}
@@ -2965,7 +2965,7 @@ const Inbox = () => {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-2.5 p-3 pt-0 sm:p-4 sm:pt-0 lg:max-h-[calc(100vh-18rem)] lg:overflow-y-auto">
             {reviewsLoading ? (
               <div className="space-y-3">
                 {[0, 1, 2].map((item) => (
@@ -3050,7 +3050,7 @@ const Inbox = () => {
                         setMobileInboxView("details");
                       }}
                       id={`review-${review.id}`}
-                      className={`group w-full rounded-2xl border p-4 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-sm ${
+                      className={`group w-full rounded-2xl border p-2.5 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-sm ${
                         selectedReviewId === review.id
                           ? `${priority.borderClass} ${priority.surfaceClass} shadow-sm`
                           : `${priority.borderClass} bg-white`
@@ -3074,16 +3074,16 @@ const Inbox = () => {
                             {review.locationName}
                           </p>
                         </div>
-                        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                        <div className="flex shrink-0 flex-col items-end gap-1 text-right">
                           <Badge className={priority.badgeClass}>
                             {priority.shortLabel}
                           </Badge>
-                          <Badge variant={statusVariantMap[safeStatus]}>
+                          <span className="text-xs font-medium text-slate-500">
                             {statusLabelMap[safeStatus]}
-                          </Badge>
+                          </span>
                         </div>
                       </div>
-                      <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+                      <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
                         <span>
                           {"★".repeat(Math.max(0, Math.min(5, rating)))}
                           {"☆".repeat(5 - Math.max(0, Math.min(5, rating)))}
@@ -3092,43 +3092,29 @@ const Inbox = () => {
                         <span>•</span>
                         <span>{formatDate(review.createdAt)}</span>
                       </div>
-                      <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-700">
+                      <p className="mt-2 line-clamp-2 text-sm leading-5 text-slate-700">
                         {signals.summary}
                       </p>
-                      <div className="mt-3 flex flex-wrap gap-1.5">
+                      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
                         {draftByReview[review.id] && (
-                          <Badge variant="success">Brouillon prêt</Badge>
+                          <span className="font-semibold text-emerald-700">
+                            Brouillon prêt
+                          </span>
                         )}
-                        {isReviewNoteOnly(review) && (
-                          <Badge variant="neutral">Note seule</Badge>
-                        )}
-                        <Badge
-                          variant={
-                            safeSentiment
-                              ? aiSentimentVariantMap[safeSentiment]
-                              : "neutral"
-                          }
-                        >
+                        {isReviewNoteOnly(review) && <span>Note seule</span>}
+                        <span>
                           {review.aiStatus === "ready"
                             ? safeSentiment
                               ? aiSentimentLabelMap[safeSentiment]
                               : "IA prête"
                             : "IA à compléter"}
-                        </Badge>
+                        </span>
                       </div>
-                      <div className="mt-3 grid gap-1.5 rounded-xl border border-white/70 bg-white/65 p-2 text-[11px] text-slate-600 opacity-90 transition group-hover:opacity-100">
-                        <div className="flex items-center justify-between gap-2">
-                          <span>Risque</span>
-                          <span className="font-semibold text-slate-800">
-                            {signals.risk}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between gap-2">
-                          <span>Urgence</span>
-                          <span className="font-semibold text-slate-800">
-                            {signals.urgency}
-                          </span>
-                        </div>
+                      <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-white/70 bg-white/65 px-2.5 py-1.5 text-[11px] text-slate-600 opacity-90 transition group-hover:opacity-100">
+                        <span className="font-semibold text-slate-800">
+                          {signals.urgency}
+                        </span>
+                        <span className="text-right">{signals.confidence}</span>
                       </div>
                     </button>
                   );
@@ -3154,10 +3140,11 @@ const Inbox = () => {
           className={cn(
             mobileInboxView === "details" ? "block" : "hidden",
             "lg:block",
+            "h-fit",
             focusMode && "border-slate-300 shadow-sm"
           )}
         >
-          <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <CardHeader className="flex flex-row items-center justify-between gap-3 p-3 sm:p-4">
             <div>
               <CardTitle>Lecture active</CardTitle>
               <p className="mt-1 text-xs text-slate-500">
@@ -3197,14 +3184,14 @@ const Inbox = () => {
               )}
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-3 pt-0 sm:p-4 sm:pt-0">
             {!selectedReview ? (
               <p className="text-sm text-slate-500">Sélectionnez un avis.</p>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-lg font-semibold text-slate-900">
+                    <p className="text-base font-semibold text-slate-900">
                       {selectedReview.authorName}
                     </p>
                     <p className="text-sm text-slate-500">
@@ -3217,46 +3204,47 @@ const Inbox = () => {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                   {selectedPriorityMeta && (
                     <Badge className={selectedPriorityMeta.badgeClass}>
                       {selectedPriorityMeta.label}
                     </Badge>
                   )}
-                  <Badge variant="neutral">{selectedReview.rating}★</Badge>
-                  <Badge variant={statusVariantMap[selectedReview.status]}>
-                    {statusLabelMap[selectedReview.status]}
-                  </Badge>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-medium text-slate-700">
+                    {selectedReview.rating}★ · {statusLabelMap[selectedReview.status]}
+                  </span>
                   {selectedReviewIsNoteOnly && (
-                    <Badge variant="neutral">Note seule</Badge>
+                    <span>Note seule</span>
                   )}
                 </div>
 
                 {selectedReviewSignals && (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                        Résumé IA
+                        Lecture IA
                       </p>
-                      <p className="mt-2 text-sm leading-6 text-slate-700">
-                        {selectedReviewSignals.summary}
-                      </p>
+                      <span className="text-xs font-medium text-slate-500">
+                        {selectedReviewSignals.confidence}
+                      </span>
                     </div>
-                    <div className="grid gap-2">
+                    <p className="mt-2 text-sm leading-5 text-slate-700">
+                      {selectedReviewSignals.summary}
+                    </p>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
                       {[
                         ["Risque", selectedReviewSignals.risk],
                         ["Urgence", selectedReviewSignals.urgency],
-                        ["Opportunité", selectedReviewSignals.opportunity],
-                        ["Confiance", selectedReviewSignals.confidence]
+                        ["Opportunité", selectedReviewSignals.opportunity]
                       ].map(([label, value]) => (
                         <div
                           key={label}
-                          className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
+                          className="rounded-xl bg-white px-2.5 py-1.5 text-xs"
                         >
-                          <span className="font-semibold uppercase text-slate-400">
+                          <span className="block font-semibold uppercase text-slate-400">
                             {label}
                           </span>
-                          <span className="text-right font-semibold text-slate-800">
+                          <span className="mt-1 block font-semibold text-slate-800">
                             {value}
                           </span>
                         </div>
@@ -3265,8 +3253,8 @@ const Inbox = () => {
                   </div>
                 )}
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-3">
-                  <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase text-slate-400">
+                <div className="rounded-2xl border border-slate-200 bg-white p-2.5">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-slate-400">
                     <Zap size={14} />
                     Actions rapides
                   </div>
@@ -3294,65 +3282,68 @@ const Inbox = () => {
                       <Bot size={15} />
                       Générer IA
                     </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled
-                      title="À connecter"
-                    >
-                      <Tag size={15} />
-                      Tagger
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled
-                      title="À connecter"
-                    >
-                      <Sparkles size={15} />
-                      Prioriser
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled
-                      title="À connecter"
-                    >
-                      <UserPlus size={15} />
-                      Assigner
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled
-                      title="À connecter"
-                    >
-                      <Archive size={15} />
-                      Archiver
-                    </Button>
                   </div>
-                  <p className="mt-2 text-xs text-slate-500">
-                    Tag, priorité, assignation et archivage sont préparés côté
-                    interface et restent à connecter.
-                  </p>
+                  <details className="mt-2 text-xs text-slate-500">
+                    <summary className="cursor-pointer font-medium text-slate-600">
+                      Outils à connecter
+                    </summary>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled
+                        title="À connecter"
+                      >
+                        <Tag size={15} />
+                        Tagger
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled
+                        title="À connecter"
+                      >
+                        <Sparkles size={15} />
+                        Prioriser
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled
+                        title="À connecter"
+                      >
+                        <UserPlus size={15} />
+                        Assigner
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled
+                        title="À connecter"
+                      >
+                        <Archive size={15} />
+                        Archiver
+                      </Button>
+                    </div>
+                  </details>
                 </div>
 
-                <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                <p className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm leading-5 text-slate-700">
                   {selectedReview.text || "Avis sans commentaire."}
                 </p>
 
-                <div className="space-y-2">
+                <div className="rounded-2xl border border-slate-200 bg-white p-2.5">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Insights IA
+                    Signaux IA
                   </p>
                   {selectedReview.aiStatus !== "ready" ? (
-                    <p className="text-sm text-slate-500">En attente IA.</p>
+                    <p className="mt-2 text-sm text-slate-500">En attente IA.</p>
                   ) : (
-                    <>
+                    <div className="mt-2 space-y-2">
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                         <Badge
                           variant={
@@ -3371,35 +3362,42 @@ const Inbox = () => {
                           </span>
                         )}
                       </div>
-                      {selectedReview.aiSummary && (
-                        <p className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
-                          {selectedReview.aiSummary}
-                        </p>
-                      )}
                       <div className="flex flex-wrap gap-2">
                         {selectedReview.aiTags.length === 0 ? (
                           <span className="text-xs text-slate-400">
                             Aucun tag détecté.
                           </span>
                         ) : (
-                          selectedReview.aiTags.map((tag: string) => (
+                          selectedReview.aiTags.slice(0, 4).map((tag: string) => (
                             <Badge key={tag} variant="neutral">
                               {tag}
                             </Badge>
                           ))
                         )}
+                        {selectedReview.aiTags.length > 4 && (
+                          <span className="text-xs font-medium text-slate-500">
+                            +{selectedReview.aiTags.length - 4} tags
+                          </span>
+                        )}
                       </div>
-                    </>
+                    </div>
                   )}
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  {selectedReview.tags.map((tag: string) => (
-                    <Badge key={tag} variant="neutral">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
+                {selectedReview.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedReview.tags.slice(0, 4).map((tag: string) => (
+                      <Badge key={tag} variant="neutral">
+                        {tag}
+                      </Badge>
+                    ))}
+                    {selectedReview.tags.length > 4 && (
+                      <span className="text-xs font-medium text-slate-500">
+                        +{selectedReview.tags.length - 4} tags
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
@@ -3409,10 +3407,11 @@ const Inbox = () => {
           className={cn(
             mobileInboxView === "reply" ? "block" : "hidden",
             "lg:block",
+            "h-fit",
             focusMode && "border-slate-300 shadow-sm"
           )}
         >
-          <CardHeader className="space-y-3">
+          <CardHeader className="space-y-3 p-3 sm:p-4">
             <div className="flex items-center justify-between gap-3">
               <CardTitle>Réponse</CardTitle>
               <Button
@@ -3426,10 +3425,15 @@ const Inbox = () => {
                 Voir l'avis
               </Button>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1">
               <Button
                 variant={replyTab === "reply" ? "default" : "outline"}
                 size="sm"
+                className={cn(
+                  "rounded-xl shadow-none",
+                  replyTab !== "reply" &&
+                    "border-transparent bg-transparent hover:bg-white"
+                )}
                 onClick={() => setReplyTab("reply")}
               >
                 Réponse
@@ -3437,18 +3441,23 @@ const Inbox = () => {
               <Button
                 variant={replyTab === "activity" ? "default" : "outline"}
                 size="sm"
+                className={cn(
+                  "rounded-xl shadow-none",
+                  replyTab !== "activity" &&
+                    "border-transparent bg-transparent hover:bg-white"
+                )}
                 onClick={() => setReplyTab("activity")}
               >
-                Activité & Notes
+                Activité
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-3 pt-0 sm:p-4 sm:pt-0">
             {replyTab === "activity" ? (
-              <div className="space-y-4">
-                <div className="space-y-3">
+              <div className="space-y-3">
+                <div className="space-y-2">
                   {selectedReview?.ownerReply && (
-                    <div className="flex gap-3 rounded-2xl border border-slate-200 bg-white p-3">
+                    <div className="flex gap-3 rounded-2xl border border-slate-200 bg-white p-2.5">
                       <span className="mt-1 h-2 w-2 rounded-full bg-emerald-500" />
                       <div className="w-full">
                         <div className="flex items-center justify-between text-xs text-slate-500">
@@ -3468,7 +3477,7 @@ const Inbox = () => {
                   {activityEvents.map((event) => (
                     <div
                       key={event.id}
-                      className="flex gap-3 rounded-2xl border border-slate-200 bg-white p-3"
+                      className="flex gap-3 rounded-2xl border border-slate-200 bg-white p-2.5"
                     >
                       <span className="mt-1 h-2 w-2 rounded-full bg-emerald-500" />
                       <div>
@@ -3495,7 +3504,7 @@ const Inbox = () => {
                       {businessMemory.map((item, index) => (
                         <div
                           key={`${item}-${index}`}
-                          className="rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-700"
+                          className="rounded-2xl border border-slate-200 bg-white p-2.5 text-sm text-slate-700"
                         >
                           {item}
                         </div>
@@ -3522,7 +3531,7 @@ const Inbox = () => {
                       {replyHistory.map((item) => (
                         <div
                           key={item.id}
-                          className="flex gap-3 rounded-2xl border border-slate-200 bg-white p-3"
+                          className="flex gap-3 rounded-2xl border border-slate-200 bg-white p-2.5"
                         >
                           <span className="mt-1 h-2 w-2 rounded-full bg-slate-300" />
                           <div className="w-full">
@@ -3544,10 +3553,10 @@ const Inbox = () => {
                 </div>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div>
                   <p className="text-xs font-semibold text-slate-500">Longueur</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  <div className="mt-2 grid grid-cols-3 gap-2">
                     {lengthOptions.map((option) => (
                       <Button
                         key={option.id}
@@ -3566,7 +3575,7 @@ const Inbox = () => {
 
                 <div>
                   <p className="text-xs font-semibold text-slate-500">Ton</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  <div className="mt-2 grid gap-2 sm:grid-cols-3">
                     {toneOptions.map((option) => (
                       <Button
                         key={option.id}
@@ -3607,7 +3616,7 @@ const Inbox = () => {
                 <div>
                   <textarea
                     id="reply-editor"
-                    className="min-h-[180px] w-full rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 lg:min-h-[220px]"
+                    className="min-h-[150px] w-full rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-700 lg:min-h-[180px]"
                     placeholder="Rédiger une réponse..."
                     value={replyText}
                     onChange={(event) => {

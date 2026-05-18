@@ -1,7 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import {
   ArrowRight,
-  AlertTriangle,
   CheckCircle,
   Medal,
   Sparkles,
@@ -556,9 +555,17 @@ const buildBusinessHealthScoreModel = (
   };
 };
 
-const ScoreRing = ({ model, size = "lg" }: { model: BusinessHealthScoreModel; size?: "sm" | "lg" }) => {
-  const ringSize = size === "sm" ? "h-20 w-20" : "h-32 w-32";
-  const scoreSize = size === "sm" ? "text-2xl" : "text-4xl";
+const ScoreRing = ({
+  model,
+  size = "lg"
+}: {
+  model: BusinessHealthScoreModel;
+  size?: "sm" | "md" | "lg";
+}) => {
+  const ringSize =
+    size === "sm" ? "h-20 w-20" : size === "md" ? "h-28 w-28" : "h-32 w-32";
+  const scoreSize =
+    size === "sm" ? "text-2xl" : size === "md" ? "text-3xl" : "text-4xl";
 
   return (
     <div
@@ -623,6 +630,7 @@ const DashboardScoreCard = ({
 }) => {
   const navigate = useNavigate();
   const todoItems = model.checklist.filter((item) => !item.complete).slice(0, 3);
+  const visibleTodoItems = todoItems.length ? todoItems : model.checklist.slice(0, 3);
   const nextPriorityStyle = getPriorityStyle(model.nextBestAction.priority);
 
   return (
@@ -749,14 +757,17 @@ const DashboardScoreCard = ({
             </div>
           </div>
 
-          <div className="space-y-4 p-5 sm:p-6">
-            <div className="flex items-center justify-between gap-3">
+          <div className="space-y-4 bg-white p-5 sm:p-6">
+            <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-slate-900">
-                  Ce qui bloque actuellement
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  Priorités du score
+                </p>
+                <p className="mt-1 text-base font-semibold text-slate-950">
+                  Ce qui débloque la progression
                 </p>
                 <p className="text-xs text-slate-500">
-                  Les priorités qui débloquent le score.
+                  Actions classées par impact business estimé.
                 </p>
               </div>
               {loading ? (
@@ -765,47 +776,57 @@ const DashboardScoreCard = ({
                 <TrendingUp size={18} className="text-emerald-600" />
               )}
             </div>
-            <div className="space-y-2">
-              {(todoItems.length ? todoItems : model.checklist.slice(0, 3)).map((item) => (
+            <div className="grid gap-2">
+              {visibleTodoItems.map((item, index) => (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => navigate(item.href)}
-                  className="flex w-full items-start gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-slate-300 hover:bg-slate-50"
+                  className="group flex w-full items-start gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-slate-300 hover:bg-slate-50"
                 >
                   <span
-                    className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
+                    className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold ${
                       item.complete
                         ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                         : "border-slate-200 bg-slate-50 text-slate-400"
                     }`}
                   >
-                    <CheckCircle size={14} />
+                    {item.complete ? <CheckCircle size={14} /> : index + 1}
                   </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-semibold text-slate-900">
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold leading-5 text-slate-900">
                       {item.label}
                     </span>
                     <span className="mt-0.5 block text-xs text-slate-500">
                       {item.description}
                     </span>
                   </span>
+                  <span className="hidden text-xs font-semibold text-slate-400 transition group-hover:text-slate-700 sm:inline">
+                    {item.complete ? "OK" : item.cta}
+                  </span>
                 </button>
               ))}
             </div>
             {model.blockedScoreSignals.length > 0 && (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <p className="text-xs font-semibold uppercase text-slate-400">
-                  Gains estimés
-                </p>
-                <div className="mt-2 space-y-1.5">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    Gains estimés
+                  </p>
+                  <span className="text-[11px] font-medium text-slate-500">
+                    Potentiel Coach
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2">
                   {model.blockedScoreSignals.map((signal) => (
                     <div
                       key={signal.label}
-                      className="flex items-center justify-between gap-3 text-xs"
+                      className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 text-xs"
                     >
-                      <span className="text-slate-600">{signal.label}</span>
-                      <span className="font-semibold text-slate-900">
+                      <span className="min-w-0 truncate text-slate-600">
+                        {signal.label}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700">
                         {signal.value}
                       </span>
                     </div>
@@ -840,177 +861,141 @@ const FullScorePanel = ({
   return (
     <Card className="overflow-hidden">
       <CardContent className="p-0">
-        <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)]">
-          <div className="bg-slate-950 p-5 text-white sm:p-6">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0 space-y-2">
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold text-slate-100">
-                  <Sparkles size={14} />
-                  Coach business EGIA
-                </div>
-                <div>
-                  <h3 className="text-2xl font-semibold leading-tight sm:text-3xl">
-                    Business Health Score
-                  </h3>
-                  <p className="mt-2 max-w-xl text-sm text-slate-300">
-                    Le détail complet pour comprendre votre score, choisir la
-                    prochaine action et progresser sans dispersion.
-                  </p>
-                </div>
+        <div className="bg-slate-950 p-4 text-white sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold text-slate-100">
+                <Sparkles size={14} />
+                Coach business EGIA
               </div>
-              <div className="flex flex-wrap gap-2">
-                {loading && <Badge variant="neutral">Calcul en cours</Badge>}
-                <Badge className={model.level.badgeClass}>
-                  <Medal size={14} />
-                  Niveau {model.level.label}
-                </Badge>
-              </div>
+              <h3 className="mt-3 text-2xl font-semibold leading-tight sm:text-3xl">
+                Business Health Score
+              </h3>
+              <p className="mt-1 max-w-2xl text-sm text-slate-300">
+                Score, priorités et prochaine action dans un cockpit compact.
+              </p>
             </div>
-
-            <div className="mt-6 grid gap-5 sm:grid-cols-[140px_minmax(0,1fr)] sm:items-center">
-              <div className="mx-auto w-full max-w-[180px] sm:mx-0">
-                <ScoreRing model={model} />
-                <div className="mt-4 rounded-2xl border border-white/10 bg-white/10 p-3">
-                  <p className="text-xs font-semibold uppercase text-slate-400">
-                    Calculé selon :
-                  </p>
-                  <div className="mt-3 space-y-2">
-                    {model.scoreFactors.map((factor) => (
-                      <div
-                        key={factor.label}
-                        className="flex items-center justify-between gap-3 text-xs"
-                      >
-                        <span className="text-slate-400">{factor.label}</span>
-                        <span
-                          className={
-                            factor.complete ? "text-emerald-300" : "text-slate-200"
-                          }
-                        >
-                          {factor.value}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                {model.positiveScoreSignals.length > 0 && (
-                  <div className="mt-3 rounded-2xl border border-white/10 bg-white/10 p-3">
-                    <p className="text-xs font-semibold uppercase text-slate-400">
-                      Ce qui améliore le score
-                    </p>
-                    <div className="mt-3 space-y-2">
-                      {model.positiveScoreSignals.map((signal) => (
-                        <div
-                          key={signal.label}
-                          className="flex items-center justify-between gap-3 text-xs"
-                        >
-                          <span className="text-slate-400">{signal.label}</span>
-                          <span className="font-semibold text-emerald-300">
-                            {signal.value}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="min-w-0 space-y-4">
-                <div>
-                  <div className="flex items-center justify-between gap-3 text-xs font-semibold text-slate-300">
-                    <span>Progression commerciale</span>
-                    <span>
-                      {model.completedChecklistCount}/{model.checklist.length} étapes
-                    </span>
-                  </div>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/15">
-                    <div
-                      className={`h-full rounded-full ${model.level.progressClass} transition-all duration-700`}
-                      style={{ width: `${model.score}%` }}
-                    />
-                  </div>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  <div className="rounded-xl border border-white/10 bg-white/10 p-3">
-                    <p className="text-xs font-semibold uppercase text-slate-400">
-                      Progression 7 jours
-                    </p>
-                    <p className="mt-1 text-sm font-semibold text-emerald-300">
-                      {model.trajectory.trendLabel}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-white/10 p-3">
-                    <p className="text-xs font-semibold uppercase text-slate-400">
-                      Score précédent
-                    </p>
-                    <p className="mt-1 text-sm font-semibold text-slate-100">
-                      {model.trajectory.previousScore}/100
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-white/10 p-3">
-                    <p className="text-xs font-semibold uppercase text-slate-400">
-                      Prochain niveau
-                    </p>
-                    <p className="mt-1 text-sm font-semibold text-slate-100">
-                      {model.nextLevel.label === "Maximum"
-                        ? "Niveau stabilisé"
-                        : `${model.nextLevel.label} à ${model.nextLevel.threshold}`}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
-                  <div className="flex items-start gap-3">
-                    <Target className={nextPriorityStyle.iconClass} size={20} />
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-xs font-semibold uppercase text-slate-400">
-                          Prochaine action
-                        </p>
-                        <Badge className={nextPriorityStyle.badgeClass}>
-                          {nextPriorityStyle.label}
-                        </Badge>
-                      </div>
-                      <p className="mt-1 font-semibold">{model.nextBestAction.label}</p>
-                      <p className="mt-1 text-sm text-slate-300">
-                        {model.nextBestAction.detail}
-                      </p>
-                      <p className="mt-2 text-xs font-semibold text-emerald-300">
-                        Prochain gain estimé: +{model.nextBestAction.potentialGain} pts
-                      </p>
-                      <div className="mt-3 rounded-xl border border-white/10 bg-slate-950/20 p-3 text-xs text-slate-300">
-                        <p className="font-semibold text-slate-200">
-                          Pourquoi cette recommandation ?
-                        </p>
-                        <p className="mt-1">{model.nextBestAction.reason}</p>
-                        <p className="mt-2 font-semibold text-emerald-300">
-                          {model.nextBestAction.impact}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      className="bg-white text-slate-950 hover:bg-slate-100"
-                      onClick={() => navigate(model.nextBestAction.href)}
-                    >
-                      {model.nextBestAction.cta}
-                      <ArrowRight size={15} />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="border-white/20 text-white hover:bg-white/10"
-                      onClick={() => navigate("/inbox")}
-                    >
-                      Ouvrir l'inbox
-                    </Button>
-                  </div>
-                </div>
-              </div>
+            <div className="flex flex-wrap gap-2">
+              {loading && <Badge variant="neutral">Calcul en cours</Badge>}
+              <Badge className={model.level.badgeClass}>
+                <Medal size={14} />
+                Niveau {model.level.label}
+              </Badge>
             </div>
           </div>
 
-          <div className="space-y-5 p-5 sm:p-6">
+          <div className="mt-5 grid gap-4 xl:grid-cols-[120px_minmax(0,1fr)_minmax(300px,0.82fr)] xl:items-center">
+            <div className="flex justify-center xl:justify-start">
+              <ScoreRing model={model} size="md" />
+            </div>
+
+            <div className="min-w-0 space-y-3">
+              <div>
+                <div className="flex items-center justify-between gap-3 text-xs font-semibold text-slate-300">
+                  <span>Progression commerciale</span>
+                  <span>
+                    {model.completedChecklistCount}/{model.checklist.length} étapes
+                  </span>
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/15">
+                  <div
+                    className={`h-full rounded-full ${model.level.progressClass} transition-all duration-700`}
+                    style={{ width: `${model.score}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-3">
+                {[
+                  ["Tendance", model.trajectory.trendLabel],
+                  ["Score précédent", `${model.trajectory.previousScore}/100`],
+                  [
+                    "Prochain niveau",
+                    model.nextLevel.label === "Maximum"
+                      ? "Niveau stabilisé"
+                      : `${model.nextLevel.label} à ${model.nextLevel.threshold}`
+                  ]
+                ].map(([label, value]) => (
+                  <div
+                    key={label}
+                    className="rounded-xl border border-white/10 bg-white/10 p-3"
+                  >
+                    <p className="text-[11px] font-semibold uppercase text-slate-400">
+                      {label}
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-100">
+                      {value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                {model.scoreFactors.map((factor) => (
+                  <div
+                    key={factor.label}
+                    className="rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2"
+                  >
+                    <p className="truncate text-[11px] text-slate-400">
+                      {factor.label}
+                    </p>
+                    <p
+                      className={`mt-0.5 truncate text-xs font-semibold ${
+                        factor.complete ? "text-emerald-300" : "text-slate-200"
+                      }`}
+                    >
+                      {factor.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
+              <div className="flex items-start gap-3">
+                <Target className={nextPriorityStyle.iconClass} size={20} />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xs font-semibold uppercase text-slate-400">
+                      Prochaine action
+                    </p>
+                    <Badge className={nextPriorityStyle.badgeClass}>
+                      {nextPriorityStyle.label}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 font-semibold">{model.nextBestAction.label}</p>
+                  <p className="mt-1 line-clamp-2 text-sm text-slate-300">
+                    {model.nextBestAction.detail}
+                  </p>
+                  <p className="mt-2 text-xs font-semibold text-emerald-300">
+                    Gain estimé: +{model.nextBestAction.potentialGain} pts
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  className="bg-white text-slate-950 hover:bg-slate-100"
+                  onClick={() => navigate(model.nextBestAction.href)}
+                >
+                  {model.nextBestAction.cta}
+                  <ArrowRight size={15} />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-white/20 text-white hover:bg-white/10"
+                  onClick={() => navigate("/inbox")}
+                >
+                  Ouvrir l'inbox
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-5 p-4 sm:p-5 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] xl:items-start">
+          <div className="space-y-4">
             <div>
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -1023,7 +1008,7 @@ const FullScorePanel = ({
                 </div>
                 <TrendingUp size={18} className="text-emerald-600" />
               </div>
-              <div className="mt-4 grid gap-2">
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
                 {model.checklist.map((item) => (
                   <button
                     key={item.id}
@@ -1056,11 +1041,14 @@ const FullScorePanel = ({
               </div>
             </div>
 
+          </div>
+
+          <div className="space-y-4">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-sm font-semibold text-slate-900">
                 Recommandations prioritaires
               </p>
-              <div className="mt-3 space-y-3">
+              <div className="mt-3 grid gap-3">
                 {model.recommendations.map((item) => {
                   const priorityStyle = getPriorityStyle(item.priority);
 
@@ -1092,31 +1080,11 @@ const FullScorePanel = ({
                           {item.cta}
                         </Button>
                       </div>
-                      <div className="mt-3 grid gap-2 rounded-xl bg-white/70 p-3 text-xs text-slate-600">
-                        <div className="flex items-start gap-2">
-                          <AlertTriangle
-                            size={14}
-                            className={`${priorityStyle.iconClass} mt-0.5 shrink-0`}
-                          />
-                          <div>
-                            <p className="font-semibold text-slate-800">
-                              Pourquoi cette recommandation ?
-                            </p>
-                            <p className="mt-0.5">{item.reason}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-start gap-2">
-                          <TrendingUp
-                            size={14}
-                            className="mt-0.5 shrink-0 text-emerald-600"
-                          />
-                          <div>
-                            <p className="font-semibold text-slate-800">
-                              Impact estimé
-                            </p>
-                            <p className="mt-0.5">{item.impact}</p>
-                          </div>
-                        </div>
+                      <div className="mt-3 grid gap-2 rounded-xl bg-white/70 p-3 text-xs text-slate-600 sm:grid-cols-2">
+                        <p>{item.reason}</p>
+                        <p className="font-semibold text-emerald-700">
+                          {item.impact}
+                        </p>
                       </div>
                     </div>
                   );

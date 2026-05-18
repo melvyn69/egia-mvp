@@ -316,7 +316,7 @@ const Progress = ({
         : "À venir"
       : "Non encore mesuré";
 
-  const features: FeatureUnlock[] = [
+  const activeFeatures: FeatureUnlock[] = [
     {
       icon: Bot,
       label: "Réponses IA",
@@ -334,32 +334,38 @@ const Progress = ({
       statusLabel: getMilestoneStatus(competitorMilestone)
     },
     {
+      icon: Zap,
+      label: "Automatisations",
+      description: describeMilestone(automationMilestone),
+      unlocked: automationMilestone.achieved,
+      statusLabel: getMilestoneStatus(automationMilestone)
+    }
+  ];
+  const roadmapFeatures: FeatureUnlock[] = [
+    {
       icon: Sparkles,
       label: "Widgets",
-      description: "Preuves sociales intégrables. Bientôt disponible.",
+      description: "Preuves sociales intégrables, affichées comme extension produit.",
+      unlocked: false,
+      statusLabel: "Bientôt disponible"
+    },
+    {
+      icon: Users,
+      label: "Social Studio",
+      description: "Activation marque et contenus, prévue après le socle réputation.",
       unlocked: false,
       statusLabel: "Bientôt disponible"
     },
     {
       icon: FileText,
       label: "Rapports",
-      description: describeMilestone(reportMilestone),
+      description: reportMilestone.achieved
+        ? describeMilestone(reportMilestone)
+        : "Reporting avancé et exports partageables.",
       unlocked: reportMilestone.achieved,
-      statusLabel: getMilestoneStatus(reportMilestone)
-    },
-    {
-      icon: Zap,
-      label: "Automatisations",
-      description: describeMilestone(automationMilestone),
-      unlocked: automationMilestone.achieved,
-      statusLabel: getMilestoneStatus(automationMilestone)
-    },
-    {
-      icon: Users,
-      label: "Social Studio",
-      description: "Activation marque et contenus. Bientôt disponible.",
-      unlocked: false,
-      statusLabel: "Bientôt disponible"
+      statusLabel: reportMilestone.achieved
+        ? getMilestoneStatus(reportMilestone)
+        : "Bientôt disponible"
     }
   ];
 
@@ -602,14 +608,14 @@ const Progress = ({
 
       <Card className="bg-white">
         <CardHeader>
-          <CardTitle>Capacités disponibles</CardTitle>
+          <CardTitle>Capacités actives</CardTitle>
           <p className="text-sm text-slate-500">
-            Les capacités activées à mesure que votre système devient plus mature.
+            Les capacités réellement mesurées par votre progression actuelle.
           </p>
         </CardHeader>
-        <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {features.map((feature) => {
+        <CardContent className="space-y-5">
+          <div className="grid gap-3 md:grid-cols-3">
+            {activeFeatures.map((feature) => {
               const Icon = feature.icon;
 
               return (
@@ -618,7 +624,7 @@ const Progress = ({
                   className={`rounded-2xl border p-4 transition duration-300 ${
                     feature.unlocked
                       ? "border-slate-200 bg-white shadow-sm"
-                      : "border-slate-200 bg-slate-50 opacity-70"
+                      : "border-slate-200 bg-slate-50"
                   }`}
                 >
                   <div className="flex items-start gap-3">
@@ -648,6 +654,49 @@ const Progress = ({
                 </div>
               );
             })}
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">
+                  Roadmap discrète
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Les extensions visibles sans les présenter comme déjà actives.
+                </p>
+              </div>
+              <Badge variant="neutral">Bientôt disponible</Badge>
+            </div>
+            <div className="mt-4 divide-y divide-slate-200">
+              {roadmapFeatures.map((feature) => {
+                const Icon = feature.icon;
+
+                return (
+                  <div
+                    key={feature.label}
+                    className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"
+                  >
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-slate-500">
+                      <Icon size={16} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-slate-900">
+                          {feature.label}
+                        </p>
+                        <span className="text-xs font-medium text-slate-500">
+                          {feature.statusLabel}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {feature.description}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </CardContent>
       </Card>
