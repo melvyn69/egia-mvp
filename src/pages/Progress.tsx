@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   Award,
@@ -20,11 +21,22 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import type { GoogleConnectionStatus } from "../hooks/useGoogleConnectionStatus";
-import { getNotifications } from "../lib/notifications";
+import type { AppNotificationBase } from "../lib/notifications";
+import {
+  buildCoachTrajectory,
+  type CoachMilestone,
+  type CoachRecommendation,
+  type CoachScoreLevel,
+  getBestCoachRecommendation,
+  getCoachNextLevelTarget,
+  getCoachRecommendationPotentialGain,
+  useCoachResult
+} from "../services/coach";
 
 type ProgressProps = {
   session: Session | null;
   googleStatus: GoogleConnectionStatus;
+  notifications?: AppNotificationBase[];
   locations: Array<{
     id: string;
     location_title: string | null;
@@ -40,6 +52,7 @@ type Achievement = {
   description: string;
   unlocked: boolean;
   date?: string;
+  statusLabel?: MilestoneStatusLabel;
 };
 
 type TrophyItem = Achievement & {
@@ -51,22 +64,18 @@ type FeatureUnlock = {
   description: string;
   unlocked: boolean;
   icon: typeof Sparkles;
+  statusLabel: MilestoneStatusLabel;
 };
 
-const getStoredCompetitorProgress = (): boolean => {
-  if (typeof window === "undefined") {
-    return false;
-  }
+type MilestoneStatusLabel =
+  | "À venir"
+  | "Bientôt disponible"
+  | "Non encore mesuré"
+  | "Débloqué";
 
-  try {
-    const zoneLabel = window.localStorage.getItem("competitors_zone_label");
-    const rawHistory = window.localStorage.getItem("competitors_scan_history");
-    const history = rawHistory ? JSON.parse(rawHistory) : [];
-    return Boolean(zoneLabel) || (Array.isArray(history) && history.length > 0);
-  } catch {
-    return false;
-  }
-};
+const plannedMilestoneIds = new Set<CoachMilestone["id"]>([
+  "first-automation"
+]);
 
 const formatDate = (value?: string | null): string | undefined => {
   if (!value) {
@@ -84,183 +93,273 @@ const formatDate = (value?: string | null): string | undefined => {
   }
 };
 
-const getProgressLevel = (score: number) => {
-  if (score >= 90) {
-    return {
-      label: "Expert",
-      badgeClass: "border-violet-200 bg-violet-50 text-violet-700",
-      barClass: "bg-violet-400",
-      message: "Votre réputation locale atteint un niveau avancé."
-    };
+const getProgressLevel = (level: CoachScoreLevel) => {
+  switch (level) {
+    case "expert":
+      return {
+        label: "Expert",
+        badgeClass: "border-violet-200 bg-violet-50 text-violet-700",
+        barClass: "bg-violet-400",
+        message: "Votre réputation locale atteint un niveau avancé."
+      };
+    case "gold":
+      return {
+        label: "Gold",
+        badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
+        barClass: "bg-amber-300",
+        message: "Votre système réputation devient un vrai avantage business."
+      };
+    case "silver":
+      return {
+        label: "Silver",
+        badgeClass: "border-slate-200 bg-slate-100 text-slate-700",
+        barClass: "bg-slate-300",
+        message: "Votre base est solide, les prochains leviers sont clairs."
+      };
+    case "bronze":
+    default:
+      return {
+        label: "Bronze",
+        badgeClass: "border-orange-200 bg-orange-50 text-orange-700",
+        barClass: "bg-orange-300",
+        message: "Votre parcours EGIA commence, chaque action débloque de la valeur."
+      };
   }
-
-  if (score >= 70) {
-    return {
-      label: "Gold",
-      badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
-      barClass: "bg-amber-300",
-      message: "Votre système réputation devient un vrai avantage business."
-    };
-  }
-
-  if (score >= 40) {
-    return {
-      label: "Silver",
-      badgeClass: "border-slate-200 bg-slate-100 text-slate-700",
-      barClass: "bg-slate-300",
-      message: "Votre base est solide, les prochains leviers sont clairs."
-    };
-  }
-
-  return {
-    label: "Bronze",
-    badgeClass: "border-orange-200 bg-orange-50 text-orange-700",
-    barClass: "bg-orange-300",
-    message: "Votre parcours EGIA commence, chaque action débloque de la valeur."
-  };
 };
 
-const Progress = ({ session, googleStatus, locations }: ProgressProps) => {
+const getMilestoneStatus = (milestone: CoachMilestone): MilestoneStatusLabel => {
+  if (milestone.achieved) {
+    return "Débloqué";
+  }
+
+  if (
+    plannedMilestoneIds.has(milestone.id) &&
+    milestone.missingFields.length > 0
+  ) {
+    return "Bientôt disponible";
+  }
+
+  return milestone.missingFields.length > 0 ? "Non encore mesuré" : "À venir";
+};
+
+const getMilestoneDate = (milestone: CoachMilestone): string | undefined =>
+  milestone.achievedAt
+    ? formatDate(milestone.achievedAt)
+    : milestone.achieved
+      ? milestone.evidence ?? "Débloqué"
+      : undefined;
+
+const describeMilestone = (milestone: CoachMilestone): string => {
+  if (milestone.achieved && milestone.evidence) {
+    return `${milestone.description} ${milestone.evidence}.`;
+  }
+
+  if (!milestone.achieved && milestone.missingFields.length > 0) {
+    if (plannedMilestoneIds.has(milestone.id)) {
+      return `${milestone.description} Bientôt disponible.`;
+    }
+
+    return `${milestone.description} Non encore mesuré.`;
+  }
+
+  return milestone.description;
+};
+
+const toAchievement = (milestone: CoachMilestone): Achievement => ({
+  title: milestone.label,
+  description: describeMilestone(milestone),
+  unlocked: milestone.achieved,
+  date: getMilestoneDate(milestone),
+  statusLabel: getMilestoneStatus(milestone)
+});
+
+const milestoneHref: Record<CoachMilestone["id"], string> = {
+  "account-created": "/connect",
+  "google-connected": "/connect",
+  "first-location-imported": "/settings?tab=locations",
+  "first-reviews-synced": "/settings?tab=locations",
+  "first-review-replied": "/coach",
+  "response-rate-90": "/coach",
+  "reviews-treated-50": "/coach",
+  "reviews-synced-100": "/coach",
+  "first-automation": "/automation",
+  "first-competitor-watch": "/competitors",
+  "first-pdf-report": "/reports"
+};
+
+const recommendationHref: Record<CoachRecommendation["id"], string> = {
+  "prioritize-critical-reviews": "/inbox?priority=critical&status=unanswered",
+  "reply-to-reviews": "/inbox?status=unanswered",
+  "connect-google": "/connect",
+  "import-locations": "/settings?tab=locations",
+  "calibrate-ai-voice": "/settings/brand-voice",
+  "activate-alerts": "/alerts",
+  "create-automation": "/automation",
+  "add-competitor-watch": "/competitors",
+  "create-report": "/reports"
+};
+
+const getMilestone = (
+  milestones: CoachMilestone[],
+  id: CoachMilestone["id"]
+): CoachMilestone => {
+  const milestone = milestones.find((item) => item.id === id);
+  if (!milestone) {
+    throw new Error(`Missing coach milestone: ${id}`);
+  }
+  return milestone;
+};
+
+const timelineMilestoneIds: CoachMilestone["id"][] = [
+  "account-created",
+  "google-connected",
+  "first-location-imported",
+  "first-reviews-synced",
+  "first-review-replied",
+  "response-rate-90"
+];
+
+const trophyIconsByMilestone: Partial<
+  Record<CoachMilestone["id"], typeof Trophy>
+> = {
+  "first-review-replied": Trophy,
+  "reviews-treated-50": Star,
+  "response-rate-90": BarChart3,
+  "reviews-synced-100": Award,
+  "first-automation": Zap,
+  "first-competitor-watch": Radar,
+  "first-pdf-report": FileText
+};
+
+const Progress = ({
+  session,
+  googleStatus,
+  locations,
+  notifications
+}: ProgressProps) => {
   const navigate = useNavigate();
-  const googleConnected = googleStatus === "connected";
-  const hasLocations = locations.length > 0;
-  const notifications = getNotifications();
-  const hasActivity = notifications.length > 0;
-  const hasCompetitorProgress = getStoredCompetitorProgress();
-  const createdAt = formatDate(session?.user.created_at);
-  const unlockedSignals = [
-    Boolean(session),
-    googleConnected,
-    hasLocations,
-    hasActivity,
-    hasCompetitorProgress
-  ].filter(Boolean).length;
-  const progressScore = Math.min(100, 38 + unlockedSignals * 12);
-  const level = getProgressLevel(progressScore);
+  const coach = useCoachResult({
+    session,
+    googleStatus,
+    locations,
+    notifications
+  });
+  const coachResult = coach.coachResult;
+  const aiSamples = coach.coachMetrics.aiSamples;
+  const milestones = coachResult.milestones;
+  const nextMilestone = coach.nextMilestone;
+  const progressScore = coachResult.score.value;
+  const level = getProgressLevel(coachResult.score.level);
+  const trajectory = useMemo(
+    () => buildCoachTrajectory(coachResult),
+    [coachResult]
+  );
+  const nextLevel = useMemo(
+    () => getCoachNextLevelTarget(coachResult),
+    [coachResult]
+  );
+  const bestRecommendation = useMemo(
+    () => getBestCoachRecommendation(coachResult),
+    [coachResult]
+  );
+  const bestRecommendationGain = bestRecommendation
+    ? getCoachRecommendationPotentialGain(bestRecommendation, coachResult)
+    : 0;
+  const completedMilestoneIds = useMemo(
+    () => new Set(coach.completedMilestones.map((milestone) => milestone.id)),
+    [coach.completedMilestones]
+  );
+  const recentlyUnlocked =
+    coach.completedMilestones[coach.completedMilestones.length - 1] ?? null;
+  const toProgressAchievement = (milestone: CoachMilestone): Achievement => ({
+    ...toAchievement(milestone),
+    unlocked: completedMilestoneIds.has(milestone.id)
+  });
 
-  const timeline: Achievement[] = [
-    {
-      title: "Compte créé",
-      description: "Votre espace EGIA est prêt.",
-      unlocked: Boolean(session),
-      date: createdAt
-    },
-    {
-      title: "Google connecté",
-      description: "La source principale de réputation est reliée.",
-      unlocked: googleConnected,
-      date: googleConnected ? "Aujourd’hui" : undefined
-    },
-    {
-      title: "Premiers établissements importés",
-      description: hasLocations
-        ? `${locations.length} établissement${locations.length > 1 ? "s" : ""} suivi${locations.length > 1 ? "s" : ""}.`
-        : "Importez vos fiches pour lancer le pilotage.",
-      unlocked: hasLocations,
-      date: hasLocations ? "Aujourd’hui" : undefined
-    },
-    {
-      title: "Premiers avis synchronisés",
-      description: "Les signaux clients commencent à alimenter le coach.",
-      unlocked: hasActivity,
-      date: hasActivity ? "Aujourd’hui" : undefined
-    },
-    {
-      title: "Première automatisation activée",
-      description: "Un workflow fait gagner du temps à l’équipe.",
-      unlocked: false
-    },
-    {
-      title: "Premier rapport généré",
-      description: "Une synthèse business est prête à partager.",
-      unlocked: false
-    }
-  ];
+  const timeline = useMemo<Achievement[]>(
+    () =>
+      timelineMilestoneIds.map((id) =>
+        toProgressAchievement(getMilestone(milestones, id))
+      ),
+    [completedMilestoneIds, milestones]
+  );
 
-  const trophies: TrophyItem[] = [
-    {
-      icon: Trophy,
-      title: "Premier avis répondu",
-      description: "Répondre au premier avis depuis EGIA.",
-      unlocked: hasActivity,
-      date: hasActivity ? "Aujourd’hui" : undefined
-    },
-    {
-      icon: Star,
-      title: "50 avis traités",
-      description: "Installer une vraie routine de réponse client.",
-      unlocked: false
-    },
-    {
-      icon: BarChart3,
-      title: "Taux réponse 90%",
-      description: "Maintenir un niveau de suivi premium.",
-      unlocked: hasActivity,
-      date: hasActivity ? "Aujourd’hui" : undefined
-    },
-    {
-      icon: Zap,
-      title: "Première automatisation",
-      description: "Activer un scénario qui accélère l’exploitation.",
-      unlocked: false
-    },
-    {
-      icon: Award,
-      title: "100 avis synchronisés",
-      description: "Atteindre un volume robuste d’apprentissage.",
-      unlocked: false
-    },
-    {
-      icon: Radar,
-      title: "Première veille concurrentielle",
-      description: "Comparer votre présence locale au marché.",
-      unlocked: hasCompetitorProgress,
-      date: hasCompetitorProgress ? "Aujourd’hui" : undefined
-    },
-    {
-      icon: FileText,
-      title: "Premier rapport PDF",
-      description: "Produire un livrable clair pour piloter.",
-      unlocked: false
-    }
-  ];
+  const trophies = useMemo<TrophyItem[]>(
+    () =>
+      milestones.flatMap((milestone) => {
+        const icon = trophyIconsByMilestone[milestone.id];
+        if (!icon) {
+          return [];
+        }
+
+        return [
+          {
+            icon,
+            ...toProgressAchievement(milestone)
+          }
+        ];
+      }),
+    [completedMilestoneIds, milestones]
+  );
+  const automationMilestone = getMilestone(milestones, "first-automation");
+  const competitorMilestone = getMilestone(milestones, "first-competitor-watch");
+  const reportMilestone = getMilestone(milestones, "first-pdf-report");
+  const aiBreakdown = coachResult.score.breakdown.find(
+    (item) => item.id === "ai-tags"
+  );
+  const aiFeatureUnlocked =
+    aiBreakdown !== undefined && aiBreakdown.points > 0;
+  const aiFeatureStatus =
+    aiBreakdown !== undefined && aiBreakdown.status !== "missing"
+      ? aiFeatureUnlocked
+        ? "Débloqué"
+        : "À venir"
+      : "Non encore mesuré";
 
   const features: FeatureUnlock[] = [
     {
       icon: Bot,
       label: "Réponses IA",
-      description: "Drafts assistés pour répondre plus vite.",
-      unlocked: googleConnected && hasLocations
+      description: aiFeatureUnlocked
+        ? `Drafts assistés pour répondre plus vite. ${aiSamples} avis analysé(s).`
+        : `Drafts assistés pour répondre plus vite. ${aiFeatureStatus}.`,
+      unlocked: aiFeatureUnlocked,
+      statusLabel: aiFeatureStatus
     },
     {
       icon: Radar,
       label: "Veille",
-      description: "Analyse concurrentielle locale.",
-      unlocked: hasCompetitorProgress
+      description: describeMilestone(competitorMilestone),
+      unlocked: competitorMilestone.achieved,
+      statusLabel: getMilestoneStatus(competitorMilestone)
     },
     {
       icon: Sparkles,
       label: "Widgets",
-      description: "Preuves sociales intégrables.",
-      unlocked: false
+      description: "Preuves sociales intégrables. Bientôt disponible.",
+      unlocked: false,
+      statusLabel: "Bientôt disponible"
     },
     {
       icon: FileText,
       label: "Rapports",
-      description: "Synthèses business exportables.",
-      unlocked: false
+      description: describeMilestone(reportMilestone),
+      unlocked: reportMilestone.achieved,
+      statusLabel: getMilestoneStatus(reportMilestone)
     },
     {
       icon: Zap,
       label: "Automatisations",
-      description: "Scénarios pour industrialiser le suivi.",
-      unlocked: false
+      description: describeMilestone(automationMilestone),
+      unlocked: automationMilestone.achieved,
+      statusLabel: getMilestoneStatus(automationMilestone)
     },
     {
       icon: Users,
       label: "Social Studio",
-      description: "Activation marque et contenus.",
-      unlocked: false
+      description: "Activation marque et contenus. Bientôt disponible.",
+      unlocked: false,
+      statusLabel: "Bientôt disponible"
     }
   ];
 
@@ -285,37 +384,108 @@ const Progress = ({ session, googleStatus, locations }: ProgressProps) => {
               </p>
               <div className="mt-8">
                 <div className="flex items-center justify-between gap-4 text-sm font-semibold text-slate-300">
-                  <span>Progression utilisateur</span>
+                  <span>Progression business</span>
                   <span>{progressScore}/100</span>
                 </div>
                 <div className="mt-3 h-3 overflow-hidden rounded-full bg-white/15">
                   <div
-                    className={`h-full rounded-full ${level.barClass} transition-all duration-700`}
+                    className={`h-full rounded-full ${level.barClass} transition-all duration-1000 ease-out`}
                     style={{ width: `${progressScore}%` }}
                   />
                 </div>
               </div>
             </div>
 
-            <div className="rounded-3xl border border-white/10 bg-white/10 p-5">
+            <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-[0_20px_60px_-40px_rgba(255,255,255,0.45)]">
               <p className="text-sm font-semibold text-slate-200">
-                Prochain déblocage
+                Prochain objectif
               </p>
-              <p className="mt-2 text-2xl font-semibold">Automatisations</p>
+              <p className="mt-2 text-2xl font-semibold">{nextMilestone.label}</p>
               <p className="mt-2 text-sm text-slate-300">
-                Activez un premier scénario pour transformer EGIA en assistant
-                opérationnel.
+                {describeMilestone(nextMilestone)}
               </p>
+              <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/20 p-3">
+                <p className="text-xs font-semibold uppercase text-slate-400">
+                  Action la plus rentable
+                </p>
+                <p className="mt-1 text-sm font-semibold text-white">
+                  {bestRecommendation?.title ?? "Maintenir le rythme Coach"}
+                </p>
+                <p className="mt-1 text-xs text-emerald-300">
+                  {bestRecommendation
+                    ? `+${bestRecommendationGain} pts estimés`
+                    : "Score à maintenir"}
+                </p>
+              </div>
+              {recentlyUnlocked && (
+                <div className="mt-3 rounded-2xl border border-emerald-300/20 bg-emerald-300/10 p-3">
+                  <p className="text-xs font-semibold uppercase text-emerald-200">
+                    Récemment débloqué
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-white">
+                    {recentlyUnlocked.label}
+                  </p>
+                </div>
+              )}
               <Button
                 className="mt-5 bg-white text-slate-950 hover:bg-slate-100"
-                onClick={() => navigate("/automation")}
+                onClick={() =>
+                  navigate(
+                    bestRecommendation
+                      ? recommendationHref[bestRecommendation.id]
+                      : milestoneHref[nextMilestone.id]
+                  )
+                }
               >
-                Voir automatisations
+                Continuer
               </Button>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          {
+            label: "Progression 7 jours",
+            value:
+              trajectory.delta7Days > 0
+                ? `+${trajectory.delta7Days} pts`
+                : "Non encore mesurée",
+            detail: trajectory.confidenceLabel
+          },
+          {
+            label: "Score précédent",
+            value: `${trajectory.previousScore}/100`,
+            detail: "estimé à partir du score actuel"
+          },
+          {
+            label: "Tendance",
+            value: trajectory.trendLabel,
+            detail: "basé sur les signaux disponibles"
+          },
+          {
+            label: "Rythme actuel",
+            value: trajectory.rhythmLabel,
+            detail:
+              nextLevel.label === "Maximum"
+                ? "niveau maximal atteint"
+                : `${nextLevel.remainingPoints} pts avant ${nextLevel.label}`
+          }
+        ].map((item) => (
+          <Card key={item.label} className="bg-white">
+            <CardContent className="pt-5">
+              <p className="text-xs font-semibold uppercase text-slate-400">
+                {item.label}
+              </p>
+              <p className="mt-2 text-lg font-semibold text-slate-950">
+                {item.value}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </section>
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,0.78fr)_minmax(0,1fr)]">
         <Card className="bg-white">
@@ -327,39 +497,56 @@ const Progress = ({ session, googleStatus, locations }: ProgressProps) => {
           </CardHeader>
           <CardContent>
             <div className="relative space-y-5 before:absolute before:left-3 before:top-2 before:h-[calc(100%-1rem)] before:w-px before:bg-slate-200">
-              {timeline.map((item) => (
-                <div key={item.title} className="relative flex gap-4">
+              {timeline.map((item) => {
+                const isNextObjective =
+                  !item.unlocked && item.title === nextMilestone.label;
+
+                return (
                   <div
-                    className={`z-10 mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border bg-white ${
-                      item.unlocked
-                        ? "border-emerald-200 text-emerald-600"
-                        : "border-slate-200 text-slate-400"
+                    key={item.title}
+                    className={`relative flex gap-4 rounded-2xl transition duration-300 ${
+                      isNextObjective ? "bg-amber-50/70 p-2" : ""
                     }`}
                   >
-                    {item.unlocked ? <Check size={14} /> : <Lock size={13} />}
-                  </div>
-                  <div className="min-w-0 pb-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold text-slate-900">{item.title}</p>
-                      {item.date && (
-                        <span className="text-xs text-slate-500">{item.date}</span>
-                      )}
+                    <div
+                      className={`z-10 mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border bg-white transition ${
+                        item.unlocked
+                          ? "border-emerald-200 text-emerald-600 shadow-sm ring-4 ring-emerald-50"
+                          : isNextObjective
+                            ? "animate-pulse border-amber-200 text-amber-600 ring-4 ring-amber-50"
+                            : "border-slate-200 text-slate-400"
+                      }`}
+                    >
+                      {item.unlocked ? <Check size={14} /> : <Lock size={13} />}
                     </div>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {item.description}
-                    </p>
+                    <div className="min-w-0 pb-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold text-slate-900">
+                          {item.title}
+                        </p>
+                        {item.date && (
+                          <span className="text-xs text-slate-500">{item.date}</span>
+                        )}
+                        {isNextObjective && (
+                          <Badge variant="warning">Prochain objectif</Badge>
+                        )}
+                      </div>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {item.description}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>
 
         <Card className="bg-white">
           <CardHeader>
-            <CardTitle>Salle des trophées</CardTitle>
+            <CardTitle>Jalons de progression</CardTitle>
             <p className="text-sm text-slate-500">
-              Des jalons business élégants, pensés pour garder le rythme.
+              Les preuves concrètes que votre système réputation gagne en maturité.
             </p>
           </CardHeader>
           <CardContent>
@@ -370,9 +557,9 @@ const Progress = ({ session, googleStatus, locations }: ProgressProps) => {
                 return (
                   <div
                     key={item.title}
-                    className={`rounded-2xl border p-4 transition ${
+                    className={`rounded-2xl border p-4 transition duration-300 ${
                       item.unlocked
-                        ? "border-emerald-100 bg-emerald-50/60"
+                        ? "border-emerald-100 bg-emerald-50/60 shadow-sm ring-1 ring-emerald-100"
                         : "border-slate-200 bg-slate-50 opacity-70"
                     }`}
                   >
@@ -399,7 +586,9 @@ const Progress = ({ session, googleStatus, locations }: ProgressProps) => {
                           {item.description}
                         </p>
                         <p className="mt-2 text-xs font-medium text-slate-500">
-                          {item.unlocked ? item.date ?? "Débloqué" : "Verrouillé"}
+                          {item.unlocked
+                            ? item.date ?? "Débloqué"
+                            : item.statusLabel ?? "À venir"}
                         </p>
                       </div>
                     </div>
@@ -413,7 +602,7 @@ const Progress = ({ session, googleStatus, locations }: ProgressProps) => {
 
       <Card className="bg-white">
         <CardHeader>
-          <CardTitle>Fonctionnalités débloquées</CardTitle>
+          <CardTitle>Capacités disponibles</CardTitle>
           <p className="text-sm text-slate-500">
             Les capacités activées à mesure que votre système devient plus mature.
           </p>
@@ -426,9 +615,9 @@ const Progress = ({ session, googleStatus, locations }: ProgressProps) => {
               return (
                 <div
                   key={feature.label}
-                  className={`rounded-2xl border p-4 ${
+                  className={`rounded-2xl border p-4 transition duration-300 ${
                     feature.unlocked
-                      ? "border-slate-200 bg-white"
+                      ? "border-slate-200 bg-white shadow-sm"
                       : "border-slate-200 bg-slate-50 opacity-70"
                   }`}
                 >
@@ -448,7 +637,7 @@ const Progress = ({ session, googleStatus, locations }: ProgressProps) => {
                           {feature.label}
                         </p>
                         <Badge variant={feature.unlocked ? "success" : "neutral"}>
-                          {feature.unlocked ? "Débloqué" : "À venir"}
+                          {feature.unlocked ? "Débloqué" : feature.statusLabel}
                         </Badge>
                       </div>
                       <p className="mt-1 text-sm text-slate-500">

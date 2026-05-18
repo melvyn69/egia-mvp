@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import {
@@ -11,8 +11,7 @@ import {
 } from "lucide-react";
 import {
   BusinessHealthScoreCard,
-  buildBusinessHealthScore,
-  getStoredCompetitorContextStatus
+  buildBusinessHealthScoreModel
 } from "../components/coach/BusinessHealthScore";
 import { GoogleConnectionBadge } from "../components/GoogleConnectionBadge";
 import { Badge } from "../components/ui/badge";
@@ -32,6 +31,7 @@ import {
 } from "../lib/notifications";
 import type { GoogleConnectionStatus } from "../hooks/useGoogleConnectionStatus";
 import { supabase } from "../lib/supabase";
+import { useCoachResult } from "../services/coach";
 
 type DashboardProps = {
   session: Session | null;
@@ -446,7 +446,7 @@ const Dashboard = ({
     | "last_year"
     | "all_time"
     | "custom"
-  >("this_month");
+  >("all_time");
   const [kpiFrom, setKpiFrom] = useState("");
   const [kpiTo, setKpiTo] = useState("");
   const [kpiLocationId, setKpiLocationId] = useState("");
@@ -831,6 +831,16 @@ const Dashboard = ({
   const urgentActionsCount = notificationsWithStatus.filter(
     (n) => n.requiresAction === true
   ).length;
+  const coach = useCoachResult({
+    session,
+    googleStatus,
+    locations,
+    notifications: notificationsWithStatus
+  });
+  const healthModel = useMemo(
+    () => buildBusinessHealthScoreModel(coach.coachResult, coach.coachInput),
+    [coach.coachInput, coach.coachResult]
+  );
 
   const sortedNotifications = notificationsWithStatus
     .slice()
@@ -931,21 +941,6 @@ const Dashboard = ({
 
   const aiSamples = aiKpiData?.sentiment.samples ?? 0;
   const aiTrend = aiKpiData?.trend ?? [];
-  const googleConnected = googleStatus === "connected";
-  const reviewsTotal = kpiData?.counts.reviews_total ?? 0;
-  const avgRating = kpiData?.ratings.avg_rating ?? null;
-  const healthModel = buildBusinessHealthScore({
-    googleConnected,
-    locationsCount: locations.length,
-    reviewsTotal,
-    responseRate: responseRateValid ? responseRate : null,
-    avgRating,
-    aiSamples,
-    priorityCount: aiKpiData?.priorityCount ?? 0,
-    activeLocationsCount: selectedActiveIds.length,
-    alertSignalsReady: notificationsWithStatus.length > 0,
-    competitorContextReady: getStoredCompetitorContextStatus()
-  });
 
   return (
     <div className="space-y-6">
@@ -956,7 +951,7 @@ const Dashboard = ({
       <BusinessHealthScoreCard
         model={healthModel}
         variant="dashboard"
-        loading={kpiLoading || aiKpiLoading}
+        loading={kpiLoading || aiKpiLoading || coach.isLoading}
       />
 
       <section className="space-y-3">
