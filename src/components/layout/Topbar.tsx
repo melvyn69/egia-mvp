@@ -78,7 +78,7 @@ const Topbar = ({
   };
 
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-white/70 px-4 py-4 backdrop-blur md:px-6 md:py-5 lg:items-center">
+    <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-white/70 px-4 py-3 backdrop-blur md:px-6 md:py-5 lg:items-center">
       <div className="flex min-w-0 flex-1 items-start gap-3">
         {onToggleMenu && (
           <Button
@@ -92,15 +92,15 @@ const Topbar = ({
           </Button>
         )}
         <div className="min-w-0">
-          <p className="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-slate-400">
+          <p className="flex items-center gap-2 text-[11px] uppercase tracking-[0.24em] text-slate-400 sm:text-xs sm:tracking-[0.3em]">
             <Sparkles size={14} />
             EGIA LIVE
           </p>
-          <h1 className="truncate text-xl font-semibold text-slate-900 md:text-3xl">
+          <h1 className="truncate text-lg font-semibold text-slate-900 sm:text-xl md:text-3xl">
             {title}
           </h1>
           {subtitle && (
-            <p className="mt-1 line-clamp-2 text-sm text-slate-500">
+            <p className="mt-0.5 line-clamp-2 text-xs text-slate-500 sm:mt-1 sm:text-sm">
               {subtitle}
             </p>
           )}

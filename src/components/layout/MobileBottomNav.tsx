@@ -20,7 +20,7 @@ const items = [
 
 const MobileBottomNav = () => (
   <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-12px_30px_-24px_rgba(15,23,42,0.45)] backdrop-blur lg:hidden">
-    <div className="mx-auto grid h-16 max-w-lg grid-cols-6 items-center gap-1">
+    <div className="mx-auto grid h-14 max-w-lg grid-cols-6 items-center gap-1">
       {items.map(({ to, label, Icon, end }) => (
         <NavLink
           key={to}
@@ -29,7 +29,7 @@ const MobileBottomNav = () => (
           aria-label={label}
           className={({ isActive }) =>
             cn(
-              "flex h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[10px] font-semibold leading-none transition",
+              "flex h-11 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[10px] font-semibold leading-none transition",
               isActive
                 ? "bg-ink text-white shadow-sm"
                 : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
