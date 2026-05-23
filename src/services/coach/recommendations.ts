@@ -45,6 +45,12 @@ const priorityRank: Record<CoachRecommendationPriority, number> = {
   low: 3
 };
 
+const isMissingField = (
+  input: NormalizedCoachInput,
+  field: CoachInputField
+): boolean =>
+  input.dataQuality.fallbacks.some((fallback) => fallback.field === field);
+
 export const buildCoachRecommendations = (
   input: NormalizedCoachInput
 ): CoachRecommendation[] => {
@@ -122,7 +128,11 @@ export const buildCoachRecommendations = (
     );
   }
 
-  if (!input.aiInsightsReady) {
+  if (
+    !input.aiInsightsReady &&
+    !isMissingField(input, "aiInsightsReady") &&
+    input.totalReviews > 0
+  ) {
     recommendations.push(
       makeRecommendation({
         input,
@@ -152,7 +162,7 @@ export const buildCoachRecommendations = (
     );
   }
 
-  if (input.automationCount === 0) {
+  if (input.automationCount === 0 && !isMissingField(input, "automationCount")) {
     recommendations.push(
       makeRecommendation({
         input,
@@ -167,7 +177,10 @@ export const buildCoachRecommendations = (
     );
   }
 
-  if (!input.competitorWatchActive) {
+  if (
+    !input.competitorWatchActive &&
+    !isMissingField(input, "competitorWatchActive")
+  ) {
     recommendations.push(
       makeRecommendation({
         input,
@@ -182,7 +195,7 @@ export const buildCoachRecommendations = (
     );
   }
 
-  if (input.reportsCount === 0) {
+  if (input.reportsCount === 0 && !isMissingField(input, "reportsCount")) {
     recommendations.push(
       makeRecommendation({
         input,

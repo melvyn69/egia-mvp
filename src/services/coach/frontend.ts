@@ -49,15 +49,27 @@ type AlertsCache = Array<{
 
 type BusinessSettingsCache = {
   active_location_ids?: unknown;
+  competitive_monitoring_enabled?: boolean | null;
 };
 
+type AutomationWorkflowCache = Array<{
+  enabled?: boolean | null;
+}>;
+
 type CompetitorCache = Array<unknown>;
+
+type ReportCache = Array<{
+  last_generated_at?: string | null;
+  storage_path?: string | null;
+  status?: string | null;
+}>;
 
 export type CoachFrontendCacheData = {
   kpiSummary: CoachKpiSummaryCache | null;
   aiStats: CoachAiKpiCache | null;
   activeLocationsCount: number;
   alertsOpenCount: number | null;
+  automationCount: number | null;
   reportsCount: number | null;
   teamMembersCount: number | null;
   competitorWatchActive: boolean | null;
@@ -92,6 +104,22 @@ const getCachedArrayCount = <T,>(
   return Array.isArray(data) ? data.length : null;
 };
 
+const getCachedNumber = (
+  queryClient: QueryClient,
+  queryKey: readonly unknown[]
+): number | null => {
+  const data = getLastCachedCoachData<number | null>(queryClient, queryKey);
+  return typeof data === "number" && Number.isFinite(data) ? data : null;
+};
+
+const getCachedBoolean = (
+  queryClient: QueryClient,
+  queryKey: readonly unknown[]
+): boolean | null => {
+  const data = getLastCachedCoachData<boolean | null>(queryClient, queryKey);
+  return typeof data === "boolean" ? data : null;
+};
+
 const getActiveLocationsCount = (
   businessSettings: BusinessSettingsCache | null,
   fallbackCount: number
@@ -124,12 +152,92 @@ const getCachedAlertsOpenCount = (
   return alerts.filter((alert) => !alert.resolved_at).length;
 };
 
+const getCachedAutomationCount = (
+  queryClient: QueryClient,
+  userId: string | null
+): number | null => {
+  if (!userId) {
+    return null;
+  }
+
+  const directCount = getCachedNumber(queryClient, [
+    "coach-automation-count",
+    userId
+  ]);
+  if (directCount !== null) {
+    return directCount;
+  }
+
+  const workflows = getLastCachedCoachData<AutomationWorkflowCache>(
+    queryClient,
+    ["automation-workflows", userId]
+  );
+  if (!Array.isArray(workflows)) {
+    return null;
+  }
+
+  return workflows.filter((workflow) => workflow.enabled !== false).length;
+};
+
+const hasGeneratedReportSignal = (report: ReportCache[number]): boolean =>
+  Boolean(report.last_generated_at || report.storage_path) ||
+  report.status === "generated" ||
+  report.status === "sent";
+
+const getCachedReportsCount = (
+  queryClient: QueryClient,
+  userId: string | null
+): number | null => {
+  if (!userId) {
+    return null;
+  }
+
+  const directCount = getCachedNumber(queryClient, ["coach-reports-count", userId]);
+  if (directCount !== null) {
+    return directCount;
+  }
+
+  const generatedReportsCount = getCachedArrayCount<unknown>(queryClient, [
+    "generated-reports",
+    userId
+  ]);
+  const reports = getLastCachedCoachData<ReportCache>(queryClient, [
+    "reports",
+    userId
+  ]);
+  const generatedClassicReportsCount = Array.isArray(reports)
+    ? reports.filter(hasGeneratedReportSignal).length
+    : null;
+
+  if (generatedReportsCount === null && generatedClassicReportsCount === null) {
+    return null;
+  }
+
+  return (generatedReportsCount ?? 0) + (generatedClassicReportsCount ?? 0);
+};
+
 const getCompetitorWatchActive = (
   queryClient: QueryClient,
   userId: string | null
 ): boolean | null => {
   if (!userId) {
     return null;
+  }
+
+  const directSignal = getCachedBoolean(queryClient, [
+    "coach-competitor-watch",
+    userId
+  ]);
+  if (directSignal !== null) {
+    return directSignal;
+  }
+
+  const businessSettings = getLastCachedCoachData<BusinessSettingsCache>(
+    queryClient,
+    ["business-settings", userId]
+  );
+  if (businessSettings?.competitive_monitoring_enabled === true) {
+    return true;
   }
 
   const followed = queryClient.getQueriesData<CompetitorCache>({
@@ -160,6 +268,7 @@ export const readCoachFrontendCacheData = (
       aiStats: null,
       activeLocationsCount: locationsCount,
       alertsOpenCount: null,
+      automationCount: null,
       reportsCount: null,
       teamMembersCount: null,
       competitorWatchActive: null
@@ -206,11 +315,8 @@ export const readCoachFrontendCacheData = (
       locationsCount
     ),
     alertsOpenCount: getCachedAlertsOpenCount(queryClient, userId),
-    reportsCount:
-      getCachedArrayCount<unknown>(queryClient, [
-        "generated-reports",
-        userId
-      ]) ?? getCachedArrayCount<unknown>(queryClient, ["reports", userId]),
+    automationCount: getCachedAutomationCount(queryClient, userId),
+    reportsCount: getCachedReportsCount(queryClient, userId),
     teamMembersCount: getCachedArrayCount<unknown>(queryClient, [
       "team-members",
       userId
@@ -241,6 +347,7 @@ export const buildCoachInputFromFrontendData = ({
   kpiSummary,
   aiStats,
   alertsOpenCount,
+  automationCount,
   reportsCount,
   teamMembersCount,
   competitorWatchActive,
@@ -253,6 +360,7 @@ export const buildCoachInputFromFrontendData = ({
   kpiSummary: CoachKpiSummaryCache | null;
   aiStats: CoachAiKpiCache | null;
   alertsOpenCount: number | null;
+  automationCount: number | null;
   reportsCount: number | null;
   teamMembersCount: number | null;
   competitorWatchActive: boolean | null;
@@ -284,12 +392,15 @@ export const buildCoachInputFromFrontendData = ({
       reviewsWithText: kpiSummary?.counts?.reviews_with_text,
       averageRating: kpiSummary?.ratings?.avg_rating,
       responseRate: kpiSummary?.response?.response_rate_pct,
-      criticalReviewsCount: aiStats?.priorityCount ?? notificationActionCount,
+      criticalReviewsCount:
+        typeof aiStats?.priorityCount === "number"
+          ? aiStats.priorityCount
+          : undefined,
       unansweredReviewsCount,
       aiInsightsReady,
       dominantTags,
       alertsOpenCount,
-      automationCount: undefined,
+      automationCount,
       teamMembersCount,
       competitorWatchActive,
       reportsCount,

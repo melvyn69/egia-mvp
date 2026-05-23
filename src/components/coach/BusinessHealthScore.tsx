@@ -272,32 +272,9 @@ const recommendationRoutes: Record<
   }
 };
 
-const businessReasonByRecommendation: Record<
-  CoachEngineRecommendation["id"],
-  string
-> = {
-  "prioritize-critical-reviews":
-    "Des avis sensibles demandent une prise en charge rapide.",
-  "reply-to-reviews":
-    "Le rythme de réponse peut encore progresser pour renforcer la réputation.",
-  "connect-google":
-    "Votre pilotage réputation doit encore être relié à Google.",
-  "import-locations":
-    "Aucun établissement n'est encore prêt pour le suivi réputation.",
-  "calibrate-ai-voice":
-    "La voix IA doit encore être affinée avec vos premiers signaux.",
-  "activate-alerts":
-    "Aucun système d'alerte avancé n'est encore configuré.",
-  "create-automation":
-    "Aucune automatisation active n'a encore été détectée.",
-  "add-competitor-watch":
-    "La veille concurrentielle n'est pas encore activée.",
-  "create-report": "Aucun reporting partageable n'a encore été préparé."
-};
-
 const mapRecommendationReason = (
   recommendation: CoachEngineRecommendation
-): string => businessReasonByRecommendation[recommendation.id];
+): string => recommendation.reason;
 
 const mapRecommendation = (
   recommendation: CoachEngineRecommendation,
@@ -432,12 +409,16 @@ const buildScoreFactors = (
     ? input.averageRating
     : null;
   const automationMilestone = getMilestone(result, "first-automation");
-  const setupBreakdown = getBreakdownItem(result, "setup");
   const reviewsMilestone = getMilestone(result, "first-reviews-synced");
   const automationCount =
     typeof input.automationCount === "number" &&
     Number.isFinite(input.automationCount)
       ? Math.max(0, Math.floor(input.automationCount))
+      : 0;
+  const teamMembersCount =
+    typeof input.teamMembersCount === "number" &&
+    Number.isFinite(input.teamMembersCount)
+      ? Math.max(0, Math.floor(input.teamMembersCount))
       : 0;
 
   return [
@@ -460,16 +441,19 @@ const buildScoreFactors = (
     },
     {
       label: "Automatisations",
-      value: automationCount > 0 ? `${automationCount} active` : "À activer",
+      value:
+        automationCount > 0
+          ? `${automationCount} active${automationCount > 1 ? "s" : ""}`
+          : "À activer",
       complete: automationMilestone?.achieved ?? false
     },
     {
-      label: "Activité équipe",
+      label: "Équipe",
       value:
-        setupBreakdown !== null && setupBreakdown.points >= 15
-          ? "Suivi actif"
-          : "À structurer",
-      complete: setupBreakdown !== null && setupBreakdown.points >= 15
+        teamMembersCount > 0
+          ? `${teamMembersCount} membre${teamMembersCount > 1 ? "s" : ""}`
+          : "Solo",
+      complete: teamMembersCount > 0
     }
   ];
 };

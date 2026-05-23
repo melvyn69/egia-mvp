@@ -532,6 +532,10 @@ const Competitors = ({ session, isAdmin = false }: CompetitorsProps) => {
       queryClient.invalidateQueries({
         queryKey: ["competitors-followed", userId, selectedLocationId]
       });
+      queryClient.setQueryData(["coach-competitor-watch", userId], true);
+      void queryClient.invalidateQueries({
+        queryKey: ["coach-competitor-watch", userId]
+      });
     },
     onError: (error: unknown) => {
       const message =
@@ -609,6 +613,9 @@ const Competitors = ({ session, isAdmin = false }: CompetitorsProps) => {
           type: "success",
           message: "Rapport généré. Téléchargement en cours."
         });
+        void queryClient.invalidateQueries({
+          queryKey: ["coach-reports-count", userId]
+        });
         return;
       }
       if (reportId) {
@@ -634,6 +641,9 @@ const Competitors = ({ session, isAdmin = false }: CompetitorsProps) => {
             type: "success",
             message: "PDF téléchargé."
           });
+          void queryClient.invalidateQueries({
+            queryKey: ["coach-reports-count", userId]
+          });
           return;
         }
         navigate(`/reports?report_id=${reportId}`);
@@ -641,9 +651,15 @@ const Competitors = ({ session, isAdmin = false }: CompetitorsProps) => {
           type: "success",
           message: "Rapport généré. Téléchargez-le depuis Rapports."
         });
+        void queryClient.invalidateQueries({
+          queryKey: ["coach-reports-count", userId]
+        });
         return;
       }
       navigate("/reports");
+      void queryClient.invalidateQueries({
+        queryKey: ["coach-reports-count", userId]
+      });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Échec de génération.";
@@ -734,6 +750,10 @@ const Competitors = ({ session, isAdmin = false }: CompetitorsProps) => {
       });
       queryClient.invalidateQueries({
         queryKey: ["competitors-followed", userId, selectedLocationId]
+      });
+      queryClient.setQueryData(["coach-competitor-watch", userId], true);
+      void queryClient.invalidateQueries({
+        queryKey: ["coach-competitor-watch", userId]
       });
     },
     onSettled: (_data, _error, payload) => {

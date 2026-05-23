@@ -206,6 +206,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
       }
     }
     void queryClient.invalidateQueries({ queryKey: ["reports"] });
+    void queryClient.invalidateQueries({
+      queryKey: ["coach-reports-count", session?.user.id ?? null]
+    });
   };
 
   const handleDownload = async (report: ReportRow) => {
@@ -235,6 +238,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
       return;
     }
     void queryClient.invalidateQueries({ queryKey: ["reports"] });
+    void queryClient.invalidateQueries({
+      queryKey: ["coach-reports-count", session?.user.id ?? null]
+    });
   };
 
   const handleDownloadBenchmark = async (reportId: string) => {

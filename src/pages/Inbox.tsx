@@ -1403,9 +1403,16 @@ const Inbox = () => {
       queryClient.invalidateQueries({
         queryKey: ["inbox-ai-cron-status", sessionUserId, activeLocationId]
       });
+      void queryClient.invalidateQueries({ queryKey: ["ai-kpis", sessionUserId] });
+      void queryClient.invalidateQueries({
+        queryKey: ["coach-health-kpi", sessionUserId]
+      });
       window.setTimeout(() => {
         queryClient.invalidateQueries({
           queryKey: ["inbox-ai-cron-status", sessionUserId, activeLocationId]
+        });
+        void queryClient.invalidateQueries({
+          queryKey: ["ai-kpis", sessionUserId]
         });
       }, 5000);
     } catch {
@@ -1531,6 +1538,10 @@ const Inbox = () => {
       setAiRunLocationResult((prev) => ({ ...prev, [locationId]: msg }));
       await queryClient.invalidateQueries({
         queryKey: ["inbox-ai-cron-status", sessionUserId, locationId]
+      });
+      void queryClient.invalidateQueries({ queryKey: ["ai-kpis", sessionUserId] });
+      void queryClient.invalidateQueries({
+        queryKey: ["coach-health-kpi", sessionUserId]
       });
     } catch {
       setAiRunLocationResult((prev) => ({
@@ -2378,6 +2389,12 @@ const Inbox = () => {
             };
           }
         );
+        void queryClient.invalidateQueries({
+          queryKey: ["kpi-summary", sessionUserId]
+        });
+        void queryClient.invalidateQueries({
+          queryKey: ["coach-health-kpi", sessionUserId]
+        });
 
         // 4) Auto-sélection du prochain avis "new" dans la liste filtrée
         // (On utilise la version la plus fraîche possible)

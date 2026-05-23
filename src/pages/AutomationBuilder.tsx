@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -64,6 +65,7 @@ const severityOptions = [
 
 const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const workflowId = searchParams.get("id");
   const templateId = searchParams.get("template");
@@ -439,6 +441,14 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
     }
 
     setSaving(false);
+    queryClient.setQueryData(
+      ["coach-automation-count", session.user.id],
+      (current: number | null | undefined) =>
+        enabled ? Math.max(1, current ?? 0) : current ?? 0
+    );
+    void queryClient.invalidateQueries({
+      queryKey: ["coach-automation-count", session.user.id]
+    });
     navigate("/automation");
   };
 

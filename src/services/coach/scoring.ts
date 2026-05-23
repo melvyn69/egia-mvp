@@ -451,6 +451,17 @@ const getVolumeScore = (input: NormalizedCoachInput): number => {
   return volumeBase + textCoverage * 3;
 };
 
+const getAlertsScore = (input: NormalizedCoachInput): number => {
+  if (input.alertsOpenCount === null) {
+    return 0;
+  }
+  if (input.alertsOpenCount === 0) {
+    return SCORE_WEIGHTS.alerts;
+  }
+
+  return Math.max(2, SCORE_WEIGHTS.alerts - input.alertsOpenCount * 2);
+};
+
 const getScoreLevel = (value: number): CoachScore["level"] => {
   if (value >= 90) {
     return "expert";
@@ -481,8 +492,7 @@ export const buildCoachScore = (input: NormalizedCoachInput): CoachScore => {
   const aiScore =
     (input.aiInsightsReady ? 7 : 0) +
     (input.dominantTags.length > 0 ? 3 : 0);
-  const alertsScore =
-    input.alertsOpenCount === null ? 0 : SCORE_WEIGHTS.alerts;
+  const alertsScore = getAlertsScore(input);
   const automationScore =
     input.automationCount > 0 ? SCORE_WEIGHTS.automations : 0;
   const advancedScore =
@@ -546,7 +556,7 @@ export const buildCoachScore = (input: NormalizedCoachInput): CoachScore => {
       label: "Alertes",
       points: alertsScore,
       maxPoints: SCORE_WEIGHTS.alerts,
-      reason: "Un compteur d'alertes fiable vaut 8 pts.",
+      reason: "Aucune alerte ouverte vaut 8 pts; chaque alerte ouverte réduit ce bloc.",
       sourceFields: ["alertsOpenCount"]
     }),
     makeBreakdownItem({

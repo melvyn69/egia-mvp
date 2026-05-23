@@ -6,6 +6,7 @@
 // - Aucun mock/localStorage
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -59,6 +60,7 @@ const templateCards = [
 
 const Automation = ({ session, locations }: AutomationProps) => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [workflows, setWorkflows] = useState<WorkflowRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,14 +95,19 @@ const Automation = ({ session, locations }: AutomationProps) => {
         setLoading(false);
         return;
       }
-      setWorkflows((data as WorkflowRow[]) ?? []);
+      const nextWorkflows = (data as WorkflowRow[]) ?? [];
+      setWorkflows(nextWorkflows);
+      queryClient.setQueryData(
+        ["coach-automation-count", session.user.id],
+        nextWorkflows.filter((item) => item.enabled === true).length
+      );
       setLoading(false);
     };
     void load();
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [queryClient, session]);
 
   const getLocationLabel = (ids: string[] | null) => {
     if (!ids || ids.length === 0) return "Tous les établissements";
@@ -116,11 +123,17 @@ const Automation = ({ session, locations }: AutomationProps) => {
       .update({ enabled })
       .eq("id", workflow.id)
       .eq("user_id", session.user.id);
-    setWorkflows((prev) =>
-      prev.map((item) =>
-        item.id === workflow.id ? { ...item, enabled } : item
-      )
+    const nextWorkflows = workflows.map((item) =>
+      item.id === workflow.id ? { ...item, enabled } : item
     );
+    setWorkflows(nextWorkflows);
+    queryClient.setQueryData(
+      ["coach-automation-count", session.user.id],
+      nextWorkflows.filter((item) => item.enabled === true).length
+    );
+    void queryClient.invalidateQueries({
+      queryKey: ["coach-automation-count", session.user.id]
+    });
   };
 
   const handleRunNow = async () => {

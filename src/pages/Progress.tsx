@@ -73,9 +73,7 @@ type MilestoneStatusLabel =
   | "Non encore mesuré"
   | "Débloqué";
 
-const plannedMilestoneIds = new Set<CoachMilestone["id"]>([
-  "first-automation"
-]);
+const plannedMilestoneIds = new Set<CoachMilestone["id"]>();
 
 const formatDate = (value?: string | null): string | undefined => {
   if (!value) {
@@ -339,6 +337,13 @@ const Progress = ({
       description: describeMilestone(automationMilestone),
       unlocked: automationMilestone.achieved,
       statusLabel: getMilestoneStatus(automationMilestone)
+    },
+    {
+      icon: FileText,
+      label: "Rapports",
+      description: describeMilestone(reportMilestone),
+      unlocked: reportMilestone.achieved,
+      statusLabel: getMilestoneStatus(reportMilestone)
     }
   ];
   const roadmapFeatures: FeatureUnlock[] = [
@@ -355,17 +360,6 @@ const Progress = ({
       description: "Activation marque et contenus, prévue après le socle réputation.",
       unlocked: false,
       statusLabel: "Bientôt disponible"
-    },
-    {
-      icon: FileText,
-      label: "Rapports",
-      description: reportMilestone.achieved
-        ? describeMilestone(reportMilestone)
-        : "Reporting avancé et exports partageables.",
-      unlocked: reportMilestone.achieved,
-      statusLabel: reportMilestone.achieved
-        ? getMilestoneStatus(reportMilestone)
-        : "Bientôt disponible"
     }
   ];
 
@@ -614,7 +608,7 @@ const Progress = ({
           </p>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             {activeFeatures.map((feature) => {
               const Icon = feature.icon;
 
