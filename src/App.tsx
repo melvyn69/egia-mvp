@@ -14,6 +14,9 @@ import { Analytics } from "./pages/Analytics";
 import { Billing } from "./pages/Billing";
 import { BrandVoice } from "./pages/BrandVoice";
 import { Progress } from "./pages/Progress";
+import { Loyalty } from "./pages/Loyalty";
+import { LoyaltyScanner } from "./pages/LoyaltyScanner";
+import { LoyaltyJoin } from "./pages/LoyaltyJoin";
 import { Onboarding } from "./pages/Onboarding";
 import { Automation } from "./pages/Automation";
 import { AutomationBuilder } from "./pages/AutomationBuilder";
@@ -100,6 +103,8 @@ const App = () => {
   const isCallbackPath =
     location.pathname === "/google_oauth_callback" ||
     location.pathname === "/auth/callback";
+  const isPublicLoyaltyPath = location.pathname.startsWith("/loyalty/join/");
+  const usesAppShell = !isPublicLoyaltyPath;
   const isAdminSession = isAdminUser(session?.user.email);
   const passwordLoginEnabled =
     import.meta.env.VITE_ENABLE_PASSWORD_LOGIN === "true";
@@ -161,6 +166,20 @@ const App = () => {
       return {
         title: "Progression",
         subtitle: "Trophées, niveaux et montée en puissance business."
+      };
+    }
+
+    if (location.pathname === "/loyalty/scanner") {
+      return {
+        title: "Scanner fidélité",
+        subtitle: "Enregistrer une visite et mettre à jour les points."
+      };
+    }
+
+    if (location.pathname === "/loyalty") {
+      return {
+        title: "Fidélité",
+        subtitle: "Programme simple, membres, visites et récompenses."
       };
     }
 
@@ -956,23 +975,37 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-sand">
-      <div className="flex">
-        {session && <Sidebar showAdminLinks={isAdminSession} />}
-        <div className="flex min-h-screen flex-1 flex-col">
-          <Topbar
-            title={pageMeta.title}
-            subtitle={pageMeta.subtitle}
-            userEmail={session?.user.email}
-            session={session}
-            onSignOut={session ? handleSignOut : undefined}
-            onDebugSession={isAdminSession ? handleDebugSession : undefined}
-            onToggleMenu={
-              session ? () => setMobileMenuOpen((prev) => !prev) : undefined
-            }
-            isMenuOpen={mobileMenuOpen}
-          />
+      <div className={usesAppShell ? "flex" : ""}>
+        {session && usesAppShell && <Sidebar showAdminLinks={isAdminSession} />}
+        <div
+          className={
+            usesAppShell
+              ? "flex min-h-screen flex-1 flex-col"
+              : "min-h-screen flex-1"
+          }
+        >
+          {usesAppShell && (
+            <Topbar
+              title={pageMeta.title}
+              subtitle={pageMeta.subtitle}
+              userEmail={session?.user.email}
+              session={session}
+              onSignOut={session ? handleSignOut : undefined}
+              onDebugSession={isAdminSession ? handleDebugSession : undefined}
+              onToggleMenu={
+                session ? () => setMobileMenuOpen((prev) => !prev) : undefined
+              }
+              isMenuOpen={mobileMenuOpen}
+            />
+          )}
 
-          <main className="flex-1 space-y-6 bg-gradient-to-br from-sand via-white to-clay px-4 py-6 pb-24 md:px-6 md:py-8 lg:pb-8">
+          <main
+            className={
+              usesAppShell
+                ? "flex-1 space-y-6 bg-gradient-to-br from-sand via-white to-clay px-4 py-6 pb-24 md:px-6 md:py-8 lg:pb-8"
+                : "min-h-screen bg-gradient-to-br from-sand via-white to-clay"
+            }
+          >
             {envMissing && (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
                 Variables d&apos;env Supabase manquantes. Ajoutez
@@ -984,10 +1017,11 @@ const App = () => {
                 {googleError}
               </div>
             )}
-            {!session && !isCallbackPath ? (
+            {!session && !isCallbackPath && !isPublicLoyaltyPath ? (
               authPanel
             ) : (
               <Routes>
+                <Route path="/loyalty/join/:publicToken" element={<LoyaltyJoin />} />
                 <Route
                   path="/"
                   element={
@@ -1038,6 +1072,28 @@ const App = () => {
                       session={session}
                       googleStatus={googleConnection.status}
                       locations={locations}
+                    />
+                  }
+                />
+                <Route
+                  path="/loyalty"
+                  element={
+                    <Loyalty
+                      session={session}
+                      locations={locations}
+                      locationsLoading={locationsLoading}
+                      locationsError={locationsError}
+                    />
+                  }
+                />
+                <Route
+                  path="/loyalty/scanner"
+                  element={
+                    <LoyaltyScanner
+                      session={session}
+                      locations={locations}
+                      locationsLoading={locationsLoading}
+                      locationsError={locationsError}
                     />
                   }
                 />
@@ -1129,7 +1185,7 @@ const App = () => {
           </main>
         </div>
       </div>
-      {session && mobileMenuOpen && (
+      {session && usesAppShell && mobileMenuOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <button
             type="button"
@@ -1147,7 +1203,7 @@ const App = () => {
           </div>
         </div>
       )}
-      {session && <MobileBottomNav />}
+      {session && usesAppShell && <MobileBottomNav />}
       {errorToast && (
         <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 shadow-lg">
           <div className="flex items-start justify-between gap-3">

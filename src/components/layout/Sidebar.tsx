@@ -15,7 +15,8 @@ import {
   Sparkles,
   Target,
   Trophy,
-  Users
+  Users,
+  WalletCards
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { supabase } from "../../lib/supabase";
@@ -138,6 +139,20 @@ const Sidebar = ({
         >
           <Trophy size={18} />
           Progression
+        </NavLink>
+        <NavLink
+          to="/loyalty"
+          className={({ isActive }) =>
+            cn(
+              navLinkBase,
+              isActive
+                ? "bg-ink text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            )
+          }
+        >
+          <WalletCards size={18} />
+          Fidélité
         </NavLink>
         <NavLink
           to="/inbox"
