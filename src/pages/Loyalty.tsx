@@ -20,6 +20,7 @@ import {
   fetchLoyaltyProgram,
   fetchLoyaltyStats,
   fetchRecentLoyaltyMembers,
+  getAppleWalletStatus,
   saveLoyaltyProgram,
   type LoyaltyProgramForm
 } from "../services/loyalty";
@@ -178,6 +179,12 @@ const Loyalty = ({
       });
     },
     enabled: Boolean(userId)
+  });
+
+  const appleWalletQuery = useQuery({
+    queryKey: ["apple-wallet-status"],
+    queryFn: () => getAppleWalletStatus(),
+    retry: false
   });
 
   useEffect(() => {
@@ -490,6 +497,14 @@ const Loyalty = ({
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
               Ce lien peut être envoyé après un avis, affiché sur un QR comptoir
               ou partagé par SMS. Aucune récompense n’est liée à la note donnée.
+            </div>
+            <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 text-sm">
+              <span className="font-medium text-slate-700">Apple Wallet</span>
+              {appleWalletQuery.data?.configured ? (
+                <Badge variant="success">Prêt</Badge>
+              ) : (
+                <Badge variant="neutral">Non configuré</Badge>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -9,6 +9,8 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
 import {
+  getAppleWalletPassUrl,
+  getAppleWalletStatus,
   getPublicLoyaltyProgram,
   joinLoyaltyProgram,
   type JoinLoyaltyResult
@@ -48,6 +50,13 @@ const LoyaltyJoin = () => {
     retry: false
   });
 
+  const appleWalletQuery = useQuery({
+    queryKey: ["apple-wallet-status", member?.wallet_public_token ?? null],
+    queryFn: () => getAppleWalletStatus(member?.wallet_public_token),
+    enabled: Boolean(member?.wallet_public_token),
+    retry: false
+  });
+
   const handleJoin = async (event: FormEvent) => {
     event.preventDefault();
     if (!publicToken) return;
@@ -76,7 +85,16 @@ const LoyaltyJoin = () => {
     window.setTimeout(() => setCopied(false), 1800);
   };
 
+  const handleAddToAppleWallet = () => {
+    if (!member?.wallet_public_token) return;
+    window.location.href = getAppleWalletPassUrl(member.wallet_public_token);
+  };
+
   const program = programQuery.data;
+  const appleWalletConfigured = Boolean(appleWalletQuery.data?.configured);
+  const appleWalletLoading = Boolean(
+    member?.wallet_public_token && appleWalletQuery.isLoading
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-sand via-white to-clay px-4 py-6">
@@ -204,6 +222,28 @@ const LoyaltyJoin = () => {
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-medium text-slate-700">
                   Vos points sont liés à vos visites. Aucune récompense n’est
                   liée à la note donnée.
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <Button
+                    type="button"
+                    size="lg"
+                    variant={appleWalletConfigured ? "default" : "outline"}
+                    className="w-full"
+                    onClick={handleAddToAppleWallet}
+                    disabled={!appleWalletConfigured || appleWalletLoading}
+                  >
+                    <WalletCards size={18} />
+                    {appleWalletLoading
+                      ? "Vérification Apple Wallet..."
+                      : "Ajouter à Apple Wallet"}
+                  </Button>
+                  {!appleWalletConfigured && !appleWalletLoading && (
+                    <p className="mt-3 text-center text-sm text-slate-500">
+                      Apple Wallet sera bientôt disponible. Votre QR code EGIA
+                      reste utilisable dès maintenant.
+                    </p>
+                  )}
                 </div>
               </div>
             ) : (
