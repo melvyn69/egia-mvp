@@ -1,13 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle, Gift, RotateCcw, ScanLine, Search } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  Gift,
+  RotateCcw,
+  ScanLine,
+  Search,
+  UserRound
+} from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import {
+  fetchLoyaltyProgram,
   recordLoyaltyVisit,
   type RecordLoyaltyVisitResult
 } from "../services/loyalty";
@@ -18,6 +28,7 @@ type LoyaltyScannerProps = {
     id: string;
     location_title: string | null;
     location_resource_name: string;
+    address_json?: unknown | null;
   }>;
   locationsLoading: boolean;
   locationsError: string | null;
@@ -30,6 +41,48 @@ const formatDate = (value: string | null) => {
     minute: "2-digit",
     second: "2-digit"
   }).format(new Date(value));
+};
+
+const formatProgress = (points: number, threshold: number) =>
+  Math.min(100, Math.round((points / Math.max(1, threshold)) * 100));
+
+const formatAddress = (value: unknown) => {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const formatted =
+    (record.formatted_address as string | undefined) ??
+    (record.formattedAddress as string | undefined);
+  if (formatted) return formatted;
+  const line1 =
+    (record.address_line_1 as string | undefined) ??
+    (record.line1 as string | undefined);
+  const line2 =
+    (record.address_line_2 as string | undefined) ??
+    (record.line2 as string | undefined);
+  const city = (record.city as string | undefined) ?? null;
+  const postal =
+    (record.postal_code as string | undefined) ??
+    (record.zip as string | undefined);
+  const region =
+    (record.region as string | undefined) ??
+    (record.state as string | undefined);
+  const parts = [line1, line2, postal, city, region]
+    .filter(Boolean)
+    .join(" ");
+  return parts || null;
+};
+
+const getLocationName = (
+  location: LoyaltyScannerProps["locations"][number]
+) => location.location_title ?? location.location_resource_name;
+
+const getLocationOptionLabel = (
+  location: LoyaltyScannerProps["locations"][number]
+) => {
+  const address = formatAddress(location.address_json);
+  return address ? `${getLocationName(location)} — ${address}` : getLocationName(location);
 };
 
 const getScannerError = (error: unknown) => {
@@ -67,6 +120,7 @@ const LoyaltyScanner = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RecordLoyaltyVisitResult | null>(null);
+  const [doubleScanRemaining, setDoubleScanRemaining] = useState(0);
 
   useEffect(() => {
     if (!selectedLocationId && locations.length > 0) {
@@ -82,6 +136,45 @@ const LoyaltyScanner = ({
     () => locations.find((location) => location.id === selectedLocationId),
     [locations, selectedLocationId]
   );
+
+  const programQuery = useQuery({
+    queryKey: ["loyalty-program", session?.user.id ?? null, selectedLocationId],
+    queryFn: () => {
+      if (!session?.user.id || !selectedLocationId) return null;
+      return fetchLoyaltyProgram(session.user.id, selectedLocationId);
+    },
+    enabled: Boolean(session?.user.id && selectedLocationId)
+  });
+
+  const rewardThreshold = programQuery.data?.reward_threshold_points ?? 100;
+  const progressPercent = result
+    ? formatProgress(result.points_balance, rewardThreshold)
+    : 0;
+  const pointsRemaining = result
+    ? Math.max(0, rewardThreshold - result.points_balance)
+    : rewardThreshold;
+
+  useEffect(() => {
+    if (!result?.duplicate_scan) {
+      setDoubleScanRemaining(0);
+      return;
+    }
+
+    const updateRemaining = () => {
+      if (!result.last_visit_at) {
+        setDoubleScanRemaining(90);
+        return;
+      }
+      const elapsedSeconds = Math.floor(
+        (Date.now() - new Date(result.last_visit_at).getTime()) / 1000
+      );
+      setDoubleScanRemaining(Math.max(0, 90 - elapsedSeconds));
+    };
+
+    updateRemaining();
+    const interval = window.setInterval(updateRemaining, 1000);
+    return () => window.clearInterval(interval);
+  }, [result]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -113,6 +206,9 @@ const LoyaltyScanner = ({
         void queryClient.invalidateQueries({
           queryKey: ["loyalty-members-recent", userId]
         });
+        void queryClient.invalidateQueries({
+          queryKey: ["loyalty-highlights", userId]
+        });
       }
     } catch (err) {
       console.error("record loyalty visit error:", err);
@@ -120,6 +216,22 @@ const LoyaltyScanner = ({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const resultIsDuplicate = Boolean(result?.duplicate_scan);
+  const resultTitle = resultIsDuplicate
+    ? "Déjà scanné à l’instant"
+    : "Visite enregistrée";
+  const resultMessage = resultIsDuplicate
+    ? `Pas de nouveaux points ajoutés. Réessayez dans ${doubleScanRemaining} s.`
+    : `${result?.points_added ?? 0} points ajoutés au compte fidélité.`;
+  const displayedMemberName = result?.first_name?.trim() || "Membre fidélité";
+
+  const handleNextScan = () => {
+    setResult(null);
+    setError(null);
+    setScannerInput("");
+    window.setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   if (!session) {
@@ -141,7 +253,8 @@ const LoyaltyScanner = ({
               <CardTitle>Scanner fidélité</CardTitle>
               <p className="mt-1 text-sm text-slate-500">
                 Scannez le QR membre ou saisissez son identifiant. Une visite
-                est enregistrée immédiatement.
+                est enregistrée immédiatement. Vos points sont liés à vos
+                visites.
               </p>
             </div>
           </div>
@@ -155,7 +268,7 @@ const LoyaltyScanner = ({
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <label className="block text-sm font-medium text-slate-700">
-              Établissement
+              Établissement au comptoir
               <select
                 value={selectedLocationId}
                 disabled={locationsLoading}
@@ -164,11 +277,26 @@ const LoyaltyScanner = ({
               >
                 {locations.map((location) => (
                   <option key={location.id} value={location.id}>
-                    {location.location_title ?? location.location_resource_name}
+                    {getLocationOptionLabel(location)}
                   </option>
                 ))}
               </select>
             </label>
+
+            {selectedLocation && (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  Scanner actif pour
+                </p>
+                <p className="mt-2 text-sm font-semibold text-slate-900">
+                  {getLocationName(selectedLocation)}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {formatAddress(selectedLocation.address_json) ??
+                    selectedLocation.location_resource_name}
+                </p>
+              </div>
+            )}
 
             <label className="block text-sm font-medium text-slate-700">
               Identifiant membre
@@ -202,32 +330,73 @@ const LoyaltyScanner = ({
           </form>
 
           {error && (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-              {error}
+            <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-5 text-rose-800">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-700">
+                <AlertTriangle size={21} />
+              </div>
+              <div>
+                <p className="text-base font-semibold">Scan impossible</p>
+                <p className="mt-1 text-sm text-rose-700">{error}</p>
+                <p className="mt-3 text-xs font-medium text-rose-600">
+                  Vérifiez le code membre, puis rescanner ou saisissez le code
+                  manuellement.
+                </p>
+              </div>
             </div>
           )}
 
           {result && (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+            <div
+              className={
+                resultIsDuplicate
+                  ? "rounded-2xl border border-amber-200 bg-amber-50 p-5"
+                  : "rounded-2xl border border-emerald-200 bg-emerald-50 p-5"
+              }
+            >
               <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div className="flex items-start gap-3">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                  <div
+                    className={
+                      resultIsDuplicate
+                        ? "flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700"
+                        : "flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
+                    }
+                  >
                     {result.duplicate_scan ? (
                       <RotateCcw size={20} />
                     ) : (
-                      <CheckCircle size={20} />
+                      <CheckCircle size={22} />
                     )}
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-emerald-900">
-                      {result.duplicate_scan
-                        ? "Scan déjà enregistré"
-                        : "Visite enregistrée"}
+                    <p
+                      className={
+                        resultIsDuplicate
+                          ? "text-lg font-semibold text-amber-950"
+                          : "text-lg font-semibold text-emerald-950"
+                      }
+                    >
+                      {resultTitle}
                     </p>
-                    <p className="mt-1 text-xs text-emerald-700">
-                      {selectedLocation?.location_title ??
-                        selectedLocation?.location_resource_name ??
-                        "Établissement"}{" "}
+                    <p
+                      className={
+                        resultIsDuplicate
+                          ? "mt-1 text-sm font-medium text-amber-800"
+                          : "mt-1 text-sm font-medium text-emerald-800"
+                      }
+                    >
+                      {resultMessage}
+                    </p>
+                    <p
+                      className={
+                        resultIsDuplicate
+                          ? "mt-2 text-xs text-amber-700"
+                          : "mt-2 text-xs text-emerald-700"
+                      }
+                    >
+                      {selectedLocation
+                        ? getLocationName(selectedLocation)
+                        : "Établissement"}{" "}
                       · {formatDate(result.last_visit_at)}
                     </p>
                   </div>
@@ -239,22 +408,46 @@ const LoyaltyScanner = ({
                     Récompense disponible
                   </Badge>
                 )}
+                {resultIsDuplicate && (
+                  <Badge variant="warning">
+                    <Clock size={13} />
+                    {doubleScanRemaining} s
+                  </Badge>
+                )}
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl bg-white p-4">
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                    Membre
-                  </p>
-                  <p className="mt-2 text-lg font-semibold text-slate-900">
-                    {result.member_code}
-                  </p>
+              <div className="mt-5 rounded-2xl bg-white p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-700">
+                      <UserRound size={18} />
+                    </div>
+                    <div>
+                      <p className="text-lg font-semibold text-slate-900">
+                        {displayedMemberName}
+                      </p>
+                      <p className="text-sm font-medium text-slate-500">
+                        {result.member_code}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                      Points ajoutés
+                    </p>
+                    <p className="text-5xl font-semibold leading-none text-slate-900">
+                      +{result.points_added}
+                    </p>
+                  </div>
                 </div>
+              </div>
+
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl bg-white p-4">
                   <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                    Solde
+                    Total points
                   </p>
-                  <p className="mt-2 text-lg font-semibold text-slate-900">
+                  <p className="mt-2 text-4xl font-semibold leading-none text-slate-900">
                     {result.points_balance} pts
                   </p>
                 </div>
@@ -268,11 +461,58 @@ const LoyaltyScanner = ({
                 </div>
               </div>
 
+              <div className="mt-3 rounded-2xl bg-white p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      Progression récompense
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {result.reward_available
+                        ? "Le seuil est atteint."
+                        : `${pointsRemaining} points restants avant récompense.`}
+                    </p>
+                  </div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    {result.points_balance}/{rewardThreshold}
+                  </p>
+                </div>
+                <div className="mt-3 h-3 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className={
+                      result.reward_available
+                        ? "h-full rounded-full bg-emerald-500"
+                        : "h-full rounded-full bg-ink"
+                    }
+                    style={{
+                      width: `${result.reward_available ? 100 : progressPercent}%`
+                    }}
+                  />
+                </div>
+              </div>
+
               {result.reward_available && (
-                <p className="mt-4 text-sm font-medium text-emerald-800">
-                  {result.reward_label}
-                </p>
+                <div className="mt-3 rounded-2xl border border-emerald-200 bg-white p-5 text-emerald-900">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                      <Gift size={19} />
+                    </div>
+                    <div>
+                      <p className="text-lg font-semibold">
+                        Récompense disponible
+                      </p>
+                      <p className="mt-1 text-sm font-medium text-emerald-800">
+                        {result.reward_label}
+                      </p>
+                    </div>
+                  </div>
+                </div>
               )}
+
+              <Button className="mt-4 w-full" size="lg" onClick={handleNextScan}>
+                <ScanLine size={18} />
+                Scanner un autre client
+              </Button>
             </div>
           )}
         </CardContent>

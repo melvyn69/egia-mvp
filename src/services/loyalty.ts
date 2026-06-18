@@ -76,6 +76,7 @@ export type LoyaltyMember = {
 
 export type RecordLoyaltyVisitResult = {
   member_id: string;
+  first_name?: string | null;
   member_code: string;
   points_balance: number;
   lifetime_points: number;
@@ -110,6 +111,25 @@ export type JoinLoyaltyResult = {
   reward_threshold_points: number;
   reward_label: string;
   location_name: string;
+};
+
+export type LoyaltyMemberHighlight = LoyaltyMember & {
+  progressPercent: number;
+  pointsRemaining: number;
+};
+
+export type LoyaltyAvailableReward = {
+  id: string;
+  member_id: string;
+  first_name: string;
+  member_code: string;
+  reward_label: string;
+  unlocked_at: string;
+};
+
+export type LoyaltyHighlights = {
+  nearRewardMembers: LoyaltyMemberHighlight[];
+  availableRewards: LoyaltyAvailableReward[];
 };
 
 const UUID_RE =
@@ -268,6 +288,90 @@ export const fetchRecentLoyaltyMembers = async (
   return (data ?? []) as LoyaltyMember[];
 };
 
+export const fetchLoyaltyHighlights = async (params: {
+  userId: string;
+  locationId: string | null;
+  rewardThresholdPoints: number;
+}): Promise<LoyaltyHighlights> => {
+  const threshold = Math.max(1, Math.round(params.rewardThresholdPoints));
+  const membersQuery = applyLocationFilter(
+    sb
+      .from("loyalty_members")
+      .select(
+        "id, first_name, email, member_code, points_balance, lifetime_points, visits_count, last_visit_at, created_at"
+      )
+      .eq("user_id", params.userId)
+      .order("points_balance", { ascending: false })
+      .limit(12),
+    params.locationId
+  );
+
+  const rewardsQuery = applyLocationFilter(
+    sb
+      .from("loyalty_rewards")
+      .select(
+        "id, member_id, reward_label, unlocked_at, loyalty_members(first_name, member_code)"
+      )
+      .eq("user_id", params.userId)
+      .eq("status", "available")
+      .order("unlocked_at", { ascending: false })
+      .limit(6),
+    params.locationId
+  );
+
+  const [members, rewards] = await Promise.all([membersQuery, rewardsQuery]);
+  if (members.error) throw members.error;
+  if (rewards.error) throw rewards.error;
+
+  const nearRewardMembers = ((members.data ?? []) as LoyaltyMember[])
+    .filter(
+      (member) =>
+        member.points_balance > 0 && member.points_balance < threshold
+    )
+    .slice(0, 5)
+    .map((member) => ({
+      ...member,
+      progressPercent: Math.min(
+        100,
+        Math.round((member.points_balance / threshold) * 100)
+      ),
+      pointsRemaining: Math.max(0, threshold - member.points_balance)
+    }));
+
+  type RewardRow = {
+    id: string;
+    member_id: string;
+    reward_label: string;
+    unlocked_at: string;
+    loyalty_members?:
+      | {
+          first_name?: string | null;
+          member_code?: string | null;
+        }
+      | Array<{
+          first_name?: string | null;
+          member_code?: string | null;
+        }>
+      | null;
+  };
+
+  const availableRewards = ((rewards.data ?? []) as RewardRow[]).map((row) => {
+    const member = Array.isArray(row.loyalty_members)
+      ? row.loyalty_members[0]
+      : row.loyalty_members;
+    return {
+      id: row.id,
+      member_id: row.member_id,
+      first_name: member?.first_name ?? "Membre",
+      member_code: member?.member_code ?? "",
+      reward_label: row.reward_label,
+      unlocked_at: row.unlocked_at
+    };
+  });
+
+  return { nearRewardMembers, availableRewards };
+};
+
 export const recordLoyaltyVisit = async (params: {
   locationId: string;
   scannerInput: string;
@@ -288,7 +392,16 @@ export const recordLoyaltyVisit = async (params: {
   if (!row) {
     throw new Error("Aucun membre trouve.");
   }
-  return row as RecordLoyaltyVisitResult;
+  const result = row as RecordLoyaltyVisitResult;
+  const { data: member } = await sb
+    .from<{ first_name: string | null }>("loyalty_members")
+    .select("first_name")
+    .eq("id", result.member_id)
+    .maybeSingle();
+  return {
+    ...result,
+    first_name: member?.first_name ?? null
+  };
 };
 
 export const getPublicLoyaltyProgram = async (
