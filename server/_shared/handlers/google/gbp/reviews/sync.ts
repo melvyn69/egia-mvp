@@ -126,6 +126,7 @@ type LocationSyncResult = {
 };
 
 type DynamicSupabaseError = {
+  code?: string | null;
   message?: string | null;
 };
 
@@ -149,7 +150,10 @@ type DynamicSupabaseQuery = PromiseLike<DynamicSupabaseResponse> & {
   delete: () => DynamicSupabaseQuery;
   insert: (
     values: Record<string, unknown> | Record<string, unknown>[],
-    options?: { onConflict?: string; ignoreDuplicates?: boolean }
+    options?: {
+      count?: "exact" | "planned" | "estimated";
+      defaultToNull?: boolean;
+    }
   ) => DynamicSupabaseQuery;
   upsert: (
     values: Record<string, unknown> | Record<string, unknown>[],
@@ -157,6 +161,7 @@ type DynamicSupabaseQuery = PromiseLike<DynamicSupabaseResponse> & {
   ) => DynamicSupabaseQuery;
   update: (values: Record<string, unknown>) => DynamicSupabaseQuery;
   eq: (column: string, value: unknown) => DynamicSupabaseQuery;
+  in: (column: string, values: unknown[]) => DynamicSupabaseQuery;
   is: (column: string, value: unknown) => DynamicSupabaseQuery;
   not: (column: string, operator: string, value: unknown) => DynamicSupabaseQuery;
   order: (
@@ -285,6 +290,133 @@ const getErrorMessage = (err: unknown): string =>
     : typeof err === "string"
       ? err
       : JSON.stringify(err);
+
+const legacyAlertKey = (alert: Pick<AlertInsert, "rule_code" | "review_id">) =>
+  `${alert.rule_code}\u0000${alert.review_id}`;
+
+const dedupeLegacyAlerts = (alerts: AlertInsert[]) => {
+  const byKey = new Map<string, AlertInsert>();
+  for (const alert of alerts) {
+    if (!byKey.has(legacyAlertKey(alert))) {
+      byKey.set(legacyAlertKey(alert), alert);
+    }
+  }
+  return Array.from(byKey.values());
+};
+
+const isUniqueViolation = (error: DynamicSupabaseError | null | undefined) =>
+  error?.code === "23505" ||
+  (typeof error?.message === "string" &&
+    error.message.toLowerCase().includes("duplicate key"));
+
+const loadExistingLegacyAlertKeys = async (params: {
+  supabase: DynamicSupabaseClient;
+  alerts: AlertInsert[];
+  requestId?: string;
+  label: string;
+}) => {
+  const existingKeys = new Set<string>();
+  const reviewIds = Array.from(new Set(params.alerts.map((alert) => alert.review_id)));
+  const ruleCodes = Array.from(new Set(params.alerts.map((alert) => alert.rule_code)));
+
+  for (const chunk of chunkArray(reviewIds, EXISTING_LOAD_CHUNK_SIZE)) {
+    const { data, error } = await withSupabaseRetry(
+      () =>
+        params.supabase
+          .from("alerts")
+          .select("rule_code, review_id")
+          .in("review_id", chunk)
+          .in("rule_code", ruleCodes)
+          .is("workflow_id", null)
+          .is("alert_type", null),
+      {
+        requestId: params.requestId,
+        label: `${params.label}.load_existing`
+      }
+    );
+
+    if (error) {
+      throw error;
+    }
+
+    for (const row of data ?? []) {
+      const ruleCode = row.rule_code;
+      const reviewId = row.review_id;
+      if (typeof ruleCode === "string" && typeof reviewId === "string") {
+        existingKeys.add(legacyAlertKey({ rule_code: ruleCode, review_id: reviewId }));
+      }
+    }
+  }
+
+  return existingKeys;
+};
+
+const insertMissingLegacyAlerts = async (params: {
+  supabase: DynamicSupabaseClient;
+  alerts: AlertInsert[];
+  requestId?: string;
+  label: string;
+}) => {
+  const uniqueAlerts = dedupeLegacyAlerts(params.alerts);
+  if (uniqueAlerts.length === 0) {
+    return { acceptedCount: 0, insertedCount: 0, error: null };
+  }
+
+  let existingKeys: Set<string>;
+  try {
+    existingKeys = await loadExistingLegacyAlertKeys({
+      supabase: params.supabase,
+      alerts: uniqueAlerts,
+      requestId: params.requestId,
+      label: params.label
+    });
+  } catch (error) {
+    console.error("[alerts] legacy existing lookup failed", {
+      requestId: params.requestId ?? null,
+      label: params.label,
+      message: getErrorMessage(error).slice(0, 300)
+    });
+    return {
+      acceptedCount: 0,
+      insertedCount: 0,
+      error: { message: getErrorMessage(error) }
+    };
+  }
+
+  const missingAlerts = uniqueAlerts.filter(
+    (alert) => !existingKeys.has(legacyAlertKey(alert))
+  );
+
+  if (missingAlerts.length === 0) {
+    return { acceptedCount: uniqueAlerts.length, insertedCount: 0, error: null };
+  }
+
+  const { error } = await withSupabaseRetry(
+    () =>
+      params.supabase
+        .from("alerts")
+        .insert(missingAlerts as unknown as Record<string, unknown>[]),
+    {
+      requestId: params.requestId,
+      label: params.label
+    }
+  );
+
+  if (isUniqueViolation(error)) {
+    console.warn("[alerts] legacy duplicate ignored by database constraint", {
+      requestId: params.requestId ?? null,
+      label: params.label,
+      attempted: missingAlerts.length
+    });
+    return { acceptedCount: uniqueAlerts.length, insertedCount: 0, error: null };
+  }
+
+  return {
+    acceptedCount: error ? 0 : uniqueAlerts.length,
+    insertedCount: error ? 0 : missingAlerts.length,
+    error
+  };
+};
 
 const deriveReauthReasonFromMessage = (message: string | null): AuthStatusReason => {
   const normalized = message?.toLowerCase() ?? "";
@@ -1479,17 +1611,14 @@ export const syncGoogleReviewsForUser = async (
         );
         insertedAlerts = alertsToInsert.length;
         if (alertsToInsert.length > 0) {
-          const { error: alertError } = await withSupabaseRetry(
-            () =>
-              dynamicSupabase.from("alerts").insert(alertsToInsert as unknown as Record<string, unknown>, {
-                onConflict: "rule_code,review_id",
-                ignoreDuplicates: true
-              }),
-            {
-              requestId,
-              label: "alerts.insert_changed_reviews"
-            }
-          );
+          const alertInsertResult = await insertMissingLegacyAlerts({
+            supabase: dynamicSupabase,
+            alerts: alertsToInsert,
+            requestId,
+            label: "alerts.insert_changed_reviews"
+          });
+          insertedAlerts = alertInsertResult.acceptedCount;
+          const alertError = alertInsertResult.error;
           if (alertError) {
             console.error("[alerts] insert failed", alertError);
           }
@@ -1543,17 +1672,13 @@ export const syncGoogleReviewsForUser = async (
             })
           );
           if (backfillAlerts.length > 0) {
-            const { error: backfillInsertError } = await withSupabaseRetry(
-              () =>
-                dynamicSupabase.from("alerts").insert(backfillAlerts as unknown as Record<string, unknown>, {
-                  onConflict: "rule_code,review_id",
-                  ignoreDuplicates: true
-                }),
-              {
-                requestId,
-                label: "alerts.insert_backfill"
-              }
-            );
+            const backfillInsertResult = await insertMissingLegacyAlerts({
+              supabase: dynamicSupabase,
+              alerts: backfillAlerts,
+              requestId,
+              label: "alerts.insert_backfill"
+            });
+            const backfillInsertError = backfillInsertResult.error;
             if (backfillInsertError) {
               console.error("[alerts] backfill_insert_failed", {
                 message: backfillInsertError.message,
