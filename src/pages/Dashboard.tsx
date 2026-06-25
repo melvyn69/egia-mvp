@@ -9,10 +9,8 @@ import {
   MessageSquare,
   RefreshCw
 } from "lucide-react";
-import {
-  BusinessHealthScoreCard,
-  buildBusinessHealthScoreModel
-} from "../components/coach/BusinessHealthScore";
+import { BusinessHealthScoreCard } from "../components/coach/BusinessHealthScore";
+import { buildBusinessHealthScoreModel } from "../components/coach/businessHealthScoreModel";
 import { GoogleConnectionBadge } from "../components/GoogleConnectionBadge";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";

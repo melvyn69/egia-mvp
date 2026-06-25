@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import type { VercelRequest, VercelResponse } from "@vercel/node";
 import type { Database } from "../../../database.types";
 import { clearGoogleReauthRequired } from "../../../utils/googleAuthState";
 
@@ -16,10 +17,10 @@ const getMissingEnv = () =>
 const buildAppRedirect = (appBaseUrl: string, status: "success" | "error") =>
   `${appBaseUrl.replace(/\/$/, "")}/google_oauth_callback?status=${status}`;
 
-const normalizeQueryValue = (value: string | string[] | undefined) =>
+const normalizeQueryValue = (value: VercelRequest["query"][string] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
-const handler = async (req: any, res: any) => {
+const handler = async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== "GET") {
     res.status(405).send("Method not allowed");
     return;

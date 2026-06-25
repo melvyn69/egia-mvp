@@ -1,10 +1,8 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
-import {
-  BusinessHealthScoreCard,
-  buildBusinessHealthScoreModel
-} from "../components/coach/BusinessHealthScore";
+import { BusinessHealthScoreCard } from "../components/coach/BusinessHealthScore";
+import { buildBusinessHealthScoreModel } from "../components/coach/businessHealthScoreModel";
 import { Card, CardContent } from "../components/ui/card";
 import type { GoogleConnectionStatus } from "../hooks/useGoogleConnectionStatus";
 import { type CoachKpiSummaryCache, useCoachResult } from "../services/coach";
