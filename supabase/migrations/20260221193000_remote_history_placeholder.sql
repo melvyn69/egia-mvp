@@ -1,0 +1,11 @@
+-- Remote history placeholder.
+--
+-- Supabase remote project fhadiwkdznhuxtlgrwfd records migration version
+-- 20260221193000 as applied, but no corresponding migration file exists in
+-- the local workspace, Git history, reflog, or reachable Git objects.
+--
+-- This file intentionally performs no schema change. It only realigns the
+-- local migrations directory with the remote migration history so future
+-- migration checks do not report this remote-applied version as missing.
+--
+-- Do not add DDL here unless the original 20260221193000 migration is found.
