@@ -5,13 +5,39 @@ import handleOAuthStart from "../../server/_shared/handlers/google/oauth/start";
 import handleOAuthCallback from "../../server/_shared/handlers/google/oauth/callback";
 import handleReply from "../../server/_shared/handlers/google/reply";
 
-const getRouteParts = (req: VercelRequest) => {
-  const query = req.query as Record<string, unknown>;
-  const raw = query?.["...slug"] ?? query?.slug ?? query?.["slug[]"];
-  const parts = (Array.isArray(raw) ? raw : raw ? [raw] : [])
+const GOOGLE_ROUTES = {
+  "gbp/sync": handleGbpSync,
+  "gbp/reviews/sync": handleGbpReviewsSync,
+  "oauth/start": handleOAuthStart,
+  "oauth/callback": handleOAuthCallback,
+  reply: handleReply
+} as const;
+
+const safeDecodeRoutePart = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+const splitRouteParts = (value: unknown): string[] => {
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+
+  return values
     .map(String)
     .flatMap((part) => part.split("/"))
-    .filter((part) => part.length > 0);
+    .map((part) => safeDecodeRoutePart(part).trim())
+    .filter((part) => part.length > 0 && part !== "[...slug]");
+};
+
+const getRouteParts = (req: VercelRequest) => {
+  const query = req.query as Record<string, unknown>;
+  const parts = [
+    ...splitRouteParts(query?.slug),
+    ...splitRouteParts(query?.["...slug"]),
+    ...splitRouteParts(query?.["slug[]"])
+  ];
 
   if (parts.length > 0) {
     return parts;
@@ -21,6 +47,7 @@ const getRouteParts = (req: VercelRequest) => {
   return pathname
     .replace(/^\/api\/google\/?/, "")
     .split("/")
+    .map((part) => safeDecodeRoutePart(part).trim())
     .filter((part) => part.length > 0);
 };
 
@@ -38,37 +65,19 @@ const getRequestId = (req: VercelRequest) => {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId = getRequestId(req);
   const parts = getRouteParts(req);
+  const routeKey = parts.join("/");
 
   console.log("[api/google]", {
     method: req.method ?? "GET",
     url: req.url ?? null,
     parts,
+    routeKey,
     requestId
   });
 
-  if (parts.length === 2 && parts[0] === "gbp" && parts[1] === "sync") {
-    return handleGbpSync(req, res);
-  }
-
-  if (
-    parts.length === 3 &&
-    parts[0] === "gbp" &&
-    parts[1] === "reviews" &&
-    parts[2] === "sync"
-  ) {
-    return handleGbpReviewsSync(req, res);
-  }
-
-  if (parts.length === 2 && parts[0] === "oauth" && parts[1] === "start") {
-    return handleOAuthStart(req, res);
-  }
-
-  if (parts.length === 2 && parts[0] === "oauth" && parts[1] === "callback") {
-    return handleOAuthCallback(req, res);
-  }
-
-  if (parts.length === 1 && parts[0] === "reply") {
-    return handleReply(req, res);
+  const routeHandler = GOOGLE_ROUTES[routeKey as keyof typeof GOOGLE_ROUTES];
+  if (routeHandler) {
+    return routeHandler(req, res);
   }
 
   return res.status(404).json({
