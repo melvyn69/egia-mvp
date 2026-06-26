@@ -3,13 +3,37 @@ import handleAiTagReviews from "../../server/_shared/handlers/cron/ai/tag-review
 import handleGoogleSyncReplies from "../../server/_shared/handlers/cron/google/sync-replies";
 import handleMonthlyReports from "../../server/_shared/handlers/cron/monthly-reports-api";
 
-const getRouteParts = (req: VercelRequest) => {
-  const query = req.query as Record<string, unknown>;
-  const raw = query?.["...slug"] ?? query?.slug ?? query?.["slug[]"];
-  const parts = (Array.isArray(raw) ? raw : raw ? [raw] : [])
+const CRON_ROUTES = {
+  "ai/tag-reviews": handleAiTagReviews,
+  "google/sync-replies": handleGoogleSyncReplies,
+  "monthly-reports": handleMonthlyReports
+} as const;
+
+const safeDecodeRoutePart = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+const splitRouteParts = (value: unknown): string[] => {
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+
+  return values
     .map(String)
     .flatMap((part) => part.split("/"))
-    .filter((part) => part.length > 0);
+    .map((part) => safeDecodeRoutePart(part).trim())
+    .filter((part) => part.length > 0 && part !== "[...slug]");
+};
+
+const getRouteParts = (req: VercelRequest) => {
+  const query = req.query as Record<string, unknown>;
+  const parts = [
+    ...splitRouteParts(query?.slug),
+    ...splitRouteParts(query?.["...slug"]),
+    ...splitRouteParts(query?.["slug[]"])
+  ];
 
   if (parts.length > 0) {
     return parts;
@@ -19,6 +43,7 @@ const getRouteParts = (req: VercelRequest) => {
   return pathname
     .replace(/^\/api\/cron\/?/, "")
     .split("/")
+    .map((part) => safeDecodeRoutePart(part).trim())
     .filter((part) => part.length > 0);
 };
 
@@ -36,28 +61,19 @@ const getRequestId = (req: VercelRequest) => {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId = getRequestId(req);
   const parts = getRouteParts(req);
+  const routeKey = parts.join("/");
 
   console.log("[api/cron]", {
     method: req.method ?? "GET",
     url: req.url ?? null,
     parts,
+    routeKey,
     requestId
   });
 
-  if (parts.length === 2 && parts[0] === "ai" && parts[1] === "tag-reviews") {
-    return handleAiTagReviews(req, res);
-  }
-
-  if (
-    parts.length === 2 &&
-    parts[0] === "google" &&
-    parts[1] === "sync-replies"
-  ) {
-    return handleGoogleSyncReplies(req, res);
-  }
-
-  if (parts.length === 1 && parts[0] === "monthly-reports") {
-    return handleMonthlyReports(req, res);
+  const routeHandler = CRON_ROUTES[routeKey as keyof typeof CRON_ROUTES];
+  if (routeHandler) {
+    return routeHandler(req, res);
   }
 
   return res.status(404).json({

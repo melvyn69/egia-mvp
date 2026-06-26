@@ -1,6 +1,10 @@
 {
   "version": 2,
   "routes": [
+    {
+      "src": "/api/cron/(.*)",
+      "dest": "/api/cron/[...slug]?slug=$1"
+    },
     { "handle": "filesystem" },
     { "src": "/(?!api/).*", "dest": "/index.html" }
   ]
