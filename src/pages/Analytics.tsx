@@ -16,6 +16,7 @@ import {
   ListChecks,
   MapPin,
   MessageSquareReply,
+  MoreHorizontal,
   RefreshCw,
   Sparkles,
   Star,
@@ -275,7 +276,7 @@ const trendConfig = {
   down: {
     label: "baisse",
     Icon: ArrowDownRight,
-    className: "border-rose-200 bg-rose-50 text-rose-700"
+    className: "border-red-200 bg-red-50 text-red-700"
   },
   stable: {
     label: "stable",
@@ -467,7 +468,7 @@ const DashboardCard = ({
 }) => (
   <Card
     className={cn(
-      "overflow-hidden rounded-[1.35rem] border-slate-200/80 bg-white/95 shadow-[0_18px_55px_rgba(15,23,42,0.06)]",
+      "analytics-section overflow-hidden rounded-2xl border-slate-200/55 bg-white/95 shadow-[0_16px_44px_rgba(15,23,42,0.045)]",
       className
     )}
   >
@@ -481,12 +482,40 @@ const EmptyState = ({ label = EMPTY_ANALYSIS }: { label?: string }) => (
   </div>
 );
 
+const AnalyticsDisclosure = ({
+  title,
+  badge,
+  defaultOpen = false,
+  children
+}: {
+  title: string;
+  badge?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) => (
+  <details
+    {...(defaultOpen ? { open: true } : {})}
+    className="group rounded-2xl border border-slate-100/80 bg-slate-50/70 p-4 transition hover:border-slate-200 hover:bg-slate-50"
+  >
+    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 [&::-webkit-details-marker]:hidden">
+      <span className="text-sm font-semibold text-slate-950">{title}</span>
+      <span className="flex items-center gap-2">
+        {badge && <Badge variant="neutral">{badge}</Badge>}
+        <span className="text-xs font-semibold text-slate-400 transition group-open:rotate-90">
+          &gt;
+        </span>
+      </span>
+    </summary>
+    <div className="mt-4">{children}</div>
+  </details>
+);
+
 const AiSkillCardView = ({ card }: { card: AiSkillCard }) => {
   const toneClass = {
     dark: "border-slate-200 bg-slate-950 text-white",
     good: "border-emerald-100 bg-emerald-50/70 text-slate-950",
     warn: "border-amber-100 bg-amber-50/70 text-slate-950",
-    neutral: "border-slate-100 bg-white text-slate-950"
+    neutral: "border-slate-100/70 bg-white text-slate-950"
   }[card.tone];
   const iconClass = card.tone === "dark" ? "bg-white/10 text-white" : "bg-white text-slate-700";
   const badgeVariant =
@@ -495,7 +524,7 @@ const AiSkillCardView = ({ card }: { card: AiSkillCard }) => {
   const emptyTitle = card.status === "soon" ? "Bientôt disponible" : "Données insuffisantes";
 
   return (
-    <div className={cn("rounded-2xl border p-4 shadow-sm", toneClass)}>
+    <div className={cn("analytics-card-motion h-full rounded-2xl border p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]", toneClass)}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", iconClass)}>
@@ -659,7 +688,7 @@ const KpiCard = ({
   <button
     type="button"
     onClick={() => onOpen(id)}
-    className="group min-w-0 rounded-[1.15rem] border border-slate-200/80 bg-white px-4 py-4 text-left shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+    className="analytics-kpi-motion group h-full min-w-0 rounded-2xl border border-slate-200/70 bg-white px-4 py-4 text-left shadow-[0_12px_30px_rgba(15,23,42,0.04)] transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_16px_38px_rgba(15,23,42,0.07)] focus:outline-none focus:ring-2 focus:ring-slate-900/10"
   >
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
@@ -670,7 +699,7 @@ const KpiCard = ({
           {value}
         </p>
       </div>
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-600">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600">
         <Icon className="h-4 w-4" />
       </div>
     </div>
@@ -687,9 +716,9 @@ const KpiCard = ({
 const TodayMetricTile = ({ metric }: { metric: TodayBriefMetric }) => {
   const Icon = metric.Icon;
   const toneClass = {
-    neutral: "border-slate-200 bg-white",
-    good: "border-emerald-100 bg-emerald-50/60",
-    warn: "border-amber-100 bg-amber-50/70"
+    neutral: "border-slate-100 bg-white",
+    good: "border-emerald-100/80 bg-emerald-50/50",
+    warn: "border-amber-100/80 bg-amber-50/60"
   }[metric.tone];
   const iconClass = {
     neutral: "border-slate-200 bg-slate-50 text-slate-600",
@@ -698,7 +727,7 @@ const TodayMetricTile = ({ metric }: { metric: TodayBriefMetric }) => {
   }[metric.tone];
 
   return (
-    <div className={cn("rounded-2xl border p-4 shadow-sm", toneClass)}>
+    <div className={cn("analytics-card-motion h-full rounded-2xl border p-4", toneClass)}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
@@ -708,7 +737,7 @@ const TodayMetricTile = ({ metric }: { metric: TodayBriefMetric }) => {
             {metric.value}
           </p>
         </div>
-        <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full border", iconClass)}>
+        <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border", iconClass)}>
           <Icon className="h-4 w-4" />
         </div>
       </div>
@@ -726,8 +755,8 @@ const TodayTaskCard = ({
 }) => {
   const toneClass = {
     neutral: "border-slate-100 bg-white",
-    good: "border-emerald-100 bg-emerald-50/60",
-    warn: "border-amber-100 bg-amber-50/70"
+    good: "border-emerald-100/80 bg-emerald-50/50",
+    warn: "border-amber-100/80 bg-amber-50/60"
   }[task.tone];
   const dotClass = {
     neutral: "bg-slate-400",
@@ -736,7 +765,7 @@ const TodayTaskCard = ({
   }[task.tone];
 
   return (
-    <article className={cn("rounded-2xl border p-4 shadow-sm", toneClass)}>
+    <article className={cn("analytics-card-motion h-full rounded-2xl border p-4", toneClass)}>
       <div className="flex items-start gap-3">
         <span className={cn("mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full", dotClass)} />
         <div className="min-w-0 flex-1">
@@ -747,7 +776,7 @@ const TodayTaskCard = ({
               type="button"
               variant={task.path ? "outline" : "ghost"}
               size="sm"
-              className="mt-3 h-8 rounded-full text-xs"
+              className="mt-3 h-9 rounded-full text-xs"
               onClick={() => task.path && onNavigate(task.path)}
               disabled={!task.path}
             >
@@ -795,7 +824,7 @@ const AreaChart = ({
   return (
     <div className="space-y-4">
       <div
-        className="relative overflow-hidden rounded-[1.35rem] border border-slate-100 bg-gradient-to-b from-slate-50 via-white to-white px-2 py-3"
+        className="relative overflow-hidden rounded-2xl border border-slate-100 bg-gradient-to-b from-slate-50 via-white to-white px-2 py-3"
         onMouseLeave={() => setHoverIndex(null)}
       >
         <style>
@@ -902,7 +931,7 @@ const AreaChart = ({
         </svg>
         {activePoint && activeCoordinate && hoverIndex !== null && (
           <div
-            className="pointer-events-none absolute z-10 w-56 rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs shadow-[0_18px_50px_rgba(15,23,42,0.16)] backdrop-blur"
+            className="pointer-events-none absolute z-10 w-56 rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs shadow-[0_16px_44px_rgba(15,23,42,0.16)] backdrop-blur"
             style={{
               left: `${Math.min(78, Math.max(4, (activeCoordinate.x / width) * 100))}%`,
               top: `${Math.min(70, Math.max(6, (activeCoordinate.y / height) * 100))}%`
@@ -981,7 +1010,7 @@ const CompactBars = ({
   }
 
   return (
-    <div className="flex h-28 items-end gap-1.5 rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+    <div className="flex h-28 items-end gap-1.5 rounded-2xl bg-slate-50/70 p-3">
       {points.map((point, index) => {
         const value = values[index];
         const ratio =
@@ -1141,7 +1170,7 @@ const TopicRow = ({
     <button
       type="button"
       onClick={onClick}
-      className="group w-full rounded-2xl border border-slate-100 bg-white p-4 text-left transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-sm"
+      className="analytics-card-motion group w-full rounded-2xl border border-transparent bg-slate-50/70 p-4 text-left transition duration-200 hover:-translate-y-0.5 hover:border-slate-200 hover:bg-white hover:shadow-sm"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -1227,7 +1256,7 @@ const KpiDetailSection = ({
   badge?: string;
   children: React.ReactNode;
 }) => (
-  <div className="rounded-2xl border border-slate-100 bg-white p-4">
+  <div className="rounded-2xl border border-slate-100/70 bg-white p-4">
     <div className="mb-3 flex items-center justify-between gap-3">
       <p className="text-sm font-semibold text-slate-900">{title}</p>
       {badge && <Badge variant="neutral">{badge}</Badge>}
@@ -1245,7 +1274,7 @@ const KpiDetailMetric = ({
   value: string;
   detail?: string;
 }) => (
-  <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+  <div className="rounded-2xl border border-transparent bg-slate-50/80 p-3">
     <p className="text-xs text-slate-500">{label}</p>
     <p className="mt-1 text-lg font-semibold text-slate-950">{value}</p>
     {detail && <p className="text-xs text-slate-500">{detail}</p>}
@@ -1267,39 +1296,121 @@ const ProblemActionButtons = ({
     { label: "Analyser avec l'IA", path: "/coach" },
     { label: "Voir uniquement les avis concernés", soon: true }
   ];
+  const primaryAction = actions[0];
+  const secondaryAction = actions[1];
+  const moreActions = actions.slice(2);
 
   return (
-    <div className={cn("flex flex-wrap gap-2", compact ? "mt-3" : "mt-4")}>
-      {actions.map((action) =>
-        action.soon ? (
-          <Button
-            key={action.label}
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 rounded-full border-dashed text-xs text-slate-400"
-            disabled
-          >
-            {action.label}
-            <span className="ml-1 text-[10px] uppercase tracking-[0.12em]">
-              Bientôt
-            </span>
-          </Button>
-        ) : (
-          <Button
-            key={action.label}
-            type="button"
-            variant={action.label === "Répondre aux avis" ? "default" : "outline"}
-            size="sm"
-            className="h-8 rounded-full text-xs"
-            onClick={() => action.path && onNavigate(action.path)}
-          >
-            {action.label}
-          </Button>
-        )
-      )}
+    <div className={cn("flex flex-wrap items-center gap-2", compact ? "mt-3" : "mt-4")}>
+      <Button
+        type="button"
+        variant="default"
+        size="sm"
+        className="h-9 rounded-full text-xs"
+        onClick={() => primaryAction.path && onNavigate(primaryAction.path)}
+      >
+        {primaryAction.label}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-9 rounded-full text-xs"
+        onClick={() => secondaryAction.path && onNavigate(secondaryAction.path)}
+      >
+        {secondaryAction.label}
+      </Button>
+      <details className="group">
+        <summary className="flex h-9 cursor-pointer list-none items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-900/10 [&::-webkit-details-marker]:hidden">
+          <MoreHorizontal className="h-3.5 w-3.5" />
+          Plus d'actions
+        </summary>
+        <div className="analytics-actions-menu mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_16px_44px_rgba(15,23,42,0.12)]">
+          {moreActions.map((action) =>
+            action.soon ? (
+              <button
+                key={action.label}
+                type="button"
+                className="flex w-full cursor-not-allowed items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-400"
+                disabled
+              >
+                <span>{action.label}</span>
+                <span className="text-[10px] uppercase tracking-[0.12em]">
+                  Bientôt disponible
+                </span>
+              </button>
+            ) : (
+              <button
+                key={action.label}
+                type="button"
+                className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                onClick={() => action.path && onNavigate(action.path)}
+              >
+                {action.label}
+              </button>
+            )
+          )}
+        </div>
+      </details>
     </div>
   );
+};
+
+const getDecisionRisk = (item: DecisionItem): string => {
+  if (item.level === "ok") {
+    return "Aucun risque immédiat détecté sur ce point, mais le niveau doit être maintenu.";
+  }
+  return item.consequence;
+};
+
+const getDecisionAction = (
+  item: DecisionItem,
+  pendingReplies: number | null
+): string => {
+  const needsReplyAction =
+    item.id.includes("reply") || item.action.toLowerCase().includes("répond");
+
+  if (needsReplyAction && pendingReplies !== null && pendingReplies > 0) {
+    return pendingReplies === 1
+      ? "Répondre aujourd'hui à 1 avis en attente."
+      : `Répondre aujourd'hui aux ${pendingReplies} avis en attente.`;
+  }
+
+  return item.action;
+};
+
+const getDecisionImpact = (item: DecisionItem): string => {
+  if (item.id.includes("reply") || item.id.includes("delay")) {
+    return "Améliorer la perception de réactivité et renforcer la confiance client.";
+  }
+  if (item.id.includes("reviews")) {
+    return "Renforcer l'activité visible de la fiche et soutenir la visibilité Google.";
+  }
+  if (item.id.includes("rating") || item.id.includes("negative")) {
+    return "Limiter la baisse de confiance et protéger la note moyenne.";
+  }
+  if (item.id.includes("sentiment") || item.id.includes("irritant")) {
+    return "Réduire les irritants récurrents et stabiliser la satisfaction client.";
+  }
+  if (item.id.includes("positive")) {
+    return "Transformer un point fort client en argument commercial visible.";
+  }
+  return item.level === "ok"
+    ? "Maintenir la qualité perçue et consolider les signaux positifs."
+    : "Réduire le risque sur la réputation et rendre l'action plus lisible.";
+};
+
+const getAssistantListImpact = (
+  item: AssistantListItem,
+  type: "opportunity" | "risk" | "action"
+): string => {
+  if (type === "opportunity") {
+    return "Rendre ce point fort plus visible dans les réponses et la communication.";
+  }
+  if (type === "risk") {
+    return "Réduire le risque avant qu'il n'affecte davantage la réputation.";
+  }
+  return item.detail;
 };
 
 const MultiLocationInsightCardView = ({
@@ -1309,7 +1420,7 @@ const MultiLocationInsightCardView = ({
 }) => {
   const Icon = card.Icon;
   return (
-    <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+    <div className="analytics-card-motion h-full rounded-2xl border border-slate-100/70 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.035)]">
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600">
           <Icon className="h-4 w-4" />
@@ -1319,7 +1430,7 @@ const MultiLocationInsightCardView = ({
           <p className="mt-1 text-xs leading-5 text-slate-500">{card.detail}</p>
         </div>
       </div>
-      <div className="mt-4 flex min-h-[118px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 text-center">
+      <div className="mt-4 flex min-h-[118px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200/80 bg-slate-50/60 px-4 text-center">
         <p className="text-sm font-semibold text-slate-800">Données insuffisantes</p>
         <p className="mt-2 text-xs leading-5 text-slate-500">
           Cette analyse sera activée automatiquement lorsque les métriques par établissement seront disponibles.
@@ -2674,6 +2785,8 @@ const Analytics = ({
     ...decisionEngine.groups.watch,
     ...decisionEngine.groups.ok
   ].slice(0, 4);
+  const assistantMainRecommendation = priorityActions[0] ?? null;
+  const assistantPendingReplies = responseBreakdown?.pending ?? null;
 
   const locationLabelById = useMemo(() => {
     return new Map(
@@ -2819,9 +2932,83 @@ const Analytics = ({
       : null;
 
   return (
-    <div className="space-y-6 pb-8">
-      <section className="overflow-hidden rounded-[1.6rem] border border-slate-200/80 bg-white shadow-[0_22px_70px_rgba(15,23,42,0.07)]">
-        <div className="border-b border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-5 py-5 sm:px-6 lg:px-8">
+    <div className="analytics-page space-y-10 pb-12 lg:space-y-12">
+      <style>
+        {`
+          @keyframes analyticsFadeUp {
+            from { opacity: 0; transform: translate3d(0, 10px, 0); }
+            to { opacity: 1; transform: translate3d(0, 0, 0); }
+          }
+
+          @keyframes analyticsPanelBackdrop {
+            from { opacity: 0; }
+            to { opacity: 1; }
+          }
+
+          @keyframes analyticsPanelIn {
+            from { opacity: 0; transform: translate3d(18px, 0, 0); }
+            to { opacity: 1; transform: translate3d(0, 0, 0); }
+          }
+
+          @keyframes analyticsKpiGlow {
+            0% { box-shadow: 0 12px 30px rgba(15, 23, 42, 0.04); }
+            100% { box-shadow: 0 16px 38px rgba(15, 23, 42, 0.065); }
+          }
+
+          .analytics-page > .analytics-section,
+          .analytics-page > section.analytics-section {
+            animation: analyticsFadeUp 520ms cubic-bezier(.22, 1, .36, 1) both;
+          }
+
+          .analytics-page > .analytics-section:nth-child(3) { animation-delay: 45ms; }
+          .analytics-page > .analytics-section:nth-child(4) { animation-delay: 90ms; }
+          .analytics-page > .analytics-section:nth-child(5) { animation-delay: 135ms; }
+          .analytics-page > .analytics-section:nth-child(6) { animation-delay: 180ms; }
+
+          .analytics-card-motion {
+            animation: analyticsFadeUp 420ms cubic-bezier(.22, 1, .36, 1) both;
+            transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background-color 180ms ease;
+          }
+
+          .analytics-card-motion:hover {
+            transform: translate3d(0, -2px, 0);
+            box-shadow: 0 16px 38px rgba(15, 23, 42, 0.065);
+          }
+
+          .analytics-kpi-motion {
+            animation: analyticsFadeUp 480ms cubic-bezier(.22, 1, .36, 1) both, analyticsKpiGlow 900ms ease-out 180ms both;
+            will-change: transform;
+          }
+
+          .analytics-panel-backdrop {
+            animation: analyticsPanelBackdrop 180ms ease-out both;
+          }
+
+          .analytics-panel,
+          .analytics-actions-menu {
+            animation: analyticsPanelIn 260ms cubic-bezier(.22, 1, .36, 1) both;
+          }
+
+          @media (prefers-reduced-motion: reduce) {
+            .analytics-page > .analytics-section,
+            .analytics-page > section.analytics-section,
+            .analytics-card-motion,
+            .analytics-kpi-motion,
+            .analytics-panel-backdrop,
+            .analytics-panel,
+            .analytics-actions-menu {
+              animation: none !important;
+              transition: none !important;
+            }
+
+            .analytics-card-motion:hover {
+              transform: none;
+            }
+          }
+        `}
+      </style>
+      <section className="analytics-section overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.055)]">
+        <div className="border-b border-slate-100/70 bg-gradient-to-br from-white via-white to-slate-50/80 px-5 py-6 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -2839,14 +3026,16 @@ const Analytics = ({
                 )}
               </div>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
-                Vue décisionnelle
+                Cockpit réputation
               </h2>
-              <p className="mt-2 text-sm text-slate-500">
-                Réputation, tendances et actions prioritaires.
-              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Badge variant="neutral">Tendances</Badge>
+                <Badge variant="neutral">Actions</Badge>
+                <Badge variant="neutral">Thèmes</Badge>
+              </div>
             </div>
 
-            <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white/80 p-3 shadow-sm sm:grid-cols-2 xl:min-w-[560px] xl:grid-cols-[1.2fr_0.9fr_auto]">
+            <div className="grid gap-3 rounded-2xl border border-slate-200/70 bg-white/80 p-3 shadow-[0_12px_30px_rgba(15,23,42,0.04)] sm:grid-cols-2 xl:min-w-[560px] xl:grid-cols-[1.2fr_0.9fr_auto]">
               <label className="min-w-0 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
                 Lieu
                 <select
@@ -2886,7 +3075,7 @@ const Analytics = ({
               <Button
                 variant="outline"
                 size="sm"
-                className="mt-6 h-10 rounded-xl"
+                className="mt-6 h-10 rounded-full"
                 onClick={() => analyticsQuery.refetch()}
                 disabled={loading}
               >
@@ -2915,13 +3104,13 @@ const Analytics = ({
                     <Filter className="h-3.5 w-3.5" />
                     Granularité
                   </span>
-                  <div className="flex rounded-xl border border-slate-200 bg-white p-1">
+                  <div className="flex rounded-full border border-slate-200 bg-white p-1">
                     {(["auto", "day", "week"] as const).map((value) => (
                       <Button
                         key={value}
                         variant={granularity === value ? "default" : "ghost"}
                         size="sm"
-                        className="h-8 rounded-lg px-3"
+                        className="h-8 rounded-full px-3"
                         onClick={() => setGranularity(value)}
                       >
                         {value === "auto" ? "Auto" : value === "day" ? "Jour" : "Semaine"}
@@ -2933,23 +3122,19 @@ const Analytics = ({
             </div>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <span>Période: {getPresetLabel(preset)}</span>
-            <span className="h-1 w-1 rounded-full bg-slate-300" />
-            <span>
+            <Badge variant="neutral">{getPresetLabel(preset)}</Badge>
+            <Badge variant="neutral">
               {locationId === "all"
                 ? "Toutes les fiches"
                 : locationLabelById.get(locationId) ?? locationId}
-            </span>
+            </Badge>
             {locationsError && (
-              <>
-                <span className="h-1 w-1 rounded-full bg-slate-300" />
-                <span className="text-amber-700">{locationsError}</span>
-              </>
+              <Badge variant="warning">{locationsError}</Badge>
             )}
           </div>
         </div>
 
-        <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           {showSkeleton
             ? Array.from({ length: 6 }).map((_, index) => (
                 <Skeleton key={index} className="h-36 rounded-2xl" />
@@ -2973,24 +3158,22 @@ const Analytics = ({
       </section>
 
       <DashboardCard>
-        <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+        <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <div className="flex items-center gap-2">
                 <CardTitle>Aujourd'hui</CardTitle>
                 <Badge variant="neutral">{todayBrief.dateLabel}</Badge>
+                <Badge variant="neutral">pilotage</Badge>
               </div>
-              <p className="mt-2 text-sm text-slate-500">
-                Les signaux utiles pour piloter la journée.
-              </p>
             </div>
             {todayBrief.metrics.length > 0 && (
               <Badge variant="neutral">{todayBrief.metrics.length} signal(s)</Badge>
             )}
           </div>
         </CardHeader>
-        <CardContent className="grid gap-5 px-5 pt-5 sm:px-6 xl:grid-cols-[1.25fr_0.75fr]">
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <CardContent className="grid gap-6 px-5 pt-6 sm:px-6 xl:grid-cols-[1.25fr_0.75fr]">
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {showSkeleton ? (
               Array.from({ length: 5 }).map((_, index) => (
                 <Skeleton key={index} className="h-36 rounded-2xl" />
@@ -3006,7 +3189,7 @@ const Analytics = ({
             )}
           </section>
 
-          <section className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+          <section className="rounded-2xl bg-slate-50/70 p-4">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <ListChecks className="h-4 w-4 text-slate-500" />
@@ -3041,42 +3224,77 @@ const Analytics = ({
       )}
 
       <DashboardCard>
-        <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+        <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <CardTitle>Assistant IA</CardTitle>
+                <CardTitle>Recommandation IA</CardTitle>
                 <Badge variant={insights?.used_ai ? "success" : "neutral"}>
                   {insights?.used_ai ? "IA" : "analyse automatique"}
                 </Badge>
+                <Badge variant="neutral">priorisé</Badge>
               </div>
-              <p className="mt-2 text-sm text-slate-500">
-                Lecture simple des signaux à traiter ce mois-ci.
-              </p>
             </div>
-            <Badge variant="neutral">{priorityActions.length} action(s)</Badge>
+            <Badge variant="neutral">{priorityActions.length} recommandation(s)</Badge>
           </div>
         </CardHeader>
-        <CardContent className="space-y-5 px-5 pt-5 sm:px-6">
+        <CardContent className="space-y-7 px-5 pt-6 sm:px-6">
           {showSkeleton ? (
             <Skeleton className="h-[560px] rounded-2xl" />
           ) : (
             <>
-              <section className="rounded-2xl border border-slate-100 bg-slate-950 p-5 text-white shadow-sm">
+              <section className="rounded-2xl bg-slate-950 p-5 text-white shadow-[0_16px_44px_rgba(15,23,42,0.12)]">
                 <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
                   <Sparkles className="h-4 w-4 text-white" />
-                  Résumé automatique
+                  Recommandation principale
                 </div>
-                {automaticSummary.length > 0 ? (
-                  <p className="max-w-4xl text-base leading-7 text-slate-100">
-                    {automaticSummary.join(" ")}
-                  </p>
+                {assistantMainRecommendation ? (
+                  <div className="grid gap-4 lg:grid-cols-4">
+                    <div>
+                      <p className="inline-flex rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
+                        Constat
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-slate-100">
+                        {assistantMainRecommendation.reason}{" "}
+                        <span className="text-slate-400">
+                          ({assistantMainRecommendation.evidence})
+                        </span>
+                      </p>
+                    </div>
+                    <div>
+                      <p className="inline-flex rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
+                        Risque
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-slate-100">
+                        {getDecisionRisk(assistantMainRecommendation)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="inline-flex rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
+                        Action
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-slate-100">
+                        {getDecisionAction(
+                          assistantMainRecommendation,
+                          assistantPendingReplies
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="inline-flex rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-300">
+                        Impact attendu
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-slate-100">
+                        {getDecisionImpact(assistantMainRecommendation)}
+                      </p>
+                    </div>
+                  </div>
                 ) : (
                   <p className="text-sm text-slate-300">{EMPTY_ANALYSIS}</p>
                 )}
               </section>
 
-              <section className="grid gap-4 xl:grid-cols-3">
+              <section className="grid gap-5 xl:grid-cols-3">
                 {(["high", "watch", "ok"] as const).map((level) => {
                   const meta = decisionLevelMeta[level];
                   const items = decisionEngine.groups[level];
@@ -3107,7 +3325,7 @@ const Analytics = ({
                           {items.map((item) => (
                             <article
                               key={item.id}
-                              className="rounded-2xl border border-white/70 bg-white/85 p-4 shadow-sm"
+                              className="rounded-2xl bg-white/80 p-4"
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
@@ -3119,19 +3337,26 @@ const Analytics = ({
                                   </p>
                                 </div>
                               </div>
-                              <div className="mt-4 grid gap-3 text-xs text-slate-600">
-                                <div>
-                                  <p className="font-semibold text-slate-900">Pourquoi</p>
-                                  <p className="mt-1">{item.reason}</p>
-                                </div>
-                                <div>
-                                  <p className="font-semibold text-slate-900">Conséquence</p>
-                                  <p className="mt-1">{item.consequence}</p>
-                                </div>
-                                <div className="inline-flex w-fit items-center gap-1.5 rounded-full bg-slate-950 px-3 py-1.5 text-[11px] font-semibold text-white">
-                                  <ArrowRight className="h-3 w-3" />
-                                  {item.action}
-                                </div>
+                              <div className="mt-4 grid gap-2 text-xs text-slate-600">
+                                {[
+                                  { label: "Constat", value: item.reason },
+                                  { label: "Risque", value: getDecisionRisk(item) },
+                                  {
+                                    label: "Action",
+                                    value: getDecisionAction(item, assistantPendingReplies)
+                                  },
+                                  { label: "Impact", value: getDecisionImpact(item) }
+                                ].map((row) => (
+                                  <div
+                                    key={row.label}
+                                    className="grid gap-2 rounded-xl bg-slate-50 px-3 py-2 sm:grid-cols-[82px_1fr]"
+                                  >
+                                    <span className="inline-flex h-6 w-fit items-center rounded-full bg-white px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                      {row.label}
+                                    </span>
+                                    <span className="leading-5">{row.value}</span>
+                                  </div>
+                                ))}
                               </div>
                               <ProblemActionButtons onNavigate={navigate} compact />
                             </article>
@@ -3145,71 +3370,94 @@ const Analytics = ({
                 })}
               </section>
 
-              <section className="grid gap-4 xl:grid-cols-2">
-                <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-slate-950">
-                      Opportunités détectées
-                    </p>
-                    <Badge variant="success">{opportunitiesDetected.length}</Badge>
-                  </div>
-                  {opportunitiesDetected.length > 0 ? (
-                    <div className="space-y-3">
-                      {opportunitiesDetected.map((item) => (
-                        <div
-                          key={item.id}
-                          className="rounded-2xl border border-white/70 bg-white/85 p-4"
-                        >
-                          <p className="text-sm font-semibold text-slate-950">{item.title}</p>
-                          <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
-                          {item.action && (
-                            <p className="mt-3 text-xs font-semibold text-emerald-700">
-                              {item.action}
-                            </p>
-                          )}
-                        </div>
-                      ))}
+              <AnalyticsDisclosure
+                title="Signaux secondaires"
+                badge={`${opportunitiesDetected.length + risksDetected.length} signal${
+                  opportunitiesDetected.length + risksDetected.length > 1 ? "s" : ""
+                }`}
+              >
+                <div className="grid gap-5 xl:grid-cols-2">
+                  <div className="rounded-2xl bg-emerald-50/60 p-4">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-950">
+                        À valoriser
+                      </p>
+                      <Badge variant="success">{opportunitiesDetected.length}</Badge>
                     </div>
-                  ) : (
-                    <EmptyState label="Aucune opportunité détectée avec les données actuelles." />
-                  )}
-                </div>
-
-                <div className="rounded-2xl border border-red-100 bg-red-50/50 p-4">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-slate-950">Risques détectés</p>
-                    <Badge variant="warning">{risksDetected.length}</Badge>
-                  </div>
-                  {risksDetected.length > 0 ? (
-                    <div className="space-y-3">
-                      {risksDetected.map((item) => (
-                        <div
-                          key={item.id}
-                          className="rounded-2xl border border-white/70 bg-white/85 p-4"
-                        >
-                          <p className="text-sm font-semibold text-slate-950">{item.title}</p>
-                          <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
-                          {item.action && (
-                            <p className="mt-3 text-xs font-semibold text-red-700">
-                              {item.action}
+                    {opportunitiesDetected.length > 0 ? (
+                      <div className="space-y-3">
+                        {opportunitiesDetected.map((item) => (
+                          <div
+                            key={item.id}
+                            className="rounded-2xl bg-white/85 p-4"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="success">Constat</Badge>
+                              <p className="text-sm font-semibold text-slate-950">
+                                {item.title}
+                              </p>
+                            </div>
+                            <p className="mt-2 text-xs text-slate-600">{item.detail}</p>
+                            {item.action && (
+                              <p className="mt-3 inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                                {item.action}
+                              </p>
+                            )}
+                            <p className="mt-3 text-xs text-slate-600">
+                              <span className="font-semibold text-slate-900">Impact : </span>
+                              {getAssistantListImpact(item, "opportunity")}
                             </p>
-                          )}
-                          <ProblemActionButtons onNavigate={navigate} compact />
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <EmptyState label="Aucun risque détecté avec les données actuelles." />
-                  )}
-                </div>
-              </section>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <EmptyState label="Aucune opportunité détectée avec les données actuelles." />
+                    )}
+                  </div>
 
-              <section className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-slate-950">Actions du mois</p>
-                  <Badge variant="neutral">impact</Badge>
+                  <div className="rounded-2xl bg-red-50/50 p-4">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-950">
+                        À prévenir
+                      </p>
+                      <Badge variant="warning">{risksDetected.length}</Badge>
+                    </div>
+                    {risksDetected.length > 0 ? (
+                      <div className="space-y-3">
+                        {risksDetected.map((item) => (
+                          <div
+                            key={item.id}
+                            className="rounded-2xl bg-white/85 p-4"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="warning">Risque</Badge>
+                              <p className="text-sm font-semibold text-slate-950">
+                                {item.title}
+                              </p>
+                            </div>
+                            <p className="mt-2 text-xs text-slate-600">{item.detail}</p>
+                            {item.action && (
+                              <p className="mt-3 inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
+                                {item.action}
+                              </p>
+                            )}
+                            <p className="mt-3 text-xs text-slate-600">
+                              <span className="font-semibold text-slate-900">Impact : </span>
+                              {getAssistantListImpact(item, "risk")}
+                            </p>
+                            <ProblemActionButtons onNavigate={navigate} compact />
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <EmptyState label="Aucun risque détecté avec les données actuelles." />
+                    )}
+                  </div>
                 </div>
-                <div className="grid gap-3 lg:grid-cols-3">
+              </AnalyticsDisclosure>
+
+              <AnalyticsDisclosure title="Plan d'action" badge="impact attendu">
+                <div className="grid gap-4 lg:grid-cols-3">
                   {[
                     {
                       label: "Impact élevé",
@@ -3249,18 +3497,18 @@ const Analytics = ({
                     </div>
                   ))}
                 </div>
-              </section>
+              </AnalyticsDisclosure>
             </>
           )}
         </CardContent>
       </DashboardCard>
 
       <DashboardCard>
-        <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+        <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex items-center gap-2">
-              <CardTitle className="text-xl">Évolution de la réputation</CardTitle>
-              <Badge variant="neutral">graphique principal</Badge>
+              <CardTitle>Réputation</CardTitle>
+              <Badge variant="neutral">tendance</Badge>
             </div>
             <select
               className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
@@ -3274,7 +3522,7 @@ const Analytics = ({
             </select>
           </div>
         </CardHeader>
-        <CardContent className="space-y-5 px-5 pt-5 sm:px-6">
+        <CardContent className="space-y-6 px-5 pt-6 sm:px-6">
           {showSkeleton ? (
             <Skeleton className="h-[400px] rounded-2xl" />
           ) : (
@@ -3289,14 +3537,14 @@ const Analytics = ({
               }
             />
           )}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {chartInsights.length > 0 ? (
               chartInsights.map((fact) => {
                 const FactIcon = fact.Icon;
                 return (
                   <div
                     key={fact.label}
-                    className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3"
+                    className="rounded-2xl bg-slate-50/80 p-3"
                   >
                     <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
                       <FactIcon className="h-3.5 w-3.5" />
@@ -3318,20 +3566,20 @@ const Analytics = ({
         </CardContent>
       </DashboardCard>
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <section className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <DashboardCard>
-          <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+          <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
             <div className="flex items-center justify-between gap-3">
-              <CardTitle>Comparaison</CardTitle>
+              <CardTitle>Périodes</CardTitle>
               <Badge variant="neutral">périodes</Badge>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4 px-5 pt-5 sm:px-6">
+          <CardContent className="space-y-5 px-5 pt-6 sm:px-6">
             {showSkeleton ? (
               <Skeleton className="h-56 rounded-2xl" />
             ) : compare ? (
               <>
-                <div className="grid gap-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-4 text-xs text-slate-500 sm:grid-cols-2">
+                <div className="grid gap-3 rounded-2xl bg-slate-50/70 p-4 text-xs text-slate-500 sm:grid-cols-2">
                   <div>
                     <p className="font-semibold uppercase tracking-[0.12em] text-slate-400">
                       Période actuelle
@@ -3355,7 +3603,7 @@ const Analytics = ({
                   {compareRows.map((row) => (
                     <div
                       key={row.key}
-                      className="grid gap-3 rounded-2xl border border-slate-100 bg-white p-4 sm:grid-cols-[1fr_auto] sm:items-center"
+                      className="grid gap-3 rounded-2xl bg-slate-50/70 p-4 sm:grid-cols-[1fr_auto] sm:items-center"
                     >
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -3382,13 +3630,13 @@ const Analytics = ({
         </DashboardCard>
 
         <DashboardCard>
-          <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+          <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
             <div className="flex items-center justify-between gap-3">
-              <CardTitle>Qualité de réponse</CardTitle>
-              <Badge variant="neutral">suivi</Badge>
+              <CardTitle>Réponses</CardTitle>
+              <Badge variant="neutral">qualité</Badge>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4 px-5 pt-5 sm:px-6">
+          <CardContent className="space-y-5 px-5 pt-6 sm:px-6">
             {showSkeleton ? (
               <Skeleton className="h-48 rounded-2xl" />
             ) : quality ? (
@@ -3425,13 +3673,13 @@ const Analytics = ({
         </DashboardCard>
 
         <DashboardCard>
-          <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+          <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
             <div className="flex items-center justify-between gap-3">
-              <CardTitle>Sentiment global</CardTitle>
+              <CardTitle>Sentiment</CardTitle>
               <Badge variant="neutral">répartition</Badge>
             </div>
           </CardHeader>
-          <CardContent className="px-5 pt-5 sm:px-6">
+          <CardContent className="px-5 pt-6 sm:px-6">
             {showSkeleton ? (
               <Skeleton className="h-52 rounded-2xl" />
             ) : (
@@ -3441,13 +3689,13 @@ const Analytics = ({
         </DashboardCard>
 
         <DashboardCard>
-          <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+          <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
             <div className="flex items-center justify-between gap-3">
               <CardTitle>Notes</CardTitle>
               <Badge variant="neutral">1 à 5</Badge>
             </div>
           </CardHeader>
-          <CardContent className="px-5 pt-5 sm:px-6">
+          <CardContent className="px-5 pt-6 sm:px-6">
             {showSkeleton ? (
               <Skeleton className="h-44 rounded-2xl" />
             ) : (
@@ -3458,25 +3706,26 @@ const Analytics = ({
       </section>
 
       <DashboardCard>
-        <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+        <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <CardTitle>Multi-établissements</CardTitle>
+                <CardTitle>Établissements</CardTitle>
                 <Badge variant={hasMultipleLocations ? "success" : "neutral"}>
                   {locations.length} établissement{locations.length > 1 ? "s" : ""}
                 </Badge>
               </div>
-              <p className="mt-2 text-sm text-slate-500">
-                Interface prête pour comparer les performances locales sans inventer de classement.
-              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Badge variant="neutral">Multi-sites</Badge>
+                <Badge variant="neutral">Sans classement fictif</Badge>
+              </div>
             </div>
             <Badge variant="neutral">
               {locationId === "all" ? "Toutes les fiches" : "Filtre actif"}
             </Badge>
           </div>
         </CardHeader>
-        <CardContent className="space-y-5 px-5 pt-5 sm:px-6">
+        <CardContent className="space-y-6 px-5 pt-6 sm:px-6">
           {locations.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {selectedLocations.slice(0, 6).map((location) => (
@@ -3490,7 +3739,7 @@ const Analytics = ({
             </div>
           )}
 
-          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
             {multiLocationCards.map((card) => (
               <MultiLocationInsightCardView key={card.id} card={card} />
             ))}
@@ -3499,10 +3748,10 @@ const Analytics = ({
       </DashboardCard>
 
       <DashboardCard>
-        <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+        <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <CardTitle>Analyse par thèmes</CardTitle>
+              <CardTitle>Thèmes</CardTitle>
               <div className="mt-2 flex flex-wrap gap-2">
                 <Badge variant="neutral">{topicExplorer.all.length} thèmes</Badge>
                 <Badge variant="success">{topicExplorer.positiveCount} mentions positives</Badge>
@@ -3553,75 +3802,85 @@ const Analytics = ({
             </div>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-5 px-5 pt-5 sm:px-6 xl:grid-cols-3">
+        <CardContent className="space-y-6 px-5 pt-6 sm:px-6">
           {showSkeleton ? (
-            <>
+            <div className="grid gap-6 xl:grid-cols-3">
               <Skeleton className="h-72 rounded-2xl" />
               <Skeleton className="h-72 rounded-2xl" />
               <Skeleton className="h-72 rounded-2xl" />
               <Skeleton className="h-72 rounded-2xl" />
               <Skeleton className="h-72 rounded-2xl" />
-            </>
+            </div>
           ) : topicExplorer.all.length > 0 ? (
             <>
-              <TopicColumn
-                title="Top thèmes"
-                badge="mentions"
-                topics={topicExplorer.top}
-                emptyLabel={EMPTY_ANALYSIS}
-                onOpen={openTopicPanel}
-              />
-              <TopicColumn
-                title="Thèmes en progression"
-                badge="hausse"
-                badgeVariant="success"
-                topics={topicExplorer.rising}
-                emptyLabel="Pas encore assez de données pour mesurer une progression."
-                onOpen={openTopicPanel}
-              />
-              <TopicColumn
-                title="Thèmes en baisse"
-                badge="baisse"
-                badgeVariant="warning"
-                topics={topicExplorer.falling}
-                emptyLabel="Aucune baisse de thème détectée sur la période."
-                onOpen={openTopicPanel}
-              />
-              <TopicColumn
-                title="Nouveaux thèmes"
-                badge="nouveau"
-                badgeVariant="success"
-                topics={topicExplorer.newTopics}
-                emptyLabel="Aucun nouveau thème détecté avec les données disponibles."
-                onOpen={openTopicPanel}
-              />
-              <TopicColumn
-                title="Thèmes disparus"
-                badge="disparu"
-                topics={topicExplorer.disappeared}
-                emptyLabel="Aucun thème disparu n'est disponible dans les données actuelles."
-                onOpen={openTopicPanel}
-              />
+              <div className="grid gap-6 xl:grid-cols-3">
+                <TopicColumn
+                  title="Top thèmes"
+                  badge="mentions"
+                  topics={topicExplorer.top}
+                  emptyLabel={EMPTY_ANALYSIS}
+                  onOpen={openTopicPanel}
+                />
+                <TopicColumn
+                  title="Thèmes en progression"
+                  badge="hausse"
+                  badgeVariant="success"
+                  topics={topicExplorer.rising}
+                  emptyLabel="Pas encore assez de données pour mesurer une progression."
+                  onOpen={openTopicPanel}
+                />
+                <TopicColumn
+                  title="Thèmes en baisse"
+                  badge="baisse"
+                  badgeVariant="warning"
+                  topics={topicExplorer.falling}
+                  emptyLabel="Aucune baisse de thème détectée sur la période."
+                  onOpen={openTopicPanel}
+                />
+              </div>
+              <AnalyticsDisclosure
+                title="Autres signaux thèmes"
+                badge={`${topicExplorer.newTopics.length + topicExplorer.disappeared.length} signal${
+                  topicExplorer.newTopics.length + topicExplorer.disappeared.length > 1 ? "s" : ""
+                }`}
+              >
+                <div className="grid gap-6 xl:grid-cols-2">
+                  <TopicColumn
+                    title="Nouveaux thèmes"
+                    badge="nouveau"
+                    badgeVariant="success"
+                    topics={topicExplorer.newTopics}
+                    emptyLabel="Aucun nouveau thème détecté avec les données disponibles."
+                    onOpen={openTopicPanel}
+                  />
+                  <TopicColumn
+                    title="Thèmes disparus"
+                    badge="disparu"
+                    topics={topicExplorer.disappeared}
+                    emptyLabel="Aucun thème disparu n'est disponible dans les données actuelles."
+                    onOpen={openTopicPanel}
+                  />
+                </div>
+              </AnalyticsDisclosure>
             </>
           ) : (
-            <div className="xl:col-span-3">
-              <EmptyState label={overview ? reasonLabel : EMPTY_ANALYSIS} />
-            </div>
+            <EmptyState label={overview ? reasonLabel : EMPTY_ANALYSIS} />
           )}
         </CardContent>
       </DashboardCard>
 
       <DashboardCard>
-        <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+        <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <CardTitle>Capacités IA</CardTitle>
+                <CardTitle>Skills IA</CardTitle>
                 <Badge variant="neutral">avancé</Badge>
               </div>
-              <p className="mt-2 text-sm text-slate-500">
-                Capacités prêtes à enrichir le cockpit quand les données seront disponibles.
-              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Badge variant="neutral">Futur</Badge>
+                <Badge variant="neutral">Activation auto</Badge>
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <Badge variant="neutral">
@@ -3632,7 +3891,7 @@ const Analytics = ({
             </div>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-4 px-5 pt-5 sm:grid-cols-2 sm:px-6 xl:grid-cols-4">
+        <CardContent className="grid gap-5 px-5 pt-6 sm:grid-cols-2 sm:px-6 xl:grid-cols-4">
           {showSkeleton
             ? Array.from({ length: 8 }).map((_, index) => (
                 <Skeleton key={index} className="h-52 rounded-2xl" />
@@ -3644,9 +3903,9 @@ const Analytics = ({
       </DashboardCard>
 
       {selectedKpi && selectedKpiDefinition && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5">
-          <DashboardCard className="h-full w-full max-w-2xl overflow-y-auto">
-            <CardHeader className="border-b border-slate-100">
+        <div className="analytics-panel-backdrop fixed inset-0 z-50 flex justify-end bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5">
+          <DashboardCard className="analytics-panel h-full w-full max-w-2xl overflow-y-auto">
+            <CardHeader className="border-b border-slate-100/60 bg-slate-50/30">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="mb-2 flex flex-wrap gap-2">
@@ -3664,7 +3923,7 @@ const Analytics = ({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="shrink-0 rounded-xl"
+                  className="shrink-0 rounded-full"
                   onClick={() => setSelectedKpi(null)}
                 >
                   Fermer
@@ -3700,7 +3959,7 @@ const Analytics = ({
                         {selectedLocations.map((location) => (
                           <div
                             key={location.location_resource_name}
-                            className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                            className="rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-700"
                           >
                             {location.location_title ?? location.location_resource_name}
                           </div>
@@ -3919,9 +4178,9 @@ const Analytics = ({
       )}
 
       {selectedTopic && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5">
-          <DashboardCard className="h-full w-full max-w-xl overflow-y-auto">
-            <CardHeader className="border-b border-slate-100">
+        <div className="analytics-panel-backdrop fixed inset-0 z-50 flex justify-end bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5">
+          <DashboardCard className="analytics-panel h-full w-full max-w-xl overflow-y-auto">
+            <CardHeader className="border-b border-slate-100/60 bg-slate-50/30">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="mb-2 flex flex-wrap gap-2">
@@ -3947,7 +4206,7 @@ const Analytics = ({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="shrink-0 rounded-xl"
+                  className="shrink-0 rounded-full"
                   onClick={() => {
                     setSelectedTopic(null);
                     setDrilldownDriver(null);
@@ -3960,7 +4219,7 @@ const Analytics = ({
               </div>
             </CardHeader>
             <CardContent className="space-y-5 pt-6">
-              <div className="rounded-2xl border border-slate-100 bg-slate-950 p-4 text-white">
+              <div className="rounded-2xl bg-slate-950 p-4 text-white shadow-[0_16px_44px_rgba(15,23,42,0.12)]">
                 <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
                   <Sparkles className="h-4 w-4 text-white" />
                   Résumé automatique
@@ -3971,21 +4230,21 @@ const Analytics = ({
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+                <div className="rounded-2xl bg-slate-50/80 p-3">
                   <p className="text-xs text-slate-500">Mentions</p>
                   <p className="mt-1 text-lg font-semibold text-slate-950">
                     {selectedTopic.count}
                   </p>
                   <p className="text-xs text-slate-500">avis concernés</p>
                 </div>
-                <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+                <div className="rounded-2xl bg-slate-50/80 p-3">
                   <p className="text-xs text-slate-500">Importance</p>
                   <p className="mt-1 text-lg font-semibold text-slate-950">
                     {formatShare(selectedTopic.share_pct)}
                   </p>
                   <p className="text-xs text-slate-500">répartition</p>
                 </div>
-                <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+                <div className="rounded-2xl bg-slate-50/80 p-3">
                   <p className="text-xs text-slate-500">Sentiment</p>
                   <p className="mt-1 text-lg font-semibold text-slate-950">
                     {selectedTopic.net_sentiment === null
@@ -3994,14 +4253,14 @@ const Analytics = ({
                   </p>
                   <p className="text-xs text-slate-500">solde</p>
                 </div>
-                <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+                <div className="rounded-2xl bg-slate-50/80 p-3">
                   <p className="text-xs text-slate-500">Poids</p>
                   <p className="mt-1 text-lg font-semibold text-slate-950">
                     {formatShare(selectedTopic.share_pct)}
                   </p>
                   <p className="text-xs text-slate-500">dans les thèmes</p>
                 </div>
-                <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+                <div className="rounded-2xl bg-slate-50/80 p-3">
                   <p className="text-xs text-slate-500">Impact</p>
                   <p className="mt-1 text-lg font-semibold text-slate-950">
                     {getTopicImpactLabel(selectedTopic)}
@@ -4010,7 +4269,7 @@ const Analytics = ({
                     {getTopicToneLabel(selectedTopic.tone).toLowerCase()}
                   </p>
                 </div>
-                <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+                <div className="rounded-2xl bg-slate-50/80 p-3">
                   <p className="text-xs text-slate-500">Évolution</p>
                   <p className="mt-1 text-lg font-semibold text-slate-950">
                     {formatDeltaCount(selectedTopic.delta)}
@@ -4021,7 +4280,7 @@ const Analytics = ({
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-100 bg-white p-4">
+    <div className="analytics-card-motion rounded-2xl border border-slate-100/70 bg-white p-4">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-semibold text-slate-900">Évolution</p>
                   <TrendPill
@@ -4056,7 +4315,7 @@ const Analytics = ({
                 )}
               </div>
 
-              <div className="rounded-2xl border border-slate-100 bg-white p-4">
+              <div className="rounded-2xl border border-slate-100/70 bg-white p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <p className="text-sm font-semibold text-slate-900">
                     Répartition positive / négative
@@ -4084,7 +4343,7 @@ const Analytics = ({
                   {drilldown.items.map((item) => (
                     <div
                       key={item.id}
-                      className="rounded-2xl border border-slate-100 bg-white p-4 text-sm text-slate-700"
+                      className="rounded-2xl bg-slate-50/70 p-4 text-sm text-slate-700"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
                         <span>
@@ -4120,7 +4379,7 @@ const Analytics = ({
               ) : null}
               </div>
 
-              <div className="rounded-2xl border border-slate-100 bg-white p-4">
+              <div className="rounded-2xl border border-slate-100/70 bg-white p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <p className="text-sm font-semibold text-slate-900">Réponses associées</p>
                   <Badge variant="neutral">si disponibles</Badge>
