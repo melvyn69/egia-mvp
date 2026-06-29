@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
+import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowDownRight,
@@ -42,6 +43,7 @@ type AnalyticsProps = {
 
 type TrendState = "up" | "down" | "stable" | "none";
 type MetricKey = "reviews" | "avg_rating" | "neg_share" | "reply_rate";
+type KpiPanelKey = "reviews" | "avg_rating" | "reply_rate" | "reply_delay" | "neg_share" | "sentiment";
 type DecisionLevel = "high" | "watch" | "ok";
 type AnalyticsPoint = {
   date: string;
@@ -56,6 +58,36 @@ type DecisionItem = {
   title: string;
   action: string;
   evidence: string;
+  reason: string;
+  consequence: string;
+};
+type AssistantListItem = {
+  id: string;
+  title: string;
+  detail: string;
+  action?: string;
+};
+type TodayBriefMetric = {
+  id: string;
+  label: string;
+  value: string;
+  detail: string;
+  Icon: typeof BarChart3;
+  tone: "neutral" | "good" | "warn";
+};
+type TodayTask = {
+  id: string;
+  title: string;
+  detail: string;
+  action?: string;
+  path?: string;
+  tone: "neutral" | "good" | "warn";
+};
+type MultiLocationInsightCard = {
+  id: string;
+  title: string;
+  detail: string;
+  Icon: typeof BarChart3;
 };
 type AnalyticsTopic = {
   id: string;
@@ -69,21 +101,18 @@ type AnalyticsTopic = {
   tag_ids?: string[];
   tone: "positive" | "negative" | "neutral";
 };
-type TimelineEvent = {
-  id: string;
-  label: string;
-  detail: string;
-  level: DecisionLevel;
-};
 type AiSkillCard = {
   id: string;
   title: string;
   badge: string;
   Icon: typeof Sparkles;
   tone: "dark" | "good" | "warn" | "neutral";
+  status: "active" | "empty" | "soon";
   items: Array<{ label: string; detail?: string }>;
   emptyLabel: string;
 };
+
+const defineAiSkill = (skill: AiSkillCard): AiSkillCard => skill;
 
 const EMPTY_ANALYSIS = "Pas encore assez de données pour cette analyse.";
 
@@ -116,6 +145,66 @@ const formatHours = (value: number | null): string =>
 
 const formatShare = (value: number | null): string =>
   value === null ? "—" : `${value.toFixed(1)}%`;
+
+const formatDateKey = (date: Date, timeZone: string): string => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  return year && month && day ? `${year}-${month}-${day}` : date.toISOString().slice(0, 10);
+};
+
+const shiftDateKey = (dateKey: string, days: number): string => {
+  const date = new Date(`${dateKey}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
+
+const getTopicToneLabel = (tone: AnalyticsTopic["tone"]) => {
+  switch (tone) {
+    case "positive":
+      return "Positif";
+    case "negative":
+      return "Négatif";
+    default:
+      return "Neutre";
+  }
+};
+
+const getTopicImpactLabel = (topic: AnalyticsTopic) => {
+  if (topic.tone === "negative") {
+    return "Risque";
+  }
+  if (topic.tone === "positive") {
+    return "Levier";
+  }
+  return "À qualifier";
+};
+
+const getTopicSummary = (topic: AnalyticsTopic) => {
+  const parts = [`${topic.label} apparaît dans ${topic.count} avis.`];
+  if (topic.share_pct !== null) {
+    parts.push(`Ce thème représente ${formatShare(topic.share_pct)} des mentions qualifiées.`);
+  }
+  if (topic.delta !== null) {
+    if (topic.delta > 0) {
+      parts.push("Il progresse sur la période.");
+    } else if (topic.delta < 0) {
+      parts.push("Il recule sur la période.");
+    } else {
+      parts.push("Il reste stable sur la période.");
+    }
+  }
+  if (topic.net_sentiment !== null) {
+    parts.push(`Son solde de sentiment est de ${topic.net_sentiment}.`);
+  }
+  return parts.join(" ");
+};
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
@@ -403,6 +492,7 @@ const AiSkillCardView = ({ card }: { card: AiSkillCard }) => {
   const badgeVariant =
     card.tone === "good" ? "success" : card.tone === "warn" ? "warning" : "neutral";
   const Icon = card.Icon;
+  const emptyTitle = card.status === "soon" ? "Bientôt disponible" : "Données insuffisantes";
 
   return (
     <div className={cn("rounded-2xl border p-4 shadow-sm", toneClass)}>
@@ -416,7 +506,7 @@ const AiSkillCardView = ({ card }: { card: AiSkillCard }) => {
               {card.title}
             </p>
             <p className={cn("mt-0.5 text-xs", card.tone === "dark" ? "text-slate-400" : "text-slate-500")}>
-              Skill IA
+              Capacité IA
             </p>
           </div>
         </div>
@@ -451,13 +541,21 @@ const AiSkillCardView = ({ card }: { card: AiSkillCard }) => {
       ) : (
         <div
           className={cn(
-            "mt-4 flex min-h-[118px] items-center justify-center rounded-xl border border-dashed px-3 text-center text-sm",
+            "mt-4 flex min-h-[132px] flex-col items-center justify-center rounded-xl border border-dashed px-4 text-center",
             card.tone === "dark"
               ? "border-white/15 bg-white/5 text-slate-300"
               : "border-slate-200 bg-white/60 text-slate-500"
           )}
         >
-          {card.emptyLabel}
+          <p
+            className={cn(
+              "text-sm font-semibold",
+              card.tone === "dark" ? "text-white" : "text-slate-800"
+            )}
+          >
+            {emptyTitle}
+          </p>
+          <p className="mt-2 text-xs leading-5">{card.emptyLabel}</p>
         </div>
       )}
     </div>
@@ -536,6 +634,7 @@ const Sparkline = ({
 };
 
 const KpiCard = ({
+  id,
   label,
   value,
   detail,
@@ -543,8 +642,10 @@ const KpiCard = ({
   delta,
   Icon,
   sparklineMetric,
-  points
+  points,
+  onOpen
 }: {
+  id: KpiPanelKey;
   label: string;
   value: string;
   detail: string;
@@ -553,8 +654,13 @@ const KpiCard = ({
   Icon: typeof BarChart3;
   sparklineMetric: MetricKey;
   points: AnalyticsPoint[];
+  onOpen: (id: KpiPanelKey) => void;
 }) => (
-  <div className="group min-w-0 rounded-[1.15rem] border border-slate-200/80 bg-white px-4 py-4 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
+  <button
+    type="button"
+    onClick={() => onOpen(id)}
+    className="group min-w-0 rounded-[1.15rem] border border-slate-200/80 bg-white px-4 py-4 text-left shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+  >
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
         <p className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
@@ -575,8 +681,89 @@ const KpiCard = ({
       <TrendPill state={trend} label={delta} />
       <span className="text-xs text-slate-500">{detail}</span>
     </div>
-  </div>
+  </button>
 );
+
+const TodayMetricTile = ({ metric }: { metric: TodayBriefMetric }) => {
+  const Icon = metric.Icon;
+  const toneClass = {
+    neutral: "border-slate-200 bg-white",
+    good: "border-emerald-100 bg-emerald-50/60",
+    warn: "border-amber-100 bg-amber-50/70"
+  }[metric.tone];
+  const iconClass = {
+    neutral: "border-slate-200 bg-slate-50 text-slate-600",
+    good: "border-emerald-200 bg-white text-emerald-700",
+    warn: "border-amber-200 bg-white text-amber-700"
+  }[metric.tone];
+
+  return (
+    <div className={cn("rounded-2xl border p-4 shadow-sm", toneClass)}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+            {metric.label}
+          </p>
+          <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+            {metric.value}
+          </p>
+        </div>
+        <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full border", iconClass)}>
+          <Icon className="h-4 w-4" />
+        </div>
+      </div>
+      <p className="mt-3 text-xs leading-5 text-slate-500">{metric.detail}</p>
+    </div>
+  );
+};
+
+const TodayTaskCard = ({
+  task,
+  onNavigate
+}: {
+  task: TodayTask;
+  onNavigate: (path: string) => void;
+}) => {
+  const toneClass = {
+    neutral: "border-slate-100 bg-white",
+    good: "border-emerald-100 bg-emerald-50/60",
+    warn: "border-amber-100 bg-amber-50/70"
+  }[task.tone];
+  const dotClass = {
+    neutral: "bg-slate-400",
+    good: "bg-emerald-500",
+    warn: "bg-amber-400"
+  }[task.tone];
+
+  return (
+    <article className={cn("rounded-2xl border p-4 shadow-sm", toneClass)}>
+      <div className="flex items-start gap-3">
+        <span className={cn("mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full", dotClass)} />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-slate-950">{task.title}</p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">{task.detail}</p>
+          {task.action && (
+            <Button
+              type="button"
+              variant={task.path ? "outline" : "ghost"}
+              size="sm"
+              className="mt-3 h-8 rounded-full text-xs"
+              onClick={() => task.path && onNavigate(task.path)}
+              disabled={!task.path}
+            >
+              {task.action}
+              {!task.path && (
+                <span className="ml-1 text-[10px] uppercase tracking-[0.12em]">
+                  Bientôt
+                </span>
+              )}
+            </Button>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+};
 
 const AreaChart = ({
   points,
@@ -946,6 +1133,9 @@ const TopicRow = ({
       : item.tone === "positive"
         ? "bg-slate-950"
         : "bg-slate-400";
+  const toneVariant =
+    item.tone === "positive" ? "success" : item.tone === "negative" ? "warning" : "neutral";
+  const impact = getTopicImpactLabel(item);
 
   return (
     <button
@@ -955,12 +1145,25 @@ const TopicRow = ({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-800">{item.label}</p>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-            <span>{item.count} mentions</span>
-            <span>{item.share_pct === null ? "Importance —" : formatShare(item.share_pct)}</span>
-            <span>
-              {item.net_sentiment === null ? "Sentiment —" : `Solde ${item.net_sentiment}`}
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="truncate text-sm font-semibold text-slate-800">{item.label}</p>
+            <Badge variant={toneVariant}>{getTopicToneLabel(item.tone)}</Badge>
+          </div>
+          <div className="mt-3 grid gap-2 text-xs text-slate-500 sm:grid-cols-2">
+            <span className="rounded-xl bg-slate-50 px-2.5 py-1">
+              Mentions: <strong className="text-slate-800">{item.count}</strong>
+            </span>
+            <span className="rounded-xl bg-slate-50 px-2.5 py-1">
+              Importance: <strong className="text-slate-800">{formatShare(item.share_pct)}</strong>
+            </span>
+            <span className="rounded-xl bg-slate-50 px-2.5 py-1">
+              Sentiment:{" "}
+              <strong className="text-slate-800">
+                {item.net_sentiment === null ? "—" : item.net_sentiment}
+              </strong>
+            </span>
+            <span className="rounded-xl bg-slate-50 px-2.5 py-1">
+              Impact: <strong className="text-slate-800">{impact}</strong>
             </span>
           </div>
         </div>
@@ -971,7 +1174,11 @@ const TopicRow = ({
           />
         </div>
       </div>
-      <div className="mt-3 h-1.5 rounded-full bg-slate-100">
+      <div className="mt-3 flex items-center justify-between text-[11px] font-medium text-slate-400">
+        <span>Poids</span>
+        <span>{formatShare(item.share_pct)}</span>
+      </div>
+      <div className="mt-1.5 h-1.5 rounded-full bg-slate-100">
         <div
           className={cn("h-1.5 rounded-full", toneClass)}
           style={{ width: `${width}%` }}
@@ -981,12 +1188,154 @@ const TopicRow = ({
   );
 };
 
+const TopicColumn = ({
+  title,
+  badge,
+  badgeVariant = "neutral",
+  topics,
+  emptyLabel,
+  onOpen
+}: {
+  title: string;
+  badge: string;
+  badgeVariant?: "success" | "warning" | "neutral";
+  topics: AnalyticsTopic[];
+  emptyLabel: string;
+  onOpen: (topic: AnalyticsTopic) => void;
+}) => (
+  <div className="space-y-3">
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-sm font-semibold text-slate-900">{title}</p>
+      <Badge variant={badgeVariant}>{badge}</Badge>
+    </div>
+    {topics.length > 0 ? (
+      topics.map((topic) => (
+        <TopicRow key={topic.id} item={topic} onClick={() => onOpen(topic)} />
+      ))
+    ) : (
+      <EmptyState label={emptyLabel} />
+    )}
+  </div>
+);
+
+const KpiDetailSection = ({
+  title,
+  badge,
+  children
+}: {
+  title: string;
+  badge?: string;
+  children: React.ReactNode;
+}) => (
+  <div className="rounded-2xl border border-slate-100 bg-white p-4">
+    <div className="mb-3 flex items-center justify-between gap-3">
+      <p className="text-sm font-semibold text-slate-900">{title}</p>
+      {badge && <Badge variant="neutral">{badge}</Badge>}
+    </div>
+    {children}
+  </div>
+);
+
+const KpiDetailMetric = ({
+  label,
+  value,
+  detail
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+}) => (
+  <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+    <p className="text-xs text-slate-500">{label}</p>
+    <p className="mt-1 text-lg font-semibold text-slate-950">{value}</p>
+    {detail && <p className="text-xs text-slate-500">{detail}</p>}
+  </div>
+);
+
+const ProblemActionButtons = ({
+  onNavigate,
+  compact = false
+}: {
+  onNavigate: (path: string) => void;
+  compact?: boolean;
+}) => {
+  const actions = [
+    { label: "Répondre aux avis", path: "/inbox" },
+    { label: "Voir les avis concernés", path: "/inbox" },
+    { label: "Créer une alerte", path: "/alerts" },
+    { label: "Programmer un rappel", path: "/automation/builder" },
+    { label: "Analyser avec l'IA", path: "/coach" },
+    { label: "Voir uniquement les avis concernés", soon: true }
+  ];
+
+  return (
+    <div className={cn("flex flex-wrap gap-2", compact ? "mt-3" : "mt-4")}>
+      {actions.map((action) =>
+        action.soon ? (
+          <Button
+            key={action.label}
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-full border-dashed text-xs text-slate-400"
+            disabled
+          >
+            {action.label}
+            <span className="ml-1 text-[10px] uppercase tracking-[0.12em]">
+              Bientôt
+            </span>
+          </Button>
+        ) : (
+          <Button
+            key={action.label}
+            type="button"
+            variant={action.label === "Répondre aux avis" ? "default" : "outline"}
+            size="sm"
+            className="h-8 rounded-full text-xs"
+            onClick={() => action.path && onNavigate(action.path)}
+          >
+            {action.label}
+          </Button>
+        )
+      )}
+    </div>
+  );
+};
+
+const MultiLocationInsightCardView = ({
+  card
+}: {
+  card: MultiLocationInsightCard;
+}) => {
+  const Icon = card.Icon;
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600">
+          <Icon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-slate-950">{card.title}</p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">{card.detail}</p>
+        </div>
+      </div>
+      <div className="mt-4 flex min-h-[118px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 text-center">
+        <p className="text-sm font-semibold text-slate-800">Données insuffisantes</p>
+        <p className="mt-2 text-xs leading-5 text-slate-500">
+          Cette analyse sera activée automatiquement lorsque les métriques par établissement seront disponibles.
+        </p>
+      </div>
+    </div>
+  );
+};
+
 const Analytics = ({
   session,
   locations,
   locationsLoading,
   locationsError
 }: AnalyticsProps) => {
+  const navigate = useNavigate();
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
   const [preset, setPreset] = useState<
     | "this_week"
@@ -1013,6 +1362,7 @@ const Analytics = ({
     tag_ids?: string[];
   } | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<AnalyticsTopic | null>(null);
+  const [selectedKpi, setSelectedKpi] = useState<KpiPanelKey | null>(null);
   const [metric, setMetric] = useState<MetricKey>("reviews");
   const presetKey = useMemo(() => {
     const base = preset === "custom" ? `${from || "?"}_${to || "?"}` : preset;
@@ -1159,6 +1509,7 @@ const Analytics = ({
 
     return [
       {
+        id: "reviews" as KpiPanelKey,
         label: "Avis",
         value: formatCount(overview?.kpis.reviews_total),
         detail: "vs période précédente",
@@ -1168,6 +1519,7 @@ const Analytics = ({
         sparklineMetric: "reviews" as MetricKey
       },
       {
+        id: "avg_rating" as KpiPanelKey,
         label: "Note moyenne",
         value: formatRating(overview?.kpis.avg_rating ?? null),
         detail: "qualité perçue",
@@ -1177,6 +1529,7 @@ const Analytics = ({
         sparklineMetric: "avg_rating" as MetricKey
       },
       {
+        id: "reply_rate" as KpiPanelKey,
         label: "Taux réponse",
         value: formatPercent(overview?.kpis.response_rate_pct ?? null),
         detail: "avis avec texte",
@@ -1186,6 +1539,24 @@ const Analytics = ({
         sparklineMetric: "reply_rate" as MetricKey
       },
       {
+        id: "reply_delay" as KpiPanelKey,
+        label: "Délai moyen",
+        value: formatHours(quality?.avg_reply_delay_hours ?? null),
+        detail:
+          quality && quality.replied_with_time_count > 0
+            ? `${quality.replied_with_time_count} réponses`
+            : EMPTY_ANALYSIS,
+        trend: "none" as TrendState,
+        delta:
+          quality?.avg_reply_delay_hours === null ||
+          quality?.avg_reply_delay_hours === undefined
+            ? "—"
+            : "mesuré",
+        Icon: Clock3,
+        sparklineMetric: "reply_rate" as MetricKey
+      },
+      {
+        id: "neg_share" as KpiPanelKey,
         label: "Avis négatifs",
         value: formatPercent(overview?.kpis.negative_share_pct ?? null),
         detail: "part du volume",
@@ -1195,6 +1566,7 @@ const Analytics = ({
         sparklineMetric: "neg_share" as MetricKey
       },
       {
+        id: "sentiment" as KpiPanelKey,
         label: "Sentiment",
         value: overview?.sentiment
           ? `${formatPercent(overview.sentiment.positive_pct)} positif`
@@ -1206,7 +1578,7 @@ const Analytics = ({
         sparklineMetric: "neg_share" as MetricKey
       }
     ];
-  }, [compare, overview]);
+  }, [compare, overview, quality]);
 
   const chartInsights = useMemo(() => {
     const points = timeseries?.points ?? [];
@@ -1372,7 +1744,9 @@ const Analytics = ({
           level: "ok",
           title: "Volume en hausse",
           action: "Maintenir les demandes d'avis",
-          evidence: `${compare.metrics.review_count.a} vs ${compare.metrics.review_count.b} avis`
+          evidence: `${compare.metrics.review_count.a} vs ${compare.metrics.review_count.b} avis`,
+          reason: "Vous recevez plus d'avis que sur la période précédente.",
+          consequence: "Votre fiche paraît plus active et plus rassurante."
         });
       } else if (reviewDelta < 0) {
         summary.push(`Volume en baisse (${formatDeltaCount(reviewDelta)})`);
@@ -1381,7 +1755,9 @@ const Analytics = ({
           level: Math.abs(reviewDelta) >= 3 ? "high" : "watch",
           title: "Les avis diminuent",
           action: "Relancer les demandes d'avis",
-          evidence: `${compare.metrics.review_count.a} vs ${compare.metrics.review_count.b} avis`
+          evidence: `${compare.metrics.review_count.a} vs ${compare.metrics.review_count.b} avis`,
+          reason: "Vous recevez moins d'avis que sur la période précédente.",
+          consequence: "La fiche peut sembler moins active aux nouveaux clients."
         });
       } else {
         summary.push("Volume stable");
@@ -1398,7 +1774,9 @@ const Analytics = ({
             action: "Répondre aux avis récents",
             evidence: `${formatRatio(compare.metrics.reply_rate.a)} vs ${formatRatio(
               compare.metrics.reply_rate.b
-            )}`
+            )}`,
+            reason: "La part d'avis répondus recule.",
+            consequence: "Des clients peuvent penser que leurs retours sont moins suivis."
           });
         } else if (replyDelta < 0) {
           summary.push(`Réponse en léger recul (${formatDeltaPoints(replyDelta)})`);
@@ -1407,7 +1785,9 @@ const Analytics = ({
             level: "watch",
             title: "Réponse à surveiller",
             action: "Traiter les avis sans réponse",
-            evidence: `${formatRatio(compare.metrics.reply_rate.a)} actuellement`
+            evidence: `${formatRatio(compare.metrics.reply_rate.a)} actuellement`,
+            reason: "Le taux de réponse baisse légèrement.",
+            consequence: "Le retard peut s'accumuler si rien n'est traité cette semaine."
           });
         } else if (replyDelta > 0) {
           summary.push(`Réponse en hausse (${formatDeltaPoints(replyDelta)})`);
@@ -1416,7 +1796,9 @@ const Analytics = ({
             level: "ok",
             title: "Réactivité en hausse",
             action: "Conserver le rythme de réponse",
-            evidence: `${formatRatio(compare.metrics.reply_rate.a)} actuellement`
+            evidence: `${formatRatio(compare.metrics.reply_rate.a)} actuellement`,
+            reason: "Vous répondez à une plus grande part des avis.",
+            consequence: "Les clients voient une entreprise attentive."
           });
         }
       }
@@ -1430,7 +1812,9 @@ const Analytics = ({
             level: "high",
             title: "Note moyenne en baisse",
             action: "Analyser les avis négatifs",
-            evidence: `${formatRating(compare.metrics.avg_rating.a)} actuellement`
+            evidence: `${formatRating(compare.metrics.avg_rating.a)} actuellement`,
+            reason: "La note moyenne recule sur la période.",
+            consequence: "La confiance peut baisser si la tendance continue."
           });
         } else if (ratingDelta < 0) {
           summary.push(`Note en léger recul (${formatDelta(ratingDelta)})`);
@@ -1439,7 +1823,9 @@ const Analytics = ({
             level: "watch",
             title: "Note à surveiller",
             action: "Identifier les irritants récurrents",
-            evidence: `${formatRating(compare.metrics.avg_rating.a)} actuellement`
+            evidence: `${formatRating(compare.metrics.avg_rating.a)} actuellement`,
+            reason: "La note baisse légèrement.",
+            consequence: "Un petit recul peut devenir visible si les irritants reviennent."
           });
         } else if (Math.abs(ratingDelta) <= 0.05) {
           summary.push("Note stable");
@@ -1448,7 +1834,9 @@ const Analytics = ({
             level: "ok",
             title: "Note stable",
             action: "Maintenir le niveau de service",
-            evidence: `${formatRating(compare.metrics.avg_rating.a)} actuellement`
+            evidence: `${formatRating(compare.metrics.avg_rating.a)} actuellement`,
+            reason: "La note moyenne reste quasiment inchangée.",
+            consequence: "Votre niveau de satisfaction reste lisible et constant."
           });
         } else {
           summary.push(`Note en hausse (${formatDelta(ratingDelta)})`);
@@ -1457,7 +1845,9 @@ const Analytics = ({
             level: "ok",
             title: "Note en progression",
             action: "Capitaliser sur les points forts",
-            evidence: `${formatRating(compare.metrics.avg_rating.a)} actuellement`
+            evidence: `${formatRating(compare.metrics.avg_rating.a)} actuellement`,
+            reason: "La note moyenne progresse.",
+            consequence: "Vos points forts peuvent être davantage mis en avant."
           });
         }
       }
@@ -1470,7 +1860,9 @@ const Analytics = ({
           level: "high",
           title: "Irritants en hausse",
           action: "Analyser les avis négatifs",
-          evidence: `${formatRatio(compare.metrics.neg_share.a)} actuellement`
+          evidence: `${formatRatio(compare.metrics.neg_share.a)} actuellement`,
+          reason: "La part d'avis négatifs augmente.",
+          consequence: "Un problème récurrent peut commencer à peser sur l'image."
         });
       }
     }
@@ -1483,7 +1875,9 @@ const Analytics = ({
           level: "high",
           title: "Réponses insuffisantes",
           action: "Répondre aux avis récents",
-          evidence: `${formatRatio(responseRate)} de taux de réponse`
+          evidence: `${formatRatio(responseRate)} de taux de réponse`,
+          reason: "Trop d'avis avec texte restent sans réponse.",
+          consequence: "Les clients peuvent avoir l'impression de ne pas être écoutés."
         });
       } else if (responseRate < 0.8) {
         addItem({
@@ -1491,7 +1885,9 @@ const Analytics = ({
           level: "watch",
           title: "Réponses à compléter",
           action: "Traiter les avis sans réponse",
-          evidence: `${formatRatio(responseRate)} de taux de réponse`
+          evidence: `${formatRatio(responseRate)} de taux de réponse`,
+          reason: "Le taux de réponse est correct mais peut progresser.",
+          consequence: "Quelques avis non traités peuvent réduire l'effet premium."
         });
       }
     }
@@ -1504,7 +1900,9 @@ const Analytics = ({
           level: "high",
           title: "Délai de réponse élevé",
           action: "Prioriser les réponses en attente",
-          evidence: formatHours(replyDelay)
+          evidence: formatHours(replyDelay),
+          reason: "Le délai moyen de réponse est long.",
+          consequence: "Les clients peuvent sentir un manque de réactivité."
         });
       } else if (replyDelay > 24) {
         addItem({
@@ -1512,7 +1910,9 @@ const Analytics = ({
           level: "watch",
           title: "Délai à réduire",
           action: "Répondre sous 24h",
-          evidence: formatHours(replyDelay)
+          evidence: formatHours(replyDelay),
+          reason: "Le délai dépasse une journée.",
+          consequence: "Une réponse plus rapide renforcerait la confiance."
         });
       } else {
         addItem({
@@ -1520,7 +1920,9 @@ const Analytics = ({
           level: "ok",
           title: "Délai maîtrisé",
           action: "Maintenir la cadence",
-          evidence: formatHours(replyDelay)
+          evidence: formatHours(replyDelay),
+          reason: "Les réponses arrivent rapidement.",
+          consequence: "La relation client reste suivie et professionnelle."
         });
       }
     }
@@ -1534,7 +1936,9 @@ const Analytics = ({
           level: "ok",
           title: "Sentiment positif",
           action: "Mettre en avant les points forts",
-          evidence: `${formatPercent(positivePct)} positif`
+          evidence: `${formatPercent(positivePct)} positif`,
+          reason: "La majorité des avis exprime une expérience positive.",
+          consequence: "Vous pouvez utiliser ces signaux dans votre communication."
         });
       } else if (positivePct < 50) {
         summary.push(`Sentiment fragile (${formatPercent(positivePct)} positif)`);
@@ -1543,7 +1947,9 @@ const Analytics = ({
           level: "high",
           title: "Sentiment fragile",
           action: "Analyser les avis négatifs",
-          evidence: `${formatPercent(positivePct)} positif`
+          evidence: `${formatPercent(positivePct)} positif`,
+          reason: "Moins de la moitié du sentiment détecté est positif.",
+          consequence: "La perception client peut se dégrader rapidement."
         });
       } else {
         summary.push(`Sentiment à consolider (${formatPercent(positivePct)} positif)`);
@@ -1552,7 +1958,9 @@ const Analytics = ({
           level: "watch",
           title: "Sentiment à consolider",
           action: "Renforcer les points forts",
-          evidence: `${formatPercent(positivePct)} positif`
+          evidence: `${formatPercent(positivePct)} positif`,
+          reason: "Le sentiment positif existe mais n'est pas dominant.",
+          consequence: "Une expérience plus régulière peut améliorer la perception."
         });
       }
     }
@@ -1565,7 +1973,9 @@ const Analytics = ({
         level: "ok",
         title: `${topPositive.label} ressort`,
         action: "Capitaliser sur ce thème",
-        evidence: `${topPositive.count} mentions`
+        evidence: `${topPositive.count} mentions`,
+        reason: "Ce point fort revient dans les avis clients.",
+        consequence: "Il peut devenir un argument commercial simple et crédible."
       });
     }
 
@@ -1576,7 +1986,9 @@ const Analytics = ({
         level: topIrritant.count >= 3 ? "high" : "watch",
         title: `${topIrritant.label} revient`,
         action: "Analyser les avis concernés",
-        evidence: `${topIrritant.count} mentions`
+        evidence: `${topIrritant.count} mentions`,
+        reason: "Ce sujet apparaît dans les irritants clients.",
+        consequence: "Il peut freiner la satisfaction s'il revient régulièrement."
       });
     }
 
@@ -1596,7 +2008,14 @@ const Analytics = ({
             : insight.severity === "warn"
               ? "Suivre cette semaine"
               : "Maintenir l'effort",
-        evidence: insight.detail
+        evidence: insight.detail,
+        reason: insight.detail,
+        consequence:
+          insight.severity === "bad"
+            ? "Ce signal peut avoir un impact direct sur la réputation."
+            : insight.severity === "warn"
+              ? "Ce signal peut devenir prioritaire s'il progresse."
+              : "Ce point contribue à maintenir une bonne image."
       });
     });
 
@@ -1694,6 +2113,19 @@ const Analytics = ({
         .filter((topic) => topic.delta !== null && topic.delta < 0)
         .sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0))
         .slice(0, 4),
+      newTopics: all
+        .filter(
+          (topic) =>
+            topic.delta !== null &&
+            topic.delta > 0 &&
+            Math.round(topic.delta) >= topic.count
+        )
+        .sort((a, b) => (b.delta ?? 0) - (a.delta ?? 0))
+        .slice(0, 4),
+      disappeared: all
+        .filter((topic) => topic.delta !== null && topic.delta < 0 && topic.count === 0)
+        .sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0))
+        .slice(0, 4),
       positiveCount: all
         .filter((topic) => topic.tone === "positive")
         .reduce((sum, topic) => sum + topic.count, 0),
@@ -1703,128 +2135,432 @@ const Analytics = ({
     };
   }, [drivers, overview]);
 
-  const timelineEvents = useMemo<TimelineEvent[]>(() => {
-    const events: TimelineEvent[] = [];
+  const automaticSummary = useMemo(() => {
+    const sentences: string[] = [];
+    const addSentence = (sentence: string) => {
+      if (!sentences.includes(sentence)) {
+        sentences.push(sentence);
+      }
+    };
+
+    const rating = overview?.kpis.avg_rating ?? null;
+    if (rating !== null) {
+      if (rating >= 4.5) {
+        addSentence("La réputation reste excellente.");
+      } else if (rating >= 4) {
+        addSentence("La réputation est solide.");
+      } else if ((overview?.kpis.reviews_total ?? 0) > 0) {
+        addSentence("La réputation demande de l'attention.");
+      }
+    }
 
     if (compare) {
       const reviewDelta = compare.metrics.review_count.delta;
-      if (reviewDelta !== 0) {
-        events.push({
-          id: "volume",
-          label: reviewDelta > 0 ? "Volume en hausse" : "Volume en baisse",
-          detail: `${formatDeltaCount(reviewDelta)} avis vs période précédente`,
-          level: reviewDelta > 0 ? "ok" : "watch"
-        });
+      if (reviewDelta > 0) {
+        addSentence("Le volume d'avis progresse.");
+      } else if (reviewDelta < 0) {
+        addSentence("Le volume d'avis recule.");
       }
 
       const replyDelta = compare.metrics.reply_rate.delta;
-      if (replyDelta !== null && Math.abs(replyDelta) > 0.001) {
-        events.push({
-          id: "reply",
-          label: replyDelta > 0 ? "Réponse en hausse" : "Réponse en baisse",
-          detail: formatDeltaPoints(replyDelta),
-          level: replyDelta > 0 ? "ok" : replyDelta <= -0.1 ? "high" : "watch"
-        });
+      if (replyDelta !== null) {
+        if (replyDelta < 0) {
+          addSentence("Le taux de réponse baisse.");
+        } else if (replyDelta > 0) {
+          addSentence("Le taux de réponse progresse.");
+        }
       }
 
       const ratingDelta = compare.metrics.avg_rating.delta;
-      if (ratingDelta !== null && Math.abs(ratingDelta) > 0.05) {
-        events.push({
-          id: "rating",
-          label: ratingDelta > 0 ? "Note en hausse" : "Note en baisse",
-          detail: formatDelta(ratingDelta),
-          level: ratingDelta > 0 ? "ok" : "watch"
-        });
+      if (ratingDelta !== null && Math.abs(ratingDelta) <= 0.05) {
+        addSentence("La note reste stable.");
+      } else if (ratingDelta !== null && ratingDelta < 0) {
+        addSentence("La note baisse légèrement.");
+      } else if (ratingDelta !== null && ratingDelta > 0) {
+        addSentence("La note progresse.");
       }
     }
 
-    const topDay = chartInsights.find((item) => item.label === "Meilleur jour");
-    if (topDay && topDay.value !== "—") {
-      events.push({
-        id: "top-day",
-        label: "Top journée",
-        detail: `${topDay.value} · ${topDay.detail}`,
-        level: "ok"
+    const replyDelay = quality?.avg_reply_delay_hours ?? null;
+    if (replyDelay !== null) {
+      if (replyDelay > 24) {
+        addSentence("Le délai de réponse augmente le risque d'attente client.");
+      } else {
+        addSentence("Le délai de réponse reste maîtrisé.");
+      }
+    }
+
+    const positivePct = overview?.sentiment?.positive_pct ?? null;
+    if (positivePct !== null) {
+      if (positivePct >= 70) {
+        addSentence("Le sentiment client est majoritairement positif.");
+      } else if (positivePct < 50) {
+        addSentence("Le sentiment client est fragile.");
+      }
+    }
+
+    const mainWatch =
+      decisionEngine.groups.high[0] ?? decisionEngine.groups.watch[0] ?? null;
+    if (mainWatch) {
+      addSentence(`Le principal point de vigilance reste : ${mainWatch.title.toLowerCase()}.`);
+    }
+
+    const insight = insights?.insights[0] ?? null;
+    if (sentences.length === 0 && insight) {
+      addSentence(insight.detail);
+    }
+
+    return sentences.slice(0, 5);
+  }, [compare, decisionEngine, insights, overview, quality]);
+
+  const opportunitiesDetected = useMemo<AssistantListItem[]>(() => {
+    const items: AssistantListItem[] = [];
+    const addItem = (item: AssistantListItem) => {
+      if (!items.some((existing) => existing.id === item.id)) {
+        items.push(item);
+      }
+    };
+
+    drivers?.positives.slice(0, 3).forEach((driver) => {
+      addItem({
+        id: `positive-${driver.label}`,
+        title: `${driver.label} est cité ${driver.count} fois.`,
+        detail: "Ce point fort peut être mis en avant auprès des clients.",
+        action: "L'utiliser dans vos messages et réponses"
+      });
+    });
+
+    topicExplorer.rising
+      .filter((topic) => topic.tone === "positive")
+      .slice(0, 2)
+      .forEach((topic) => {
+        addItem({
+          id: `rising-${topic.label}`,
+          title: `${topic.label} progresse.`,
+          detail: `${formatDeltaCount(topic.delta)} mentions sur la période.`,
+          action: "Renforcer ce point fort"
+        });
+      });
+
+    if (compare && compare.metrics.review_count.delta > 0) {
+      addItem({
+        id: "reviews-growth",
+        title: "Le volume d'avis augmente.",
+        detail: `${formatDeltaCount(compare.metrics.review_count.delta)} avis par rapport à la période précédente.`,
+        action: "Continuer à demander des avis"
       });
     }
 
-    const risingTopic = topicExplorer.rising[0];
-    if (risingTopic) {
-      events.push({
-        id: "rising-topic",
-        label: "Thème en progression",
-        detail: `${risingTopic.label} · ${formatDeltaCount(risingTopic.delta)}`,
-        level: risingTopic.tone === "negative" ? "watch" : "ok"
+    const rating = overview?.kpis.avg_rating ?? null;
+    if (rating !== null && rating >= 4.5) {
+      addItem({
+        id: "rating-strong",
+        title: "La note moyenne est très forte.",
+        detail: `${formatRating(rating)} sur la période.`,
+        action: "Mettre cette preuve en avant"
       });
     }
 
-    const fallingTopic = topicExplorer.falling[0];
-    if (fallingTopic) {
-      events.push({
-        id: "falling-topic",
-        label: "Thème en baisse",
-        detail: `${fallingTopic.label} · ${formatDeltaCount(fallingTopic.delta)}`,
-        level: fallingTopic.tone === "positive" ? "watch" : "ok"
-      });
-    }
+    return items.slice(0, 5);
+  }, [compare, drivers, overview, topicExplorer]);
 
-    if (quality?.avg_reply_delay_hours !== null && quality?.avg_reply_delay_hours !== undefined) {
-      events.push({
+  const risksDetected = useMemo<AssistantListItem[]>(() => {
+    const items: AssistantListItem[] = [];
+    const addItem = (item: AssistantListItem) => {
+      if (!items.some((existing) => existing.id === item.id)) {
+        items.push(item);
+      }
+    };
+
+    const replyDelay = quality?.avg_reply_delay_hours ?? null;
+    if (replyDelay !== null && replyDelay > 24) {
+      addItem({
         id: "reply-delay",
-        label: "Temps moyen avant réponse",
-        detail: formatHours(quality.avg_reply_delay_hours),
-        level:
-          quality.avg_reply_delay_hours > 72
-            ? "high"
-            : quality.avg_reply_delay_hours > 24
-              ? "watch"
-              : "ok"
+        title: "Délai moyen élevé.",
+        detail: `${formatHours(replyDelay)} avant réponse en moyenne.`,
+        action: "Réduire le temps de réponse"
       });
     }
 
-    const levelOrder: Record<DecisionLevel, number> = { high: 0, watch: 1, ok: 2 };
-    return events.sort((a, b) => levelOrder[a.level] - levelOrder[b.level]).slice(0, 6);
-  }, [chartInsights, compare, quality, topicExplorer]);
+    const replyRateDelta = compare?.metrics.reply_rate.delta ?? null;
+    if (replyRateDelta !== null && replyRateDelta < 0) {
+      addItem({
+        id: "reply-rate-down",
+        title: "Taux de réponse en baisse.",
+        detail: formatDeltaPoints(replyRateDelta),
+        action: "Répondre aux avis en attente"
+      });
+    }
+
+    if (compare && compare.metrics.review_count.delta < 0) {
+      addItem({
+        id: "reviews-down",
+        title: "Volume d'avis en baisse.",
+        detail: `${formatDeltaCount(compare.metrics.review_count.delta)} avis par rapport à la période précédente.`,
+        action: "Relancer les demandes d'avis"
+      });
+    }
+
+    const totalReviews = overview?.kpis.reviews_total ?? null;
+    if (totalReviews !== null && totalReviews > 0 && totalReviews <= 3) {
+      addItem({
+        id: "low-volume",
+        title: "Volume faible.",
+        detail: `${totalReviews} avis sur la période.`,
+        action: "Demander plus d'avis clients"
+      });
+    }
+
+    drivers?.irritants.slice(0, 3).forEach((driver) => {
+      addItem({
+        id: `irritant-${driver.label}`,
+        title: `${driver.label} revient dans les irritants.`,
+        detail: `${driver.count} mentions détectées.`,
+        action: "Lire les avis concernés"
+      });
+    });
+
+    insights?.insights
+      .filter((insight) => insight.severity !== "good")
+      .slice(0, 2)
+      .forEach((insight, index) => {
+        addItem({
+          id: `insight-risk-${index}-${insight.title}`,
+          title: insight.title,
+          detail: insight.detail,
+          action: insight.severity === "bad" ? "Traiter rapidement" : "Suivre cette semaine"
+        });
+      });
+
+    return items.slice(0, 5);
+  }, [compare, drivers, insights, overview, quality]);
+
+  const monthlyActions = useMemo(() => {
+    const toItems = (items: DecisionItem[]): AssistantListItem[] =>
+      items
+        .map((item) => ({
+          id: item.id,
+          title: item.action,
+          detail: item.title
+        }))
+        .filter(
+          (item, index, list) =>
+            list.findIndex((candidate) => candidate.title === item.title) === index
+        )
+        .slice(0, 3);
+
+    return {
+      high: toItems(decisionEngine.groups.high),
+      medium: toItems(decisionEngine.groups.watch),
+      low: toItems(decisionEngine.groups.ok)
+    };
+  }, [decisionEngine]);
+
+  const todayBrief = useMemo(() => {
+    const todayKey = formatDateKey(new Date(), timeZone);
+    const yesterdayKey = shiftDateKey(todayKey, -1);
+    const points = timeseries?.points ?? [];
+    const todayPoint =
+      points.find((point) => point.date.slice(0, 10) === todayKey) ?? null;
+    const yesterdayPoint =
+      points.find((point) => point.date.slice(0, 10) === yesterdayKey) ?? null;
+    const metrics: TodayBriefMetric[] = [];
+
+    if (todayPoint) {
+      metrics.push({
+        id: "today-reviews",
+        label: "Nouveaux avis",
+        value: String(todayPoint.review_count),
+        detail: "Avis reçus aujourd'hui dans les données chargées.",
+        Icon: MessageSquareReply,
+        tone: todayPoint.review_count > 0 ? "good" : "neutral"
+      });
+    }
+
+    if (responseBreakdown) {
+      metrics.push({
+        id: "pending-replies",
+        label: "Avis sans réponse",
+        value: String(responseBreakdown.pending),
+        detail:
+          responseBreakdown.pending > 0
+            ? "Backlog de réponses à traiter."
+            : "Aucun avis mesuré en attente.",
+        Icon: ListChecks,
+        tone: responseBreakdown.pending > 0 ? "warn" : "good"
+      });
+    }
+
+    if (todayPoint && yesterdayPoint) {
+      const delta = todayPoint.review_count - yesterdayPoint.review_count;
+      metrics.push({
+        id: "yesterday-evolution",
+        label: "Depuis hier",
+        value: formatDeltaCount(delta),
+        detail: `${todayPoint.review_count} avis aujourd'hui vs ${yesterdayPoint.review_count} hier.`,
+        Icon: TrendingUp,
+        tone: delta > 0 ? "good" : delta < 0 ? "warn" : "neutral"
+      });
+    }
+
+    const positivePoint =
+      opportunitiesDetected[0]?.title ?? drivers?.positives[0]?.label ?? null;
+    if (positivePoint) {
+      metrics.push({
+        id: "positive-focus",
+        label: "Point positif",
+        value: "Signal fort",
+        detail: positivePoint,
+        Icon: CheckCircle2,
+        tone: "good"
+      });
+    }
+
+    const vigilancePoint =
+      decisionEngine.groups.high[0]?.title ??
+      decisionEngine.groups.watch[0]?.title ??
+      risksDetected[0]?.title ??
+      null;
+    if (vigilancePoint) {
+      metrics.push({
+        id: "watch-focus",
+        label: "Vigilance",
+        value: "À traiter",
+        detail: vigilancePoint,
+        Icon: AlertTriangle,
+        tone: "warn"
+      });
+    }
+
+    return {
+      dateLabel: todayKey,
+      metrics
+    };
+  }, [
+    decisionEngine,
+    drivers,
+    opportunitiesDetected,
+    responseBreakdown,
+    risksDetected,
+    timeZone,
+    timeseries
+  ]);
+
+  const todayTasks = useMemo<TodayTask[]>(() => {
+    const tasks: TodayTask[] = [];
+    const addTask = (task: TodayTask) => {
+      if (!tasks.some((existing) => existing.id === task.id)) {
+        tasks.push(task);
+      }
+    };
+
+    if (responseBreakdown && responseBreakdown.pending > 0) {
+      addTask({
+        id: "reply-pending",
+        title:
+          responseBreakdown.pending === 1
+            ? "Répondre à 1 avis restant."
+            : `Répondre aux ${responseBreakdown.pending} avis restants.`,
+        detail: "Traiter les avis sans réponse visibles dans la période sélectionnée.",
+        action: "Ouvrir la boîte",
+        path: "/inbox",
+        tone: "warn"
+      });
+    }
+
+    const replyDelay = quality?.avg_reply_delay_hours ?? null;
+    if (replyDelay !== null && replyDelay > 24) {
+      addTask({
+        id: "reduce-reply-delay",
+        title: "Réduire le délai de réponse.",
+        detail: `Le délai moyen est de ${formatHours(replyDelay)}.`,
+        action: "Voir les avis",
+        path: "/inbox",
+        tone: "warn"
+      });
+    }
+
+    if (compare && compare.metrics.review_count.delta < 0) {
+      addTask({
+        id: "collect-reviews-down",
+        title: "Continuer la collecte d'avis.",
+        detail: `${formatDeltaCount(compare.metrics.review_count.delta)} avis vs période précédente.`,
+        action: "Voir Fidélité",
+        path: "/loyalty",
+        tone: "warn"
+      });
+    } else if (
+      overview &&
+      overview.kpis.reviews_total > 0 &&
+      overview.kpis.reviews_total <= 3
+    ) {
+      addTask({
+        id: "collect-reviews-low",
+        title: "Continuer la collecte d'avis.",
+        detail: `${overview.kpis.reviews_total} avis sur la période sélectionnée.`,
+        action: "Voir Fidélité",
+        path: "/loyalty",
+        tone: "neutral"
+      });
+    }
+
+    const topPositive = drivers?.positives[0] ?? null;
+    if (topPositive) {
+      addTask({
+        id: `capitalize-${topPositive.label}`,
+        title: "Capitaliser sur la satisfaction client.",
+        detail: `${topPositive.label} revient dans ${topPositive.count} avis.`,
+        action: "Analyser",
+        path: "/coach",
+        tone: "good"
+      });
+    }
+
+    const topIrritant = drivers?.irritants[0] ?? null;
+    if (topIrritant) {
+      addTask({
+        id: `review-irritant-${topIrritant.label}`,
+        title: "Lire les avis liés au point de vigilance.",
+        detail: `${topIrritant.label} revient dans ${topIrritant.count} avis.`,
+        action: "Voir les avis",
+        path: "/inbox",
+        tone: "warn"
+      });
+    }
+
+    return tasks.slice(0, 5);
+  }, [compare, drivers, overview, quality, responseBreakdown]);
 
   const aiSkillCards = useMemo<AiSkillCard[]>(() => {
-    const highItems = decisionEngine.groups.high;
-    const watchItems = decisionEngine.groups.watch;
-    const okItems = decisionEngine.groups.ok;
-    const recommendedActions = [...highItems, ...watchItems, ...okItems]
-      .map((item) => ({ label: item.action, detail: item.title }))
+    const recommendedActions = [
+      ...monthlyActions.high,
+      ...monthlyActions.medium,
+      ...monthlyActions.low
+    ]
+      .map((item) => ({ label: item.title, detail: item.detail }))
       .filter(
         (item, index, items) =>
           items.findIndex((candidate) => candidate.label === item.label) === index
       );
 
-    const opportunities = [
-      ...okItems.map((item) => ({ label: item.title, detail: item.evidence })),
-      ...topicExplorer.rising
-        .filter((topic) => topic.tone === "positive")
-        .map((topic) => ({
-          label: topic.label,
-          detail: `${topic.count} mentions · ${formatDeltaCount(topic.delta)}`
-        }))
-    ];
+    const opportunities = opportunitiesDetected.map((item) => ({
+      label: item.title,
+      detail: item.action ?? item.detail
+    }));
 
-    const risks = [
-      ...highItems.map((item) => ({ label: item.title, detail: item.evidence })),
-      ...watchItems.map((item) => ({ label: item.title, detail: item.evidence })),
-      ...topicExplorer.rising
-        .filter((topic) => topic.tone === "negative")
-        .map((topic) => ({
-          label: topic.label,
-          detail: `${topic.count} mentions · ${formatDeltaCount(topic.delta)}`
-        }))
-    ];
+    const risks = risksDetected.map((item) => ({
+      label: item.title,
+      detail: item.action ?? item.detail
+    }));
 
     return [
-      {
+      defineAiSkill({
         id: "ai-health-score",
         title: "Score Santé IA",
         badge: healthScore ? `${healthScore.value}/100` : "en attente",
         Icon: Sparkles,
         tone: "dark",
+        status: healthScore ? "active" : "empty",
         items: healthScore
           ? [
               {
@@ -1833,50 +2569,60 @@ const Analytics = ({
               }
             ]
           : [],
-        emptyLabel: "Le score s'affichera dès que les KPI nécessaires seront disponibles."
-      },
-      {
+        emptyLabel:
+          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+      }),
+      defineAiSkill({
         id: "ai-summary",
         title: "Résumé IA",
-        badge: decisionEngine.summary.length > 0 ? "actif" : "vide",
+        badge: automaticSummary.length > 0 ? "actif" : "vide",
         Icon: LineChart,
         tone: "neutral",
-        items: decisionEngine.summary.map((line) => ({ label: line })),
-        emptyLabel: "Pas encore assez de données pour générer un résumé."
-      },
-      {
+        status: automaticSummary.length > 0 ? "active" : "empty",
+        items: automaticSummary.map((line) => ({ label: line })),
+        emptyLabel:
+          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+      }),
+      defineAiSkill({
         id: "ai-opportunities",
         title: "Opportunités",
-        badge: String(opportunities.length),
+        badge: opportunities.length > 0 ? String(opportunities.length) : "vide",
         Icon: Lightbulb,
         tone: "good",
+        status: opportunities.length > 0 ? "active" : "empty",
         items: opportunities,
-        emptyLabel: "Aucune opportunité exploitable détectée sur la période."
-      },
-      {
+        emptyLabel:
+          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+      }),
+      defineAiSkill({
         id: "ai-risks",
         title: "Risques",
-        badge: String(risks.length),
+        badge: risks.length > 0 ? String(risks.length) : "vide",
         Icon: AlertTriangle,
         tone: risks.length > 0 ? "warn" : "neutral",
+        status: risks.length > 0 ? "active" : "empty",
         items: risks,
-        emptyLabel: "Aucun risque prioritaire détecté avec les données actuelles."
-      },
-      {
+        emptyLabel:
+          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+      }),
+      defineAiSkill({
         id: "ai-winback",
         title: "Clients à reconquérir",
         badge: "prévu",
         Icon: UsersRound,
         tone: "neutral",
+        status: "soon",
         items: [],
-        emptyLabel: "Aucune donnée client exploitable n'est encore disponible pour cette Skill."
-      },
-      {
+        emptyLabel:
+          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+      }),
+      defineAiSkill({
         id: "ai-reply-needed",
-        title: "Avis nécessitant une réponse",
+        title: "Avis sans réponse",
         badge: responseBreakdown ? String(responseBreakdown.pending) : "—",
         Icon: MessageSquareReply,
         tone: responseBreakdown && responseBreakdown.pending > 0 ? "warn" : "good",
+        status: responseBreakdown ? "active" : "empty",
         items:
           responseBreakdown && responseBreakdown.pending > 0
             ? [
@@ -1888,28 +2634,46 @@ const Analytics = ({
             : responseBreakdown
               ? [{ label: "Aucun avis en attente", detail: "Tous les avis mesurés sont traités" }]
               : [],
-        emptyLabel: "Aucun avis avec texte n'est disponible pour cette analyse."
-      },
-      {
+        emptyLabel:
+          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+      }),
+      defineAiSkill({
         id: "ai-forecast",
-        title: "Évolution prévisible",
+        title: "Prévision",
         badge: "prévu",
         Icon: TrendingUp,
         tone: "neutral",
+        status: "soon",
         items: [],
-        emptyLabel: "Les prévisions seront disponibles quand la Skill dédiée sera connectée."
-      },
-      {
+        emptyLabel:
+          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+      }),
+      defineAiSkill({
         id: "ai-actions",
         title: "Actions recommandées",
-        badge: String(recommendedActions.length),
+        badge: recommendedActions.length > 0 ? String(recommendedActions.length) : "vide",
         Icon: ListChecks,
         tone: "neutral",
+        status: recommendedActions.length > 0 ? "active" : "empty",
         items: recommendedActions,
-        emptyLabel: "Aucune action recommandée avec les données actuelles."
-      }
+        emptyLabel:
+          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+      })
     ];
-  }, [decisionEngine, healthScore, responseBreakdown, topicExplorer]);
+  }, [
+    automaticSummary,
+    healthScore,
+    monthlyActions,
+    opportunitiesDetected,
+    responseBreakdown,
+    risksDetected
+  ]);
+
+  const priorityActions = [
+    ...decisionEngine.groups.high,
+    ...decisionEngine.groups.watch,
+    ...decisionEngine.groups.ok
+  ].slice(0, 4);
 
   const locationLabelById = useMemo(() => {
     return new Map(
@@ -2004,6 +2768,55 @@ const Analytics = ({
 
   const reasonLabel = overview ? getReasonLabel(overview.reasons) : "";
   const showGranularityToggle = rangeDays > 30 || preset === "all_time";
+  const selectedKpiDefinition = selectedKpi
+    ? kpis.find((kpi) => kpi.id === selectedKpi) ?? null
+    : null;
+  const selectedLocations =
+    locationId === "all"
+      ? locations
+      : locations.filter((location) => location.location_resource_name === locationId);
+  const hasMultipleLocations = locations.length > 1;
+  const multiLocationCards = useMemo<MultiLocationInsightCard[]>(
+    () => [
+      {
+        id: "location-ranking",
+        title: "Classement des établissements",
+        detail: "Classement disponible dès que les métriques par établissement seront chargées.",
+        Icon: BarChart3
+      },
+      {
+        id: "location-best-progress",
+        title: "Meilleure progression",
+        detail: "Progression comparée entre établissements, sans classement tant que les données locales manquent.",
+        Icon: TrendingUp
+      },
+      {
+        id: "location-watch",
+        title: "Établissement à surveiller",
+        detail: "Signal d'attention basé sur les avis, la note, les réponses et les irritants par établissement.",
+        Icon: AlertTriangle
+      },
+      {
+        id: "location-review-volume",
+        title: "Contribution au volume d'avis",
+        detail: "Part de chaque établissement dans le volume total d'avis.",
+        Icon: MessageSquareReply
+      },
+      {
+        id: "location-rating-contribution",
+        title: "Contribution à la note globale",
+        detail: "Impact de chaque établissement sur la note moyenne globale.",
+        Icon: Star
+      }
+    ],
+    []
+  );
+  const replyableCount = overview?.kpis.replyable_count ?? quality?.replyable_count ?? null;
+  const repliedCount = overview?.kpis.replied_count ?? quality?.replied_count ?? null;
+  const unrepliedCount =
+    replyableCount !== null && repliedCount !== null
+      ? Math.max(0, replyableCount - repliedCount)
+      : null;
 
   return (
     <div className="space-y-6 pb-8">
@@ -2136,14 +2949,15 @@ const Analytics = ({
           </div>
         </div>
 
-        <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           {showSkeleton
-            ? Array.from({ length: 5 }).map((_, index) => (
+            ? Array.from({ length: 6 }).map((_, index) => (
                 <Skeleton key={index} className="h-36 rounded-2xl" />
               ))
             : kpis.map((kpi) => (
                 <KpiCard
                   key={kpi.label}
+                  id={kpi.id}
                   label={kpi.label}
                   value={kpi.value}
                   detail={kpi.detail}
@@ -2152,10 +2966,70 @@ const Analytics = ({
                   Icon={kpi.Icon}
                   sparklineMetric={kpi.sparklineMetric}
                   points={compactPoints}
+                  onOpen={setSelectedKpi}
                 />
               ))}
         </div>
       </section>
+
+      <DashboardCard>
+        <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <CardTitle>Aujourd'hui</CardTitle>
+                <Badge variant="neutral">{todayBrief.dateLabel}</Badge>
+              </div>
+              <p className="mt-2 text-sm text-slate-500">
+                Les signaux utiles pour piloter la journée.
+              </p>
+            </div>
+            {todayBrief.metrics.length > 0 && (
+              <Badge variant="neutral">{todayBrief.metrics.length} signal(s)</Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-5 px-5 pt-5 sm:px-6 xl:grid-cols-[1.25fr_0.75fr]">
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {showSkeleton ? (
+              Array.from({ length: 5 }).map((_, index) => (
+                <Skeleton key={index} className="h-36 rounded-2xl" />
+              ))
+            ) : todayBrief.metrics.length > 0 ? (
+              todayBrief.metrics.map((metric) => (
+                <TodayMetricTile key={metric.id} metric={metric} />
+              ))
+            ) : (
+              <div className="sm:col-span-2 xl:col-span-3">
+                <EmptyState label={EMPTY_ANALYSIS} />
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <ListChecks className="h-4 w-4 text-slate-500" />
+                <p className="text-sm font-semibold text-slate-950">
+                  À faire aujourd'hui
+                </p>
+              </div>
+              <Badge variant="neutral">{todayTasks.length}</Badge>
+            </div>
+            {showSkeleton ? (
+              <Skeleton className="h-56 rounded-2xl" />
+            ) : todayTasks.length > 0 ? (
+              <div className="space-y-3">
+                {todayTasks.map((task) => (
+                  <TodayTaskCard key={task.id} task={task} onNavigate={navigate} />
+                ))}
+              </div>
+            ) : (
+              <EmptyState label="Aucune tâche prioritaire avec les données actuelles." />
+            )}
+          </section>
+        </CardContent>
+      </DashboardCard>
 
       {error && (
         <DashboardCard>
@@ -2166,219 +3040,260 @@ const Analytics = ({
         </DashboardCard>
       )}
 
-      <section className="grid gap-6 xl:grid-cols-[0.8fr_1.1fr_0.9fr]">
-        {showSkeleton ? (
-          <>
-            <Skeleton className="h-64 rounded-2xl" />
-            <Skeleton className="h-64 rounded-2xl" />
-            <Skeleton className="h-64 rounded-2xl" />
-          </>
-        ) : (
-          <>
-            {healthScore && (
-              <DashboardCard>
-                <CardHeader className="px-5 py-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <CardTitle>Santé globale</CardTitle>
-                    <Badge
-                      variant={
-                        healthScore.value >= 80
-                          ? "success"
-                          : healthScore.value >= 60
-                            ? "neutral"
-                            : "warning"
-                      }
-                    >
-                      {healthScore.status}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="px-5">
-                  <div className="flex items-end justify-between gap-4">
-                    <div>
-                      <p className="text-5xl font-semibold tracking-tight text-slate-950">
-                        {healthScore.value}
-                      </p>
-                      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-                        / 100
-                      </p>
-                    </div>
-                    <div className="mb-2 h-24 w-24 rounded-full border border-slate-100 p-2">
-                      <div
-                        className="grid h-full w-full place-items-center rounded-full"
-                        style={{
-                          background: `conic-gradient(#0f172a 0 ${healthScore.value}%, #e2e8f0 ${healthScore.value}% 100%)`
-                        }}
-                      >
-                        <div className="h-14 w-14 rounded-full bg-white" />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-5 grid gap-2 text-xs text-slate-500">
-                    <div className="flex justify-between">
-                      <span>Signaux utilisés</span>
-                      <span className="font-semibold text-slate-800">
-                        {healthScore.availableSignals}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Temps moyen avant réponse</span>
-                      <span className="font-semibold text-slate-800">
-                        {formatHours(quality?.avg_reply_delay_hours ?? null)}
-                      </span>
-                    </div>
-                  </div>
-                </CardContent>
-              </DashboardCard>
-            )}
-
-            {timelineEvents.length > 0 && (
-              <DashboardCard>
-                <CardHeader className="border-b border-slate-100 px-5 py-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <CardTitle>Timeline</CardTitle>
-                    <Badge variant="neutral">événements</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3 px-5 pt-5">
-                  {timelineEvents.map((event) => {
-                    const meta = decisionLevelMeta[event.level];
-                    return (
-                      <div key={event.id} className="flex gap-3">
-                        <div className="flex flex-col items-center">
-                          <span className={cn("mt-1 h-2.5 w-2.5 rounded-full", meta.dotClass)} />
-                          <span className="mt-2 h-full w-px bg-slate-100" />
-                        </div>
-                        <div className="min-w-0 pb-3">
-                          <p className="truncate text-sm font-semibold text-slate-900">
-                            {event.label}
-                          </p>
-                          <p className="mt-1 text-xs text-slate-500">{event.detail}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </CardContent>
-              </DashboardCard>
-            )}
-
-            {responseBreakdown && (
-              <DashboardCard>
-                <CardHeader className="px-5 py-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <CardTitle>Réponses</CardTitle>
-                    <Badge variant="neutral">{responseBreakdown.total} avis</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4 px-5">
-                  <div className="flex h-3 overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className="bg-slate-950"
-                      style={{ width: `${responseBreakdown.repliedPct}%` }}
-                    />
-                    <div
-                      className="bg-amber-400"
-                      style={{ width: `${responseBreakdown.pendingPct}%` }}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-2xl bg-slate-50 p-3">
-                      <p className="text-xs text-slate-500">Répondus</p>
-                      <p className="mt-1 text-xl font-semibold text-slate-950">
-                        {responseBreakdown.replied}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {responseBreakdown.repliedPct}%
-                      </p>
-                    </div>
-                    <div className="rounded-2xl bg-slate-50 p-3">
-                      <p className="text-xs text-slate-500">À répondre</p>
-                      <p className="mt-1 text-xl font-semibold text-slate-950">
-                        {responseBreakdown.pending}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {responseBreakdown.pendingPct}%
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </DashboardCard>
-            )}
-          </>
-        )}
-      </section>
-
       <DashboardCard>
         <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <CardTitle>Skills IA</CardTitle>
-                <Badge variant="neutral">architecture prête</Badge>
+                <CardTitle>Assistant IA</CardTitle>
+                <Badge variant={insights?.used_ai ? "success" : "neutral"}>
+                  {insights?.used_ai ? "IA" : "analyse automatique"}
+                </Badge>
               </div>
               <p className="mt-2 text-sm text-slate-500">
-                Cartes intelligentes prêtes à recevoir les futures capacités EGIA.
+                Lecture simple des signaux à traiter ce mois-ci.
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="neutral">
-                <CheckCircle2 className="mr-1 h-3 w-3" />
-                Sans nouvelle API
-              </Badge>
-              <Badge variant="neutral">États vides</Badge>
-            </div>
+            <Badge variant="neutral">{priorityActions.length} action(s)</Badge>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-4 px-5 pt-5 sm:grid-cols-2 sm:px-6 xl:grid-cols-4">
-          {showSkeleton
-            ? Array.from({ length: 8 }).map((_, index) => (
-                <Skeleton key={index} className="h-52 rounded-2xl" />
-              ))
-            : aiSkillCards.map((card) => (
-                <AiSkillCardView key={card.id} card={card} />
-              ))}
+        <CardContent className="space-y-5 px-5 pt-5 sm:px-6">
+          {showSkeleton ? (
+            <Skeleton className="h-[560px] rounded-2xl" />
+          ) : (
+            <>
+              <section className="rounded-2xl border border-slate-100 bg-slate-950 p-5 text-white shadow-sm">
+                <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  <Sparkles className="h-4 w-4 text-white" />
+                  Résumé automatique
+                </div>
+                {automaticSummary.length > 0 ? (
+                  <p className="max-w-4xl text-base leading-7 text-slate-100">
+                    {automaticSummary.join(" ")}
+                  </p>
+                ) : (
+                  <p className="text-sm text-slate-300">{EMPTY_ANALYSIS}</p>
+                )}
+              </section>
+
+              <section className="grid gap-4 xl:grid-cols-3">
+                {(["high", "watch", "ok"] as const).map((level) => {
+                  const meta = decisionLevelMeta[level];
+                  const items = decisionEngine.groups[level];
+                  return (
+                    <div
+                      key={level}
+                      className={cn("rounded-2xl border p-4", meta.cardClass)}
+                    >
+                      <div className="mb-4 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className={cn("h-2.5 w-2.5 rounded-full", meta.dotClass)} />
+                          <p className="text-sm font-semibold text-slate-950">
+                            {meta.label}
+                          </p>
+                        </div>
+                        <span
+                          className={cn(
+                            "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                            meta.badgeClass
+                          )}
+                        >
+                          {items.length}
+                        </span>
+                      </div>
+
+                      {items.length > 0 ? (
+                        <div className="space-y-3">
+                          {items.map((item) => (
+                            <article
+                              key={item.id}
+                              className="rounded-2xl border border-white/70 bg-white/85 p-4 shadow-sm"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-semibold text-slate-950">
+                                    {item.title}
+                                  </p>
+                                  <p className="mt-1 text-xs font-medium text-slate-500">
+                                    {item.evidence}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="mt-4 grid gap-3 text-xs text-slate-600">
+                                <div>
+                                  <p className="font-semibold text-slate-900">Pourquoi</p>
+                                  <p className="mt-1">{item.reason}</p>
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-slate-900">Conséquence</p>
+                                  <p className="mt-1">{item.consequence}</p>
+                                </div>
+                                <div className="inline-flex w-fit items-center gap-1.5 rounded-full bg-slate-950 px-3 py-1.5 text-[11px] font-semibold text-white">
+                                  <ArrowRight className="h-3 w-3" />
+                                  {item.action}
+                                </div>
+                              </div>
+                              <ProblemActionButtons onNavigate={navigate} compact />
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <EmptyState label="Aucun signal sur ce niveau." />
+                      )}
+                    </div>
+                  );
+                })}
+              </section>
+
+              <section className="grid gap-4 xl:grid-cols-2">
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-slate-950">
+                      Opportunités détectées
+                    </p>
+                    <Badge variant="success">{opportunitiesDetected.length}</Badge>
+                  </div>
+                  {opportunitiesDetected.length > 0 ? (
+                    <div className="space-y-3">
+                      {opportunitiesDetected.map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-2xl border border-white/70 bg-white/85 p-4"
+                        >
+                          <p className="text-sm font-semibold text-slate-950">{item.title}</p>
+                          <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
+                          {item.action && (
+                            <p className="mt-3 text-xs font-semibold text-emerald-700">
+                              {item.action}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState label="Aucune opportunité détectée avec les données actuelles." />
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-red-100 bg-red-50/50 p-4">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-slate-950">Risques détectés</p>
+                    <Badge variant="warning">{risksDetected.length}</Badge>
+                  </div>
+                  {risksDetected.length > 0 ? (
+                    <div className="space-y-3">
+                      {risksDetected.map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-2xl border border-white/70 bg-white/85 p-4"
+                        >
+                          <p className="text-sm font-semibold text-slate-950">{item.title}</p>
+                          <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
+                          {item.action && (
+                            <p className="mt-3 text-xs font-semibold text-red-700">
+                              {item.action}
+                            </p>
+                          )}
+                          <ProblemActionButtons onNavigate={navigate} compact />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState label="Aucun risque détecté avec les données actuelles." />
+                  )}
+                </div>
+              </section>
+
+              <section className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-950">Actions du mois</p>
+                  <Badge variant="neutral">impact</Badge>
+                </div>
+                <div className="grid gap-3 lg:grid-cols-3">
+                  {[
+                    {
+                      label: "Impact élevé",
+                      items: monthlyActions.high,
+                      className: "border-red-100 bg-white"
+                    },
+                    {
+                      label: "Impact moyen",
+                      items: monthlyActions.medium,
+                      className: "border-amber-100 bg-white"
+                    },
+                    {
+                      label: "Impact faible",
+                      items: monthlyActions.low,
+                      className: "border-slate-100 bg-white"
+                    }
+                  ].map((group) => (
+                    <div key={group.label} className={cn("rounded-2xl border p-4", group.className)}>
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                        {group.label}
+                      </p>
+                      {group.items.length > 0 ? (
+                        <div className="space-y-2">
+                          {group.items.map((item) => (
+                            <div key={item.id} className="rounded-xl bg-slate-50 px-3 py-2">
+                              <p className="text-sm font-semibold text-slate-900">
+                                {item.title}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
+                              <ProblemActionButtons onNavigate={navigate} compact />
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-500">Aucune action pour ce niveau.</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </>
+          )}
         </CardContent>
       </DashboardCard>
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.8fr)]">
-        <DashboardCard>
-          <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <CardTitle className="text-xl">Évolution de la réputation</CardTitle>
-              </div>
-              <select
-                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
-                value={metric}
-                onChange={(event) => setMetric(event.target.value as MetricKey)}
-              >
-                <option value="reviews">Avis</option>
-                <option value="avg_rating">Note moyenne</option>
-                <option value="reply_rate">Taux de réponse</option>
-                <option value="neg_share">Avis négatifs</option>
-              </select>
+      <DashboardCard>
+        <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-xl">Évolution de la réputation</CardTitle>
+              <Badge variant="neutral">graphique principal</Badge>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-5 px-5 pt-5 sm:px-6">
-            {showSkeleton ? (
-              <Skeleton className="h-[400px] rounded-2xl" />
-            ) : (
-              <AreaChart
-                points={chartPoints}
-                metric={metric}
-                sentimentLabel={
-                  overview?.sentiment?.positive_pct === null ||
-                  overview?.sentiment?.positive_pct === undefined
-                    ? null
-                    : `${formatPercent(overview.sentiment.positive_pct)} positif`
-                }
-              />
-            )}
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-              {chartInsights.length > 0 ? (
-                chartInsights.map((fact) => {
-                  const FactIcon = fact.Icon;
-                  return (
+            <select
+              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+              value={metric}
+              onChange={(event) => setMetric(event.target.value as MetricKey)}
+            >
+              <option value="reviews">Avis</option>
+              <option value="avg_rating">Note moyenne</option>
+              <option value="reply_rate">Taux de réponse</option>
+              <option value="neg_share">Avis négatifs</option>
+            </select>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5 px-5 pt-5 sm:px-6">
+          {showSkeleton ? (
+            <Skeleton className="h-[400px] rounded-2xl" />
+          ) : (
+            <AreaChart
+              points={chartPoints}
+              metric={metric}
+              sentimentLabel={
+                overview?.sentiment?.positive_pct === null ||
+                overview?.sentiment?.positive_pct === undefined
+                  ? null
+                  : `${formatPercent(overview.sentiment.positive_pct)} positif`
+              }
+            />
+          )}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            {chartInsights.length > 0 ? (
+              chartInsights.map((fact) => {
+                const FactIcon = fact.Icon;
+                return (
                   <div
                     key={fact.label}
                     className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3"
@@ -2392,78 +3307,16 @@ const Analytics = ({
                     </p>
                     <p className="mt-0.5 truncate text-xs text-slate-500">{fact.detail}</p>
                   </div>
-                  );
-                })
-              ) : (
-                <div className="sm:col-span-2 lg:col-span-3 xl:col-span-6">
-                  <EmptyState />
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </DashboardCard>
-
-        <div className="grid gap-6">
-          <DashboardCard>
-            <CardHeader className="px-5 py-5">
-              <div className="flex items-center justify-between gap-3">
-                <CardTitle>Sentiment global</CardTitle>
-                <Badge variant="neutral">répartition</Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="px-5">
-              {showSkeleton ? (
-                <Skeleton className="h-44 rounded-2xl" />
-              ) : (
-                <SentimentDonut sentiment={overview?.sentiment} />
-              )}
-            </CardContent>
-          </DashboardCard>
-
-          <DashboardCard>
-            <CardHeader className="px-5 py-5">
-              <div className="flex items-center justify-between gap-3">
-                <CardTitle>Qualité de réponse</CardTitle>
-                <Badge variant="neutral">SLA</Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4 px-5">
-              {showSkeleton ? (
-                <Skeleton className="h-32 rounded-2xl" />
-              ) : quality ? (
-                <>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="rounded-2xl bg-slate-50 p-3">
-                      <p className="text-xs text-slate-500">Taux</p>
-                      <p className="mt-1 text-lg font-semibold text-slate-950">
-                        {formatRatio(quality.reply_rate)}
-                      </p>
-                    </div>
-                    <div className="rounded-2xl bg-slate-50 p-3">
-                      <p className="text-xs text-slate-500">Délai</p>
-                      <p className="mt-1 text-lg font-semibold text-slate-950">
-                        {formatHours(quality.avg_reply_delay_hours)}
-                      </p>
-                    </div>
-                    <div className="rounded-2xl bg-slate-50 p-3">
-                      <p className="text-xs text-slate-500">&lt; 24h</p>
-                      <p className="mt-1 text-lg font-semibold text-slate-950">
-                        {formatRatio(quality.sla_24h)}
-                      </p>
-                    </div>
-                  </div>
-                  <CompactBars points={compactPoints} metric="reply_rate" />
-                  <p className="text-xs text-slate-500">
-                    {quality.replied_with_time_count} réponses avec délai mesuré.
-                  </p>
-                </>
-              ) : (
+                );
+              })
+            ) : (
+              <div className="sm:col-span-2 lg:col-span-3 xl:col-span-6">
                 <EmptyState />
-              )}
-            </CardContent>
-          </DashboardCard>
-        </div>
-      </section>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </DashboardCard>
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <DashboardCard>
@@ -2531,110 +3384,119 @@ const Analytics = ({
         <DashboardCard>
           <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
             <div className="flex items-center justify-between gap-3">
-              <CardTitle>Résumé IA</CardTitle>
-              <Badge variant={insights?.used_ai ? "success" : "neutral"}>
-                {insights?.used_ai ? "IA" : "auto"}
-              </Badge>
+              <CardTitle>Qualité de réponse</CardTitle>
+              <Badge variant="neutral">suivi</Badge>
             </div>
           </CardHeader>
-          <CardContent className="space-y-5 px-5 pt-5 sm:px-6">
+          <CardContent className="space-y-4 px-5 pt-5 sm:px-6">
             {showSkeleton ? (
-              <Skeleton className="h-56 rounded-2xl" />
-            ) : decisionEngine.summary.length > 0 ||
-              decisionEngine.groups.high.length > 0 ||
-              decisionEngine.groups.watch.length > 0 ||
-              decisionEngine.groups.ok.length > 0 ? (
+              <Skeleton className="h-48 rounded-2xl" />
+            ) : quality ? (
               <>
-                <div className="rounded-2xl border border-slate-100 bg-slate-950 p-4 text-white shadow-sm">
-                  <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-                    <Sparkles className="h-4 w-4 text-white" />
-                    Lecture automatique
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-2xl bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">Taux</p>
+                    <p className="mt-1 text-lg font-semibold text-slate-950">
+                      {formatRatio(quality.reply_rate)}
+                    </p>
                   </div>
-                  {decisionEngine.summary.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {decisionEngine.summary.map((line) => (
-                        <span
-                          key={line}
-                          className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-slate-100"
-                        >
-                          {line}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-slate-300">{EMPTY_ANALYSIS}</p>
-                  )}
+                  <div className="rounded-2xl bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">Délai</p>
+                    <p className="mt-1 text-lg font-semibold text-slate-950">
+                      {formatHours(quality.avg_reply_delay_hours)}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">&lt; 24h</p>
+                    <p className="mt-1 text-lg font-semibold text-slate-950">
+                      {formatRatio(quality.sla_24h)}
+                    </p>
+                  </div>
                 </div>
-
-                <div className="grid gap-3">
-                  {(["high", "watch", "ok"] as const).map((level) => {
-                    const meta = decisionLevelMeta[level];
-                    const items = decisionEngine.groups[level];
-                    return (
-                      <div
-                        key={level}
-                        className={cn(
-                          "rounded-2xl border p-4",
-                          items.length > 0 ? meta.cardClass : "border-slate-100 bg-white"
-                        )}
-                      >
-                        <div className="mb-3 flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2">
-                            <span className={cn("h-2.5 w-2.5 rounded-full", meta.dotClass)} />
-                            <p className="text-sm font-semibold text-slate-900">
-                              {meta.label}
-                            </p>
-                          </div>
-                          <span
-                            className={cn(
-                              "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
-                              meta.badgeClass
-                            )}
-                          >
-                            {items.length}
-                          </span>
-                        </div>
-
-                        {items.length > 0 ? (
-                          <div className="space-y-2">
-                            {items.map((item) => (
-                              <div
-                                key={item.id}
-                                className="rounded-xl border border-white/70 bg-white/80 p-3 shadow-sm"
-                              >
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <p className="truncate text-sm font-semibold text-slate-900">
-                                      {item.title}
-                                    </p>
-                                    <p className="mt-1 line-clamp-2 text-xs text-slate-500">
-                                      {item.evidence}
-                                    </p>
-                                  </div>
-                                </div>
-                                <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-slate-950 px-2.5 py-1 text-[11px] font-semibold text-white">
-                                  <ArrowRight className="h-3 w-3" />
-                                  {item.action}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-sm text-slate-500">
-                            Aucun signal détecté sur ce niveau.
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                <CompactBars points={compactPoints} metric="reply_rate" />
+                <p className="text-xs text-slate-500">
+                  {quality.replied_with_time_count} réponses avec délai mesuré.
+                </p>
               </>
             ) : (
               <EmptyState />
             )}
           </CardContent>
         </DashboardCard>
+
+        <DashboardCard>
+          <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle>Sentiment global</CardTitle>
+              <Badge variant="neutral">répartition</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="px-5 pt-5 sm:px-6">
+            {showSkeleton ? (
+              <Skeleton className="h-52 rounded-2xl" />
+            ) : (
+              <SentimentDonut sentiment={overview?.sentiment} />
+            )}
+          </CardContent>
+        </DashboardCard>
+
+        <DashboardCard>
+          <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle>Notes</CardTitle>
+              <Badge variant="neutral">1 à 5</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="px-5 pt-5 sm:px-6">
+            {showSkeleton ? (
+              <Skeleton className="h-44 rounded-2xl" />
+            ) : (
+              <RatingDistribution ratings={overview?.ratings ?? null} total={ratingTotal} />
+            )}
+          </CardContent>
+        </DashboardCard>
       </section>
+
+      <DashboardCard>
+        <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <CardTitle>Multi-établissements</CardTitle>
+                <Badge variant={hasMultipleLocations ? "success" : "neutral"}>
+                  {locations.length} établissement{locations.length > 1 ? "s" : ""}
+                </Badge>
+              </div>
+              <p className="mt-2 text-sm text-slate-500">
+                Interface prête pour comparer les performances locales sans inventer de classement.
+              </p>
+            </div>
+            <Badge variant="neutral">
+              {locationId === "all" ? "Toutes les fiches" : "Filtre actif"}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5 px-5 pt-5 sm:px-6">
+          {locations.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {selectedLocations.slice(0, 6).map((location) => (
+                <Badge key={location.location_resource_name} variant="neutral">
+                  {location.location_title ?? location.location_resource_name}
+                </Badge>
+              ))}
+              {selectedLocations.length > 6 && (
+                <Badge variant="neutral">+{selectedLocations.length - 6}</Badge>
+              )}
+            </div>
+          )}
+
+          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+            {multiLocationCards.map((card) => (
+              <MultiLocationInsightCardView key={card.id} card={card} />
+            ))}
+          </div>
+        </CardContent>
+      </DashboardCard>
 
       <DashboardCard>
         <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
@@ -2691,64 +3553,55 @@ const Analytics = ({
             </div>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-5 px-5 pt-5 sm:px-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)_minmax(0,0.9fr)]">
+        <CardContent className="grid gap-5 px-5 pt-5 sm:px-6 xl:grid-cols-3">
           {showSkeleton ? (
             <>
+              <Skeleton className="h-72 rounded-2xl" />
+              <Skeleton className="h-72 rounded-2xl" />
               <Skeleton className="h-72 rounded-2xl" />
               <Skeleton className="h-72 rounded-2xl" />
               <Skeleton className="h-72 rounded-2xl" />
             </>
           ) : topicExplorer.all.length > 0 ? (
             <>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-slate-900">Top thèmes</p>
-                  <Badge variant="neutral">mentions</Badge>
-                </div>
-                {topicExplorer.top.map((topic) => (
-                  <TopicRow
-                    key={topic.id}
-                    item={topic}
-                    onClick={() => openTopicPanel(topic)}
-                  />
-                ))}
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-slate-900">En progression</p>
-                  <Badge variant="success">variation</Badge>
-                </div>
-                {topicExplorer.rising.length > 0 ? (
-                  topicExplorer.rising.map((topic) => (
-                    <TopicRow
-                      key={topic.id}
-                      item={topic}
-                      onClick={() => openTopicPanel(topic)}
-                    />
-                  ))
-                ) : (
-                  <EmptyState label="Pas encore assez de données pour mesurer une progression." />
-                )}
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-slate-900">En baisse</p>
-                  <Badge variant="warning">à lire</Badge>
-                </div>
-                {topicExplorer.falling.length > 0 ? (
-                  topicExplorer.falling.map((topic) => (
-                    <TopicRow
-                      key={topic.id}
-                      item={topic}
-                      onClick={() => openTopicPanel(topic)}
-                    />
-                  ))
-                ) : (
-                  <EmptyState label="Aucune baisse de thème détectée sur la période." />
-                )}
-              </div>
+              <TopicColumn
+                title="Top thèmes"
+                badge="mentions"
+                topics={topicExplorer.top}
+                emptyLabel={EMPTY_ANALYSIS}
+                onOpen={openTopicPanel}
+              />
+              <TopicColumn
+                title="Thèmes en progression"
+                badge="hausse"
+                badgeVariant="success"
+                topics={topicExplorer.rising}
+                emptyLabel="Pas encore assez de données pour mesurer une progression."
+                onOpen={openTopicPanel}
+              />
+              <TopicColumn
+                title="Thèmes en baisse"
+                badge="baisse"
+                badgeVariant="warning"
+                topics={topicExplorer.falling}
+                emptyLabel="Aucune baisse de thème détectée sur la période."
+                onOpen={openTopicPanel}
+              />
+              <TopicColumn
+                title="Nouveaux thèmes"
+                badge="nouveau"
+                badgeVariant="success"
+                topics={topicExplorer.newTopics}
+                emptyLabel="Aucun nouveau thème détecté avec les données disponibles."
+                onOpen={openTopicPanel}
+              />
+              <TopicColumn
+                title="Thèmes disparus"
+                badge="disparu"
+                topics={topicExplorer.disappeared}
+                emptyLabel="Aucun thème disparu n'est disponible dans les données actuelles."
+                onOpen={openTopicPanel}
+              />
             </>
           ) : (
             <div className="xl:col-span-3">
@@ -2758,23 +3611,312 @@ const Analytics = ({
         </CardContent>
       </DashboardCard>
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)]">
-        <DashboardCard>
-          <CardHeader className="px-5 py-5 sm:px-6">
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle>Notes</CardTitle>
-              <Badge variant="neutral">1 à 5</Badge>
+      <DashboardCard>
+        <CardHeader className="border-b border-slate-100 px-5 py-5 sm:px-6">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <CardTitle>Capacités IA</CardTitle>
+                <Badge variant="neutral">avancé</Badge>
+              </div>
+              <p className="mt-2 text-sm text-slate-500">
+                Capacités prêtes à enrichir le cockpit quand les données seront disponibles.
+              </p>
             </div>
-          </CardHeader>
-          <CardContent className="px-5 sm:px-6">
-            {showSkeleton ? (
-              <Skeleton className="h-44 rounded-2xl" />
-            ) : (
-              <RatingDistribution ratings={overview?.ratings ?? null} total={ratingTotal} />
-            )}
-          </CardContent>
-        </DashboardCard>
-      </section>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="neutral">
+                <CheckCircle2 className="mr-1 h-3 w-3" />
+                Sans nouvelle API
+              </Badge>
+              <Badge variant="neutral">États vides</Badge>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-4 px-5 pt-5 sm:grid-cols-2 sm:px-6 xl:grid-cols-4">
+          {showSkeleton
+            ? Array.from({ length: 8 }).map((_, index) => (
+                <Skeleton key={index} className="h-52 rounded-2xl" />
+              ))
+            : aiSkillCards.map((card) => (
+                <AiSkillCardView key={card.id} card={card} />
+              ))}
+        </CardContent>
+      </DashboardCard>
+
+      {selectedKpi && selectedKpiDefinition && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5">
+          <DashboardCard className="h-full w-full max-w-2xl overflow-y-auto">
+            <CardHeader className="border-b border-slate-100">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    <Badge variant="neutral">Indicateur</Badge>
+                    <TrendPill
+                      state={selectedKpiDefinition.trend}
+                      label={selectedKpiDefinition.delta}
+                    />
+                  </div>
+                  <CardTitle className="truncate">{selectedKpiDefinition.label}</CardTitle>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {selectedKpiDefinition.value} · {selectedKpiDefinition.detail}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 rounded-xl"
+                  onClick={() => setSelectedKpi(null)}
+                >
+                  Fermer
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-5 pt-6">
+              <KpiDetailSection title="Actions rapides">
+                <ProblemActionButtons onNavigate={navigate} />
+              </KpiDetailSection>
+
+              {selectedKpi === "reviews" && (
+                <>
+                  <KpiDetailSection title="Évolution" badge={getPresetLabel(preset)}>
+                    {chartPoints.length > 0 ? (
+                      <AreaChart points={chartPoints} metric="reviews" sentimentLabel={null} />
+                    ) : (
+                      <EmptyState />
+                    )}
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Répartition dans le temps">
+                    {compactPoints.length > 0 ? (
+                      <CompactBars points={compactPoints} metric="reviews" />
+                    ) : (
+                      <EmptyState />
+                    )}
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Établissements concernés" badge={String(selectedLocations.length)}>
+                    {selectedLocations.length > 0 ? (
+                      <div className="space-y-2">
+                        {selectedLocations.map((location) => (
+                          <div
+                            key={location.location_resource_name}
+                            className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                          >
+                            {location.location_title ?? location.location_resource_name}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <EmptyState label="Aucun établissement chargé pour ce filtre." />
+                    )}
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Avis concernés">
+                    <EmptyState label="La liste détaillée des avis n'est pas disponible dans les données déjà chargées pour cet indicateur." />
+                  </KpiDetailSection>
+                </>
+              )}
+
+              {selectedKpi === "avg_rating" && (
+                <>
+                  <KpiDetailSection title="Évolution" badge={getPresetLabel(preset)}>
+                    {chartPoints.some((point) => point.avg_rating !== null) ? (
+                      <AreaChart points={chartPoints} metric="avg_rating" sentimentLabel={null} />
+                    ) : (
+                      <EmptyState />
+                    )}
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Répartition des notes">
+                    <RatingDistribution ratings={overview?.ratings ?? null} total={ratingTotal} />
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Avis ayant fait monter la note">
+                    <EmptyState label="Les avis individuels qui font monter la note ne sont pas disponibles dans les données déjà chargées." />
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Avis ayant fait baisser la note">
+                    <EmptyState label="Les avis individuels qui font baisser la note ne sont pas disponibles dans les données déjà chargées." />
+                  </KpiDetailSection>
+                </>
+              )}
+
+              {selectedKpi === "reply_rate" && (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <KpiDetailMetric
+                      label="Avis répondus"
+                      value={repliedCount === null ? "—" : String(repliedCount)}
+                      detail="avis avec texte"
+                    />
+                    <KpiDetailMetric
+                      label="Avis non répondus"
+                      value={unrepliedCount === null ? "—" : String(unrepliedCount)}
+                      detail="à traiter"
+                    />
+                    <KpiDetailMetric
+                      label="Délai moyen"
+                      value={formatHours(quality?.avg_reply_delay_hours ?? null)}
+                      detail="avant réponse"
+                    />
+                    <KpiDetailMetric
+                      label="Réponses < 24h"
+                      value={formatRatio(quality?.sla_24h ?? null)}
+                      detail="part des réponses mesurées"
+                    />
+                  </div>
+
+                  <KpiDetailSection title="Évolution">
+                    {chartPoints.some((point) => point.reply_rate !== null) ? (
+                      <AreaChart points={chartPoints} metric="reply_rate" sentimentLabel={null} />
+                    ) : (
+                      <EmptyState />
+                    )}
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Avis répondus">
+                    <EmptyState label="La liste des avis répondus n'est pas disponible dans les données déjà chargées." />
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Avis non répondus">
+                    <EmptyState label="La liste des avis non répondus n'est pas disponible dans les données déjà chargées." />
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Réponses > 7 jours">
+                    <EmptyState label="Le détail des réponses de plus de 7 jours n'est pas disponible dans les données déjà chargées." />
+                  </KpiDetailSection>
+                </>
+              )}
+
+              {selectedKpi === "reply_delay" && (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <KpiDetailMetric
+                      label="Délai moyen"
+                      value={formatHours(quality?.avg_reply_delay_hours ?? null)}
+                    />
+                    <KpiDetailMetric
+                      label="Réponses mesurées"
+                      value={
+                        quality?.replied_with_time_count === undefined
+                          ? "—"
+                          : String(quality.replied_with_time_count)
+                      }
+                    />
+                    <KpiDetailMetric
+                      label="Réponses < 24h"
+                      value={formatRatio(quality?.sla_24h ?? null)}
+                    />
+                  </div>
+
+                  <KpiDetailSection title="Histogramme">
+                    <EmptyState label="L'histogramme des délais n'est pas disponible dans les données déjà chargées." />
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Évolution">
+                    <EmptyState label="L'évolution du délai moyen n'est pas disponible dans les données déjà chargées." />
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Avis les plus lents">
+                    <EmptyState label="La liste des avis les plus lents n'est pas disponible dans les données déjà chargées." />
+                  </KpiDetailSection>
+                </>
+              )}
+
+              {selectedKpi === "sentiment" && (
+                <>
+                  <KpiDetailSection title="Répartition">
+                    <SentimentDonut sentiment={overview?.sentiment ?? null} />
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Thèmes positifs" badge={String(topicExplorer.positiveCount)}>
+                    {topicExplorer.top.filter((topic) => topic.tone === "positive").length > 0 ? (
+                      <div className="space-y-2">
+                        {topicExplorer.top
+                          .filter((topic) => topic.tone === "positive")
+                          .map((topic) => (
+                            <TopicRow
+                              key={topic.id}
+                              item={topic}
+                              onClick={() => {
+                                setSelectedKpi(null);
+                                openTopicPanel(topic);
+                              }}
+                            />
+                          ))}
+                      </div>
+                    ) : (
+                      <EmptyState label="Aucun thème positif disponible dans les données chargées." />
+                    )}
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Thèmes négatifs" badge={String(topicExplorer.negativeCount)}>
+                    {topicExplorer.top.filter((topic) => topic.tone === "negative").length > 0 ? (
+                      <div className="space-y-2">
+                        {topicExplorer.top
+                          .filter((topic) => topic.tone === "negative")
+                          .map((topic) => (
+                            <TopicRow
+                              key={topic.id}
+                              item={topic}
+                              onClick={() => {
+                                setSelectedKpi(null);
+                                openTopicPanel(topic);
+                              }}
+                            />
+                          ))}
+                      </div>
+                    ) : (
+                      <EmptyState label="Aucun thème négatif disponible dans les données chargées." />
+                    )}
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Avis concernés">
+                    <EmptyState label="La liste des avis par sentiment n'est pas disponible dans les données déjà chargées." />
+                  </KpiDetailSection>
+                </>
+              )}
+
+              {selectedKpi === "neg_share" && (
+                <>
+                  <KpiDetailSection title="Évolution des avis négatifs">
+                    {chartPoints.some((point) => point.neg_share !== null) ? (
+                      <AreaChart points={chartPoints} metric="neg_share" sentimentLabel={null} />
+                    ) : (
+                      <EmptyState />
+                    )}
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Thèmes irritants" badge={String(topicExplorer.negativeCount)}>
+                    {topicExplorer.top.filter((topic) => topic.tone === "negative").length > 0 ? (
+                      <div className="space-y-2">
+                        {topicExplorer.top
+                          .filter((topic) => topic.tone === "negative")
+                          .map((topic) => (
+                            <TopicRow
+                              key={topic.id}
+                              item={topic}
+                              onClick={() => {
+                                setSelectedKpi(null);
+                                openTopicPanel(topic);
+                              }}
+                            />
+                          ))}
+                      </div>
+                    ) : (
+                      <EmptyState label="Aucun irritant disponible dans les données chargées." />
+                    )}
+                  </KpiDetailSection>
+
+                  <KpiDetailSection title="Avis concernés">
+                    <EmptyState label="La liste des avis négatifs n'est pas disponible dans les données déjà chargées." />
+                  </KpiDetailSection>
+                </>
+              )}
+            </CardContent>
+          </DashboardCard>
+        </div>
+      )}
 
       {selectedTopic && (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5">
@@ -2818,13 +3960,23 @@ const Analytics = ({
               </div>
             </CardHeader>
             <CardContent className="space-y-5 pt-6">
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-slate-100 bg-slate-950 p-4 text-white">
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  <Sparkles className="h-4 w-4 text-white" />
+                  Résumé automatique
+                </div>
+                <p className="text-sm leading-6 text-slate-100">
+                  {getTopicSummary(selectedTopic)}
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
-                  <p className="text-xs text-slate-500">Fréquence</p>
+                  <p className="text-xs text-slate-500">Mentions</p>
                   <p className="mt-1 text-lg font-semibold text-slate-950">
                     {selectedTopic.count}
                   </p>
-                  <p className="text-xs text-slate-500">mentions</p>
+                  <p className="text-xs text-slate-500">avis concernés</p>
                 </div>
                 <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
                   <p className="text-xs text-slate-500">Importance</p>
@@ -2841,6 +3993,31 @@ const Analytics = ({
                       : selectedTopic.net_sentiment}
                   </p>
                   <p className="text-xs text-slate-500">solde</p>
+                </div>
+                <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+                  <p className="text-xs text-slate-500">Poids</p>
+                  <p className="mt-1 text-lg font-semibold text-slate-950">
+                    {formatShare(selectedTopic.share_pct)}
+                  </p>
+                  <p className="text-xs text-slate-500">dans les thèmes</p>
+                </div>
+                <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+                  <p className="text-xs text-slate-500">Impact</p>
+                  <p className="mt-1 text-lg font-semibold text-slate-950">
+                    {getTopicImpactLabel(selectedTopic)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {getTopicToneLabel(selectedTopic.tone).toLowerCase()}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+                  <p className="text-xs text-slate-500">Évolution</p>
+                  <p className="mt-1 text-lg font-semibold text-slate-950">
+                    {formatDeltaCount(selectedTopic.delta)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {formatDeltaPct(selectedTopic.delta_pct)}
+                  </p>
                 </div>
               </div>
 
@@ -2881,10 +4058,12 @@ const Analytics = ({
 
               <div className="rounded-2xl border border-slate-100 bg-white p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-slate-900">Mots associés</p>
-                  <Badge variant="neutral">si disponibles</Badge>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Répartition positive / négative
+                  </p>
+                  <Badge variant="neutral">si disponible</Badge>
                 </div>
-                <EmptyState label="Aucun mot associé disponible pour ce thème." />
+                <EmptyState label="La répartition positive / négative détaillée n'est pas disponible pour ce thème." />
               </div>
 
               <div className="space-y-3">
@@ -2939,6 +4118,14 @@ const Analytics = ({
               ) : !drilldownLoading && !drilldownError ? (
                 <EmptyState label="Aucun avis concerné n'est disponible côté client pour ce thème." />
               ) : null}
+              </div>
+
+              <div className="rounded-2xl border border-slate-100 bg-white p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-900">Réponses associées</p>
+                  <Badge variant="neutral">si disponibles</Badge>
+                </div>
+                <EmptyState label="Aucune réponse associée n'est disponible dans les données chargées pour ce thème." />
               </div>
             </CardContent>
           </DashboardCard>
