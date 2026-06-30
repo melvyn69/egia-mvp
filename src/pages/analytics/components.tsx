@@ -97,11 +97,13 @@ export const EmptyState = ({ label = EMPTY_ANALYSIS }: { label?: string }) => (
 export const AnalyticsDisclosure = ({
   title,
   badge,
+  summary,
   defaultOpen = false,
   children
 }: {
   title: string;
   badge?: string;
+  summary?: string;
   defaultOpen?: boolean;
   children: ReactNode;
 }) => (
@@ -110,7 +112,14 @@ export const AnalyticsDisclosure = ({
     className="group rounded-2xl border border-slate-100/80 bg-slate-50/70 p-4 transition hover:border-slate-200 hover:bg-slate-50"
   >
     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 [&::-webkit-details-marker]:hidden">
-      <span className="text-sm font-semibold text-slate-950">{title}</span>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold text-slate-950">{title}</span>
+        {summary && (
+          <span className="mt-1 block truncate text-xs font-medium text-slate-500">
+            {summary}
+          </span>
+        )}
+      </span>
       <span className="flex items-center gap-2">
         {badge && <Badge variant="neutral">{badge}</Badge>}
         <span className="text-xs font-semibold text-slate-400 transition group-open:rotate-90">
@@ -118,7 +127,9 @@ export const AnalyticsDisclosure = ({
         </span>
       </span>
     </summary>
-    <div className="mt-4">{children}</div>
+    <div className="mt-4 overflow-hidden motion-safe:transition-all motion-safe:duration-200 motion-reduce:transition-none">
+      {children}
+    </div>
   </details>
 );
 
@@ -134,6 +145,8 @@ export const AiSkillCardView = ({ card }: { card: AiSkillCard }) => {
     card.tone === "good" ? "success" : card.tone === "warn" ? "warning" : "neutral";
   const Icon = card.Icon;
   const emptyTitle = card.status === "soon" ? "Bientôt disponible" : "Données insuffisantes";
+  const isDecisionList = card.id === "ai-opportunities" || card.id === "ai-risks";
+  const signalDotClass = card.id === "ai-risks" ? "bg-amber-400" : "bg-emerald-500";
 
   return (
     <div className={cn("analytics-card-motion h-full rounded-2xl border p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]", toneClass)}>
@@ -146,36 +159,51 @@ export const AiSkillCardView = ({ card }: { card: AiSkillCard }) => {
             <p className={cn("truncate text-sm font-semibold", card.tone === "dark" ? "text-white" : "text-slate-950")}>
               {card.title}
             </p>
-            <p className={cn("mt-0.5 text-xs", card.tone === "dark" ? "text-slate-400" : "text-slate-500")}>
-              Capacité IA
-            </p>
           </div>
         </div>
-        <Badge variant={badgeVariant} className={card.tone === "dark" ? "border-white/10 bg-white/10 text-white" : undefined}>
-          {card.badge}
-        </Badge>
+        {!["actif", "vide", "prévu", "en attente"].includes(card.badge) && (
+          <Badge variant={badgeVariant} className={card.tone === "dark" ? "border-white/10 bg-white/10 text-white" : undefined}>
+            {card.badge}
+          </Badge>
+        )}
       </div>
 
       {card.items.length > 0 ? (
-        <div className="mt-4 space-y-2">
+        <div className={cn("mt-4", isDecisionList ? "space-y-3" : "space-y-2")}>
           {card.items.slice(0, 3).map((item) => (
             <div
               key={`${card.id}-${item.label}`}
               className={cn(
-                "rounded-xl border px-3 py-2",
-                card.tone === "dark"
-                  ? "border-white/10 bg-white/10"
-                  : "border-white/80 bg-white/80"
+                isDecisionList
+                  ? "rounded-2xl border border-white/90 bg-white/90 px-3.5 py-3 shadow-[0_8px_18px_rgba(15,23,42,0.035)]"
+                  : "rounded-xl border px-3 py-2",
+                !isDecisionList &&
+                  (card.tone === "dark"
+                    ? "border-white/10 bg-white/10"
+                    : "border-white/80 bg-white/80")
               )}
             >
-              <p className={cn("text-sm font-semibold", card.tone === "dark" ? "text-white" : "text-slate-900")}>
-                {item.label}
-              </p>
-              {item.detail && (
-                <p className={cn("mt-1 text-xs", card.tone === "dark" ? "text-slate-300" : "text-slate-500")}>
-                  {item.detail}
-                </p>
-              )}
+              <div className={cn("flex items-start", isDecisionList ? "gap-3" : "gap-0")}>
+                {isDecisionList && (
+                  <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", signalDotClass)} />
+                )}
+                <div className="min-w-0">
+                  <p className={cn(
+                    isDecisionList ? "text-sm font-semibold leading-5" : "text-sm font-semibold",
+                    card.tone === "dark" ? "text-white" : "text-slate-950"
+                  )}>
+                    {item.label}
+                  </p>
+                  {item.detail && (
+                    <p className={cn(
+                      isDecisionList ? "mt-1.5 text-xs leading-5" : "mt-1 text-xs",
+                      card.tone === "dark" ? "text-slate-300" : "text-slate-500"
+                    )}>
+                      {item.detail}
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -202,6 +230,40 @@ export const AiSkillCardView = ({ card }: { card: AiSkillCard }) => {
     </div>
   );
 };
+
+const AiSummaryHero = ({ card }: { card: AiSkillCard }) => (
+  <div className="analytics-card-motion rounded-2xl border border-slate-200/70 bg-slate-950 p-5 text-white shadow-[0_16px_44px_rgba(15,23,42,0.12)]">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+          Assistant IA
+        </p>
+        <h3 className="mt-2 text-2xl font-semibold tracking-tight text-white">
+          {card.title}
+        </h3>
+      </div>
+      {!["actif", "vide", "prévu", "en attente"].includes(card.badge) && (
+        <Badge className="w-fit border-white/10 bg-white/10 text-white">
+          {card.badge}
+        </Badge>
+      )}
+    </div>
+    <p className="mt-5 text-sm font-medium text-slate-200">
+      Aujourd'hui l'IA retient :
+    </p>
+    <div className="mt-3 grid gap-2">
+      {card.items.slice(0, 4).map((item) => (
+        <div
+          key={`${card.id}-${item.label}`}
+          className="flex items-start gap-3 rounded-xl bg-white/10 px-3 py-2.5"
+        >
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+          <p className="text-sm leading-5 text-slate-100">{item.label}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+);
 
 export const TrendPill = ({
   state,
@@ -974,7 +1036,7 @@ export const MultiLocationInsightCardView = ({
       <div className="mt-4 flex min-h-[118px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200/80 bg-slate-50/60 px-4 text-center">
         <p className="text-sm font-semibold text-slate-800">Données insuffisantes</p>
         <p className="mt-2 text-xs leading-5 text-slate-500">
-          Cette analyse sera activée automatiquement lorsque les métriques par établissement seront disponibles.
+          Données par établissement requises.
         </p>
       </div>
     </div>
@@ -998,10 +1060,7 @@ export const AnalyticsAssistant = ({
         <div>
           <div className="flex items-center gap-2">
             <CardTitle>Recommandation IA</CardTitle>
-            <Badge variant={usedAi ? "success" : "neutral"}>
-              {usedAi ? "IA" : "analyse automatique"}
-            </Badge>
-            <Badge variant="neutral">priorisé</Badge>
+            {usedAi && <Badge variant="success">IA</Badge>}
           </div>
         </div>
         <Badge variant="neutral">{recommendationCount} recommandation(s)</Badge>
@@ -1112,7 +1171,7 @@ export const AnalyticsThemeAnalysis = ({
               badge="hausse"
               badgeVariant="success"
               topics={topicExplorer.rising}
-              emptyLabel="Pas encore assez de données pour mesurer une progression."
+              emptyLabel="Progression non mesurable."
               onOpen={onOpenTopic}
             />
             <TopicColumn
@@ -1120,7 +1179,7 @@ export const AnalyticsThemeAnalysis = ({
               badge="baisse"
               badgeVariant="warning"
               topics={topicExplorer.falling}
-              emptyLabel="Aucune baisse de thème détectée sur la période."
+              emptyLabel="Aucune baisse détectée."
               onOpen={onOpenTopic}
             />
           </div>
@@ -1136,14 +1195,14 @@ export const AnalyticsThemeAnalysis = ({
                 badge="nouveau"
                 badgeVariant="success"
                 topics={topicExplorer.newTopics}
-                emptyLabel="Aucun nouveau thème détecté avec les données disponibles."
+                emptyLabel="Aucun nouveau thème."
                 onOpen={onOpenTopic}
               />
               <TopicColumn
                 title="Thèmes disparus"
                 badge="disparu"
                 topics={topicExplorer.disappeared}
-                emptyLabel="Aucun thème disparu n'est pas disponible dans les données actuelles."
+                emptyLabel="Aucun thème disparu."
                 onOpen={onOpenTopic}
               />
             </div>
@@ -1156,47 +1215,74 @@ export const AnalyticsThemeAnalysis = ({
   </DashboardCard>
 );
 
+const visibleSkillIds = new Set([
+  "ai-health-score",
+  "ai-summary",
+  "ai-opportunities",
+  "ai-risks",
+  "ai-reply-needed"
+]);
+
 export const AnalyticsSkillsSection = ({
   showSkeleton,
   cards
 }: {
   showSkeleton: boolean;
   cards: AiSkillCard[];
-}) => (
-  <DashboardCard>
-    <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <CardTitle>Skills IA</CardTitle>
-            <Badge variant="neutral">avancé</Badge>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Badge variant="neutral">Futur</Badge>
-            <Badge variant="neutral">Activation auto</Badge>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge variant="neutral">
-            <CheckCircle2 className="mr-1 h-3 w-3" />
-            Sans nouvelle API
-          </Badge>
-          <Badge variant="neutral">États vides</Badge>
-        </div>
-      </div>
-    </CardHeader>
-    <CardContent className="grid gap-5 px-5 pt-6 sm:grid-cols-2 sm:px-6 xl:grid-cols-4">
-      {showSkeleton
-        ? Array.from({ length: 8 }).map((_, index) => (
-            <Skeleton key={index} className="h-52 rounded-2xl" />
-          ))
-        : cards.map((card) => (
-            <AiSkillCardView key={card.id} card={card} />
-          ))}
-    </CardContent>
-  </DashboardCard>
-);
+}) => {
+  const visibleCards = cards.filter(
+    (card) =>
+      visibleSkillIds.has(card.id) &&
+      card.status === "active" &&
+      card.items.length > 0
+  );
+  const summaryCard = visibleCards.find((card) => card.id === "ai-summary") ?? null;
+  const secondaryCards = visibleCards.filter((card) => card.id !== "ai-summary");
 
+  if (!showSkeleton && visibleCards.length === 0) {
+    return null;
+  }
+
+  return (
+    <DashboardCard>
+      <CardContent className="px-5 pt-6 sm:px-6">
+        <AnalyticsDisclosure
+          title="Skills IA"
+          badge={showSkeleton ? "chargement" : `${visibleCards.length} carte(s)`}
+          summary={
+            showSkeleton
+              ? "Chargement des capacités disponibles."
+              : "Résumé, opportunités, risques, avis."
+          }
+        >
+          <div className="space-y-5">
+            {showSkeleton ? (
+              <>
+                <Skeleton className="h-64 rounded-2xl" />
+                <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <Skeleton key={index} className="h-52 rounded-2xl" />
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                {summaryCard && <AiSummaryHero card={summaryCard} />}
+                {secondaryCards.length > 0 && (
+                  <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                    {secondaryCards.map((card) => (
+                      <AiSkillCardView key={card.id} card={card} />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </AnalyticsDisclosure>
+      </CardContent>
+    </DashboardCard>
+  );
+};
 export const AnalyticsKpiPanel = ({
   selectedKpiDefinition,
   onClose,
@@ -1218,7 +1304,6 @@ export const AnalyticsKpiPanel = ({
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="mb-2 flex flex-wrap gap-2">
-              <Badge variant="neutral">Indicateur</Badge>
               <TrendPill
                 state={selectedKpiDefinition.trend}
                 label={selectedKpiDefinition.delta}

@@ -27,6 +27,7 @@ import { cn } from "../lib/utils";
 import type { AnalyticsDrilldown } from "../types/analytics";
 import { analyticsQueryKey, fetchAnalyticsBundle } from "../queries/analytics";
 import {
+  AiSkillCardView,
   AnalyticsDisclosure,
   AnalyticsAssistant,
   AnalyticsKpiCard,
@@ -122,7 +123,7 @@ const decisionLevelMeta = {
 
 const getDecisionRisk = (item: DecisionItem): string => {
   if (item.level === "ok") {
-    return "Aucun risque immédiat détecté sur ce point, mais le niveau doit être maintenu.";
+    return "Niveau à maintenir.";
   }
   return item.consequence;
 };
@@ -145,23 +146,23 @@ const getDecisionAction = (
 
 const getDecisionImpact = (item: DecisionItem): string => {
   if (item.id.includes("reply") || item.id.includes("delay")) {
-    return "Améliorer la perception de réactivité et renforcer la confiance client.";
+    return "Réactivité plus visible.";
   }
   if (item.id.includes("reviews")) {
-    return "Renforcer l'activité visible de la fiche et soutenir la visibilité Google.";
+    return "Fiche plus active.";
   }
   if (item.id.includes("rating") || item.id.includes("negative")) {
-    return "Limiter la baisse de confiance et protéger la note moyenne.";
+    return "Note mieux protégée.";
   }
   if (item.id.includes("sentiment") || item.id.includes("irritant")) {
-    return "Réduire les irritants récurrents et stabiliser la satisfaction client.";
+    return "Irritants mieux suivis.";
   }
   if (item.id.includes("positive")) {
-    return "Transformer un point fort client en argument commercial visible.";
+    return "Point fort plus visible.";
   }
   return item.level === "ok"
-    ? "Maintenir la qualité perçue et consolider les signaux positifs."
-    : "Réduire le risque sur la réputation et rendre l'action plus lisible.";
+    ? "Qualité perçue maintenue."
+    : "Risque réputation réduit.";
 };
 
 const getAssistantListImpact = (
@@ -169,10 +170,10 @@ const getAssistantListImpact = (
   type: "opportunity" | "risk" | "action"
 ): string => {
   if (type === "opportunity") {
-    return "Rendre ce point fort plus visible dans les réponses et la communication.";
+    return "À valoriser dans vos réponses.";
   }
   if (type === "risk") {
-    return "Réduire le risque avant qu'il n'affecte davantage la réputation.";
+    return "À traiter avant impact réputation.";
   }
   return item.detail;
 };
@@ -1219,7 +1220,7 @@ const Analytics = ({
         id: "today-reviews",
         label: "Nouveaux avis",
         value: String(todayPoint.review_count),
-        detail: "Avis reçus aujourd'hui dans les données chargées.",
+        detail: "Reçus aujourd'hui.",
         Icon: MessageSquareReply,
         tone: todayPoint.review_count > 0 ? "good" : "neutral"
       });
@@ -1232,8 +1233,8 @@ const Analytics = ({
         value: String(responseBreakdown.pending),
         detail:
           responseBreakdown.pending > 0
-            ? "Backlog de réponses à traiter."
-            : "Aucun avis mesuré en attente.",
+            ? "À traiter."
+            : "Rien en attente.",
         Icon: ListChecks,
         tone: responseBreakdown.pending > 0 ? "warn" : "good"
       });
@@ -1245,7 +1246,7 @@ const Analytics = ({
         id: "yesterday-evolution",
         label: "Depuis hier",
         value: formatDeltaCount(delta),
-        detail: `${todayPoint.review_count} avis aujourd'hui vs ${yesterdayPoint.review_count} hier.`,
+        detail: `${todayPoint.review_count} aujourd'hui · ${yesterdayPoint.review_count} hier.`,
         Icon: TrendingUp,
         tone: delta > 0 ? "good" : delta < 0 ? "warn" : "neutral"
       });
@@ -1309,7 +1310,7 @@ const Analytics = ({
           responseBreakdown.pending === 1
             ? "Répondre à 1 avis restant."
             : `Répondre aux ${responseBreakdown.pending} avis restants.`,
-        detail: "Traiter les avis sans réponse visibles dans la période sélectionnée.",
+        detail: "Avis sans réponse.",
         action: "Ouvrir la boîte",
         path: "/inbox",
         tone: "warn"
@@ -1345,7 +1346,7 @@ const Analytics = ({
       addTask({
         id: "collect-reviews-low",
         title: "Continuer la collecte d'avis.",
-        detail: `${overview.kpis.reviews_total} avis sur la période sélectionnée.`,
+        detail: `${overview.kpis.reviews_total} avis sur la période.`,
         action: "Voir Fidélité",
         path: "/loyalty",
         tone: "neutral"
@@ -1357,7 +1358,7 @@ const Analytics = ({
       addTask({
         id: `capitalize-${topPositive.label}`,
         title: "Capitaliser sur la satisfaction client.",
-        detail: `${topPositive.label} revient dans ${topPositive.count} avis.`,
+        detail: `${topPositive.label} · ${topPositive.count} avis.`,
         action: "Analyser",
         path: "/coach",
         tone: "good"
@@ -1369,7 +1370,7 @@ const Analytics = ({
       addTask({
         id: `review-irritant-${topIrritant.label}`,
         title: "Lire les avis liés au point de vigilance.",
-        detail: `${topIrritant.label} revient dans ${topIrritant.count} avis.`,
+        detail: `${topIrritant.label} · ${topIrritant.count} avis.`,
         action: "Voir les avis",
         path: "/inbox",
         tone: "warn"
@@ -1404,8 +1405,8 @@ const Analytics = ({
     return [
       defineAiSkill({
         id: "ai-health-score",
-        title: "Score Santé IA",
-        badge: healthScore ? `${healthScore.value}/100` : "en attente",
+        title: "Assistant IA",
+        badge: healthScore ? healthScore.status : "en attente",
         Icon: Sparkles,
         tone: "dark",
         status: healthScore ? "active" : "empty",
@@ -1413,12 +1414,11 @@ const Analytics = ({
           ? [
               {
                 label: healthScore.status,
-                detail: `${healthScore.availableSignals} signaux disponibles`
+                detail: "Les analyses essentielles sont disponibles."
               }
             ]
           : [],
-        emptyLabel:
-          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+        emptyLabel: "Activée avec plus de données."
       }),
       defineAiSkill({
         id: "ai-summary",
@@ -1428,8 +1428,7 @@ const Analytics = ({
         tone: "neutral",
         status: automaticSummary.length > 0 ? "active" : "empty",
         items: automaticSummary.map((line) => ({ label: line })),
-        emptyLabel:
-          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+        emptyLabel: "Activée avec plus de données."
       }),
       defineAiSkill({
         id: "ai-opportunities",
@@ -1439,8 +1438,7 @@ const Analytics = ({
         tone: "good",
         status: opportunities.length > 0 ? "active" : "empty",
         items: opportunities,
-        emptyLabel:
-          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+        emptyLabel: "Activée avec plus de données."
       }),
       defineAiSkill({
         id: "ai-risks",
@@ -1450,8 +1448,7 @@ const Analytics = ({
         tone: risks.length > 0 ? "warn" : "neutral",
         status: risks.length > 0 ? "active" : "empty",
         items: risks,
-        emptyLabel:
-          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+        emptyLabel: "Activée avec plus de données."
       }),
       defineAiSkill({
         id: "ai-winback",
@@ -1461,8 +1458,7 @@ const Analytics = ({
         tone: "neutral",
         status: "soon",
         items: [],
-        emptyLabel:
-          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+        emptyLabel: "Activée avec plus de données."
       }),
       defineAiSkill({
         id: "ai-reply-needed",
@@ -1482,8 +1478,7 @@ const Analytics = ({
             : responseBreakdown
               ? [{ label: "Aucun avis en attente", detail: "Tous les avis mesurés sont traités" }]
               : [],
-        emptyLabel:
-          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+        emptyLabel: "Activée avec plus de données."
       }),
       defineAiSkill({
         id: "ai-forecast",
@@ -1493,8 +1488,7 @@ const Analytics = ({
         tone: "neutral",
         status: "soon",
         items: [],
-        emptyLabel:
-          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+        emptyLabel: "Activée avec plus de données."
       }),
       defineAiSkill({
         id: "ai-actions",
@@ -1504,8 +1498,7 @@ const Analytics = ({
         tone: "neutral",
         status: recommendedActions.length > 0 ? "active" : "empty",
         items: recommendedActions,
-        emptyLabel:
-          "Cette Skill sera activée automatiquement lorsque suffisamment de données seront disponibles."
+        emptyLabel: "Activée avec plus de données."
       })
     ];
   }, [
@@ -1524,6 +1517,13 @@ const Analytics = ({
   ].slice(0, 4);
   const assistantMainRecommendation = priorityActions[0] ?? null;
   const assistantPendingReplies = responseBreakdown?.pending ?? null;
+  const aiActionsCard =
+    aiSkillCards.find(
+      (card) =>
+        card.id === "ai-actions" &&
+        card.status === "active" &&
+        card.items.length > 0
+    ) ?? null;
 
   const locationLabelById = useMemo(() => {
     return new Map(
@@ -1631,31 +1631,31 @@ const Analytics = ({
       {
         id: "location-ranking",
         title: "Classement des établissements",
-        detail: "Classement disponible dès que les métriques par établissement seront chargées.",
+        detail: "Métriques par établissement requises.",
         Icon: BarChart3
       },
       {
         id: "location-best-progress",
         title: "Meilleure progression",
-        detail: "Progression comparée entre établissements, sans classement tant que les données locales manquent.",
+        detail: "Comparaison dès que les données existent.",
         Icon: TrendingUp
       },
       {
         id: "location-watch",
         title: "Établissement à surveiller",
-        detail: "Signal d'attention basé sur les avis, la note, les réponses et les irritants par établissement.",
+        detail: "Signal basé sur avis, note et réponses.",
         Icon: AlertTriangle
       },
       {
         id: "location-review-volume",
         title: "Contribution au volume d'avis",
-        detail: "Part de chaque établissement dans le volume total d'avis.",
+        detail: "Part du volume total.",
         Icon: MessageSquareReply
       },
       {
         id: "location-rating-contribution",
         title: "Contribution à la note globale",
-        detail: "Impact de chaque établissement sur la note moyenne globale.",
+        detail: "Impact sur la note globale.",
         Icon: Star
       }
     ],
@@ -1749,10 +1749,6 @@ const Analytics = ({
           <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="neutral" className="bg-white">
-                  <LineChart className="mr-1 h-3 w-3" />
-                  Analytics
-                </Badge>
                 {overview && overview.data_status !== "ok" && (
                   <Badge variant="warning">{reasonLabel || "Données partielles"}</Badge>
                 )}
@@ -1765,11 +1761,6 @@ const Analytics = ({
               <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
                 Cockpit réputation
               </h2>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Badge variant="neutral">Tendances</Badge>
-                <Badge variant="neutral">Actions</Badge>
-                <Badge variant="neutral">Thèmes</Badge>
-              </div>
             </div>
 
             <div className="grid gap-3 rounded-2xl border border-slate-200/70 bg-white/80 p-3 shadow-[0_12px_30px_rgba(15,23,42,0.04)] sm:grid-cols-2 xl:min-w-[560px] xl:grid-cols-[1.2fr_0.9fr_auto]">
@@ -1901,7 +1892,6 @@ const Analytics = ({
               <div className="flex items-center gap-2">
                 <CardTitle>Aujourd'hui</CardTitle>
                 <Badge variant="neutral">{todayBrief.dateLabel}</Badge>
-                <Badge variant="neutral">pilotage</Badge>
               </div>
             </div>
             {todayBrief.metrics.length > 0 && (
@@ -1945,7 +1935,7 @@ const Analytics = ({
                 ))}
               </div>
             ) : (
-              <EmptyState label="Aucune tâche prioritaire avec les données actuelles." />
+              <EmptyState label="Aucune tâche prioritaire." />
             )}
           </section>
         </CardContent>
@@ -2114,7 +2104,6 @@ const Analytics = ({
                             className="rounded-2xl bg-white/85 p-4"
                           >
                             <div className="flex flex-wrap items-center gap-2">
-                              <Badge variant="success">Constat</Badge>
                               <p className="text-sm font-semibold text-slate-950">
                                 {item.title}
                               </p>
@@ -2133,7 +2122,7 @@ const Analytics = ({
                         ))}
                       </div>
                     ) : (
-                      <EmptyState label="Aucune opportunité détectée avec les données actuelles." />
+                      <EmptyState label="Aucune opportunité détectée." />
                     )}
                   </div>
 
@@ -2152,7 +2141,6 @@ const Analytics = ({
                             className="rounded-2xl bg-white/85 p-4"
                           >
                             <div className="flex flex-wrap items-center gap-2">
-                              <Badge variant="warning">Risque</Badge>
                               <p className="text-sm font-semibold text-slate-950">
                                 {item.title}
                               </p>
@@ -2172,7 +2160,7 @@ const Analytics = ({
                         ))}
                       </div>
                     ) : (
-                      <EmptyState label="Aucun risque détecté avec les données actuelles." />
+                      <EmptyState label="Aucun risque détecté." />
                     )}
                   </div>
                 </div>
@@ -2222,12 +2210,17 @@ const Analytics = ({
               </AnalyticsDisclosure>
       </AnalyticsAssistant>
 
+      {aiActionsCard && (
+        <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+          <AiSkillCardView card={aiActionsCard} />
+        </section>
+      )}
+
       <DashboardCard>
         <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex items-center gap-2">
               <CardTitle>Réputation</CardTitle>
-              <Badge variant="neutral">tendance</Badge>
             </div>
             <select
               className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
@@ -2290,7 +2283,6 @@ const Analytics = ({
           <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
             <div className="flex items-center justify-between gap-3">
               <CardTitle>Périodes</CardTitle>
-              <Badge variant="neutral">périodes</Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-5 px-5 pt-6 sm:px-6">
@@ -2352,7 +2344,6 @@ const Analytics = ({
           <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
             <div className="flex items-center justify-between gap-3">
               <CardTitle>Réponses</CardTitle>
-              <Badge variant="neutral">qualité</Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-5 px-5 pt-6 sm:px-6">
@@ -2395,7 +2386,6 @@ const Analytics = ({
           <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
             <div className="flex items-center justify-between gap-3">
               <CardTitle>Sentiment</CardTitle>
-              <Badge variant="neutral">répartition</Badge>
             </div>
           </CardHeader>
           <CardContent className="px-5 pt-6 sm:px-6">
@@ -2433,10 +2423,6 @@ const Analytics = ({
                 <Badge variant={hasMultipleLocations ? "success" : "neutral"}>
                   {locations.length} établissement{locations.length > 1 ? "s" : ""}
                 </Badge>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Badge variant="neutral">Multi-sites</Badge>
-                <Badge variant="neutral">Sans classement fictif</Badge>
               </div>
             </div>
             <Badge variant="neutral">
@@ -2520,7 +2506,7 @@ const Analytics = ({
                   </KpiDetailSection>
 
                   <KpiDetailSection title="Avis concernés">
-                    <EmptyState label="La liste détaillée des avis n'est pas disponible dans les données déjà chargées pour cet indicateur." />
+                    <EmptyState label="Détail des avis indisponible." />
                   </KpiDetailSection>
                 </>
               )}
@@ -2540,11 +2526,11 @@ const Analytics = ({
                   </KpiDetailSection>
 
                   <KpiDetailSection title="Avis ayant fait monter la note">
-                    <EmptyState label="Les avis individuels qui font monter la note ne sont pas disponibles dans les données déjà chargées." />
+                    <EmptyState label="Détail indisponible." />
                   </KpiDetailSection>
 
                   <KpiDetailSection title="Avis ayant fait baisser la note">
-                    <EmptyState label="Les avis individuels qui font baisser la note ne sont pas disponibles dans les données déjà chargées." />
+                    <EmptyState label="Détail indisponible." />
                   </KpiDetailSection>
                 </>
               )}
@@ -2583,15 +2569,15 @@ const Analytics = ({
                   </KpiDetailSection>
 
                   <KpiDetailSection title="Avis répondus">
-                    <EmptyState label="La liste des avis répondus n'est pas disponible dans les données déjà chargées." />
+                    <EmptyState label="Liste indisponible." />
                   </KpiDetailSection>
 
                   <KpiDetailSection title="Avis non répondus">
-                    <EmptyState label="La liste des avis non répondus n'est pas disponible dans les données déjà chargées." />
+                    <EmptyState label="Liste indisponible." />
                   </KpiDetailSection>
 
                   <KpiDetailSection title="Réponses > 7 jours">
-                    <EmptyState label="Le détail des réponses de plus de 7 jours n'est pas disponible dans les données déjà chargées." />
+                    <EmptyState label="Détail indisponible." />
                   </KpiDetailSection>
                 </>
               )}
@@ -2618,15 +2604,15 @@ const Analytics = ({
                   </div>
 
                   <KpiDetailSection title="Histogramme">
-                    <EmptyState label="L'histogramme des délais n'est pas disponible dans les données déjà chargées." />
+                    <EmptyState label="Histogramme indisponible." />
                   </KpiDetailSection>
 
                   <KpiDetailSection title="Évolution">
-                    <EmptyState label="L'évolution du délai moyen n'est pas disponible dans les données déjà chargées." />
+                    <EmptyState label="Évolution indisponible." />
                   </KpiDetailSection>
 
                   <KpiDetailSection title="Avis les plus lents">
-                    <EmptyState label="La liste des avis les plus lents n'est pas disponible dans les données déjà chargées." />
+                    <EmptyState label="Liste indisponible." />
                   </KpiDetailSection>
                 </>
               )}
@@ -2654,7 +2640,7 @@ const Analytics = ({
                           ))}
                       </div>
                     ) : (
-                      <EmptyState label="Aucun thème positif disponible dans les données chargées." />
+                      <EmptyState label="Aucun thème positif." />
                     )}
                   </KpiDetailSection>
 
@@ -2675,12 +2661,12 @@ const Analytics = ({
                           ))}
                       </div>
                     ) : (
-                      <EmptyState label="Aucun thème négatif disponible dans les données chargées." />
+                      <EmptyState label="Aucun thème négatif." />
                     )}
                   </KpiDetailSection>
 
                   <KpiDetailSection title="Avis concernés">
-                    <EmptyState label="La liste des avis par sentiment n'est pas disponible dans les données déjà chargées." />
+                    <EmptyState label="Liste indisponible." />
                   </KpiDetailSection>
                 </>
               )}
@@ -2712,12 +2698,12 @@ const Analytics = ({
                           ))}
                       </div>
                     ) : (
-                      <EmptyState label="Aucun irritant disponible dans les données chargées." />
+                      <EmptyState label="Aucun irritant." />
                     )}
                   </KpiDetailSection>
 
                   <KpiDetailSection title="Avis concernés">
-                    <EmptyState label="La liste des avis négatifs n'est pas disponible dans les données déjà chargées." />
+                    <EmptyState label="Liste indisponible." />
                   </KpiDetailSection>
                 </>
               )}
@@ -2842,7 +2828,7 @@ const Analytics = ({
                 </div>
                 {selectedTopic.delta === null ? (
                   <div className="mt-4">
-                    <EmptyState label="Pas encore assez de données pour mesurer l'évolution de ce thème." />
+                    <EmptyState label="Évolution non mesurable." />
                   </div>
                 ) : (
                   <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
@@ -2867,9 +2853,8 @@ const Analytics = ({
                   <p className="text-sm font-semibold text-slate-900">
                     Répartition positive / négative
                   </p>
-                  <Badge variant="neutral">si disponible</Badge>
                 </div>
-                <EmptyState label="La répartition positive / négative détaillée n'est pas disponible pour ce thème." />
+                <EmptyState label="Répartition indisponible." />
               </div>
 
               <div className="space-y-3">
@@ -2922,16 +2907,15 @@ const Analytics = ({
                   )}
                 </div>
               ) : !drilldownLoading && !drilldownError ? (
-                <EmptyState label="Aucun avis concerné n'est disponible côté client pour ce thème." />
+                <EmptyState label="Aucun avis disponible." />
               ) : null}
               </div>
 
               <div className="rounded-2xl border border-slate-100/70 bg-white p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <p className="text-sm font-semibold text-slate-900">Réponses associées</p>
-                  <Badge variant="neutral">si disponibles</Badge>
                 </div>
-                <EmptyState label="Aucune réponse associée n'est disponible dans les données chargées pour ce thème." />
+                <EmptyState label="Aucune réponse disponible." />
               </div>
             </CardContent>
           </DashboardCard>
