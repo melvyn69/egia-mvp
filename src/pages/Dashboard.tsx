@@ -1,21 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import {
   AlertTriangle,
   Bell,
   CheckCircle,
-  MapPin,
+  Globe2,
   MessageSquare,
+  Phone,
   RefreshCw
 } from "lucide-react";
 import { BusinessHealthScoreCard } from "../components/coach/BusinessHealthScore";
 import { buildBusinessHealthScoreModel } from "../components/coach/businessHealthScoreModel";
 import { GoogleConnectionBadge } from "../components/GoogleConnectionBadge";
-import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
+import { buildAreaPath, buildLinePath } from "./analytics/utils";
 import {
   type AppNotificationBase,
   type AppNotification,
@@ -192,6 +193,25 @@ const formatCount = (value: number | null | undefined): string =>
 const formatScore = (value: number | null): string =>
   value === null ? "—" : value.toFixed(2);
 
+const formatDisplayUrl = (value: string | null): string => {
+  const rawValue = value?.trim();
+  if (!rawValue) {
+    return "—";
+  }
+
+  try {
+    const parsedUrl = new URL(
+      /^https?:\/\//i.test(rawValue) ? rawValue : `https://${rawValue}`
+    );
+    const hostname = parsedUrl.hostname.replace(/^www\./i, "");
+    const pathname =
+      parsedUrl.pathname === "/" ? "" : parsedUrl.pathname.replace(/\/$/, "");
+    return `${hostname}${pathname}${parsedUrl.search}${parsedUrl.hash}`;
+  } catch {
+    return rawValue;
+  }
+};
+
 const getKpiReason = (reasons?: string[]): string => {
   if (!reasons || reasons.length === 0) {
     return "Pas assez de données";
@@ -209,6 +229,111 @@ const getKpiReason = (reasons?: string[]): string => {
     return "Source incompatible";
   }
   return "Pas assez de données";
+};
+
+const DashboardSparkline = ({
+  values,
+  tone = "neutral"
+}: {
+  values: Array<number | null>;
+  tone?: "neutral" | "positive" | "critical";
+}) => {
+  const width = 150;
+  const height = 38;
+  const validValues = values.filter(
+    (value): value is number => typeof value === "number" && Number.isFinite(value)
+  );
+  const stroke =
+    tone === "positive" ? "#059669" : tone === "critical" ? "#e11d48" : "#0f172a";
+
+  if (validValues.length < 2) {
+    return (
+      <div className="flex h-9 items-center">
+        <div className="h-px w-full bg-slate-200" />
+      </div>
+    );
+  }
+
+  const min = Math.min(...validValues);
+  const max = Math.max(...validValues);
+  const lineMin = min === max ? min - 1 : min;
+  const lineMax = min === max ? max + 1 : max;
+  const path = buildLinePath(values, lineMin, lineMax, width, height, 5);
+  const area = buildAreaPath(path, values, width, height, 5);
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      aria-label="Mini tendance"
+      className="h-9 w-full"
+      preserveAspectRatio="none"
+    >
+      <path d={area} fill={stroke} opacity="0.08" />
+      <path
+        d={path}
+        fill="none"
+        stroke={stroke}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2.4"
+      />
+    </svg>
+  );
+};
+
+const CompactEmptyState = ({
+  icon,
+  title,
+  description,
+  tone = "neutral"
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  tone?: "neutral" | "success" | "info";
+}) => {
+  const toneClass =
+    tone === "success"
+      ? {
+          shell: "border-emerald-200 bg-emerald-50/70",
+          icon: "border-emerald-200 bg-white text-emerald-700",
+          title: "text-emerald-900",
+          description: "text-emerald-700/80"
+        }
+      : tone === "info"
+        ? {
+            shell: "border-sky-200 bg-sky-50/60",
+            icon: "border-sky-200 bg-white text-sky-700",
+            title: "text-sky-950",
+            description: "text-sky-700/80"
+          }
+        : {
+            shell: "border-slate-200 bg-slate-50/80",
+            icon: "border-slate-200 bg-white text-slate-600",
+            title: "text-slate-900",
+            description: "text-slate-500"
+          };
+
+  return (
+    <div className={`rounded-xl border px-3 py-2.5 ${toneClass.shell}`}>
+      <div className="flex items-start gap-2.5">
+        <span
+          className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border ${toneClass.icon}`}
+        >
+          {icon}
+        </span>
+        <div className="min-w-0">
+          <p className={`text-sm font-semibold leading-5 ${toneClass.title}`}>
+            {title}
+          </p>
+          <p className={`mt-0.5 text-xs leading-5 ${toneClass.description}`}>
+            {description}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const getPresetLabel = (preset: string): string => {
@@ -939,11 +1064,79 @@ const Dashboard = ({
 
   const aiSamples = aiKpiData?.sentiment.samples ?? 0;
   const aiTrend = aiKpiData?.trend ?? [];
+  const activeAiTrend = aiTrend.filter(
+    (point) =>
+      point.samples > 0 ||
+      point.avgScore !== null ||
+      point.criticalCount > 0
+  );
+  const latestAiTrendPoint =
+    activeAiTrend[activeAiTrend.length - 1] ?? aiTrend[aiTrend.length - 1] ?? null;
+  const aiTopTags = aiKpiData?.topTags ?? [];
+  const aiSentimentBreakdown = [
+    {
+      label: "Positif",
+      value: aiKpiData?.sentiment.positivePct ?? null,
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700"
+    },
+    {
+      label: "Neutre",
+      value: aiKpiData?.sentiment.neutralPct ?? null,
+      className: "border-slate-200 bg-slate-50 text-slate-600"
+    },
+    {
+      label: "Négatif",
+      value: aiKpiData?.sentiment.negativePct ?? null,
+      className: "border-rose-200 bg-rose-50 text-rose-700"
+    },
+    {
+      label: "Mixte",
+      value: aiKpiData?.sentiment.mixedPct ?? null,
+      className: "border-amber-200 bg-amber-50 text-amber-700"
+    }
+  ];
+  const dominantAiSentiment = aiSentimentBreakdown.reduce<
+    (typeof aiSentimentBreakdown)[number] | null
+  >((current, item) => {
+    if (item.value === null) {
+      return current;
+    }
+    if (!current || item.value > (current.value ?? 0)) {
+      return item;
+    }
+    return current;
+  }, null);
+  const aiMetricCards = [
+    {
+      label: "Score moyen",
+      value: aiKpiLoading ? "…" : formatScore(aiKpiData?.avgScore ?? null),
+      caption: aiSamples === 0 ? "En attente de signal" : `Sur ${aiSamples} avis`,
+      sparklineValues: aiTrend.map((point) => point.avgScore),
+      sparklineTone: "positive" as const
+    },
+    {
+      label: "Avis analysés",
+      value: aiKpiLoading ? "…" : formatCount(aiSamples),
+      caption: aiSamples === 0 ? "Aucun avis qualifié" : "Sur la période",
+      sparklineValues: aiTrend.map((point) => point.samples),
+      sparklineTone: "neutral" as const
+    },
+    {
+      label: "Avis critiques",
+      value: aiKpiLoading ? "…" : formatCount(aiKpiData?.priorityCount ?? null),
+      caption: aiSamples === 0 ? "Rien à prioriser" : "À traiter en priorité",
+      sparklineValues: aiTrend.map((point) => point.criticalCount),
+      sparklineTone: "critical" as const
+    }
+  ];
+  const activeLocationsCount = locations.filter((location) =>
+    selectedActiveIds.includes(location.id)
+  ).length;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold text-slate-900">{greetingText}</h2>
+    <div className="space-y-4">
+      <div className="-mb-2">
+        <h2 className="text-sm font-medium text-slate-500">{greetingText}</h2>
       </div>
 
       <BusinessHealthScoreCard
@@ -952,331 +1145,505 @@ const Dashboard = ({
         loading={kpiLoading || aiKpiLoading || coach.isLoading}
       />
 
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="text-xs font-semibold text-slate-500">
-              Lieu
-            </label>
-            <select
-              className="mt-1 w-56 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-              value={kpiLocationId}
-              onChange={(event) => setKpiLocationId(event.target.value)}
-            >
-              <option value="all">Toutes les fiches</option>
-              {locations.map((location) => (
-                <option
-                  key={location.location_resource_name}
-                  value={location.location_resource_name}
-                >
-                  {location.location_title ?? location.location_resource_name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-slate-500">
-              Période
-            </label>
-            <select
-              className="mt-1 w-44 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-              value={kpiPreset}
-              onChange={(event) =>
-                setKpiPreset(event.target.value as typeof kpiPreset)
-              }
-            >
-              <option value="this_week">Cette semaine</option>
-              <option value="this_month">Ce mois</option>
-              <option value="this_quarter">Ce trimestre</option>
-              <option value="last_quarter">Trimestre précédent</option>
-              <option value="this_year">Cette année</option>
-              <option value="last_year">Année dernière</option>
-              <option value="all_time">Depuis toujours</option>
-              <option value="custom">Personnalisé</option>
-            </select>
-          </div>
-          {kpiPreset === "custom" && (
-            <div className="flex items-center gap-2">
-              <input
-                type="date"
-                className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                value={kpiFrom}
-                onChange={(event) => setKpiFrom(event.target.value)}
-              />
-              <input
-                type="date"
-                className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                value={kpiTo}
-                onChange={(event) => setKpiTo(event.target.value)}
-              />
+      <section className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.055)]">
+        <div className="border-b border-slate-100/70 bg-gradient-to-br from-white via-white to-slate-50/80 px-5 py-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[14rem]">
+              <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                Lieu
+              </label>
+              <select
+                className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm normal-case tracking-normal text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+                value={kpiLocationId}
+                onChange={(event) => setKpiLocationId(event.target.value)}
+              >
+                <option value="all">Toutes les fiches</option>
+                {locations.map((location) => (
+                  <option
+                    key={location.location_resource_name}
+                    value={location.location_resource_name}
+                  >
+                    {location.location_title ?? location.location_resource_name}
+                  </option>
+                ))}
+              </select>
             </div>
-          )}
-          {kpiError && (
-            <span className="text-xs text-amber-700">{kpiError}</span>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void queryClient.invalidateQueries({ queryKey: ["kpi-summary"] });
-              void queryClient.invalidateQueries({ queryKey: ["ai-kpis"] });
-            }}
-          >
-            Rafraîchir
-          </Button>
+            <div className="min-w-[11rem]">
+              <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                Période
+              </label>
+              <select
+                className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm normal-case tracking-normal text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+                value={kpiPreset}
+                onChange={(event) =>
+                  setKpiPreset(event.target.value as typeof kpiPreset)
+                }
+              >
+                <option value="this_week">Cette semaine</option>
+                <option value="this_month">Ce mois</option>
+                <option value="this_quarter">Ce trimestre</option>
+                <option value="last_quarter">Trimestre précédent</option>
+                <option value="this_year">Cette année</option>
+                <option value="last_year">Année dernière</option>
+                <option value="all_time">Depuis toujours</option>
+                <option value="custom">Personnalisé</option>
+              </select>
+            </div>
+            {kpiPreset === "custom" && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  className="h-10 w-40 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+                  value={kpiFrom}
+                  onChange={(event) => setKpiFrom(event.target.value)}
+                />
+                <input
+                  type="date"
+                  className="h-10 w-40 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+                  value={kpiTo}
+                  onChange={(event) => setKpiTo(event.target.value)}
+                />
+              </div>
+            )}
+            {kpiError && (
+              <span className="text-xs text-amber-700">{kpiError}</span>
+            )}
+            <span className="pb-3 text-xs font-medium text-slate-500">
+              Période: {getPresetLabel(kpiPreset)}
+            </span>
+            {kpiLoading && (
+              <span className="pb-3 text-xs font-medium text-slate-400">
+                Actualisation...
+              </span>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-10 rounded-full"
+              onClick={() => {
+                void queryClient.invalidateQueries({ queryKey: ["kpi-summary"] });
+                void queryClient.invalidateQueries({ queryKey: ["ai-kpis"] });
+              }}
+            >
+              Rafraîchir
+            </Button>
+          </div>
         </div>
-        <p className="text-xs text-slate-500">
-          Période: {getPresetLabel(kpiPreset)}
-        </p>
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
           {kpiCards.map((kpi) => (
-            <Card key={kpi.id}>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold text-slate-500">
+            <article
+              key={kpi.id}
+              className="h-full min-w-0 rounded-2xl border border-slate-200/70 bg-white px-4 py-4 text-left shadow-[0_12px_30px_rgba(15,23,42,0.04)] transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_16px_38px_rgba(15,23,42,0.07)]"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
                   {kpi.label}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="flex items-end justify-between">
-                <div>
-                  <p className="text-3xl font-semibold text-slate-900">
-                    {formatKpiValue(kpi.value)}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {formatKpiValue(kpi.caption)}
-                  </p>
-                </div>
-                <Badge variant="neutral">
-                  {kpiLoading ? "..." : " "}
-                </Badge>
-              </CardContent>
-            </Card>
+                </p>
+                <p className="mt-2 truncate text-2xl font-semibold tracking-tight text-slate-950">
+                  {formatKpiValue(kpi.value)}
+                </p>
+              </div>
+              <div className="mt-3">
+                <DashboardSparkline values={[]} />
+              </div>
+              <div className="mt-3">
+                <span className="text-xs text-slate-500">
+                  {formatKpiValue(kpi.caption)}
+                </span>
+              </div>
+            </article>
           ))}
         </div>
-        <div className="text-xs text-slate-500">
-          Tags dominants:{" "}
+        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100/70 px-5 py-3 text-xs text-slate-500">
+          <span className="font-semibold text-slate-600">Tags dominants</span>
           {kpiData?.top_tags?.length
             ? kpiData.top_tags
                 .map((tag) => `${tag.tag} (${tag.count})`)
                 .join(", ")
-            : "—"}
+            : (
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-500">
+                  Aucun thème récurrent sur cette période
+                </span>
+              )}
         </div>
       </section>
 
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-slate-900">Analyse IA</h3>
+      <section className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.055)]">
+        <div className="flex items-center justify-between border-b border-slate-100/70 bg-slate-50/30 px-5 py-4">
+          <h3 className="text-sm font-semibold text-slate-700">Analyse IA</h3>
           {aiKpiError && (
             <span className="text-xs text-amber-700">{aiKpiError}</span>
           )}
         </div>
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-slate-500">
-                Répartition des sentiments
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm text-slate-600">
-              {aiKpiLoading ? (
-                <Skeleton className="h-5 w-24" />
-              ) : aiSamples === 0 ? (
-                <p className="text-xs text-slate-500">Analyse en cours.</p>
-              ) : (
-                <>
-                  <p>Positif: {formatPercent(aiKpiData?.sentiment.positivePct ?? null)}</p>
-                  <p>Neutre: {formatPercent(aiKpiData?.sentiment.neutralPct ?? null)}</p>
-                  <p>Négatif: {formatPercent(aiKpiData?.sentiment.negativePct ?? null)}</p>
-                  <p>Mixte: {formatPercent(aiKpiData?.sentiment.mixedPct ?? null)}</p>
-                </>
-              )}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-slate-500">
-                Score moyen
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-3xl font-semibold text-slate-900">
-                {aiKpiLoading ? "…" : formatScore(aiKpiData?.avgScore ?? null)}
-              </p>
-              <p className="text-xs text-slate-500">
-                {aiSamples === 0 ? "Analyse en cours." : `Sur ${aiSamples} avis`}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-slate-500">
-                Avis analysés
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-3xl font-semibold text-slate-900">
-                {aiKpiLoading ? "…" : formatCount(aiSamples)}
-              </p>
-              <p className="text-xs text-slate-500">
-                {aiSamples === 0 ? "Analyse en cours." : "Sur la période"}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-slate-500">
-                Avis critiques
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-3xl font-semibold text-slate-900">
-                {aiKpiLoading ? "…" : formatCount(aiKpiData?.priorityCount ?? null)}
-              </p>
-              <p className="text-xs text-slate-500">
-                {aiSamples === 0 ? "Analyse en cours." : "À traiter en priorité"}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-slate-500">
-                Top 5 tags IA
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm text-slate-600">
-              {aiKpiLoading ? (
-                <Skeleton className="h-5 w-32" />
-              ) : aiKpiData?.topTags.length ? (
-                <ul className="space-y-1">
-                  {aiKpiData.topTags.map((tag) => (
-                    <li key={tag.tag} className="flex items-center justify-between">
-                      <span>{tag.tag}</span>
-                      <span className="text-xs text-slate-500">
-                        {tag.count}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-slate-500">Aucun tag détecté.</p>
-              )}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-slate-500">
-                Évolution 30 jours
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm text-slate-600">
-              {aiKpiLoading ? (
-                <Skeleton className="h-5 w-40" />
-              ) : aiTrend.length === 0 ? (
-                <p className="text-xs text-slate-500">Analyse en cours.</p>
-              ) : (
-                <div className="max-h-56 space-y-2 overflow-auto pr-2 text-xs">
-                  {aiTrend.map((point) => (
+        <div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,1.05fr)_minmax(300px,0.95fr)]">
+          <article className="h-full min-w-0 rounded-2xl border border-slate-200/70 bg-white px-4 py-4 text-left shadow-[0_12px_30px_rgba(15,23,42,0.04)] transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_16px_38px_rgba(15,23,42,0.07)]">
+            <p className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+              Signal principal
+            </p>
+            {aiKpiLoading ? (
+              <div className="mt-3 space-y-3">
+                <Skeleton className="h-8 w-32" />
+                <Skeleton className="h-6 w-full" />
+              </div>
+            ) : aiSamples === 0 ? (
+              <div className="mt-3">
+                <CompactEmptyState
+                  icon={<MessageSquare className="h-4 w-4" />}
+                  title="Analyse prête à se remplir"
+                  description="Les signaux IA apparaîtront dès que des avis seront qualifiés."
+                  tone="info"
+                />
+              </div>
+            ) : (
+              <div className="mt-3 space-y-4">
+                <div className="flex items-end justify-between gap-4">
+                  <div>
+                    <p className="text-3xl font-semibold tracking-tight text-slate-950">
+                      {dominantAiSentiment?.label ?? "—"}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {formatPercent(dominantAiSentiment?.value ?? null)} des avis analysés
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    {formatCount(aiSamples)} avis
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {aiSentimentBreakdown.map((sentiment) => (
                     <div
-                      key={point.date}
-                      className="flex items-center justify-between"
+                      key={sentiment.label}
+                      className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs font-semibold ${sentiment.className}`}
                     >
-                      <span>{point.date}</span>
-                      <span className="text-slate-500">
-                        Score {formatScore(point.avgScore)} · {point.samples} avis ·{" "}
-                        {point.criticalCount} critiques
-                      </span>
+                      <span>{sentiment.label}</span>
+                      <span>{formatPercent(sentiment.value)}</span>
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+          </article>
+          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+            {aiMetricCards.map((metric) => (
+              <article
+                key={metric.label}
+                className="h-full min-w-0 rounded-2xl border border-slate-200/70 bg-white px-4 py-3 text-left shadow-[0_12px_30px_rgba(15,23,42,0.04)] transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_16px_38px_rgba(15,23,42,0.07)]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                      {metric.label}
+                    </p>
+                    <p className="mt-1 truncate text-2xl font-semibold tracking-tight text-slate-950">
+                      {metric.value}
+                    </p>
+                  </div>
+                  <span className="mt-1 text-xs text-slate-500">
+                    {metric.caption}
+                  </span>
+                </div>
+                <div className="mt-2">
+                  <DashboardSparkline
+                    values={metric.sparklineValues}
+                    tone={metric.sparklineTone}
+                  />
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+        <div className="grid gap-4 px-5 pb-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+          <article className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                Thèmes dominants
+              </p>
+              <span className="text-xs font-medium text-slate-500">
+                Top {aiTopTags.length || 0}
+              </span>
+            </div>
+            <div className="mt-3">
+              {aiKpiLoading ? (
+                <Skeleton className="h-20 w-full" />
+              ) : aiTopTags.length ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {aiTopTags.map((tag, index) => (
+                    <div
+                      key={tag.tag}
+                      className={
+                        index === 0
+                          ? "rounded-xl border border-slate-300 bg-slate-950 px-3 py-2 text-white"
+                          : "rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700"
+                      }
+                    >
+                      <p className="truncate text-sm font-semibold">{tag.tag}</p>
+                      <p
+                        className={
+                          index === 0
+                            ? "mt-1 text-xs text-white/70"
+                            : "mt-1 text-xs text-slate-500"
+                        }
+                      >
+                        {tag.count} mention{tag.count > 1 ? "s" : ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <CompactEmptyState
+                  icon={<MessageSquare className="h-4 w-4" />}
+                  title="Aucun thème dominant"
+                  description="Les motifs récurrents seront regroupés ici dès qu’ils ressortent."
+                />
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </article>
+
+          <article className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                Évolution 30 jours
+              </p>
+              <span className="text-xs font-medium text-slate-500">
+                {activeAiTrend.length}/{aiTrend.length || 30} jours actifs
+              </span>
+            </div>
+            <div className="mt-3">
+              {aiKpiLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : aiTrend.length === 0 ? (
+                <CompactEmptyState
+                  icon={<MessageSquare className="h-4 w-4" />}
+                  title="Pas encore de tendance"
+                  description="La courbe se construira dès que des avis analysés existent sur la période."
+                  tone="info"
+                />
+              ) : (
+                <>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p className="text-xs font-semibold text-slate-500">
+                        Dernier score
+                      </p>
+                      <p className="mt-1 text-xl font-semibold text-slate-950">
+                        {formatScore(latestAiTrendPoint?.avgScore ?? null)}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {latestAiTrendPoint?.date ?? "—"}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p className="text-xs font-semibold text-slate-500">
+                        Avis analysés
+                      </p>
+                      <p className="mt-1 text-xl font-semibold text-slate-950">
+                        {formatCount(latestAiTrendPoint?.samples)}
+                      </p>
+                      <p className="text-xs text-slate-500">dernier point</p>
+                    </div>
+                    <div className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2">
+                      <p className="text-xs font-semibold text-rose-600">
+                        Critiques
+                      </p>
+                      <p className="mt-1 text-xl font-semibold text-rose-700">
+                        {formatCount(latestAiTrendPoint?.criticalCount)}
+                      </p>
+                      <p className="text-xs text-rose-600/80">dernier point</p>
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <DashboardSparkline
+                      values={aiTrend.map((point) => point.avgScore)}
+                      tone="positive"
+                    />
+                  </div>
+                  <details className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <summary className="cursor-pointer text-xs font-semibold text-slate-500">
+                      Détail journalier
+                    </summary>
+                    <div className="mt-2 max-h-28 space-y-1.5 overflow-auto pr-2 text-xs">
+                      {activeAiTrend.length === 0 ? (
+                        <p className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-slate-500">
+                          Aucun jour actif à détailler pour l’instant.
+                        </p>
+                      ) : (
+                        activeAiTrend.map((point) => (
+                          <div
+                            key={point.date}
+                            className="flex items-center justify-between gap-3 border-t border-slate-200/70 pt-1.5 first:border-t-0 first:pt-0"
+                          >
+                            <span className="text-slate-600">{point.date}</span>
+                            <span className="text-right text-slate-500">
+                              Score {formatScore(point.avgScore)} · {point.samples} avis ·{" "}
+                              {point.criticalCount} critiques
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </details>
+                </>
+              )}
+            </div>
+          </article>
         </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="space-y-2">
-            <GoogleConnectionBadge status={googleStatus} />
-            <a href="/connect" className="text-xs font-semibold text-ink underline">
-              Gérer la connexion Google
-            </a>
+      <section
+        id="locations-section"
+        className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.055)]"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100/70 bg-slate-50/30 px-5 py-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-semibold text-slate-800">
+                Lieux connectés
+              </h2>
+              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
+                {locations.length} fiche{locations.length > 1 ? "s" : ""}
+              </span>
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                {activeLocationsCount} active
+                {activeLocationsCount > 1 ? "s" : ""}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <GoogleConnectionBadge status={googleStatus} />
+              <a
+                href="/connect"
+                className="text-xs font-semibold text-ink underline underline-offset-2"
+              >
+                Gérer la connexion Google
+              </a>
+            </div>
             {googleStatus === "reauth_required" && googleLastError && (
-              <p className="text-xs text-amber-700">
+              <p className="mt-1 text-xs text-amber-700">
                 Dernière erreur: {googleLastError}
               </p>
             )}
           </div>
-          {googleStatus === "connected" && (
+          <div className="flex flex-wrap items-center gap-2">
+            {googleStatus === "connected" && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 gap-2 rounded-full"
+                onClick={onSyncLocations}
+                disabled={syncing || syncDisabled}
+              >
+                <RefreshCw className={syncing ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+                {syncing ? "Synchronisation..." : "Synchroniser maintenant"}
+              </Button>
+            )}
             <Button
               variant="outline"
-              onClick={onSyncLocations}
-              disabled={syncing || syncDisabled}
+              size="sm"
+              className="h-9 gap-2 rounded-full"
+              onClick={saveActiveLocations}
+              disabled={activeLocationsSaving || locationsLoading}
             >
-              {syncing ? "Synchronisation..." : "Synchroniser maintenant"}
+              <CheckCircle className="h-4 w-4" />
+              {activeLocationsSaving ? "Enregistrement..." : "Enregistrer"}
             </Button>
-          )}
-        </div>
-      </section>
-
-      <section id="locations-section">
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-semibold text-slate-900">
-            Lieux connectes
-          </h2>
-          <Button
-            variant="outline"
-            onClick={saveActiveLocations}
-            disabled={activeLocationsSaving || locationsLoading}
-          >
-            {activeLocationsSaving ? "Enregistrement..." : "Enregistrer"}
-          </Button>
+          </div>
         </div>
         {locationsError && (
-          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+          <div className="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
             {locationsError}
           </div>
         )}
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <div className="grid gap-2 p-4 md:grid-cols-2">
           {locationsLoading &&
             Array.from({ length: 2 }).map((_, index) => (
-              <Card key={`skeleton-${index}`}>
-                <CardContent className="space-y-3 pt-6">
+              <Card
+                key={`skeleton-${index}`}
+                className="border-slate-200/70 bg-white/75 shadow-none"
+              >
+                <CardContent className="space-y-2 p-3">
                   <Skeleton className="h-5 w-2/3" />
-                  <Skeleton className="h-4 w-1/2" />
+                  <Skeleton className="h-3 w-1/2" />
                 </CardContent>
               </Card>
             ))}
           {!locationsLoading && locations.length === 0 && (
-            <Card>
-              <CardContent className="space-y-2 pt-6 text-sm text-slate-500">
-                <p>Aucun lieu synchronise pour le moment.</p>
-                <p>Utilisez le bouton de synchronisation pour charger vos lieux.</p>
+            <Card className="border-slate-200/70 bg-white/75 shadow-none md:col-span-2">
+              <CardContent className="p-3">
+                <CompactEmptyState
+                  icon={<Globe2 className="h-4 w-4" />}
+                  title="Aucune fiche connectée"
+                  description="Synchronisez Google pour afficher vos fiches et gérer leur statut ici."
+                  tone="info"
+                />
               </CardContent>
             </Card>
           )}
           {!locationsLoading &&
-            locations.map((location) => (
-              <Card key={location.id}>
-                <CardContent className="flex items-center justify-between gap-4 pt-6">
-                  <div>
-                    <p className="text-lg font-semibold text-slate-900">
-                      {location.location_title ??
-                        location.location_resource_name}
-                    </p>
-                    {location.phone && (
-                      <div className="mt-2 flex items-center gap-2 text-sm text-slate-500">
-                        <MapPin size={14} />
-                        {location.phone}
+            locations.map((location) => {
+              const isActive = selectedActiveIds.includes(location.id);
+              const displayUrl = formatDisplayUrl(location.website_uri);
+              return (
+                <Card
+                  key={location.id}
+                  className={
+                    isActive
+                      ? "border-emerald-200/80 bg-emerald-50/35 shadow-none"
+                      : "border-slate-200/70 bg-white/80 shadow-none"
+                  }
+                >
+                  <CardContent className="grid gap-3 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <p
+                          className="truncate text-sm font-semibold text-slate-900"
+                          title={
+                            location.location_title ??
+                            location.location_resource_name
+                          }
+                        >
+                          {location.location_title ??
+                            location.location_resource_name}
+                        </p>
+                        <span
+                          className={
+                            isActive
+                              ? "shrink-0 rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+                              : "shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500"
+                          }
+                        >
+                          {isActive ? "Actif" : "Inactif"}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    <label className="flex items-center justify-end gap-2 text-sm font-semibold text-slate-900">
+                      <div className="mt-1.5 grid min-w-0 gap-1 text-xs text-slate-500">
+                        {location.phone && (
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <Phone className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{location.phone}</span>
+                          </div>
+                        )}
+                        {location.website_uri && (
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <Globe2 className="h-3.5 w-3.5 shrink-0" />
+                            <span
+                              className="truncate font-medium text-slate-600"
+                              title={location.website_uri}
+                            >
+                              {displayUrl}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <label
+                      className={
+                        isActive
+                          ? "inline-flex items-center justify-end gap-2 rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700"
+                          : "inline-flex items-center justify-end gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600"
+                      }
+                    >
                       <input
                         type="checkbox"
-                        checked={selectedActiveIds.includes(location.id)}
+                        className="h-4 w-4 accent-slate-950"
+                        checked={isActive}
                         onChange={(event) => {
                           const checked = event.target.checked;
                           setSelectedActiveIds((prev) =>
@@ -1286,92 +1653,93 @@ const Dashboard = ({
                           );
                         }}
                       />
-                      {selectedActiveIds.includes(location.id) ? "Actif" : "Inactif"}
+                      {isActive ? "Activée" : "Désactivée"}
                     </label>
-                    {location.website_uri && (
-                      <p className="text-xs text-slate-500">
-                        {location.website_uri}
-                      </p>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              );
+            })}
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>À traiter maintenant</CardTitle>
-            <p className="text-sm text-slate-500">
-              Les actions prioritaires du moment.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {urgentActionsCount === 0 ? (
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-slate-900">
-                  Tout est sous contrôle.
-                </p>
+      <section>
+        <Card className="border-slate-200/70 bg-white/65 shadow-sm">
+          <CardContent className="grid gap-4 p-4 lg:grid-cols-[minmax(220px,0.42fr)_minmax(0,1fr)]">
+            <div className="space-y-3">
+              <div>
+                <CardTitle className="text-base">À traiter maintenant</CardTitle>
                 <p className="text-xs text-slate-500">
-                  Aucun avis urgent à traiter.
+                  File courte des points qui méritent une réponse.
                 </p>
               </div>
-            ) : (
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-slate-900">
-                  {urgentActionsCount} action
-                  {urgentActionsCount > 1 ? "s" : ""} urgente
-                  {urgentActionsCount > 1 ? "s" : ""}.
-                </p>
-                <p className="text-xs text-slate-500">
-                  Priorité aux avis négatifs sans réponse.
-                </p>
-              </div>
-            )}
-            <Button onClick={handleOpenInbox}>Aller à la boîte de réception</Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Activité récente</CardTitle>
-            <p className="text-sm text-slate-500">
-              Derniers événements utiles (max 5).
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {recentActivities.length === 0 ? (
-              <p className="text-sm text-slate-500">Aucune activité récente.</p>
-            ) : (
-              recentActivities.map((notif) => (
-                <div
-                  key={notif.id}
-                  className="flex items-start gap-3 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0"
-                >
-                  <div className="mt-0.5">
-                    {getNotificationIcon(notif.kind, notif.severity)}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-slate-900">
-                      {notif.title || "Événement"}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {notif.message || "—"}
-                    </p>
-                    <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
-                      <span>
-                        {notif.locationId
-                          ? `Lieu : ${getLocationName(notif.locationId)}`
-                          : "Tous les lieux"}
-                      </span>
-                      <span>{formatRelativeTime(notif.createdAt)}</span>
-                    </div>
-                  </div>
+              {urgentActionsCount === 0 ? (
+                <CompactEmptyState
+                  icon={<CheckCircle className="h-4 w-4" />}
+                  title="Tout est sous contrôle"
+                  description="Aucun avis urgent ni alerte client ne demande d’action."
+                  tone="success"
+                />
+              ) : (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-900">
+                    {urgentActionsCount} action
+                    {urgentActionsCount > 1 ? "s" : ""} urgente
+                    {urgentActionsCount > 1 ? "s" : ""}.
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Priorité aux avis négatifs sans réponse.
+                  </p>
                 </div>
-              ))
-            )}
+              )}
+              <Button size="sm" variant="outline" onClick={handleOpenInbox}>
+                Aller à la boîte de réception
+              </Button>
+            </div>
+
+            <div className="border-t border-slate-200 pt-4 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+              <div>
+                <CardTitle className="text-base">Activité récente</CardTitle>
+                <p className="text-xs text-slate-500">
+                  Derniers signaux utiles, limités aux 5 plus récents.
+                </p>
+              </div>
+              <div className="mt-3 space-y-3">
+                {recentActivities.length === 0 ? (
+                  <CompactEmptyState
+                    icon={<Bell className="h-4 w-4" />}
+                    title="Aucune activité récente"
+                    description="Rien de nouveau à signaler depuis la dernière synchronisation."
+                  />
+                ) : (
+                  recentActivities.map((notif) => (
+                    <div
+                      key={notif.id}
+                      className="flex items-start gap-3 border-b border-slate-100 pb-3 last:border-b-0 last:pb-0"
+                    >
+                      <div className="mt-0.5">
+                        {getNotificationIcon(notif.kind, notif.severity)}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-slate-900">
+                          {notif.title || "Événement"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {notif.message || "—"}
+                        </p>
+                        <div className="mt-1.5 flex items-center justify-between gap-3 text-xs text-slate-500">
+                          <span>
+                            {notif.locationId
+                              ? `Lieu : ${getLocationName(notif.locationId)}`
+                              : "Tous les lieux"}
+                          </span>
+                          <span>{formatRelativeTime(notif.createdAt)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </CardContent>
         </Card>
       </section>
