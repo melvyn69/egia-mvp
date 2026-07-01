@@ -174,7 +174,7 @@ const buildAiSummary = (params: {
   return sentences.slice(0, 5);
 };
 
-const buildHtml = (params: {
+export type PremiumReportPayload = {
   title: string;
   subtitle: string;
   locationsLabel: string;
@@ -207,10 +207,101 @@ const buildHtml = (params: {
     positiveCount: number;
     negativeCount: number;
   }>;
-}) => {
+};
+
+const buildHtml = (params: PremiumReportPayload) => {
   const tags = params.ai.topTags.slice(0, 10);
-  const tagsLeft = tags.slice(0, Math.ceil(tags.length / 2));
-  const tagsRight = tags.slice(Math.ceil(tags.length / 2));
+  const generatedDate = formatDate(new Date());
+  const coverName = params.locationsLabel
+    .replace(/^Établissement:\s*/i, "")
+    .replace(/^Établissements:\s*/i, "")
+    .trim();
+  const businessHealthScore = "—";
+  const ratingPercent =
+    params.kpis.avgRating === null
+      ? 0
+      : Math.max(0, Math.min(100, (params.kpis.avgRating / 5) * 100));
+  const responsePercent =
+    params.kpis.responseRate === null
+      ? 0
+      : Math.max(0, Math.min(100, params.kpis.responseRate * 100));
+  const summaryItems = params.aiSummary.length ? params.aiSummary : ["—"];
+  const findSummary = (patterns: RegExp[], fallbackIndex = 0) =>
+    summaryItems.find((item) => patterns.some((pattern) => pattern.test(item))) ??
+    summaryItems[fallbackIndex] ??
+    "—";
+  const mainInsight = summaryItems[0] ?? "—";
+  const strengthInsight = findSummary(
+    [/note moyenne/i, /taux de réponse/i, /maîtrisée/i],
+    0
+  );
+  const weaknessInsight = findSummary(
+    [/négatif/i, /critique/i, /nécessitent/i],
+    1
+  );
+  const priorityInsight = findSummary([/priorit/i, /nécessitent/i], 0);
+  const highImpactActions = summaryItems
+    .filter((item) => /priorit|nécessitent|critique/i.test(item))
+    .slice(0, 2);
+  const mediumImpactActions = summaryItems
+    .filter(
+      (item) =>
+        !highImpactActions.includes(item) &&
+        /taux de réponse|note moyenne|négatif/i.test(item)
+    )
+    .slice(0, 2);
+  const lowImpactActions = summaryItems
+    .filter(
+      (item) =>
+        !highImpactActions.includes(item) &&
+        !mediumImpactActions.includes(item) &&
+        /sujets|récurrents/i.test(item)
+    )
+    .slice(0, 2);
+  const renderInsightCard = (
+    label: string,
+    value: string,
+    tone: "dark" | "light" | "green" = "light"
+  ) => `
+    <div class="insight-card insight-${tone}">
+      <div class="eyebrow">${escapeHtml(label)}</div>
+      <div class="insight-text">${escapeHtml(value)}</div>
+    </div>
+  `;
+  const renderKpi = (label: string, value: string, note = "") => `
+    <div class="metric-card">
+      <div class="metric-label">${escapeHtml(label)}</div>
+      <div class="metric-value">${escapeHtml(value)}</div>
+      ${note ? `<div class="metric-note">${escapeHtml(note)}</div>` : ""}
+    </div>
+  `;
+  const renderTag = (tag: { tag: string; count: number }) => `
+    <div class="tag-pill">
+      <span>${escapeHtml(tag.tag)}</span>
+      <strong>${tag.count}</strong>
+    </div>
+  `;
+  const renderActionItems = (items: string[]) =>
+    (items.length ? items : ["—"])
+      .map((item) => `<div class="action-item">${escapeHtml(item)}</div>`)
+      .join("");
+  const renderMiniLocationCards = () =>
+    params.perLocation
+      .slice(0, 6)
+      .map(
+        (row) => `
+          <div class="location-card">
+            <div class="location-name">${escapeHtml(row.name)}</div>
+            <div class="location-grid">
+              <span>${row.reviewsTotal} avis</span>
+              <span>${formatRating(row.avgRating)}</span>
+              <span>${formatRatio(row.responseRate)}</span>
+              <span>${row.untreatedNegativeCount} à traiter</span>
+            </div>
+          </div>
+        `
+      )
+      .join("");
 
   return `
   <!doctype html>
@@ -218,312 +309,642 @@ const buildHtml = (params: {
     <head>
       <meta charset="utf-8" />
       <style>
-        @page { size: A4; margin: 18mm; }
+        @page { size: A4; }
+        * { box-sizing: border-box; }
         body {
           margin: 0;
-          font-family: "Inter", "Helvetica", sans-serif;
-          color: #0b0f14;
+          font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+          color: #0f172a;
+          background: #ffffff;
         }
         .page {
-          font-size: 13px;
-          line-height: 1.55;
+          min-height: 250mm;
+          page-break-after: always;
+          position: relative;
+          display: flex;
+          flex-direction: column;
+          gap: 22px;
+          padding: 2mm 0;
         }
-        .header {
+        .page:last-child {
+          page-break-after: auto;
+        }
+        .brand {
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.24em;
+          font-weight: 800;
+          color: #0f172a;
+        }
+        .page-kicker {
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          color: #64748b;
+        }
+        .page-title {
+          margin: 6px 0 0;
+          font-size: 34px;
+          line-height: 1.05;
+          letter-spacing: -0.04em;
+          font-weight: 760;
+          color: #0f172a;
+        }
+        h1 {
+          margin: 0;
+        }
+        .muted {
+          color: #64748b;
+        }
+        .cover {
+          justify-content: space-between;
+          padding-top: 4mm;
+          padding-bottom: 4mm;
+        }
+        .cover-top {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          margin-bottom: 18px;
+          gap: 24px;
         }
-        .brand {
-          font-size: 11px;
-          text-transform: uppercase;
-          letter-spacing: 0.12em;
-          color: #6b7280;
-          margin-bottom: 6px;
+        .cover-title {
+          margin-top: 38px;
+          max-width: 470px;
         }
-        h1 {
-          font-size: 26px;
-          margin: 0 0 4px 0;
+        .cover-title h1 {
+          font-size: 54px;
+          line-height: 0.96;
+          letter-spacing: -0.055em;
+          font-weight: 780;
         }
-        .subtitle {
-          color: #6b7280;
-          font-size: 12px;
-        }
-        .divider {
-          height: 1px;
-          background: #e5e7eb;
-          margin: 16px 0;
-        }
-        .card {
-          border: 1px solid #e5e7eb;
-          border-radius: 12px;
-          padding: 14px;
-          background: #fafafa;
-        }
-        .kpi-grid {
+        .cover-meta {
+          margin-top: 20px;
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 12px;
+          max-width: 430px;
         }
-        .kpi-label {
-          font-size: 11px;
+        .meta-card,
+        .metric-card,
+        .insight-card,
+        .action-card,
+        .theme-column,
+        .location-card {
+          border-radius: 18px;
+          background: #f8fafc;
+          padding: 16px;
+        }
+        .meta-label,
+        .metric-label,
+        .eyebrow {
+          font-size: 12px;
+          line-height: 1.2;
+          font-weight: 740;
           text-transform: uppercase;
-          letter-spacing: 0.08em;
-          color: #6b7280;
+          letter-spacing: 0.09em;
+          color: #64748b;
         }
-        .kpi-value {
-          font-size: 20px;
-          font-weight: 600;
+        .meta-value {
+          margin-top: 8px;
+          font-size: 18px;
+          line-height: 1.25;
+          font-weight: 740;
+          color: #0f172a;
+        }
+        .score-hero {
+          margin-top: 30px;
+          border-radius: 28px;
+          padding: 26px;
+          min-height: 210px;
+          color: #ffffff;
+          background:
+            linear-gradient(135deg, #0f172a 0%, #111827 48%, #10b981 145%);
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 170px;
+          gap: 28px;
+          align-items: center;
+          overflow: hidden;
+          position: relative;
+        }
+        .score-hero::after {
+          content: "";
+          position: absolute;
+          right: -70px;
+          bottom: -95px;
+          width: 260px;
+          height: 260px;
+          border-radius: 44px;
+          border: 1px solid rgba(255,255,255,0.18);
+          transform: rotate(18deg);
+        }
+        .score-label {
+          font-size: 12px;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          font-weight: 760;
+          color: #a7f3d0;
+        }
+        .score-value {
+          margin-top: 10px;
+          font-size: 76px;
+          line-height: 0.9;
+          letter-spacing: -0.06em;
+          font-weight: 780;
+        }
+        .visual-stack {
+          display: grid;
+          gap: 10px;
+          position: relative;
+          z-index: 1;
+        }
+        .visual-bar {
+          height: 14px;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.22);
+        }
+        .visual-bar:nth-child(1) { width: 100%; }
+        .visual-bar:nth-child(2) { width: 78%; }
+        .visual-bar:nth-child(3) { width: 56%; }
+        .visual-card {
+          margin-top: 16px;
+          border-radius: 20px;
+          padding: 18px;
+          background: rgba(255,255,255,0.10);
+          border: 1px solid rgba(255,255,255,0.16);
+        }
+        .section-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 20px;
+        }
+        .section-header .muted {
+          margin-top: 8px;
+          max-width: 420px;
+          font-size: 13px;
+          line-height: 1.5;
+        }
+        .summary-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 14px;
+        }
+        .insight-card {
+          min-height: 118px;
+        }
+        .insight-dark {
+          background: #0f172a;
+          color: #ffffff;
+        }
+        .insight-dark .eyebrow {
+          color: #cbd5e1;
+        }
+        .insight-green {
+          background: #ecfdf5;
+        }
+        .insight-light {
+          background: #f8fafc;
+        }
+        .insight-text {
+          margin-top: 12px;
+          font-size: 17px;
+          line-height: 1.38;
+          font-weight: 650;
+        }
+        .metric-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 14px;
+        }
+        .metric-card {
+          min-height: 126px;
+        }
+        .metric-value {
+          margin-top: 12px;
+          font-size: 38px;
+          line-height: 0.96;
+          letter-spacing: -0.045em;
+          font-weight: 780;
+          color: #0f172a;
+        }
+        .metric-note {
+          margin-top: 10px;
+          font-size: 12px;
+          line-height: 1.35;
+          color: #64748b;
+        }
+        .chart-panel {
+          margin-top: 18px;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 22px;
+          align-items: stretch;
+        }
+        .chart-block {
+          padding: 8px 0;
+        }
+        .chart-title {
+          font-size: 14px;
+          font-weight: 740;
+          color: #0f172a;
+          margin-bottom: 14px;
+        }
+        .big-bar {
+          height: 26px;
+          border-radius: 999px;
+          background: #e2e8f0;
+          overflow: hidden;
+        }
+        .big-bar span {
+          display: block;
+          height: 100%;
+          border-radius: 999px;
+          background: #0f172a;
+        }
+        .rating-band {
+          margin-top: 22px;
+          display: grid;
+          gap: 10px;
         }
         .stars {
           display: flex;
           align-items: center;
-          gap: 6px;
-          margin-top: 4px;
-        }
-        .kpi-note {
-          margin-top: 12px;
-          padding-top: 12px;
-          border-top: 1px solid #e5e7eb;
-        }
-        .section-title {
+          gap: 7px;
           font-size: 16px;
-          margin: 18px 0 8px;
+          color: #0f172a;
         }
-        .tags {
+        .volume-strip {
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 10px;
+          margin-top: 22px;
+        }
+        .strip-item {
+          border-radius: 16px;
+          background: #f8fafc;
+          padding: 14px;
+        }
+        .strip-value {
+          font-size: 26px;
+          font-weight: 760;
+          letter-spacing: -0.04em;
+        }
+        .theme-grid,
+        .action-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 14px;
+        }
+        .theme-column,
+        .action-card {
+          min-height: 176px;
+        }
+        .theme-title,
+        .action-title {
+          font-size: 13px;
+          line-height: 1.2;
+          font-weight: 780;
+          color: #0f172a;
+          margin-bottom: 14px;
+        }
+        .tag-pill {
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
+          padding: 10px 0;
+          border-bottom: 1px solid #e2e8f0;
+          font-size: 13px;
+          line-height: 1.35;
+        }
+        .tag-pill:last-child {
+          border-bottom: 0;
+        }
+        .tag-pill strong {
+          color: #64748b;
+        }
+        .text-list {
+          display: grid;
+          gap: 10px;
+          font-size: 13px;
+          line-height: 1.45;
+          color: #334155;
+        }
+        .action-item {
+          border-radius: 14px;
+          background: #ffffff;
+          padding: 12px;
+          font-size: 13px;
+          line-height: 1.45;
+          color: #334155;
+          border: 1px solid #e2e8f0;
+        }
+        .action-high {
+          background: #ecfdf5;
+        }
+        .location-list {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 6px 20px;
-          font-size: 12px;
-          color: #374151;
-        }
-        .tag {
-          display: flex;
-          gap: 6px;
-        }
-        .tag::before {
-          content: "•";
-          color: #9ca3af;
-        }
-        .reviews {
-          display: grid;
           gap: 12px;
         }
-        .review {
-          padding-bottom: 10px;
-          border-bottom: 1px solid #eef2f7;
+        .location-name {
+          font-size: 14px;
+          font-weight: 740;
+          color: #0f172a;
+          margin-bottom: 12px;
         }
-        .review:last-child {
-          border-bottom: none;
-        }
-        .review-meta {
-          font-size: 11px;
-          color: #6b7280;
-          display: flex;
+        .location-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
           gap: 8px;
-          flex-wrap: wrap;
-        }
-        .review-rating {
-          color: #111827;
-          font-weight: 600;
-        }
-        .review-text {
-          margin-top: 4px;
-          color: #111827;
-        }
-        .summary {
-          margin: 8px 0 0;
-          padding-left: 16px;
-          color: #111827;
-        }
-        .summary li {
-          margin-bottom: 6px;
-        }
-        .table {
-          width: 100%;
-          border-collapse: collapse;
           font-size: 12px;
+          color: #64748b;
         }
-        .table th,
-        .table td {
-          padding: 6px 8px;
-          border-bottom: 1px solid #eef2f7;
-          text-align: left;
+        .conclusion-panel {
+          margin-top: auto;
+          border-radius: 28px;
+          padding: 28px;
+          background: #0f172a;
+          color: #ffffff;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 180px;
+          gap: 30px;
+          align-items: end;
         }
-        .table th {
-          color: #6b7280;
-          font-weight: 600;
+        .conclusion-panel .eyebrow {
+          color: #a7f3d0;
+        }
+        .conclusion-text {
+          margin-top: 12px;
+          font-size: 28px;
+          line-height: 1.15;
+          letter-spacing: -0.035em;
+          font-weight: 740;
+        }
+        .page-number {
+          position: absolute;
+          right: 0;
+          bottom: 0;
+          font-size: 10px;
+          letter-spacing: 0.12em;
           text-transform: uppercase;
-          font-size: 10px;
-          letter-spacing: 0.06em;
-        }
-        .untreated-item {
-          border-bottom: 1px solid #eef2f7;
-          padding-bottom: 10px;
-          margin-bottom: 10px;
-        }
-        .untreated-item:last-child {
-          border-bottom: none;
-          margin-bottom: 0;
-          padding-bottom: 0;
-        }
-        .footer {
-          margin-top: 18px;
-          font-size: 10px;
-          color: #9ca3af;
-          text-align: right;
+          color: #94a3b8;
         }
       </style>
     </head>
     <body>
-      <div class="page">
-        <div class="header">
+      <section class="page cover">
+        <div class="cover-top">
+          <div class="brand">EGIA</div>
           <div>
-            <div class="brand">EGIA</div>
-            <h1>${escapeHtml(params.title)}</h1>
-            <div class="subtitle">${escapeHtml(params.subtitle)}</div>
-            <div class="subtitle">${escapeHtml(params.locationsLabel)}</div>
+            <div class="page-kicker">Rapport Premium</div>
+            <div class="muted" style="font-size:12px;margin-top:4px;">${escapeHtml(generatedDate)}</div>
           </div>
         </div>
-        <div class="divider"></div>
-        <div class="card">
-          <div class="kpi-grid">
-            <div>
-              <div class="kpi-label">Volume d’avis (période)</div>
-              <div class="kpi-value">${params.kpis.reviewsTotal}</div>
+        <div class="cover-title">
+          <div class="page-kicker">Nom établissement</div>
+          <h1>${escapeHtml(coverName || params.title)}</h1>
+          <div class="cover-meta">
+            <div class="meta-card">
+              <div class="meta-label">Période</div>
+              <div class="meta-value">${escapeHtml(params.subtitle)}</div>
             </div>
-            <div>
-              <div class="kpi-label">Avis négatifs (historique)</div>
-              <div class="kpi-value">${params.kpis.negativeCount}</div>
+            <div class="meta-card">
+              <div class="meta-label">Date génération</div>
+              <div class="meta-value">${escapeHtml(generatedDate)}</div>
             </div>
-            <div>
-              <div class="kpi-label">Taux de réponse</div>
-              <div class="kpi-value">${formatRatio(params.kpis.responseRate)}</div>
-            </div>
-            <div>
-              <div class="kpi-label">Avis négatifs non traités</div>
-              <div class="kpi-value">${params.kpis.untreatedNegativeCount}</div>
-            </div>
-          </div>
-          <div class="kpi-note">
-            <div class="kpi-label">Note moyenne</div>
-            ${renderStars(params.kpis.avgRating)}
           </div>
         </div>
+        <div class="score-hero">
+          <div>
+            <div class="score-label">Business Health Score</div>
+            <div class="score-value">${businessHealthScore}</div>
+            <div style="margin-top:14px;color:#cbd5e1;font-size:13px;line-height:1.45;">
+              Score affiché uniquement lorsqu'il est présent dans les données du rapport.
+            </div>
+          </div>
+          <div class="visual-stack">
+            <div class="visual-bar"></div>
+            <div class="visual-bar"></div>
+            <div class="visual-bar"></div>
+            <div class="visual-card">
+              <div class="score-label">Executive view</div>
+              <div style="margin-top:8px;font-size:26px;font-weight:760;">${params.kpis.reviewsTotal}</div>
+              <div style="color:#cbd5e1;font-size:12px;">avis analysés</div>
+            </div>
+          </div>
+        </div>
+        <div class="page-number">Page 1</div>
+      </section>
 
-        <h2 class="section-title">Analyse IA</h2>
-        <div class="card">
-          <div class="kpi-grid">
-            <div>
-              <div class="kpi-label">Avis critiques IA</div>
-              <div class="kpi-value">${params.ai.criticalCount}</div>
-            </div>
-          </div>
-          <div class="section-title" style="margin: 14px 0 8px;">Top tags</div>
-          <div class="tags">
-            ${
-              tags.length === 0
-                ? '<div class="tag">—</div>'
-                : tagsLeft
-                    .map(
-                      (tag) =>
-                        `<div class="tag">${escapeHtml(tag.tag)}</div>`
-                    )
-                    .join("") +
-                  tagsRight
-                    .map(
-                      (tag) =>
-                        `<div class="tag">${escapeHtml(tag.tag)}</div>`
-                    )
-                    .join("")
-            }
+      <section class="page">
+        <div class="section-header">
+          <div>
+            <div class="page-kicker">Executive Summary</div>
+            <h1 class="page-title">Ce que l'IA retient</h1>
+            <div class="muted">Principaux signaux consolidés sur la période, sans ajout de données externes.</div>
           </div>
         </div>
-
-        <h2 class="section-title">Résumé IA</h2>
-        <div class="card">
-          <ul class="summary">
-            ${params.aiSummary.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-          </ul>
+        <div class="summary-grid">
+          ${renderInsightCard("Principaux constats", mainInsight, "dark")}
+          ${renderInsightCard("Points forts", strengthInsight, "green")}
+          ${renderInsightCard("Points faibles", weaknessInsight, "light")}
+          ${renderInsightCard("Priorité", priorityInsight, "light")}
         </div>
+        <div class="summary-grid" style="margin-top:14px;">
+          ${summaryItems
+            .slice(0, 4)
+            .map((item, index) =>
+              renderInsightCard(`Constat ${index + 1}`, item, "light")
+            )
+            .join("")}
+        </div>
+        <div class="page-number">Page 2</div>
+      </section>
 
-        <h2 class="section-title">Avis négatifs non traités</h2>
-        <div class="card">
-          ${
-            params.untreatedNegatives.length > 0
-              ? params.untreatedNegatives
-                  .map(
-                    (item) => `
-              <div class="untreated-item">
-                <div class="review-meta">
-                  <span class="review-rating">★ ${formatRating(item.rating)}</span>
-                  <span>${escapeHtml(item.date)}</span>
-                  ${item.author ? `<span>· ${escapeHtml(item.author)}</span>` : ""}
-                  <span>· ${escapeHtml(item.location)}</span>
-                </div>
-                <div class="review-text">${escapeHtml(item.comment)}</div>
+      <section class="page">
+        <div class="section-header">
+          <div>
+            <div class="page-kicker">Performance</div>
+            <h1 class="page-title">Les indicateurs clés</h1>
+            <div class="muted">${escapeHtml(params.subtitle)}</div>
+          </div>
+        </div>
+        <div class="metric-grid">
+          ${renderKpi("Nombre avis", String(params.kpis.reviewsTotal), "Volume sur la période")}
+          ${renderKpi("Note", formatRating(params.kpis.avgRating), "Moyenne des avis")}
+          ${renderKpi("Réponses", formatRatio(params.kpis.responseRate), "Taux de réponse")}
+          ${renderKpi("Evolution", "—", "Non présente dans le payload")}
+        </div>
+        <div class="chart-panel">
+          <div class="chart-block">
+            <div class="chart-title">Lecture rapide</div>
+            <div class="volume-strip">
+              <div class="strip-item">
+                <div class="meta-label">Négatifs</div>
+                <div class="strip-value">${params.kpis.negativeCount}</div>
               </div>
-            `
-                  )
-                  .join("")
-              : "<div class='review-text'>Aucun avis négatif non traité ✅</div>"
-          }
+              <div class="strip-item">
+                <div class="meta-label">À traiter</div>
+                <div class="strip-value">${params.kpis.untreatedNegativeCount}</div>
+              </div>
+              <div class="strip-item">
+                <div class="meta-label">Critiques IA</div>
+                <div class="strip-value">${params.ai.criticalCount}</div>
+              </div>
+            </div>
+          </div>
+          <div class="chart-block">
+            <div class="chart-title">Note moyenne</div>
+            ${renderStars(params.kpis.avgRating)}
+            <div class="big-bar" style="margin-top:14px;">
+              <span style="width:${ratingPercent}%;"></span>
+            </div>
+          </div>
         </div>
+        <div class="page-number">Page 3</div>
+      </section>
 
+      <section class="page">
+        <div class="section-header">
+          <div>
+            <div class="page-kicker">Réputation</div>
+            <h1 class="page-title">Signal réputation</h1>
+            <div class="muted">Graphiques agrandis à partir des indicateurs existants.</div>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-block">
+            <div class="chart-title">Taux de réponse</div>
+            <div style="font-size:56px;line-height:0.95;font-weight:780;letter-spacing:-0.06em;">
+              ${formatRatio(params.kpis.responseRate)}
+            </div>
+            <div class="big-bar" style="margin-top:22px;">
+              <span style="width:${responsePercent}%;background:#10b981;"></span>
+            </div>
+          </div>
+          <div class="chart-block">
+            <div class="chart-title">Volume & risques</div>
+            <div class="volume-strip">
+              <div class="strip-item">
+                <div class="meta-label">Avis</div>
+                <div class="strip-value">${params.kpis.reviewsTotal}</div>
+              </div>
+              <div class="strip-item">
+                <div class="meta-label">Négatifs</div>
+                <div class="strip-value">${params.kpis.negativeCount}</div>
+              </div>
+              <div class="strip-item">
+                <div class="meta-label">Critiques IA</div>
+                <div class="strip-value">${params.ai.criticalCount}</div>
+              </div>
+            </div>
+          </div>
+        </div>
         ${
-          params.perLocation.length > 1
+          params.perLocation.length > 0
             ? `
-        <h2 class="section-title">Détail par établissement</h2>
-        <div class="card">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>Établissement</th>
-                <th># Avis</th>
-                <th>Note moy.</th>
-                <th>Taux réponse</th>
-                <th>Positifs</th>
-                <th>Négatifs</th>
-                <th>Négatifs non traités</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${params.perLocation
-                .slice(0, 8)
-                .map(
-                  (row) => `
-                <tr>
-                  <td>${escapeHtml(row.name)}</td>
-                  <td>${row.reviewsTotal}</td>
-                  <td>${formatRating(row.avgRating)}</td>
-                  <td>${formatRatio(row.responseRate)}</td>
-                  <td>${row.positiveCount}</td>
-                  <td>${row.negativeCount}</td>
-                  <td>${row.untreatedNegativeCount}</td>
-                </tr>
-              `
-                )
-                .join("")}
-              ${
-                params.perLocation.length > 8
-                  ? `<tr><td colspan="6">+${params.perLocation.length - 8} autres…</td></tr>`
-                  : ""
-              }
-            </tbody>
-          </table>
+        <div class="chart-title" style="margin-top:28px;">Établissements</div>
+        <div class="location-list">
+          ${renderMiniLocationCards()}
         </div>
         `
             : ""
         }
-        ${
-          params.notes
-            ? `<h2 class="section-title">Notes</h2><div class="card">${escapeHtml(
-                params.notes
-              )}</div>`
-            : ""
-        }
-        <div class="footer">Généré le ${formatDate(new Date())}</div>
-      </div>
+        <div class="page-number">Page 4</div>
+      </section>
+
+      <section class="page">
+        <div class="section-header">
+          <div>
+            <div class="page-kicker">Thèmes clients</div>
+            <h1 class="page-title">Ce qui ressort</h1>
+            <div class="muted">Thèmes et signaux issus des données déjà présentes dans le rapport.</div>
+          </div>
+        </div>
+        <div class="theme-grid">
+          <div class="theme-column">
+            <div class="theme-title">Points positifs</div>
+            <div class="text-list">
+              <div>${escapeHtml(strengthInsight)}</div>
+            </div>
+          </div>
+          <div class="theme-column">
+            <div class="theme-title">Points négatifs</div>
+            <div class="text-list">
+              <div>${escapeHtml(weaknessInsight)}</div>
+            </div>
+          </div>
+          <div class="theme-column">
+            <div class="theme-title">Opportunités</div>
+            ${tags.length ? tags.slice(0, 5).map(renderTag).join("") : "<div class='text-list'><div>—</div></div>"}
+          </div>
+          <div class="theme-column">
+            <div class="theme-title">Risques</div>
+            <div class="text-list">
+              <div>${params.kpis.untreatedNegativeCount} avis négatifs non traités</div>
+              <div>${params.ai.criticalCount} avis critiques IA</div>
+              ${
+                params.untreatedNegatives[0]
+                  ? `<div>${escapeHtml(params.untreatedNegatives[0].comment)}</div>`
+                  : ""
+              }
+            </div>
+          </div>
+        </div>
+        <div class="page-number">Page 5</div>
+      </section>
+
+      <section class="page">
+        <div class="section-header">
+          <div>
+            <div class="page-kicker">Plan d'action</div>
+            <h1 class="page-title">Priorisation</h1>
+            <div class="muted">Classement éditorial des signaux déjà présents dans la synthèse IA.</div>
+          </div>
+        </div>
+        <div class="action-grid" style="grid-template-columns: repeat(3, 1fr);">
+          <div class="action-card action-high">
+            <div class="action-title">Impact élevé</div>
+            ${renderActionItems(highImpactActions)}
+          </div>
+          <div class="action-card">
+            <div class="action-title">Impact moyen</div>
+            ${renderActionItems(mediumImpactActions)}
+          </div>
+          <div class="action-card">
+            <div class="action-title">Impact faible</div>
+            ${renderActionItems(lowImpactActions)}
+          </div>
+        </div>
+        <div class="page-number">Page 6</div>
+      </section>
+
+      <section class="page">
+        <div class="section-header">
+          <div>
+            <div class="page-kicker">Conclusion</div>
+            <h1 class="page-title">Synthèse finale</h1>
+          </div>
+        </div>
+        <div class="conclusion-panel">
+          <div>
+            <div class="eyebrow">Phrase IA</div>
+            <div class="conclusion-text">${escapeHtml(mainInsight)}</div>
+            <div style="margin-top:26px;display:grid;gap:10px;">
+              <div class="eyebrow">Prochaine action</div>
+              <div style="font-size:16px;line-height:1.45;color:#e2e8f0;">
+                ${escapeHtml(priorityInsight)}
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="score-label">Business Health Score</div>
+            <div class="score-value" style="font-size:68px;">${businessHealthScore}</div>
+          </div>
+        </div>
+        <div class="page-number">Page 7</div>
+      </section>
     </body>
   </html>
   `;
@@ -544,13 +965,21 @@ type GeneratePremiumReportParams = {
   requestId: string;
   userId?: string;
   htmlOnly?: boolean;
+  includeEmailPayload?: boolean;
 };
 
 export const generatePremiumReport = async (
   params: GeneratePremiumReportParams
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> => {
-  const { supabaseAdmin, reportId, requestId, userId, htmlOnly } = params;
+  const {
+    supabaseAdmin,
+    reportId,
+    requestId,
+    userId,
+    htmlOnly,
+    includeEmailPayload
+  } = params;
 
   logRequest("[reports]", { requestId, reportId, renderMode: "premium" });
 
@@ -807,7 +1236,7 @@ export const generatePremiumReport = async (
       aiCriticalCount
     });
 
-    const html = buildHtml({
+    const reportPayload: PremiumReportPayload = {
       title: report.name,
       subtitle: periodLabel,
       locationsLabel,
@@ -826,10 +1255,17 @@ export const generatePremiumReport = async (
       untreatedNegatives: untreatedList,
       aiSummary,
       perLocation
-    });
+    };
+
+    const html = buildHtml(reportPayload);
 
     if (htmlOnly) {
-      return { ok: true, reportId, html };
+      return {
+        ok: true,
+        reportId,
+        html,
+        ...(includeEmailPayload ? { emailPayload: reportPayload } : {})
+      };
     }
 
     const pdfBytes = await renderPdfFromHtml(html);
@@ -873,7 +1309,8 @@ export const generatePremiumReport = async (
     return {
       ok: true,
       reportId,
-      pdf: { path: storagePath, url: signed?.signedUrl ?? null }
+      pdf: { path: storagePath, url: signed?.signedUrl ?? null },
+      ...(includeEmailPayload ? { emailPayload: reportPayload } : {})
     };
   } catch (error) {
     console.error("[reports] generate_html failed", error);

@@ -1,7 +1,10 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
-import { generatePremiumReport } from "../reports/generate_html";
+import {
+  generatePremiumReport,
+  type PremiumReportPayload
+} from "../reports/generate_html";
 
 const getRequestId = (req: VercelRequest) => {
   const header = req.headers["x-vercel-id"] ?? req.headers["x-request-id"];
@@ -57,40 +60,272 @@ const fetchPdfAsBase64 = async (pdfUrl: string) => {
   return toBase64(ab);
 };
 
+const escapeEmailHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const formatEmailRating = (value: number | null | undefined) =>
+  typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(1).replace(".", ",")
+    : "—";
+
+const formatEmailRatio = (value: number | null | undefined) =>
+  typeof value === "number" && Number.isFinite(value)
+    ? `${Math.round(value * 100)}%`
+    : "—";
+
+const getAppBaseUrl = () => {
+  const raw =
+    process.env.APP_URL ??
+    process.env.APP_BASE_URL ??
+    process.env.VITE_APP_BASE_URL ??
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+  return raw.trim().replace(/\/+$/, "");
+};
+
+const renderEmailKpiCard = (label: string, value: string) => `
+  <td class="kpi-cell" style="padding:8px;width:50%;">
+    <div class="kpi-card" style="border:1px solid rgba(15,23,42,0.08);border-radius:18px;background:#ffffff;padding:16px;">
+      <div class="kpi-label" style="font-size:11px;line-height:16px;letter-spacing:.08em;text-transform:uppercase;color:#64748b;font-weight:700;">
+        ${escapeEmailHtml(label)}
+      </div>
+      <div class="kpi-value" style="margin-top:8px;font-size:28px;line-height:32px;color:#0f172a;font-weight:750;">
+        ${escapeEmailHtml(value)}
+      </div>
+    </div>
+  </td>
+`;
+
+const renderEmailChecklist = (items: string[]) =>
+  items
+    .map(
+      (item) => `
+        <div class="check-row" style="display:block;margin:0 0 10px 0;color:#0f172a;font-size:14px;line-height:20px;">
+          <span style="display:inline-block;width:22px;color:#10b981;font-weight:800;">✓</span>${escapeEmailHtml(item)}
+        </div>
+      `
+    )
+    .join("");
+
+const renderEmailBullets = (items: string[]) =>
+  items
+    .map(
+      (item) => `
+        <div style="display:block;margin:0 0 8px 0;color:#0f172a;font-size:14px;line-height:20px;">
+          <span style="display:inline-block;width:18px;color:#64748b;">•</span>${escapeEmailHtml(item)}
+        </div>
+      `
+    )
+    .join("");
+
 const buildMonthlyReportEmailHtml = (opts: {
   firstName?: string | null;
   periodLabel: string;
+  reportUrl: string;
+  appUrl: string;
+  report?: PremiumReportPayload | null;
 }) => {
   const name = (opts.firstName ?? "").trim();
-  const hello = name ? `Bonjour ${name},` : "Bonjour,";
+  const report = opts.report ?? null;
+  const aiFindings = report?.aiSummary.slice(0, 5) ?? [];
+  const priority =
+    aiFindings.find((item) => /priorit|nécessitent une réponse/i.test(item)) ??
+    null;
+  const opportunities =
+    report?.ai.topTags.slice(0, 5).map((tag) => `${tag.tag} (${tag.count})`) ??
+    [];
+  const maybeHealthScore =
+    report &&
+    "businessHealthScore" in report.kpis &&
+    typeof (report.kpis as { businessHealthScore?: unknown })
+      .businessHealthScore === "number"
+      ? String(
+          (report.kpis as { businessHealthScore: number }).businessHealthScore
+        )
+      : null;
+  const kpiCards = [
+    {
+      label: "Business Health Score",
+      value: maybeHealthScore ?? "—"
+    },
+    {
+      label: "Note moyenne",
+      value: formatEmailRating(report?.kpis.avgRating)
+    },
+    {
+      label: "Nombre d'avis",
+      value: report ? String(report.kpis.reviewsTotal) : "—"
+    },
+    {
+      label: "Taux de réponse",
+      value: formatEmailRatio(report?.kpis.responseRate)
+    }
+  ];
+  const kpiRows = [];
+  for (let index = 0; index < kpiCards.length; index += 2) {
+    kpiRows.push(kpiCards.slice(index, index + 2));
+  }
 
   return `
-  <div style="font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f6f7fb;padding:24px;">
-    <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:14px;padding:24px;border:1px solid #e9ebf3;">
-      <h1 style="margin:0 0 12px 0;font-size:20px;line-height:1.3;color:#111827;">
-        Rapport mensuel EGIA – ${opts.periodLabel}
-      </h1>
-      <p style="margin:0 0 14px 0;color:#111827;font-size:14px;line-height:1.6;">
-        ${hello}
-      </p>
-      <p style="margin:0 0 14px 0;color:#111827;font-size:14px;line-height:1.6;">
-        Votre rapport mensuel EGIA pour la période ${opts.periodLabel} est maintenant disponible.
-      </p>
-      <p style="margin:0 0 12px 0;color:#111827;font-size:14px;line-height:1.6;">
-        Vous y trouverez :<br/>
-        • l’analyse de vos avis clients<br/>
-        • les indicateurs clés de performance<br/>
-        • le résumé IA des tendances
-      </p>
-      <p style="margin:0 0 12px 0;color:#111827;font-size:14px;line-height:1.6;">
-        Le rapport est joint à cet email au format PDF.
-      </p>
-      <p style="margin:18px 0 0 0;color:#111827;font-size:14px;line-height:1.6;">
-        Bonne lecture,<br/>
-        L’équipe EGIA
-      </p>
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="supported-color-schemes" content="light dark" />
+    <style>
+      @media screen and (max-width: 640px) {
+        .outer { padding: 18px 12px !important; }
+        .container { width: 100% !important; }
+        .section { padding: 20px !important; }
+        .kpi-cell { display: block !important; width: 100% !important; padding: 6px 0 !important; }
+        .button-wrap { display: block !important; width: 100% !important; margin: 0 0 10px 0 !important; }
+        .button-link { display: block !important; text-align: center !important; }
+      }
+      @media (prefers-color-scheme: dark) {
+        body, .outer { background: #0f172a !important; }
+        .container, .section, .kpi-card { background: #111827 !important; }
+        .hero { background: #101827 !important; }
+        .text-main, .kpi-value, .check-row { color: #f8fafc !important; }
+        .text-muted, .kpi-label, .footer { color: #cbd5e1 !important; }
+        .secondary-button { color: #f8fafc !important; border-color: rgba(248,250,252,0.18) !important; }
+      }
+    </style>
+  </head>
+  <body style="margin:0;background:#f8fafc;padding:0;">
+    <div class="outer" style="background:#f8fafc;padding:36px 18px;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+      <table role="presentation" class="container" style="width:640px;max-width:640px;margin:0 auto;border-collapse:collapse;">
+        <tr>
+          <td style="padding:0 0 18px 0;">
+            <table role="presentation" style="width:100%;border-collapse:collapse;">
+              <tr>
+                <td style="text-align:left;">
+                  <div style="display:inline-block;border-radius:18px;background:#ffffff;padding:12px 16px;border:1px solid rgba(15,23,42,0.08);">
+                    <span style="font-size:18px;letter-spacing:.18em;color:#0f172a;font-weight:800;">EGIA</span>
+                  </div>
+                </td>
+                <td class="text-muted" style="text-align:right;color:#64748b;font-size:12px;line-height:18px;font-weight:650;">
+                  ${escapeEmailHtml(opts.periodLabel)}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td class="hero section" style="background:#ffffff;border:1px solid rgba(15,23,42,0.08);border-radius:20px;padding:28px;">
+            ${
+              name
+                ? `<div class="text-muted" style="margin:0 0 12px 0;color:#64748b;font-size:13px;line-height:18px;font-weight:650;">Bonjour ${escapeEmailHtml(
+                    name
+                  )}</div>`
+                : ""
+            }
+            <h1 class="text-main" style="margin:0;color:#0f172a;font-size:30px;line-height:36px;font-weight:780;letter-spacing:-.02em;">
+              Votre rapport mensuel est prêt
+            </h1>
+            <div class="text-muted" style="margin:10px 0 0;color:#64748b;font-size:15px;line-height:22px;">
+              Voici les principaux enseignements de votre activité.
+            </div>
+            <table role="presentation" style="width:100%;border-collapse:collapse;margin-top:22px;">
+              ${kpiRows
+                .map(
+                  (row) => `
+                    <tr>
+                      ${row
+                        .map((card) => renderEmailKpiCard(card.label, card.value))
+                        .join("")}
+                      ${row.length === 1 ? '<td class="kpi-cell" style="padding:8px;width:50%;"></td>' : ""}
+                    </tr>
+                  `
+                )
+                .join("")}
+            </table>
+          </td>
+        </tr>
+        ${
+          aiFindings.length > 0
+            ? `
+        <tr>
+          <td class="section" style="padding:24px 28px 0;">
+            <div class="text-main" style="color:#0f172a;font-size:18px;line-height:24px;font-weight:760;margin:0 0 14px;">
+              Aujourd'hui l'IA retient
+            </div>
+            ${renderEmailChecklist(aiFindings)}
+          </td>
+        </tr>
+        `
+            : ""
+        }
+        ${
+          priority
+            ? `
+        <tr>
+          <td style="padding:24px 0 0;">
+            <div class="section" style="border-radius:20px;background:#ecfdf5;border:1px solid rgba(16,185,129,0.24);padding:22px 24px;">
+              <div style="color:#065f46;font-size:12px;line-height:16px;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin:0 0 8px;">
+                Priorité du mois
+              </div>
+              <div style="color:#064e3b;font-size:16px;line-height:24px;font-weight:720;">
+                ${escapeEmailHtml(priority)}
+              </div>
+            </div>
+          </td>
+        </tr>
+        `
+            : ""
+        }
+        ${
+          opportunities.length > 0
+            ? `
+        <tr>
+          <td class="section" style="padding:24px 28px 0;">
+            <div class="text-main" style="color:#0f172a;font-size:18px;line-height:24px;font-weight:760;margin:0 0 14px;">
+              Opportunités détectées
+            </div>
+            ${renderEmailBullets(opportunities)}
+          </td>
+        </tr>
+        `
+            : ""
+        }
+        <tr>
+          <td style="padding:28px 0 0;">
+            <table role="presentation" style="border-collapse:collapse;">
+              <tr>
+                <td class="button-wrap" style="padding:0 10px 0 0;">
+                  <a class="button-link" href="${escapeEmailHtml(opts.reportUrl)}" style="display:inline-block;border-radius:999px;background:#0f172a;color:#ffffff;text-decoration:none;font-size:14px;line-height:20px;font-weight:760;padding:13px 20px;">
+                    Consulter le rapport
+                  </a>
+                </td>
+                ${
+                  opts.appUrl
+                    ? `
+                <td class="button-wrap" style="padding:0;">
+                  <a class="button-link secondary-button" href="${escapeEmailHtml(opts.appUrl)}" style="display:inline-block;border-radius:999px;background:transparent;color:#0f172a;text-decoration:none;font-size:14px;line-height:20px;font-weight:760;padding:12px 18px;border:1px solid rgba(15,23,42,0.14);">
+                    Ouvrir EGIA
+                  </a>
+                </td>
+                `
+                    : ""
+                }
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td class="footer" style="padding:28px 0 0;color:#64748b;font-size:11px;line-height:17px;">
+            Vous recevez cet email car les rapports automatiques sont activés.
+          </td>
+        </tr>
+      </table>
     </div>
-  </div>`;
+  </body>
+</html>`;
 };
 
 const buildMonthlyReportSubject = (periodLabel: string) =>
@@ -200,6 +435,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const resendApiKey = process.env.RESEND_API_KEY ?? "";
     const emailFrom = process.env.EMAIL_FROM ?? "";
+    const appUrl = getAppBaseUrl();
 
     let users: string[] = [];
 
@@ -412,6 +648,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let rendered = Boolean(renderedAt);
       let emailed = Boolean(emailedAt);
       let reportUrl: string | null = null;
+      let reportEmailPayload: PremiumReportPayload | null = null;
       let reason: string | undefined;
 
       console.log("[monthly-report] fetching data for period:", fromIso, toIso);
@@ -419,11 +656,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const renderResult = await generatePremiumReport({
           supabaseAdmin,
           reportId: reportIdResolved,
-          requestId
+          requestId,
+          includeEmailPayload: true
         });
         if (renderResult?.pdf?.url) {
           reportUrl = renderResult.pdf.url as string;
         }
+        reportEmailPayload =
+          (renderResult?.emailPayload as PremiumReportPayload | undefined) ??
+          null;
         rendered = true;
         renderedAt = new Date().toISOString();
         await supabaseAdmin
@@ -472,7 +713,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               console.log("[monthly-report] sending email to:", recipient.email);
               const html = buildMonthlyReportEmailHtml({
                 firstName: recipient.firstName,
-                periodLabel
+                periodLabel,
+                reportUrl,
+                appUrl,
+                report: reportEmailPayload
               });
               await sendResendEmail({
                 to: recipient.email,
