@@ -54,38 +54,75 @@ const getPriorityStyle = (
   }
 };
 
+const getDailyCoachSummary = (model: BusinessHealthScoreModel): string => {
+  if (model.nextLevel.remainingPoints === 0) {
+    return "Votre réputation est stabilisée, gardez le rythme aujourd'hui.";
+  }
+
+  if (
+    model.nextLevel.remainingPoints > 0 &&
+    model.nextLevel.remainingPoints <= 10
+  ) {
+    return `Encore ${model.nextLevel.remainingPoints} point${
+      model.nextLevel.remainingPoints > 1 ? "s" : ""
+    } pour atteindre le niveau ${model.nextLevel.label}.`;
+  }
+
+  if (
+    model.nextBestAction.priority === "critical" ||
+    model.nextBestAction.priority === "business"
+  ) {
+    return `Votre priorité du jour : ${model.nextBestAction.label}.`;
+  }
+
+  if (model.trajectory.delta7Days > 0) {
+    return `Votre réputation progresse : ${model.trajectory.trendLabel}.`;
+  }
+
+  if (model.nextBestAction.potentialGain > 0) {
+    return `La prochaine action peut ajouter +${model.nextBestAction.potentialGain} points aujourd'hui.`;
+  }
+
+  return "Une action ciblée aujourd'hui peut renforcer votre score.";
+};
+
 const ScoreRing = ({
   model,
   size = "lg"
 }: {
   model: BusinessHealthScoreModel;
-  size?: "sm" | "md" | "lg" | "xl";
+  size?: "sm" | "md" | "lg" | "xl" | "dashboard";
 }) => {
-  const isHero = size === "xl";
   const ringSize =
     size === "sm"
       ? "h-20 w-20"
       : size === "md"
         ? "h-28 w-28"
-        : size === "xl"
-          ? "h-40 w-40 sm:h-52 sm:w-52"
+        : size === "dashboard"
+          ? "h-36 w-36 sm:h-44 sm:w-44"
+          : size === "xl"
+            ? "h-40 w-40 sm:h-52 sm:w-52"
           : "h-32 w-32";
   const scoreSize =
     size === "sm"
       ? "text-2xl"
       : size === "md"
         ? "text-3xl"
-        : size === "xl"
-          ? "text-6xl sm:text-7xl"
+        : size === "dashboard"
+          ? "text-5xl sm:text-6xl"
+          : size === "xl"
+            ? "text-6xl sm:text-7xl"
           : "text-4xl";
+  const heroShellClass =
+    size === "dashboard"
+      ? "p-2 shadow-[0_24px_70px_-34px_rgba(16,185,129,0.9)]"
+      : size === "xl"
+        ? "p-2.5 shadow-[0_30px_90px_-38px_rgba(16,185,129,0.9)]"
+        : "p-2";
 
   return (
     <div
-      className={`relative flex ${ringSize} items-center justify-center rounded-full ${
-        isHero
-          ? "p-2.5 shadow-[0_30px_90px_-38px_rgba(16,185,129,0.9)]"
-          : "p-2"
-      }`}
+      className={`relative flex ${ringSize} items-center justify-center rounded-full ${heroShellClass}`}
       style={{
         background: `conic-gradient(${model.level.ringColor} ${model.score * 3.6}deg, rgba(148,163,184,0.22) 0deg)`
       }}
@@ -108,13 +145,17 @@ const SuccessDashboardCard = ({
   loading?: boolean;
 }) => {
   const navigate = useNavigate();
+  const dailyCoachSummary = getDailyCoachSummary(model);
 
   return (
     <Card className="overflow-hidden border-slate-900 bg-slate-950 text-white shadow-[0_30px_90px_-42px_rgba(15,23,42,0.95)]">
       <CardContent className="p-0">
-        <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-[190px_minmax(0,1fr)_auto] lg:items-center lg:p-6">
-          <div className="flex justify-center lg:justify-start">
-            <ScoreRing model={model} size="xl" />
+        <div className="grid gap-3 p-3 sm:p-4 lg:grid-cols-[170px_minmax(0,1fr)_auto] lg:items-center lg:p-5">
+          <div className="flex flex-col items-center gap-2 text-center lg:items-start lg:text-left">
+            <ScoreRing model={model} size="dashboard" />
+            <p className="max-w-[11rem] text-xs font-semibold leading-5 text-emerald-100">
+              {dailyCoachSummary}
+            </p>
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -128,7 +169,7 @@ const SuccessDashboardCard = ({
                 </Badge>
               )}
             </div>
-            <h3 className="mt-2 text-2xl font-semibold leading-tight sm:text-3xl">
+            <h3 className="mt-2 text-xl font-semibold leading-tight sm:text-2xl">
               Business Health Score au maximum
             </h3>
             <p className="mt-1 max-w-2xl text-sm text-slate-300">
@@ -160,6 +201,7 @@ const DashboardScoreCard = ({
   const todoItems = model.checklist.filter((item) => !item.complete).slice(0, 3);
   const visibleTodoItems = todoItems.length ? todoItems : model.checklist.slice(0, 3);
   const nextPriorityStyle = getPriorityStyle(model.nextBestAction.priority);
+  const dailyCoachSummary = getDailyCoachSummary(model);
   const objectiveLabel =
     model.nextLevel.label === "Maximum"
       ? "Objectif final"
@@ -168,13 +210,13 @@ const DashboardScoreCard = ({
   return (
     <Card className="overflow-hidden border-slate-900 bg-slate-950 shadow-[0_30px_90px_-42px_rgba(15,23,42,0.95)]">
       <CardContent className="p-0">
-        <div className="bg-slate-950 p-4 text-white sm:p-5 lg:p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="bg-slate-950 p-3 text-white sm:p-4 lg:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
                 Score business
               </p>
-              <h3 className="mt-1 text-3xl font-semibold leading-tight sm:text-4xl">
+              <h3 className="mt-1 text-2xl font-semibold leading-tight sm:text-3xl">
                 Business Health Score
               </h3>
             </div>
@@ -191,11 +233,14 @@ const DashboardScoreCard = ({
             </div>
           </div>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(260px,0.48fr)_minmax(0,1fr)] lg:items-stretch">
-            <div className="flex flex-col items-center justify-between rounded-2xl border border-white/10 bg-slate-900/75 p-4 sm:p-5 lg:items-start">
-              <ScoreRing model={model} size="xl" />
-              <div className="mt-4 grid w-full grid-cols-2 gap-2">
-                <div className="rounded-xl border border-emerald-300/30 bg-emerald-300/10 p-3">
+          <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(240px,0.42fr)_minmax(0,1fr)] lg:items-start">
+            <div className="flex flex-col items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/75 p-3 sm:p-4 lg:items-start">
+              <ScoreRing model={model} size="dashboard" />
+              <p className="max-w-sm text-center text-sm font-semibold leading-5 text-emerald-100 lg:text-left">
+                {dailyCoachSummary}
+              </p>
+              <div className="grid w-full grid-cols-2 gap-2">
+                <div className="rounded-xl border border-emerald-300/30 bg-emerald-300/10 p-2.5">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-200">
                     Score actuel
                   </p>
@@ -203,7 +248,7 @@ const DashboardScoreCard = ({
                     {model.score}/100
                   </p>
                 </div>
-                <div className="rounded-xl border border-white bg-white p-3 text-slate-950">
+                <div className="rounded-xl border border-white bg-white p-2.5 text-slate-950">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                     {objectiveLabel}
                   </p>
@@ -212,14 +257,14 @@ const DashboardScoreCard = ({
                   </p>
                 </div>
               </div>
-              <div className="mt-3 w-full rounded-2xl border border-white/10 bg-white/[0.06] p-3">
+              <div className="w-full rounded-2xl border border-white/10 bg-white/[0.06] p-2.5">
                 <div className="flex items-center justify-between gap-3 text-xs font-semibold text-slate-200">
                   <span>Progression du score</span>
                   <span>
                     {model.completedChecklistCount}/{model.checklist.length} étapes
                   </span>
                 </div>
-                <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-800 ring-1 ring-white/10">
+                <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-800 ring-1 ring-white/10">
                   <div
                     className={`h-full rounded-full ${model.level.progressClass} transition-all duration-700`}
                     style={{ width: `${model.score}%` }}
@@ -234,10 +279,10 @@ const DashboardScoreCard = ({
               </div>
             </div>
 
-            <div className="rounded-2xl border border-emerald-100 bg-white p-4 text-slate-950 shadow-[0_26px_80px_-30px_rgba(15,23,42,0.95)] ring-1 ring-emerald-200/70 sm:p-5">
+            <div className="rounded-2xl border border-emerald-100 bg-white p-3 text-slate-950 shadow-[0_26px_80px_-30px_rgba(15,23,42,0.95)] ring-1 ring-emerald-200/70 sm:p-4">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-950 text-white">
-                  <Target className={nextPriorityStyle.iconClass} size={22} />
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-950 text-white">
+                  <Target className={nextPriorityStyle.iconClass} size={20} />
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
@@ -250,19 +295,19 @@ const DashboardScoreCard = ({
                   </div>
                 </div>
               </div>
-              <p className="mt-4 text-2xl font-semibold leading-tight sm:text-3xl">
+              <p className="mt-3 text-xl font-semibold leading-tight sm:text-2xl">
                 {model.nextBestAction.label}
               </p>
-              <p className="mt-2 max-w-3xl text-sm leading-5 text-slate-600">
+              <p className="mt-1.5 max-w-3xl text-sm leading-5 text-slate-600">
                 {model.nextBestAction.detail}
               </p>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(170px,0.48fr)_minmax(0,1fr)] sm:items-end">
-                <div className="rounded-2xl border border-emerald-500 bg-emerald-600 p-4 text-white shadow-[0_18px_48px_-24px_rgba(5,150,105,0.9)]">
+              <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(160px,0.42fr)_minmax(0,1fr)] sm:items-end">
+                <div className="rounded-2xl border border-emerald-500 bg-emerald-600 p-3 text-white shadow-[0_18px_48px_-24px_rgba(5,150,105,0.9)]">
                   <p className="text-xs font-semibold uppercase tracking-wide text-emerald-50">
                     Gain potentiel
                   </p>
-                  <p className="mt-1 text-4xl font-semibold leading-none sm:text-5xl">
+                  <p className="mt-1 text-4xl font-semibold leading-none">
                     +{model.nextBestAction.potentialGain}
                   </p>
                   <p className="mt-1 text-xs font-semibold text-emerald-50">
@@ -286,8 +331,8 @@ const DashboardScoreCard = ({
             </div>
           </div>
 
-          <div className="mt-3 grid gap-2 sm:grid-cols-3">
-            <div className="rounded-xl border border-white/10 bg-white/[0.04] p-2.5">
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            <div className="rounded-xl border border-white/10 bg-white/[0.04] p-2">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 Progression 7 jours
               </p>
@@ -297,7 +342,7 @@ const DashboardScoreCard = ({
                   : "Non encore mesurée"}
               </p>
             </div>
-            <div className="rounded-xl border border-white/10 bg-white/[0.04] p-2.5">
+            <div className="rounded-xl border border-white/10 bg-white/[0.04] p-2">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 Prochain niveau
               </p>
@@ -308,7 +353,7 @@ const DashboardScoreCard = ({
               </p>
             </div>
             {model.positiveScoreSignals.length > 0 && (
-              <div className="rounded-xl border border-white/10 bg-white/[0.04] p-2.5">
+              <div className="rounded-xl border border-white/10 bg-white/[0.04] p-2">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                   Signaux positifs
                 </p>
@@ -327,8 +372,8 @@ const DashboardScoreCard = ({
           </div>
         </div>
 
-        <div className="grid gap-3 bg-slate-50/95 p-3 sm:p-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.55fr)]">
-          <div className="rounded-2xl border border-slate-200 bg-white/80 p-3">
+        <div className="grid gap-2 bg-slate-50/95 p-3 lg:grid-cols-[minmax(0,1fr)_minmax(250px,0.5fr)]">
+          <div className="rounded-2xl border border-slate-200 bg-white/80 p-2.5">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -350,7 +395,7 @@ const DashboardScoreCard = ({
                   key={item.id}
                   type="button"
                   onClick={() => navigate(item.href)}
-                  className="group flex w-full items-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-slate-300 hover:bg-slate-50"
+                  className="group flex w-full items-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-left transition hover:border-slate-300 hover:bg-slate-50"
                 >
                   <span
                     className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold ${
@@ -375,7 +420,7 @@ const DashboardScoreCard = ({
           </div>
 
           {model.blockedScoreSignals.length > 0 && (
-            <div className="rounded-2xl border border-slate-200 bg-white/80 p-3">
+            <div className="rounded-2xl border border-slate-200 bg-white/80 p-2.5">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                   Gains estimés
@@ -384,11 +429,11 @@ const DashboardScoreCard = ({
                   Potentiel Coach
                 </span>
               </div>
-              <div className="mt-2 grid gap-2">
+              <div className="mt-2 grid gap-1.5">
                 {model.blockedScoreSignals.map((signal) => (
                   <div
                     key={signal.label}
-                    className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-xs"
+                    className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-1.5 text-xs"
                   >
                     <span className="min-w-0 truncate text-slate-600">
                       {signal.label}
@@ -416,6 +461,7 @@ const FullScorePanel = ({
 }) => {
   const navigate = useNavigate();
   const nextPriorityStyle = getPriorityStyle(model.nextBestAction.priority);
+  const dailyCoachSummary = getDailyCoachSummary(model);
   const objectiveLabel =
     model.nextLevel.label === "Maximum"
       ? "Objectif final"
@@ -448,8 +494,11 @@ const FullScorePanel = ({
           </div>
 
           <div className="mt-5 grid gap-4 xl:grid-cols-[190px_minmax(0,1fr)_minmax(320px,0.9fr)] xl:items-center">
-            <div className="flex justify-center xl:justify-start">
+            <div className="flex flex-col items-center gap-3 text-center xl:items-start xl:text-left">
               <ScoreRing model={model} size="xl" />
+              <p className="max-w-[13rem] text-sm font-semibold leading-5 text-emerald-100">
+                {dailyCoachSummary}
+              </p>
             </div>
 
             <div className="min-w-0 space-y-3">

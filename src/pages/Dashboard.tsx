@@ -5,14 +5,13 @@ import {
   AlertTriangle,
   Bell,
   CheckCircle,
+  ChevronRight,
   Globe2,
   MessageSquare,
-  Phone,
   RefreshCw
 } from "lucide-react";
 import { BusinessHealthScoreCard } from "../components/coach/BusinessHealthScore";
 import { buildBusinessHealthScoreModel } from "../components/coach/businessHealthScoreModel";
-import { GoogleConnectionBadge } from "../components/GoogleConnectionBadge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
@@ -476,17 +475,35 @@ const getNotificationIcon = (
 ) => {
   if (kind === "review") {
     if (severity === "critical" || severity === "high") {
-      return <AlertTriangle size={16} className="text-red-600" />;
+      return <AlertTriangle className="h-4 w-4" />;
     }
-    return <MessageSquare size={16} className="text-green-600" />;
+    return <MessageSquare className="h-4 w-4" />;
   }
   if (kind === "sync") {
-    return <RefreshCw size={16} className="text-blue-600" />;
+    return <RefreshCw className="h-4 w-4" />;
   }
   if (kind === "connection") {
-    return <CheckCircle size={16} className="text-green-600" />;
+    return <CheckCircle className="h-4 w-4" />;
   }
-  return <Bell size={16} className="text-slate-500" />;
+  return <Bell className="h-4 w-4" />;
+};
+
+const getNotificationTimelineTone = (
+  kind: NotificationKind,
+  severity: NotificationSeverity
+): string => {
+  if (kind === "review") {
+    return severity === "critical" || severity === "high"
+      ? "border-rose-200 bg-rose-50 text-rose-600"
+      : "border-emerald-200 bg-emerald-50 text-emerald-600";
+  }
+  if (kind === "sync") {
+    return "border-sky-200 bg-sky-50 text-sky-600";
+  }
+  if (kind === "connection") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-600";
+  }
+  return "border-slate-200 bg-slate-50 text-slate-500";
 };
 
 const formatRelativeTime = (isoDate: string): string => {
@@ -542,7 +559,6 @@ const createNotification = (
 const Dashboard = ({
   session,
   googleStatus,
-  googleLastError,
   onSyncLocations,
   syncDisabled = false,
   locations,
@@ -989,19 +1005,6 @@ const Dashboard = ({
     window.location.href = "/inbox";
   };
 
-  const getLocationName = (locationId?: string | null): string => {
-    if (!locationId) {
-      return "—";
-    }
-
-    const location = locations.find((loc) => loc.id === locationId);
-    if (!location) {
-      return "—";
-    }
-
-    return location.location_title ?? location.location_resource_name ?? "—";
-  };
-
   const kpiReason = getKpiReason(kpiData?.meta?.reasons);
   const noData = kpiData?.meta?.data_status === "no_data";
   const responseRate = kpiData?.response.response_rate_pct ?? null;
@@ -1012,7 +1015,7 @@ const Dashboard = ({
       id: "reviews_total",
       label: "Volume d'avis",
       value: noData ? "—" : formatCount(kpiData?.counts.reviews_total),
-      caption: noData
+      variation: noData
         ? kpiReason
         : `Avec texte: ${formatCount(kpiData?.counts.reviews_with_text)}`
     },
@@ -1020,14 +1023,14 @@ const Dashboard = ({
       id: "avg_rating",
       label: "Note moyenne",
       value: formatRating(kpiData?.ratings.avg_rating ?? null),
-      caption:
+      variation:
         kpiData?.ratings.avg_rating === null ? kpiReason : "Sur 5"
     },
     {
       id: "response_rate",
       label: "Taux de réponse",
       value: responseRateValid ? formatPercent(responseRate) : "—",
-      caption:
+      variation:
         !responseRateValid
           ? kpiReason
           : `Sur ${formatCount(kpiData?.counts.reviews_replyable)} avis`
@@ -1036,7 +1039,7 @@ const Dashboard = ({
       id: "sentiment_positive",
       label: "Sentiment positif",
       value: formatPercent(kpiData?.sentiment.sentiment_positive_pct ?? null),
-      caption:
+      variation:
         kpiData?.sentiment.sentiment_positive_pct === null
           ? kpiReason
           : `Sur ${formatCount(kpiData?.sentiment.sentiment_samples)} avis`
@@ -1055,7 +1058,7 @@ const Dashboard = ({
         </span>
       ),
       value: kpiData?.nps.nps_score ?? "—",
-      caption:
+      variation:
         kpiData?.nps.nps_score === null
           ? kpiReason
           : `Sur ${formatCount(kpiData?.nps.nps_samples)} avis`
@@ -1106,27 +1109,74 @@ const Dashboard = ({
     }
     return current;
   }, null);
+  const aiPositivePct = aiKpiData?.sentiment.positivePct ?? null;
+  const aiNegativePct = aiKpiData?.sentiment.negativePct ?? null;
+  const aiPriorityCount = aiKpiData?.priorityCount ?? 0;
+  const aiPrimaryTag = aiTopTags[0] ?? null;
+  const aiSummarySentence =
+    aiSamples === 0
+      ? "Les conclusions apparaîtront dès que des avis seront analysés."
+      : `${dominantAiSentiment?.label ?? "Signal principal"} ressort en premier (${formatPercent(
+          dominantAiSentiment?.value ?? null
+        )}) sur ${formatCount(aiSamples)} avis analysés.`;
+  const aiConclusionCards = [
+    {
+      id: "forces",
+      label: "Forces",
+      value: formatPercent(aiPositivePct),
+      body:
+        aiPositivePct === null
+          ? "Les points forts seront isolés dès que le volume qualifié sera suffisant."
+          : `${formatPercent(aiPositivePct)} d'avis positifs dans l'échantillon IA.`,
+      icon: <CheckCircle className="h-4 w-4" />,
+      shellClass: "border-emerald-200 bg-emerald-50/70",
+      iconClass: "border-emerald-200 bg-white text-emerald-700",
+      valueClass: "text-emerald-900",
+      bodyClass: "text-emerald-700/80"
+    },
+    {
+      id: "risks",
+      label: "Risques",
+      value: formatCount(aiPriorityCount),
+      body:
+        aiPriorityCount > 0
+          ? `${formatCount(aiPriorityCount)} avis critique${aiPriorityCount > 1 ? "s" : ""} à surveiller.`
+          : `Risque faible sur la période (${formatPercent(aiNegativePct)} négatifs).`,
+      icon: <AlertTriangle className="h-4 w-4" />,
+      shellClass: "border-rose-200 bg-rose-50/70",
+      iconClass: "border-rose-200 bg-white text-rose-700",
+      valueClass: "text-rose-900",
+      bodyClass: "text-rose-700/80"
+    },
+    {
+      id: "opportunities",
+      label: "Opportunités",
+      value: aiPrimaryTag?.tag ?? "À détecter",
+      body: aiPrimaryTag
+        ? `${aiPrimaryTag.count} mention${aiPrimaryTag.count > 1 ? "s" : ""} autour de ce thème à exploiter.`
+        : "Aucun thème récurrent ne ressort encore assez nettement.",
+      icon: <MessageSquare className="h-4 w-4" />,
+      shellClass: "border-sky-200 bg-sky-50/70",
+      iconClass: "border-sky-200 bg-white text-sky-700",
+      valueClass: "text-sky-950",
+      bodyClass: "text-sky-700/80"
+    }
+  ];
   const aiMetricCards = [
     {
       label: "Score moyen",
       value: aiKpiLoading ? "…" : formatScore(aiKpiData?.avgScore ?? null),
-      caption: aiSamples === 0 ? "En attente de signal" : `Sur ${aiSamples} avis`,
-      sparklineValues: aiTrend.map((point) => point.avgScore),
-      sparklineTone: "positive" as const
+      caption: aiSamples === 0 ? "En attente de signal" : `Sur ${aiSamples} avis`
     },
     {
       label: "Avis analysés",
       value: aiKpiLoading ? "…" : formatCount(aiSamples),
-      caption: aiSamples === 0 ? "Aucun avis qualifié" : "Sur la période",
-      sparklineValues: aiTrend.map((point) => point.samples),
-      sparklineTone: "neutral" as const
+      caption: aiSamples === 0 ? "Aucun avis qualifié" : "Sur la période"
     },
     {
       label: "Avis critiques",
       value: aiKpiLoading ? "…" : formatCount(aiKpiData?.priorityCount ?? null),
-      caption: aiSamples === 0 ? "Rien à prioriser" : "À traiter en priorité",
-      sparklineValues: aiTrend.map((point) => point.criticalCount),
-      sparklineTone: "critical" as const
+      caption: aiSamples === 0 ? "Rien à prioriser" : "À traiter en priorité"
     }
   ];
   const activeLocationsCount = locations.filter((location) =>
@@ -1145,15 +1195,15 @@ const Dashboard = ({
         loading={kpiLoading || aiKpiLoading || coach.isLoading}
       />
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.055)]">
-        <div className="border-b border-slate-100/70 bg-gradient-to-br from-white via-white to-slate-50/80 px-5 py-4">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="min-w-[14rem]">
+      <section className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.045)]">
+        <div className="flex flex-wrap items-end justify-between gap-2 border-b border-slate-100/70 bg-white px-4 py-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="min-w-[12rem]">
               <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
                 Lieu
               </label>
               <select
-                className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm normal-case tracking-normal text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+                className="mt-1 h-8 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm normal-case tracking-normal text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
                 value={kpiLocationId}
                 onChange={(event) => setKpiLocationId(event.target.value)}
               >
@@ -1168,12 +1218,12 @@ const Dashboard = ({
                 ))}
               </select>
             </div>
-            <div className="min-w-[11rem]">
+            <div className="min-w-[10rem]">
               <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
                 Période
               </label>
               <select
-                className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm normal-case tracking-normal text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+                className="mt-1 h-8 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm normal-case tracking-normal text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
                 value={kpiPreset}
                 onChange={(event) =>
                   setKpiPreset(event.target.value as typeof kpiPreset)
@@ -1193,13 +1243,13 @@ const Dashboard = ({
               <div className="flex items-center gap-2">
                 <input
                   type="date"
-                  className="h-10 w-40 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+                  className="h-8 w-36 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
                   value={kpiFrom}
                   onChange={(event) => setKpiFrom(event.target.value)}
                 />
                 <input
                   type="date"
-                  className="h-10 w-40 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
+                  className="h-8 w-36 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
                   value={kpiTo}
                   onChange={(event) => setKpiTo(event.target.value)}
                 />
@@ -1208,108 +1258,169 @@ const Dashboard = ({
             {kpiError && (
               <span className="text-xs text-amber-700">{kpiError}</span>
             )}
-            <span className="pb-3 text-xs font-medium text-slate-500">
-              Période: {getPresetLabel(kpiPreset)}
+            <span className="mb-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-500">
+              {getPresetLabel(kpiPreset)}
             </span>
             {kpiLoading && (
-              <span className="pb-3 text-xs font-medium text-slate-400">
+              <span className="mb-2 text-xs font-medium text-slate-400">
                 Actualisation...
               </span>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-10 rounded-full"
-              onClick={() => {
-                void queryClient.invalidateQueries({ queryKey: ["kpi-summary"] });
-                void queryClient.invalidateQueries({ queryKey: ["ai-kpis"] });
-              }}
-            >
-              Rafraîchir
-            </Button>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-full px-3 text-xs font-semibold"
+            onClick={() => {
+              void queryClient.invalidateQueries({ queryKey: ["kpi-summary"] });
+              void queryClient.invalidateQueries({ queryKey: ["ai-kpis"] });
+            }}
+          >
+            Rafraîchir
+          </Button>
         </div>
-        <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="flex overflow-x-auto divide-x divide-slate-100">
           {kpiCards.map((kpi) => (
             <article
               key={kpi.id}
-              className="h-full min-w-0 rounded-2xl border border-slate-200/70 bg-white px-4 py-4 text-left shadow-[0_12px_30px_rgba(15,23,42,0.04)] transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_16px_38px_rgba(15,23,42,0.07)]"
+              className="min-w-[10.5rem] flex-1 bg-white px-3 py-2.5 transition duration-200 hover:bg-slate-50/80"
             >
-              <div className="min-w-0">
-                <p className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+              <p className="truncate text-3xl font-semibold tracking-tight text-slate-950">
+                {formatKpiValue(kpi.value)}
+              </p>
+              <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
+                <span className="min-w-0 truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
                   {kpi.label}
-                </p>
-                <p className="mt-2 truncate text-2xl font-semibold tracking-tight text-slate-950">
-                  {formatKpiValue(kpi.value)}
-                </p>
-              </div>
-              <div className="mt-3">
-                <DashboardSparkline values={[]} />
-              </div>
-              <div className="mt-3">
-                <span className="text-xs text-slate-500">
-                  {formatKpiValue(kpi.caption)}
+                </span>
+                <span className="max-w-[7rem] shrink-0 truncate text-right text-xs font-medium text-slate-500">
+                  {formatKpiValue(kpi.variation)}
                 </span>
               </div>
             </article>
           ))}
         </div>
-        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100/70 px-5 py-3 text-xs text-slate-500">
-          <span className="font-semibold text-slate-600">Tags dominants</span>
-          {kpiData?.top_tags?.length
-            ? kpiData.top_tags
-                .map((tag) => `${tag.tag} (${tag.count})`)
-                .join(", ")
-            : (
-                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-500">
-                  Aucun thème récurrent sur cette période
-                </span>
-              )}
-        </div>
       </section>
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.055)]">
-        <div className="flex items-center justify-between border-b border-slate-100/70 bg-slate-50/30 px-5 py-4">
+      <section className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.045)]">
+        <div className="flex items-center justify-between border-b border-slate-100/70 bg-slate-50/20 px-4 py-3">
           <h3 className="text-sm font-semibold text-slate-700">Analyse IA</h3>
           {aiKpiError && (
             <span className="text-xs text-amber-700">{aiKpiError}</span>
           )}
         </div>
-        <div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,1.05fr)_minmax(300px,0.95fr)]">
-          <article className="h-full min-w-0 rounded-2xl border border-slate-200/70 bg-white px-4 py-4 text-left shadow-[0_12px_30px_rgba(15,23,42,0.04)] transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_16px_38px_rgba(15,23,42,0.07)]">
-            <p className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-              Signal principal
-            </p>
-            {aiKpiLoading ? (
-              <div className="mt-3 space-y-3">
-                <Skeleton className="h-8 w-32" />
-                <Skeleton className="h-6 w-full" />
+        <div className="p-4">
+          <article className="rounded-2xl border border-slate-200/70 bg-gradient-to-br from-white via-white to-slate-50/80 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.34fr)] lg:items-start">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  Aujourd'hui l'IA retient :
+                </p>
+                {aiKpiLoading ? (
+                  <div className="mt-3 space-y-3">
+                    <Skeleton className="h-8 w-2/3" />
+                    <Skeleton className="h-20 w-full" />
+                  </div>
+                ) : aiSamples === 0 ? (
+                  <div className="mt-3">
+                    <CompactEmptyState
+                      icon={<MessageSquare className="h-4 w-4" />}
+                      title="Analyse prête à se remplir"
+                      description="Les signaux IA apparaîtront dès que des avis seront qualifiés."
+                      tone="info"
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <p className="mt-2 max-w-3xl text-2xl font-semibold leading-tight tracking-tight text-slate-950">
+                      {aiSummarySentence}
+                    </p>
+                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      {aiConclusionCards.map((card) => (
+                        <div
+                          key={card.id}
+                          className={`rounded-2xl border px-3 py-3 ${card.shellClass}`}
+                        >
+                          <div className="flex items-start gap-2.5">
+                            <span
+                              className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ${card.iconClass}`}
+                            >
+                              {card.icon}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                {card.label}
+                              </p>
+                              <p
+                                className={`mt-1 truncate text-lg font-semibold leading-tight ${card.valueClass}`}
+                              >
+                                {card.value}
+                              </p>
+                              <p className={`mt-1 text-xs leading-5 ${card.bodyClass}`}>
+                                {card.body}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
-            ) : aiSamples === 0 ? (
-              <div className="mt-3">
+              <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1">
+                {aiMetricCards.map((metric) => (
+                  <div
+                    key={metric.label}
+                    className="rounded-xl border border-slate-200/70 bg-white px-3 py-2"
+                  >
+                    <p className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                      {metric.label}
+                    </p>
+                    <div className="mt-1 flex items-end justify-between gap-2">
+                      <span className="text-xl font-semibold tracking-tight text-slate-950">
+                        {metric.value}
+                      </span>
+                      <span className="truncate text-right text-xs text-slate-500">
+                        {metric.caption}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div className="grid gap-3 px-4 pb-4 lg:grid-cols-3">
+          <details className="group rounded-2xl border border-slate-200/70 bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.035)]">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 [&::-webkit-details-marker]:hidden">
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-slate-950">
+                  Sentiment et score
+                </span>
+                <span className="mt-0.5 block text-xs text-slate-500">
+                  Répartition complète des avis analysés.
+                </span>
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-500">
+                  {formatCount(aiSamples)} avis
+                </span>
+                <span className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition group-open:rotate-90">
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </span>
+              </span>
+            </summary>
+            <div className="mt-3">
+              {aiKpiLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : aiSamples === 0 ? (
                 <CompactEmptyState
                   icon={<MessageSquare className="h-4 w-4" />}
-                  title="Analyse prête à se remplir"
-                  description="Les signaux IA apparaîtront dès que des avis seront qualifiés."
-                  tone="info"
+                  title="Aucun sentiment qualifié"
+                  description="La répartition apparaîtra dès que l'IA aura assez d'avis."
                 />
-              </div>
-            ) : (
-              <div className="mt-3 space-y-4">
-                <div className="flex items-end justify-between gap-4">
-                  <div>
-                    <p className="text-3xl font-semibold tracking-tight text-slate-950">
-                      {dominantAiSentiment?.label ?? "—"}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {formatPercent(dominantAiSentiment?.value ?? null)} des avis analysés
-                    </p>
-                  </div>
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
-                    {formatCount(aiSamples)} avis
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
+              ) : (
+                <div className="grid gap-2">
                   {aiSentimentBreakdown.map((sentiment) => (
                     <div
                       key={sentiment.label}
@@ -1320,72 +1431,45 @@ const Dashboard = ({
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-          </article>
-          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-            {aiMetricCards.map((metric) => (
-              <article
-                key={metric.label}
-                className="h-full min-w-0 rounded-2xl border border-slate-200/70 bg-white px-4 py-3 text-left shadow-[0_12px_30px_rgba(15,23,42,0.04)] transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_16px_38px_rgba(15,23,42,0.07)]"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                      {metric.label}
-                    </p>
-                    <p className="mt-1 truncate text-2xl font-semibold tracking-tight text-slate-950">
-                      {metric.value}
-                    </p>
-                  </div>
-                  <span className="mt-1 text-xs text-slate-500">
-                    {metric.caption}
-                  </span>
-                </div>
-                <div className="mt-2">
-                  <DashboardSparkline
-                    values={metric.sparklineValues}
-                    tone={metric.sparklineTone}
-                  />
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-        <div className="grid gap-4 px-5 pb-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-          <article className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                Thèmes dominants
-              </p>
-              <span className="text-xs font-medium text-slate-500">
-                Top {aiTopTags.length || 0}
-              </span>
+              )}
             </div>
+          </details>
+
+          <details className="group rounded-2xl border border-slate-200/70 bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.035)]">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 [&::-webkit-details-marker]:hidden">
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-slate-950">
+                  Thèmes détectés
+                </span>
+                <span className="mt-0.5 block text-xs text-slate-500">
+                  Motifs clients à explorer.
+                </span>
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-500">
+                  Top {aiTopTags.length || 0}
+                </span>
+                <span className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition group-open:rotate-90">
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </span>
+              </span>
+            </summary>
             <div className="mt-3">
               {aiKpiLoading ? (
-                <Skeleton className="h-20 w-full" />
+                <Skeleton className="h-24 w-full" />
               ) : aiTopTags.length ? (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {aiTopTags.map((tag, index) => (
+                <div className="grid gap-2">
+                  {aiTopTags.map((tag) => (
                     <div
                       key={tag.tag}
-                      className={
-                        index === 0
-                          ? "rounded-xl border border-slate-300 bg-slate-950 px-3 py-2 text-white"
-                          : "rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700"
-                      }
+                      className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
                     >
-                      <p className="truncate text-sm font-semibold">{tag.tag}</p>
-                      <p
-                        className={
-                          index === 0
-                            ? "mt-1 text-xs text-white/70"
-                            : "mt-1 text-xs text-slate-500"
-                        }
-                      >
+                      <span className="min-w-0 truncate font-semibold text-slate-700">
+                        {tag.tag}
+                      </span>
+                      <span className="shrink-0 text-slate-500">
                         {tag.count} mention{tag.count > 1 ? "s" : ""}
-                      </p>
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -1393,21 +1477,31 @@ const Dashboard = ({
                 <CompactEmptyState
                   icon={<MessageSquare className="h-4 w-4" />}
                   title="Aucun thème dominant"
-                  description="Les motifs récurrents seront regroupés ici dès qu’ils ressortent."
+                  description="Les motifs récurrents seront regroupés ici dès qu'ils ressortent."
                 />
               )}
             </div>
-          </article>
+          </details>
 
-          <article className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                Évolution 30 jours
-              </p>
-              <span className="text-xs font-medium text-slate-500">
-                {activeAiTrend.length}/{aiTrend.length || 30} jours actifs
+          <details className="group rounded-2xl border border-slate-200/70 bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.035)]">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 [&::-webkit-details-marker]:hidden">
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-slate-950">
+                  Évolution récente
+                </span>
+                <span className="mt-0.5 block text-xs text-slate-500">
+                  Tendance et jours actifs.
+                </span>
               </span>
-            </div>
+              <span className="flex items-center gap-2">
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-500">
+                  {activeAiTrend.length}/{aiTrend.length || 30}
+                </span>
+                <span className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition group-open:rotate-90">
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </span>
+              </span>
+            </summary>
             <div className="mt-3">
               {aiKpiLoading ? (
                 <Skeleton className="h-24 w-full" />
@@ -1420,12 +1514,12 @@ const Dashboard = ({
                 />
               ) : (
                 <>
-                  <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1">
                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                       <p className="text-xs font-semibold text-slate-500">
                         Dernier score
                       </p>
-                      <p className="mt-1 text-xl font-semibold text-slate-950">
+                      <p className="mt-1 text-lg font-semibold text-slate-950">
                         {formatScore(latestAiTrendPoint?.avgScore ?? null)}
                       </p>
                       <p className="text-xs text-slate-500">
@@ -1436,19 +1530,17 @@ const Dashboard = ({
                       <p className="text-xs font-semibold text-slate-500">
                         Avis analysés
                       </p>
-                      <p className="mt-1 text-xl font-semibold text-slate-950">
+                      <p className="mt-1 text-lg font-semibold text-slate-950">
                         {formatCount(latestAiTrendPoint?.samples)}
                       </p>
-                      <p className="text-xs text-slate-500">dernier point</p>
                     </div>
                     <div className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2">
                       <p className="text-xs font-semibold text-rose-600">
                         Critiques
                       </p>
-                      <p className="mt-1 text-xl font-semibold text-rose-700">
+                      <p className="mt-1 text-lg font-semibold text-rose-700">
                         {formatCount(latestAiTrendPoint?.criticalCount)}
                       </p>
-                      <p className="text-xs text-rose-600/80">dernier point</p>
                     </div>
                   </div>
                   <div className="mt-3">
@@ -1457,92 +1549,69 @@ const Dashboard = ({
                       tone="positive"
                     />
                   </div>
-                  <details className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <summary className="cursor-pointer text-xs font-semibold text-slate-500">
-                      Détail journalier
-                    </summary>
-                    <div className="mt-2 max-h-28 space-y-1.5 overflow-auto pr-2 text-xs">
-                      {activeAiTrend.length === 0 ? (
-                        <p className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-slate-500">
-                          Aucun jour actif à détailler pour l’instant.
-                        </p>
-                      ) : (
-                        activeAiTrend.map((point) => (
-                          <div
-                            key={point.date}
-                            className="flex items-center justify-between gap-3 border-t border-slate-200/70 pt-1.5 first:border-t-0 first:pt-0"
-                          >
-                            <span className="text-slate-600">{point.date}</span>
-                            <span className="text-right text-slate-500">
-                              Score {formatScore(point.avgScore)} · {point.samples} avis ·{" "}
-                              {point.criticalCount} critiques
-                            </span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </details>
+                  <div className="mt-3 max-h-28 space-y-1.5 overflow-auto pr-2 text-xs">
+                    {activeAiTrend.length === 0 ? (
+                      <p className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-slate-500">
+                        Aucun jour actif à détailler pour l'instant.
+                      </p>
+                    ) : (
+                      activeAiTrend.map((point) => (
+                        <div
+                          key={point.date}
+                          className="flex items-center justify-between gap-3 border-t border-slate-200/70 pt-1.5 first:border-t-0 first:pt-0"
+                        >
+                          <span className="text-slate-600">{point.date}</span>
+                          <span className="text-right text-slate-500">
+                            Score {formatScore(point.avgScore)} · {point.samples} avis ·{" "}
+                            {point.criticalCount} critiques
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </>
               )}
             </div>
-          </article>
+          </details>
         </div>
       </section>
 
       <section
         id="locations-section"
-        className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.055)]"
+        className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.045)]"
       >
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100/70 bg-slate-50/30 px-5 py-4">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-base font-semibold text-slate-800">
-                Lieux connectés
-              </h2>
-              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
-                {locations.length} fiche{locations.length > 1 ? "s" : ""}
-              </span>
-              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                {activeLocationsCount} active
-                {activeLocationsCount > 1 ? "s" : ""}
-              </span>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <GoogleConnectionBadge status={googleStatus} />
-              <a
-                href="/connect"
-                className="text-xs font-semibold text-ink underline underline-offset-2"
-              >
-                Gérer la connexion Google
-              </a>
-            </div>
-            {googleStatus === "reauth_required" && googleLastError && (
-              <p className="mt-1 text-xs text-amber-700">
-                Dernière erreur: {googleLastError}
-              </p>
-            )}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100/70 bg-slate-50/20 px-4 py-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h2 className="text-sm font-semibold text-slate-800">
+              Lieux connectés
+            </h2>
+            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
+              {locations.length} fiche{locations.length > 1 ? "s" : ""}
+            </span>
+            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
+              {activeLocationsCount} active
+              {activeLocationsCount > 1 ? "s" : ""}
+            </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {googleStatus === "connected" && (
               <Button
                 variant="outline"
                 size="sm"
-                className="h-9 gap-2 rounded-full"
+                className="h-8 rounded-full px-3 text-xs font-semibold"
                 onClick={onSyncLocations}
                 disabled={syncing || syncDisabled}
               >
-                <RefreshCw className={syncing ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-                {syncing ? "Synchronisation..." : "Synchroniser maintenant"}
+                {syncing ? "Synchronisation..." : "Synchroniser"}
               </Button>
             )}
             <Button
               variant="outline"
               size="sm"
-              className="h-9 gap-2 rounded-full"
+              className="h-8 rounded-full px-3 text-xs font-semibold"
               onClick={saveActiveLocations}
               disabled={activeLocationsSaving || locationsLoading}
             >
-              <CheckCircle className="h-4 w-4" />
               {activeLocationsSaving ? "Enregistrement..." : "Enregistrer"}
             </Button>
           </div>
@@ -1584,42 +1653,21 @@ const Dashboard = ({
               return (
                 <Card
                   key={location.id}
-                  className={
-                    isActive
-                      ? "border-emerald-200/80 bg-emerald-50/35 shadow-none"
-                      : "border-slate-200/70 bg-white/80 shadow-none"
-                  }
+                  className="border-slate-200/70 bg-white/85 shadow-none"
                 >
-                  <CardContent className="grid gap-3 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                  <CardContent className="grid gap-2.5 p-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                     <div className="min-w-0">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <p
-                          className="truncate text-sm font-semibold text-slate-900"
-                          title={
-                            location.location_title ??
-                            location.location_resource_name
-                          }
-                        >
-                          {location.location_title ??
-                            location.location_resource_name}
-                        </p>
-                        <span
-                          className={
-                            isActive
-                              ? "shrink-0 rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
-                              : "shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500"
-                          }
-                        >
-                          {isActive ? "Actif" : "Inactif"}
-                        </span>
-                      </div>
-                      <div className="mt-1.5 grid min-w-0 gap-1 text-xs text-slate-500">
-                        {location.phone && (
-                          <div className="flex min-w-0 items-center gap-1.5">
-                            <Phone className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate">{location.phone}</span>
-                          </div>
-                        )}
+                      <p
+                        className="truncate text-sm font-semibold text-slate-900"
+                        title={
+                          location.location_title ??
+                          location.location_resource_name
+                        }
+                      >
+                        {location.location_title ??
+                          location.location_resource_name}
+                      </p>
+                      <div className="mt-1 grid min-w-0 gap-1 text-xs text-slate-500">
                         {location.website_uri && (
                           <div className="flex min-w-0 items-center gap-1.5">
                             <Globe2 className="h-3.5 w-3.5 shrink-0" />
@@ -1636,8 +1684,8 @@ const Dashboard = ({
                     <label
                       className={
                         isActive
-                          ? "inline-flex items-center justify-end gap-2 rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700"
-                          : "inline-flex items-center justify-end gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600"
+                          ? "inline-flex w-fit justify-self-start items-center justify-end gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 sm:justify-self-end"
+                          : "inline-flex w-fit justify-self-start items-center justify-end gap-2 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-500 sm:justify-self-end"
                       }
                     >
                       <input
@@ -1653,7 +1701,7 @@ const Dashboard = ({
                           );
                         }}
                       />
-                      {isActive ? "Activée" : "Désactivée"}
+                      {isActive ? "Actif" : "Inactif"}
                     </label>
                   </CardContent>
                 </Card>
@@ -1663,7 +1711,7 @@ const Dashboard = ({
       </section>
 
       <section>
-        <Card className="border-slate-200/70 bg-white/65 shadow-sm">
+        <Card className="overflow-hidden border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.045)]">
           <CardContent className="grid gap-4 p-4 lg:grid-cols-[minmax(220px,0.42fr)_minmax(0,1fr)]">
             <div className="space-y-3">
               <div>
@@ -1691,7 +1739,12 @@ const Dashboard = ({
                   </p>
                 </div>
               )}
-              <Button size="sm" variant="outline" onClick={handleOpenInbox}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-full px-3 text-xs font-semibold"
+                onClick={handleOpenInbox}
+              >
                 Aller à la boîte de réception
               </Button>
             </div>
@@ -1703,7 +1756,7 @@ const Dashboard = ({
                   Derniers signaux utiles, limités aux 5 plus récents.
                 </p>
               </div>
-              <div className="mt-3 space-y-3">
+              <div className="mt-3">
                 {recentActivities.length === 0 ? (
                   <CompactEmptyState
                     icon={<Bell className="h-4 w-4" />}
@@ -1711,32 +1764,42 @@ const Dashboard = ({
                     description="Rien de nouveau à signaler depuis la dernière synchronisation."
                   />
                 ) : (
-                  recentActivities.map((notif) => (
-                    <div
-                      key={notif.id}
-                      className="flex items-start gap-3 border-b border-slate-100 pb-3 last:border-b-0 last:pb-0"
-                    >
-                      <div className="mt-0.5">
-                        {getNotificationIcon(notif.kind, notif.severity)}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-slate-900">
-                          {notif.title || "Événement"}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {notif.message || "—"}
-                        </p>
-                        <div className="mt-1.5 flex items-center justify-between gap-3 text-xs text-slate-500">
-                          <span>
-                            {notif.locationId
-                              ? `Lieu : ${getLocationName(notif.locationId)}`
-                              : "Tous les lieux"}
-                          </span>
-                          <span>{formatRelativeTime(notif.createdAt)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))
+                  <ol className="relative space-y-0">
+                    {recentActivities.map((notif, index) => (
+                      <li
+                        key={notif.id}
+                        className="relative grid grid-cols-[2rem_minmax(0,1fr)] gap-3 pb-3 last:pb-0"
+                      >
+                        {index < recentActivities.length - 1 && (
+                          <span className="absolute left-4 top-8 h-[calc(100%-1.5rem)] w-px bg-slate-200/80" />
+                        )}
+                        <span
+                          className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-full border ${getNotificationTimelineTone(
+                            notif.kind,
+                            notif.severity
+                          )}`}
+                        >
+                          {getNotificationIcon(notif.kind, notif.severity)}
+                        </span>
+                        <article className="min-w-0 rounded-xl border border-slate-200/70 bg-white px-3 py-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.035)]">
+                          <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+                            <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">
+                              {notif.title || "Événement"}
+                            </p>
+                            <time
+                              dateTime={notif.createdAt}
+                              className="shrink-0 text-xs font-medium text-slate-400"
+                            >
+                              {formatRelativeTime(notif.createdAt)}
+                            </time>
+                          </div>
+                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                            {notif.message || "—"}
+                          </p>
+                        </article>
+                      </li>
+                    ))}
+                  </ol>
                 )}
               </div>
             </div>
