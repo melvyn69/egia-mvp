@@ -103,6 +103,10 @@ const periodLabels: Record<string, string> = {
   custom: "Personnalisé"
 };
 
+const BUSINESS_HEALTH_SCORE_PENDING = "Calcul en cours";
+const BUSINESS_HEALTH_SCORE_PENDING_DETAIL =
+  "Le score sera disponible dès que suffisamment d'historique aura été analysé.";
+
 const formatDateLabel = (value: string | null) => {
   if (!value) return null;
   const date = new Date(value);
@@ -181,6 +185,58 @@ const formatOptionalMetric = (value: unknown, suffix = "") => {
   return null;
 };
 
+const getNumericReportMetric = (report: ReportRow, keys: string[]) => {
+  const value = getReportMetric(report, keys);
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value.replace(",", ".").replace("%", ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const getReportTextSignal = (report: ReportRow, keys: string[]) => {
+  const source = report as unknown as Record<string, unknown>;
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+    if (Array.isArray(value)) {
+      const first = value.find(
+        (item) => typeof item === "string" && item.trim()
+      );
+      if (typeof first === "string") return first.trim();
+      const firstObject = value.find(
+        (item) => item && typeof item === "object"
+      ) as Record<string, unknown> | undefined;
+      const objectText =
+        firstObject &&
+        ["label", "name", "title", "summary", "recommendation", "action"]
+          .map((field) => firstObject[field])
+          .find((item) => typeof item === "string" && item.trim());
+      if (typeof objectText === "string") return objectText.trim();
+    }
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      const objectText = [
+        "label",
+        "name",
+        "title",
+        "summary",
+        "recommendation",
+        "action"
+      ]
+        .map((field) => record[field])
+        .find((item) => typeof item === "string" && item.trim());
+      if (typeof objectText === "string") return objectText.trim();
+    }
+  }
+  return null;
+};
+
 const formatFileSize = (value: number | string | null | undefined) => {
   if (typeof value === "string" && value.trim()) return value;
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
@@ -192,16 +248,27 @@ const formatFileSize = (value: number | string | null | undefined) => {
   return `${Math.max(1, Math.round(value / 1024))} Ko`;
 };
 
-const getReportHealthScore = (report: ReportRow) =>
-  formatOptionalMetric(
-    getReportMetric(report, [
-      "business_health_score",
-      "businessHealthScore",
-      "health_score",
-      "score"
-    ]),
-    "/100"
-  ) ?? "Calcul en cours";
+const getReportHealthScoreValue = (report: ReportRow | null) =>
+  report
+    ? formatOptionalMetric(
+        getReportMetric(report, [
+          "business_health_score",
+          "businessHealthScore",
+          "health_score",
+          "score"
+        ]),
+        "/100"
+      )
+    : null;
+
+const getReportHealthScoreState = (report: ReportRow | null) => {
+  const value = getReportHealthScoreValue(report);
+  return {
+    value: value ?? BUSINESS_HEALTH_SCORE_PENDING,
+    pending: value === null,
+    detail: value === null ? BUSINESS_HEALTH_SCORE_PENDING_DETAIL : null
+  };
+};
 
 const getGeneratedPageCount = (data: ReportGenerationResponse | null) =>
   data?.pdf?.page_count ??
@@ -247,6 +314,59 @@ const getReportThemes = (report: ReportRow) => {
     .slice(0, 3);
 };
 
+const getReportExecutiveInsight = (report: ReportRow) => {
+  const existing = getReportTextSignal(report, [
+    "executive_summary",
+    "executiveSummary",
+    "ai_summary",
+    "aiSummary",
+    "summary",
+    "ai_insight",
+    "insight",
+    "conclusion"
+  ]);
+  if (existing) return existing;
+
+  const healthScore = getNumericReportMetric(report, [
+    "business_health_score",
+    "businessHealthScore",
+    "health_score",
+    "score"
+  ]);
+  if (healthScore !== null && healthScore >= 80) {
+    return "Votre réputation reste excellente ce mois-ci. Les principaux leviers de progression ont été identifiés.";
+  }
+
+  const rating = getNumericReportMetric(report, [
+    "average_rating",
+    "avg_rating",
+    "rating",
+    "note"
+  ]);
+  if (rating !== null && rating >= 4.5) {
+    return "Votre satisfaction client reste très solide ce mois-ci. Les leviers prioritaires sont prêts à être exploités.";
+  }
+
+  return "Votre rapport est prêt. L'IA a identifié les principaux leviers d'amélioration de votre réputation.";
+};
+
+const getReportFocusSignal = (report: ReportRow) => {
+  const existing = getReportTextSignal(report, [
+    "next_best_action",
+    "nextBestAction",
+    "priority",
+    "priorite",
+    "priority_action",
+    "recommended_action",
+    "recommendation",
+    "ai_recommendation",
+    "main_opportunity",
+    "focus_area"
+  ]);
+  if (existing) return existing;
+  return getReportThemes(report)[0] ?? null;
+};
+
 const getReportLocationNames = (
   report: ReportRow,
   locations: ReportsProps["locations"]
@@ -281,7 +401,7 @@ const ReportBrandBlock = ({
           src={branding.logoUrl}
           alt={branding.companyName ?? "Logo entreprise"}
           className={cn(
-            "shrink-0 rounded-2xl border border-slate-200 bg-white object-cover shadow-sm",
+            "shrink-0 rounded-[24px] border border-slate-200 bg-white object-cover shadow-[0_12px_30px_rgba(15,23,42,0.06)]",
             compact ? "h-10 w-10" : "h-12 w-12"
           )}
         />
@@ -326,18 +446,18 @@ const ReportHeroMetric = ({
 }) => (
   <div
     className={cn(
-      "rounded-2xl border p-4 shadow-[0_12px_32px_rgba(15,23,42,0.045)]",
+      "rounded-[24px] border p-5 shadow-[0_18px_42px_rgba(15,23,42,0.045)]",
       highlight
-        ? "border-slate-900 bg-slate-950 text-white"
-        : "border-white/80 bg-white/85 text-slate-950"
+        ? "border-[#020617] bg-[#020617] text-white"
+        : "border-slate-200/70 bg-white text-slate-950"
     )}
   >
-    <p className={cn("text-xs font-semibold uppercase tracking-[0.08em]", highlight ? "text-slate-300" : "text-slate-500")}>
+    <p className={cn("text-xs font-semibold uppercase tracking-[0.08em]", highlight ? "text-blue-200" : "text-slate-500")}>
       {label}
     </p>
     <div className="mt-2 text-3xl font-semibold leading-none">{value}</div>
     {detail && (
-      <p className={cn("mt-2 truncate text-xs", highlight ? "text-slate-300" : "text-slate-500")}>
+      <p className={cn("mt-2 text-xs leading-5", highlight ? "text-slate-300" : "text-slate-500")}>
         {detail}
       </p>
     )}
@@ -346,43 +466,55 @@ const ReportHeroMetric = ({
 
 const ReportDataPoint = ({
   label,
-  value
+  value,
+  detail
 }: {
   label: string;
   value: ReactNode;
+  detail?: ReactNode;
 }) => (
-  <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-4 py-3">
+  <div className="rounded-[24px] border border-slate-200/70 bg-white px-4 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.035)]">
     <p className="text-xs font-medium text-slate-500">{label}</p>
     <div className="mt-1 text-lg font-semibold text-slate-950">{value}</div>
+    {detail && <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>}
   </div>
 );
 
 const ReportReadyKpiCard = ({
   label,
   value,
+  detail,
   highlight = false
 }: {
   label: string;
   value: ReactNode;
+  detail?: ReactNode;
   highlight?: boolean;
 }) => (
   <div
     className={cn(
-      "rounded-2xl border p-4 shadow-[0_14px_34px_rgba(15,23,42,0.055)]",
+      "rounded-[24px] border p-5 shadow-[0_18px_46px_rgba(15,23,42,0.06)]",
       highlight
-        ? "border-slate-950 bg-slate-950 text-white"
+        ? "border-[#020617] bg-[#020617] text-white"
         : "border-slate-100 bg-white text-slate-950"
     )}
   >
     <p
       className={cn(
-        "text-xs font-semibold uppercase tracking-[0.09em]",
-        highlight ? "text-slate-300" : "text-slate-500"
+        "text-[11px] font-semibold uppercase tracking-[0.11em]",
+        highlight ? "text-blue-200" : "text-slate-500"
       )}
     >
       {label}
     </p>
-    <div className="mt-2 text-2xl font-semibold leading-none">{value}</div>
+    <div className="mt-3 text-3xl font-semibold leading-none tracking-tight">
+      {value}
+    </div>
+    {detail && (
+      <p className={cn("mt-3 text-xs leading-5", highlight ? "text-slate-300" : "text-slate-500")}>
+        {detail}
+      </p>
+    )}
   </div>
 );
 
@@ -402,7 +534,11 @@ const ReportReadyModal = ({
   onDownload: () => void;
 }) => {
   const canAccessPdf = Boolean(state.pdfUrl || state.storagePath);
-  const healthScore = getReportHealthScore(state.report);
+  const healthScore = getReportHealthScoreState(state.report);
+  const periodLabel = formatReportPeriod(state.report);
+  const executiveInsight = getReportExecutiveInsight(state.report);
+  const focusSignal = getReportFocusSignal(state.report);
+  const establishmentCount = locationNames.length || state.report.locations.length;
   const rating = formatOptionalMetric(
     getReportMetric(state.report, [
       "average_rating",
@@ -429,108 +565,144 @@ const ReportReadyModal = ({
     ]),
     "%"
   );
-  const kpiCards = [
+  const kpiCards: Array<{
+    label: string;
+    value: ReactNode;
+    detail?: ReactNode;
+    highlight?: boolean;
+  }> = [
     {
       label: "Business Health Score",
-      value: healthScore,
+      value: healthScore.value,
+      detail: healthScore.detail,
       highlight: true
     },
-    ...(rating ? [{ label: "Note moyenne", value: rating }] : []),
     ...(reviews ? [{ label: "Avis analysés", value: reviews }] : []),
-    ...(responseRate ? [{ label: "Taux réponse", value: responseRate }] : []),
-    ...(state.report.locations.length > 0
+    ...(rating ? [{ label: "Note moyenne", value: rating }] : []),
+    ...(responseRate ? [{ label: "Taux de réponse", value: responseRate }] : []),
+    ...(establishmentCount > 0
       ? [
           {
-            label: "Établissements",
-            value: state.report.locations.length
+            label: "Établissements concernés",
+            value: establishmentCount
           }
         ]
       : [])
   ];
+  const brandName = branding.companyName ?? state.report.name;
 
   return (
     <div
-      className="report-ready-backdrop fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm"
+      className="report-ready-backdrop fixed inset-0 z-[100] flex items-center justify-center bg-[#020617]/70 p-4 backdrop-blur-md"
       role="dialog"
       aria-modal="true"
       aria-labelledby="report-ready-title"
     >
-      <div className="report-ready-modal relative w-full max-w-3xl overflow-hidden rounded-[30px] border border-white/70 bg-white shadow-[0_34px_100px_rgba(15,23,42,0.26)]">
+      <div className="report-ready-modal relative max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-[24px] border border-white/80 bg-white shadow-[0_34px_110px_rgba(2,6,23,0.32)]">
         <button
           type="button"
-          className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-slate-500 shadow-sm transition hover:bg-slate-100 hover:text-slate-900"
+          className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-500 shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition hover:bg-slate-100 hover:text-slate-900"
           onClick={onClose}
           aria-label="Fermer"
         >
           <X className="h-4 w-4" />
         </button>
 
-        <div className="bg-slate-50/90 px-5 pb-5 pt-6 md:px-8 md:pb-7 md:pt-8">
-          <div className="flex items-start gap-4 pr-10">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-[0_16px_34px_rgba(15,23,42,0.2)]">
-              <FileText className="h-6 w-6" />
+        <div className="border-b border-slate-100 bg-[#f8fafc] px-5 pb-8 pt-7 md:px-10 md:pb-11 md:pt-9">
+          <div className="flex flex-wrap items-center gap-3 pr-10 text-sm text-slate-500">
+            {branding.logoUrl && (
+              <img
+                src={branding.logoUrl}
+                alt={brandName}
+                className="h-10 w-10 rounded-[18px] border border-white bg-white object-cover shadow-[0_12px_28px_rgba(15,23,42,0.08)]"
+              />
+            )}
+            <span className="font-semibold text-slate-950">{brandName}</span>
+            {branding.legalName && (
+              <>
+                <span className="h-1 w-1 rounded-full bg-slate-300" />
+                <span className="font-medium">{branding.legalName}</span>
+              </>
+            )}
+            {periodLabel && (
+              <>
+                <span className="h-1 w-1 rounded-full bg-slate-300" />
+                <span>{periodLabel}</span>
+              </>
+            )}
+          </div>
+
+          <div className="mt-8 max-w-4xl">
+            <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-semibold text-blue-700 shadow-[0_10px_24px_rgba(37,99,235,0.10)]">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Rapport généré
             </div>
-            <div className="min-w-0">
-              {(branding.companyName || branding.logoUrl) && (
-                <div className="mb-4">
-                  <ReportBrandBlock
-                    branding={branding}
-                    locationNames={locationNames}
-                    compact
-                  />
-                </div>
-              )}
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                Génération terminée
-              </div>
-              <h3
-                id="report-ready-title"
-                className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 md:text-3xl"
-              >
-                Votre rapport est prêt.
-              </h3>
-              <p className="mt-2 truncate text-sm font-medium text-slate-500">
-                {state.report.name}
-              </p>
-              <p className="mt-4 max-w-xl text-sm leading-6 text-slate-600">
-                L'IA a identifié les principaux leviers d'amélioration de votre réputation.
-              </p>
-            </div>
+            <h3
+              id="report-ready-title"
+              className="mt-5 text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl"
+            >
+              Votre rapport est prêt.
+            </h3>
+            <p className="mt-5 max-w-3xl text-xl leading-8 text-slate-700 md:text-2xl md:leading-9">
+              {executiveInsight}
+            </p>
+            <p className="mt-4 truncate text-sm font-medium text-slate-500">
+              {state.report.name}
+            </p>
           </div>
         </div>
 
-        <div className="space-y-5 p-5 md:p-8">
+        <div className="space-y-6 p-5 md:p-10">
           {kpiCards.length > 0 && (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               {kpiCards.map((card) => (
                 <ReportReadyKpiCard
                   key={card.label}
                   label={card.label}
                   value={card.value}
+                  detail={card.detail}
                   highlight={card.highlight}
                 />
               ))}
             </div>
           )}
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+          {focusSignal && (
+            <div className="rounded-[24px] border border-blue-100 bg-blue-50 px-5 py-4 text-sm leading-6 text-slate-900">
+              <span className="font-semibold text-blue-700">
+                L'IA recommande de concentrer vos efforts sur
+              </span>{" "}
+              {focusSignal}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-end">
             <Button
-              className="w-full sm:w-auto"
+              size="lg"
+              className="w-full bg-blue-600 px-7 shadow-[0_18px_38px_rgba(37,99,235,0.24)] hover:bg-blue-700 sm:w-auto"
               disabled={!canAccessPdf}
               onClick={onOpenReport}
             >
               <Eye className="h-4 w-4" />
-              Voir
+              Voir le rapport
             </Button>
             <Button
               variant="outline"
+              size="lg"
               className="w-full sm:w-auto"
               disabled={!canAccessPdf}
               onClick={onDownload}
             >
               <Download className="h-4 w-4" />
               Télécharger
+            </Button>
+            <Button
+              variant="ghost"
+              size="lg"
+              className="w-full sm:w-auto"
+              onClick={onClose}
+            >
+              Fermer
             </Button>
           </div>
         </div>
@@ -847,7 +1019,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
     });
     return Array.from(groups.values());
   }, [filteredReports]);
-  const latestHealthScore = latestReport ? getReportHealthScore(latestReport) : "Calcul en cours";
+  const latestHealthScore = getReportHealthScoreState(latestReport);
   const latestReportDate = latestReport ? formatDateLabel(getReportDateValue(latestReport)) : null;
   const generatedReportLocationNames = generatedReportModal
     ? getReportLocationNames(generatedReportModal.report, locations)
@@ -880,7 +1052,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <style>{`
         @keyframes reportReadyFade {
           from { opacity: 0; }
@@ -906,9 +1078,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
         />
       )}
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/90 shadow-[0_18px_48px_rgba(15,23,42,0.055)]">
-        <div className="grid gap-6 p-5 md:p-7 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.9fr)]">
-          <div className="flex min-h-[180px] flex-col justify-between">
+      <section className="overflow-hidden rounded-[24px] border border-slate-200/80 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.06)]">
+        <div className="grid gap-8 p-6 md:p-8 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.9fr)]">
+          <div className="flex min-h-[190px] flex-col justify-between">
             <div>
               {(reportBranding.companyName || reportBranding.logoUrl) ? (
                 <div className="mb-5">
@@ -918,26 +1090,26 @@ const Reports = ({ session, locations }: ReportsProps) => {
                   />
                 </div>
               ) : (
-                <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-slate-900 shadow-sm">
+                <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-[18px] border border-slate-200 bg-white text-blue-600 shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
                   <FileText className="h-5 w-5" />
                 </div>
               )}
-              <h2 className="text-4xl font-semibold tracking-tight text-slate-950">
+              <h2 className="text-5xl font-semibold tracking-tight text-slate-950">
                 Rapports
               </h2>
               <p className="mt-3 max-w-xl text-base leading-7 text-slate-500">
                 Retrouvez toute l'évolution de votre réputation.
               </p>
             </div>
-            <div className="mt-6 flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
-              <span className="rounded-full border border-slate-200 bg-white px-3 py-1">
+            <div className="mt-7 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+              <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-blue-700">
                 Timeline mensuelle
               </span>
-              <span className="rounded-full border border-slate-200 bg-white px-3 py-1">
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
                 PDF premium
               </span>
               {allLocationNames.length > 0 && (
-                <span className="rounded-full border border-slate-200 bg-white px-3 py-1">
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
                   {allLocationNames.length} établissement{allLocationNames.length > 1 ? "s" : ""}
                 </span>
               )}
@@ -959,15 +1131,15 @@ const Reports = ({ session, locations }: ReportsProps) => {
             )}
             <ReportHeroMetric
               label="Business Health Score"
-              value={latestHealthScore}
-              detail="Donnée du rapport"
+              value={latestHealthScore.value}
+              detail={latestHealthScore.detail ?? "Donnée du rapport"}
               highlight
             />
           </div>
         </div>
       </section>
 
-      <Card className="overflow-hidden border-slate-200/70 bg-white/95 shadow-[0_16px_44px_rgba(15,23,42,0.045)]">
+      <Card className="overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
         <CardHeader className="p-5 pb-0 md:p-6 md:pb-0">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -986,7 +1158,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                 Nom du rapport
               </label>
               <input
-                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/5"
+                className="mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Rapport mensuel"
@@ -995,7 +1167,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
             <div>
               <label className="text-xs font-semibold text-slate-500">Période</label>
               <select
-                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/5"
+                className="mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10"
                 value={preset}
                 onChange={(event) => setPreset(event.target.value as Preset)}
               >
@@ -1013,13 +1185,13 @@ const Reports = ({ session, locations }: ReportsProps) => {
               <div className="grid gap-2 md:col-span-2 md:grid-cols-2">
                 <input
                   type="date"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/5"
+                  className="w-full rounded-[18px] border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10"
                   value={from}
                   onChange={(event) => setFrom(event.target.value)}
                 />
                 <input
                   type="date"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/5"
+                  className="w-full rounded-[18px] border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10"
                   value={to}
                   onChange={(event) => setTo(event.target.value)}
                 />
@@ -1033,7 +1205,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                 {locationOptions.map((location) => (
                   <label
                     key={location.id}
-                    className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-2.5 text-sm text-slate-600 transition hover:border-slate-300 hover:bg-white"
+                    className="flex items-center gap-2 rounded-[18px] border border-slate-200 bg-slate-50/70 px-3 py-2.5 text-sm text-slate-600 transition hover:border-blue-200 hover:bg-white"
                   >
                     <input
                       type="checkbox"
@@ -1053,11 +1225,11 @@ const Reports = ({ session, locations }: ReportsProps) => {
             </div>
           </div>
 
-          <div className="space-y-4 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+          <div className="space-y-4 rounded-[24px] border border-slate-200/70 bg-slate-50/70 p-4">
             <div>
               <label className="text-xs font-semibold text-slate-500">Notes</label>
               <textarea
-                className="mt-2 min-h-[112px] w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-900/5"
+                className="mt-2 min-h-[112px] w-full rounded-[18px] border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10"
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
                 placeholder="Notes internes à inclure dans le rapport."
@@ -1072,7 +1244,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                   className={cn(
                     "flex items-center justify-center gap-2 rounded-full border px-3 py-2",
                     renderMode === "classic"
-                      ? "border-slate-900 bg-white text-slate-950"
+                      ? "border-blue-200 bg-blue-50 text-blue-700"
                       : "border-slate-200 bg-white/70"
                   )}
                 >
@@ -1089,7 +1261,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                   className={cn(
                     "flex items-center justify-center gap-2 rounded-full border px-3 py-2",
                     renderMode === "premium"
-                      ? "border-slate-900 bg-white text-slate-950"
+                      ? "border-blue-200 bg-blue-50 text-blue-700"
                       : "border-slate-200 bg-white/70"
                   )}
                 >
@@ -1105,7 +1277,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
               </div>
             </div>
             {error && (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <div className="rounded-[24px] border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                 {error}
               </div>
             )}
@@ -1123,7 +1295,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden border-slate-200/70 bg-white/95 shadow-[0_16px_44px_rgba(15,23,42,0.045)]">
+      <Card className="overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
         <CardHeader className="p-5 pb-0 md:p-6 md:pb-0">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
@@ -1141,7 +1313,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                     className={cn(
                       "rounded-full px-3 py-1.5 text-xs font-semibold transition",
                       reportFilter === option.value
-                        ? "bg-slate-950 text-white shadow-sm"
+                        ? "bg-blue-600 text-white shadow-sm"
                         : "text-slate-500 hover:text-slate-900"
                     )}
                     onClick={() => setReportFilter(option.value)}
@@ -1153,7 +1325,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
               <label className="relative block">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
-                  className="h-10 w-full rounded-full border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-900/5 sm:w-64"
+                  className="h-10 w-full rounded-full border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 sm:w-64"
                   value={reportSearch}
                   onChange={(event) => setReportSearch(event.target.value)}
                   placeholder="Rechercher"
@@ -1165,12 +1337,12 @@ const Reports = ({ session, locations }: ReportsProps) => {
         <CardContent className="p-5 md:p-6">
           {reportsQuery.isLoading ? (
             <div className="space-y-4">
-              <Skeleton className="h-40 w-full rounded-2xl" />
-              <Skeleton className="h-40 w-full rounded-2xl" />
+              <Skeleton className="h-40 w-full rounded-[24px]" />
+              <Skeleton className="h-40 w-full rounded-[24px]" />
             </div>
           ) : reports.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 p-6 text-center">
-              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-700 shadow-sm">
+            <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center">
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-[18px] bg-white text-blue-600 shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
                 <FileText className="h-5 w-5" />
               </div>
               <p className="mt-4 text-sm font-semibold text-slate-950">
@@ -1181,8 +1353,8 @@ const Reports = ({ session, locations }: ReportsProps) => {
               </p>
             </div>
           ) : reportGroups.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 p-6 text-center">
-              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-700 shadow-sm">
+            <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center">
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-[18px] bg-white text-blue-600 shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
                 <Search className="h-5 w-5" />
               </div>
               <p className="mt-4 text-sm font-semibold text-slate-950">
@@ -1196,9 +1368,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
             <div className="space-y-8">
               {reportGroups.map((group) => (
                 <section key={group.label} className="relative pl-7 md:pl-9">
-                  <div className="absolute left-2 top-9 h-[calc(100%-1rem)] w-px bg-slate-200 md:left-3" />
+                  <div className="absolute left-2 top-9 h-[calc(100%-1rem)] w-px bg-blue-100 md:left-3" />
                   <div className="mb-4 flex items-center gap-3">
-                    <span className="absolute left-0 flex h-4 w-4 items-center justify-center rounded-full bg-slate-950 ring-4 ring-white md:left-1">
+                    <span className="absolute left-0 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 ring-4 ring-white md:left-1">
                       <span className="h-1.5 w-1.5 rounded-full bg-white" />
                     </span>
                     <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
@@ -1213,7 +1385,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                         "health_score",
                         "score"
                       ]);
-                      const healthScore = getReportHealthScore(report);
+                      const healthScore = getReportHealthScoreState(report);
                       const scoreWidth =
                         typeof rawHealthScore === "number"
                           ? Math.min(Math.max(rawHealthScore, 0), 100)
@@ -1261,7 +1433,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                       return (
                         <article
                           key={report.id}
-                          className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_14px_38px_rgba(15,23,42,0.045)] transition hover:-translate-y-0.5 hover:shadow-[0_18px_46px_rgba(15,23,42,0.07)] md:p-5"
+                          className="rounded-[24px] border border-slate-200/80 bg-white p-5 shadow-[0_18px_48px_rgba(15,23,42,0.045)] transition hover:-translate-y-0.5 hover:border-blue-100 hover:shadow-[0_24px_64px_rgba(15,23,42,0.07)] md:p-6"
                         >
                           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                             <div className="min-w-0">
@@ -1333,7 +1505,11 @@ const Reports = ({ session, locations }: ReportsProps) => {
                           </div>
 
                           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-                            <ReportDataPoint label="Business Health Score" value={healthScore} />
+                            <ReportDataPoint
+                              label="Business Health Score"
+                              value={healthScore.value}
+                              detail={healthScore.detail}
+                            />
                             {rating && <ReportDataPoint label="Note" value={rating} />}
                             {reviews && <ReportDataPoint label="Avis" value={reviews} />}
                             {responses && <ReportDataPoint label="Réponses" value={responses} />}
@@ -1352,10 +1528,10 @@ const Reports = ({ session, locations }: ReportsProps) => {
                           </div>
 
                           <div className="mt-4 grid gap-3 lg:grid-cols-[0.9fr_0.8fr_1.2fr]">
-                            <div className="rounded-2xl border border-slate-100 bg-slate-950 p-4 text-white">
+                            <div className="rounded-[24px] border border-[#020617] bg-[#020617] p-5 text-white shadow-[0_18px_42px_rgba(2,6,23,0.18)]">
                               <div className="flex items-center justify-between gap-3">
                                 <div>
-                                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
+                                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-blue-200">
                                     Aperçu
                                   </p>
                                   {reportBranding.companyName && (
@@ -1364,22 +1540,26 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                     </p>
                                   )}
                                   <p className="mt-2 text-3xl font-semibold leading-none">
-                                    {healthScore}
+                                    {healthScore.value}
                                   </p>
                                 </div>
-                                <TrendingUp className="h-5 w-5 text-slate-300" />
+                                <TrendingUp className="h-5 w-5 text-blue-200" />
                               </div>
-                              <div className="mt-4 h-2 rounded-full bg-white/15">
-                                {typeof rawHealthScore === "number" && (
+                              {typeof rawHealthScore === "number" ? (
+                                <div className="mt-4 h-2 rounded-full bg-white/15">
                                   <div
-                                    className="h-full rounded-full bg-white"
+                                    className="h-full rounded-full bg-blue-400"
                                     style={{ width: `${scoreWidth}%` }}
                                   />
-                                )}
-                              </div>
+                                </div>
+                              ) : (
+                                <p className="mt-4 text-xs leading-5 text-slate-300">
+                                  {BUSINESS_HEALTH_SCORE_PENDING_DETAIL}
+                                </p>
+                              )}
                             </div>
                             {evolution && (
-                              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+                              <div className="rounded-[24px] border border-slate-200/70 bg-slate-50/70 p-5">
                                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                                   <CalendarDays className="h-4 w-4" />
                                   Evolution
@@ -1390,7 +1570,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                               </div>
                             )}
                             {themes.length > 0 && (
-                              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+                              <div className="rounded-[24px] border border-slate-200/70 bg-slate-50/70 p-5">
                                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                                   Top thèmes
                                 </p>
@@ -1398,7 +1578,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                   {themes.map((theme) => (
                                     <span
                                       key={theme}
-                                      className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600"
+                                      className="rounded-full border border-blue-100 bg-white px-3 py-1 text-xs font-medium text-slate-600"
                                     >
                                       {theme}
                                     </span>
@@ -1535,7 +1715,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                       "Impact attendu : améliorer la perception et la préférence locale.";
                     return (
                       <div className="mt-6 space-y-6">
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
+                        <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-6">
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <Badge variant="neutral">
                               Veille concurrentielle
@@ -1565,7 +1745,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                           </div>
                         </div>
 
-                        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                        <div className="rounded-[24px] border border-slate-200 bg-white p-6">
                           <div className="text-sm font-semibold text-slate-900">
                             Résumé exécutif
                           </div>
@@ -1618,7 +1798,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                         </div>
 
                         {topCompetitors.length > 0 && (
-                        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                        <div className="rounded-[24px] border border-slate-200 bg-white p-6">
                           <div className="text-sm font-semibold text-slate-900">
                             Podium concurrentiel
                           </div>
@@ -1651,7 +1831,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                         {(typeof stats.closest_m === "number" ||
                           typeof stats.best_rating === "number" ||
                           typeof stats.high_risk_count === "number") && (
-                        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                        <div className="rounded-[24px] border border-slate-200 bg-white p-6">
                           <div className="text-sm font-semibold text-slate-900">
                             Analyse radar
                           </div>
@@ -1698,7 +1878,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                             swot[key]?.[0] ? (
                             <div
                               key={key}
-                              className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-600"
+                              className="rounded-[24px] border border-slate-200 bg-white p-4 text-xs text-slate-600"
                             >
                               <div className="font-semibold text-slate-700">
                                 {label}
@@ -1724,7 +1904,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                         )}
 
                         {actions.length > 0 && (
-                        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                        <div className="rounded-[24px] border border-slate-200 bg-white p-6">
                           <div className="text-sm font-semibold text-slate-900">
                             Actions recommandées
                           </div>

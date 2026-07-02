@@ -105,6 +105,9 @@ const formatRatio = (value: number | null) =>
   value === null ? null : `${Math.round(value * 100)}%`;
 
 const EMPTY_DASH = String.fromCharCode(8212);
+const BUSINESS_HEALTH_SCORE_PENDING = "Calcul en cours";
+const BUSINESS_HEALTH_SCORE_PENDING_DETAIL =
+  "Le score sera disponible dès que suffisamment d'historique aura été analysé.";
 
 const normalizeLocationTitle = (value: string) =>
   value.replace(/\s*-\s*/g, " - ").replace(/\s{2,}/g, " ").trim();
@@ -116,26 +119,6 @@ const escapeHtml = (value: string) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-
-const renderStars = (rating: number | null) => {
-  if (rating === null) {
-    return "";
-  }
-  const normalized = typeof rating === "number" ? Math.max(0, Math.min(5, rating)) : 0;
-  const ratingLabel = formatRating(rating);
-  const fullStars = Math.floor(normalized);
-  const stars = Array.from({ length: 5 }, (_, index) => {
-    const filled = index < fullStars;
-    return `
-      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 2.5l2.9 6.1 6.7.6-5 4.3 1.5 6.6L12 16.8 5.9 20l1.5-6.6-5-4.3 6.7-.6L12 2.5z"
-          fill="${filled ? "#1f2937" : "none"}"
-          stroke="#1f2937" stroke-width="1"/>
-      </svg>
-    `;
-  });
-  return `<div class="stars">${stars.join("")}<span>${escapeHtml(ratingLabel ?? "")}</span></div>`;
-};
 
 const buildAiSummary = (params: {
   avgRating: number | null;
@@ -346,37 +329,6 @@ const resolveReportBranding = async (
 const formatCoverNumber = (value: number) =>
   Number.isInteger(value) ? String(value) : value.toFixed(1).replace(".", ",");
 
-const buildCoverAiSentence = (params: PremiumReportPayload) => {
-  const summaries = params.aiSummary;
-  if (summaries.length === 0) return null;
-  if (
-    summaries.some((item) => /note moyenne/i.test(item)) &&
-    typeof params.kpis.avgRating === "number" &&
-    params.kpis.avgRating >= 4.5
-  ) {
-    return "Aujourd'hui votre réputation est excellente.";
-  }
-  if (
-    summaries.some((item) => /note moyenne/i.test(item)) &&
-    typeof params.kpis.avgRating === "number" &&
-    params.kpis.avgRating >= 4
-  ) {
-    return "La satisfaction client reste votre principal point fort.";
-  }
-  if (summaries.some((item) => /Aucun avis négatif en attente/i.test(item))) {
-    return "Votre réputation reste sous contrôle sur la période.";
-  }
-  if (
-    summaries.some((item) => /taux de réponse/i.test(item)) &&
-    typeof params.kpis.responseRate === "number" &&
-    params.kpis.responseRate >= 0.8
-  ) {
-    return "Votre réactivité soutient la qualité de votre réputation.";
-  }
-  const first = summaries[0]?.trim();
-  return first && first !== EMPTY_DASH ? first : null;
-};
-
 const rewritePdfInsight = (item: string) => {
   const trimmed = item.trim();
   if (!trimmed || trimmed === EMPTY_DASH) {
@@ -530,8 +482,12 @@ const buildHtml = (params: PremiumReportPayload) => {
     ]);
   const businessHealthScore =
     businessHealthScoreValue === null
-      ? "Calcul en cours"
+      ? BUSINESS_HEALTH_SCORE_PENDING
       : `${formatCoverNumber(businessHealthScoreValue)}/100`;
+  const businessHealthScoreDetail =
+    businessHealthScoreValue === null
+      ? BUSINESS_HEALTH_SCORE_PENDING_DETAIL
+      : "Score actuel";
   const coverKpis = [
     {
       label: "Avis analysés",
@@ -573,7 +529,6 @@ const buildHtml = (params: PremiumReportPayload) => {
     (item): item is { label: string; value: string; visible: true } =>
       item.visible && item.value !== null
   );
-  const coverAiSentence = buildCoverAiSentence(params);
   const ratingPercent =
     params.kpis.avgRating === null
       ? 0
@@ -582,12 +537,14 @@ const buildHtml = (params: PremiumReportPayload) => {
     params.kpis.responseRate === null
       ? 0
       : Math.max(0, Math.min(100, params.kpis.responseRate * 100));
+  const healthPercent =
+    businessHealthScoreValue === null
+      ? null
+      : Math.max(0, Math.min(100, businessHealthScoreValue));
   const sourceSummaryItems = params.aiSummary.filter(
     (item) => item.trim() && item.trim() !== EMPTY_DASH
   );
-  const summaryItems = sourceSummaryItems.length
-    ? sourceSummaryItems.map(rewritePdfInsight)
-    : ["Aucune synthèse IA disponible dans les données du rapport."];
+  const summaryItems = sourceSummaryItems.map(rewritePdfInsight).filter(Boolean);
   const findSummary = (patterns: RegExp[], fallbackIndex = 0) =>
     rewritePdfInsight(
       sourceSummaryItems.find((item) =>
@@ -597,10 +554,9 @@ const buildHtml = (params: PremiumReportPayload) => {
         ""
     ) ||
     summaryItems[fallbackIndex] ||
-    "Aucune synthèse IA disponible dans les données du rapport.";
+    "";
   const mainInsight =
-    (sourceSummaryItems[0] && rewritePdfInsight(sourceSummaryItems[0])) ||
-    "Aucune synthèse IA disponible dans les données du rapport.";
+    (sourceSummaryItems[0] && rewritePdfInsight(sourceSummaryItems[0])) || "";
   const strengthInsight = findSummary(
     [/note moyenne/i, /taux de réponse/i, /maîtrisée/i],
     0
@@ -634,91 +590,449 @@ const buildHtml = (params: PremiumReportPayload) => {
     .slice(0, 2)
     .map(rewritePdfInsight)
     .filter(Boolean);
-  const hasActionItems =
-    highImpactActions.length > 0 ||
-    mediumImpactActions.length > 0 ||
-    lowImpactActions.length > 0;
-  const renderInsightCard = (
-    label: string,
+  const compactInsight = (value: string, maxLength = 92) => {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    const firstSentence = normalized.split(/(?<=[.!?])\s+/)[0] ?? normalized;
+    const clean = firstSentence.replace(/\s*[;:]\s*$/, "").trim();
+    if (clean.length <= maxLength) return clean;
+    return `${clean.slice(0, maxLength).replace(/\s+\S*$/, "").trim()}.`;
+  };
+  const renderActionItems = (items: string[]) =>
+    items
+      .map((item) => compactInsight(item, 88))
+      .filter(Boolean)
+      .map(
+        (item) =>
+          `<div class="action-item">${escapeHtml(item)}</div>`
+      )
+      .join("");
+  const renderConsultHeader = (kicker: string, title: string) => `
+    <div class="consult-header">
+      <div>
+        <div class="page-kicker">${escapeHtml(kicker)}</div>
+        <h1 class="page-title">${escapeHtml(title)}</h1>
+      </div>
+      <div class="header-rule"></div>
+    </div>
+  `;
+  const renderDecisionCard = (
+    label: "Constat" | "Impact" | "Décision",
     value: string,
     tone: "dark" | "light" | "green" = "light"
+  ) => {
+    const text = compactInsight(value);
+    if (!text) return "";
+    return `
+    <div class="decision-card decision-${tone}">
+      <div class="decision-icon">${label.charAt(0)}</div>
+      <div>
+        <div class="decision-label">${escapeHtml(label)}</div>
+        <div class="decision-text">${escapeHtml(text)}</div>
+      </div>
+    </div>
+  `;
+  };
+  const renderDecisionSet = (
+    constat: string,
+    impact: string,
+    decision: string
+  ) => {
+    const cards = [
+      renderDecisionCard("Constat", constat, "dark"),
+      renderDecisionCard("Impact", impact, "light"),
+      renderDecisionCard("Décision", decision, "green")
+    ]
+      .filter(Boolean)
+      .join("");
+    return cards
+      ? `
+    <div class="decision-grid">
+      ${cards}
+    </div>
+  `
+      : "";
+  };
+  const renderBoardMetric = (
+    label: string,
+    value: string,
+    index: number,
+    featured = false,
+    detail?: string | null
   ) => `
-    <div class="insight-card insight-${tone}">
-      <div class="eyebrow">${escapeHtml(label)}</div>
-      <div class="insight-text">${escapeHtml(value)}</div>
+    <div class="${featured ? "board-metric board-metric-featured" : "board-metric"}">
+      <div class="metric-index">${String(index + 1).padStart(2, "0")}</div>
+      <div class="board-label">${escapeHtml(label)}</div>
+      <div class="board-value">${escapeHtml(value)}</div>
+      ${
+        detail
+          ? `<div class="board-detail">${escapeHtml(detail)}</div>`
+          : ""
+      }
     </div>
   `;
-  const renderKpi = (label: string, value: string, note = "") => `
-    <div class="metric-card">
-      <div class="metric-label">${escapeHtml(label)}</div>
-      <div class="metric-value">${escapeHtml(value)}</div>
-      ${note ? `<div class="metric-note">${escapeHtml(note)}</div>` : ""}
+  const renderGauge = (
+    label: string,
+    value: string,
+    percent: number | null,
+    caption: string
+  ) => {
+    if (percent === null || !Number.isFinite(percent)) return "";
+    const safePercent = Math.max(0, Math.min(100, percent));
+    return `
+      <div class="viz-card viz-gauge-card">
+        <div class="viz-label">${escapeHtml(label)}</div>
+        <div class="gauge-shell">
+          <div class="gauge-ring" style="background: conic-gradient(#2563eb 0 ${safePercent}%, #e2e8f0 ${safePercent}% 100%);">
+            <div class="gauge-core">
+              <div class="gauge-value">${escapeHtml(value)}</div>
+              <div class="gauge-caption">${escapeHtml(caption)}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  };
+  const renderDonut = (
+    label: string,
+    value: string,
+    percent: number | null,
+    caption: string
+  ) => {
+    if (percent === null || !Number.isFinite(percent)) return "";
+    const safePercent = Math.max(0, Math.min(100, percent));
+    return `
+      <div class="viz-card donut-card">
+        <div class="viz-label">${escapeHtml(label)}</div>
+        <div class="donut-row">
+          <div class="donut-ring" style="background: conic-gradient(#2563eb 0 ${safePercent}%, #e2e8f0 ${safePercent}% 100%);">
+            <div class="donut-core"></div>
+          </div>
+          <div>
+            <div class="donut-value">${escapeHtml(value)}</div>
+            <div class="donut-caption">${escapeHtml(caption)}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  };
+  const renderProgress = (
+    label: string,
+    value: string,
+    percent: number | null
+  ) => {
+    if (percent === null || !Number.isFinite(percent)) return "";
+    const safePercent = Math.max(0, Math.min(100, percent));
+    return `
+      <div class="progress-row">
+        <div class="progress-top">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value)}</strong>
+        </div>
+        <div class="progress-track">
+          <span style="width:${safePercent}%;"></span>
+        </div>
+      </div>
+    `;
+  };
+  const renderHorizontalBars = (
+    title: string,
+    items: Array<{ label: string; value: number }>
+  ) => {
+    const validItems = items.filter((item) => Number.isFinite(item.value));
+    if (!validItems.length) return "";
+    const maxValue = Math.max(...validItems.map((item) => item.value));
+    if (maxValue <= 0) return "";
+    return `
+      <div class="viz-card bars-card">
+        <div class="viz-label">${escapeHtml(title)}</div>
+        <div class="bars-list">
+          ${validItems
+            .map((item) => {
+              const width =
+                item.value <= 0
+                  ? 0
+                  : Math.max(2, Math.min(100, (item.value / maxValue) * 100));
+              return `
+                <div class="bar-row">
+                  <div class="bar-meta">
+                    <span>${escapeHtml(item.label)}</span>
+                    <strong>${escapeHtml(formatCoverNumber(item.value))}</strong>
+                  </div>
+                  <div class="bar-track">
+                    <span style="width:${width}%;"></span>
+                  </div>
+                </div>
+              `;
+            })
+            .join("")}
+        </div>
+      </div>
+    `;
+  };
+  const renderMiniSparkline = (
+    label: string,
+    values: number[],
+    caption: string
+  ) => {
+    const validValues = values.filter((value) => Number.isFinite(value));
+    if (validValues.length < 3) return "";
+    const maxValue = Math.max(...validValues);
+    const minValue = Math.min(...validValues);
+    if (maxValue <= 0) return "";
+    const range = maxValue - minValue || 1;
+    const points = validValues
+      .map((value, index) => {
+        const x = (index / (validValues.length - 1)) * 100;
+        const y = 34 - ((value - minValue) / range) * 28;
+        return `${x.toFixed(2)},${y.toFixed(2)}`;
+      })
+      .join(" ");
+    return `
+      <div class="viz-card spark-card">
+        <div class="viz-label">${escapeHtml(label)}</div>
+        <svg class="sparkline" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+          <polyline points="${points}" />
+        </svg>
+        <div class="spark-caption">${escapeHtml(caption)}</div>
+      </div>
+    `;
+  };
+  const renderTimelineItem = (
+    label: string,
+    value: string,
+    detail: string,
+    index: number
+  ) => `
+    <div class="timeline-item">
+      <div class="timeline-index">${String(index + 1).padStart(2, "0")}</div>
+      <div>
+        <div class="timeline-label">${escapeHtml(label)}</div>
+        <div class="timeline-value">${escapeHtml(value)}</div>
+        <div class="timeline-detail">${escapeHtml(compactInsight(detail, 72))}</div>
+      </div>
     </div>
   `;
-  const performanceKpis = [
-    renderKpi(
-      "Avis analysés",
-      String(params.kpis.reviewsTotal),
-      "Volume d'avis collectés sur la période."
-    ),
+  const renderThemeCloud = () => {
+    if (!tags.length) return "";
+    const cloudItems = tags.slice(0, 10).map((tag, index) => ({
+      label: tag.tag,
+      value: formatCoverNumber(tag.count),
+      size: Math.min(3, Math.floor(index / 3))
+    }));
+
+    return cloudItems
+      .map(
+        (item) => `
+    <div class="theme-pill theme-size-${item.size}">
+      <span>${escapeHtml(item.label)}</span>
+      <strong>${escapeHtml(item.value)}</strong>
+    </div>
+  `
+      )
+      .join("");
+  };
+  const renderVerticalActionCard = (
+    title: string,
+    items: string[],
+    index: number,
+    featured = false
+  ) => {
+    const renderedItems = renderActionItems(items);
+    if (!renderedItems) return "";
+    return `
+    <div class="${featured ? "action-lane-card action-lane-featured" : "action-lane-card"}">
+      <div class="action-lane-index">${String(index + 1).padStart(2, "0")}</div>
+      <div>
+        <div class="action-title">${escapeHtml(title)}</div>
+        <div class="action-lane-items">
+          ${renderedItems}
+        </div>
+      </div>
+    </div>
+  `;
+  };
+  const performanceBoardMetrics = [
+    {
+      label: "Avis analysés",
+      value: formatCoverNumber(params.kpis.reviewsTotal),
+      featured: true
+    },
     ...(params.kpis.avgRating !== null
       ? [
-          renderKpi(
-            "Note moyenne",
-            formatRating(params.kpis.avgRating) ?? "",
-            "Satisfaction exprimée par vos clients."
-          )
+          {
+            label: "Note moyenne",
+            value: formatRating(params.kpis.avgRating) ?? "",
+            featured: false
+          }
         ]
       : []),
     ...(params.kpis.responseRate !== null
       ? [
-          renderKpi(
-            "Taux de réponse",
-            formatRatio(params.kpis.responseRate) ?? "",
-            "Réactivité visible dans votre réputation."
-          )
+          {
+            label: "Taux de réponse",
+            value: formatRatio(params.kpis.responseRate) ?? "",
+            featured: false
+          }
         ]
-      : [])
-  ];
-  const renderTag = (tag: { tag: string; count: number }) => `
-    <div class="tag-pill">
-      <span>${escapeHtml(tag.tag)}</span>
-      <strong>${tag.count}</strong>
-    </div>
-  `;
-  const renderActionItems = (items: string[]) =>
-    items
-      .map((item) => `<div class="action-item">${escapeHtml(item)}</div>`)
-      .join("");
-  const renderMiniLocationCards = () =>
+      : []),
+    {
+      label: "Avis négatifs",
+      value: formatCoverNumber(params.kpis.negativeCount),
+      featured: false
+    }
+  ].map((metric, index) =>
+    renderBoardMetric(metric.label, metric.value, index, metric.featured)
+  );
+  const reputationTimelineItems = [
+    {
+      label: "Score",
+      value: businessHealthScore,
+      detail: businessHealthScoreDetail
+    },
+    {
+      label: "Volume",
+      value: formatCoverNumber(params.kpis.reviewsTotal),
+      detail: "Avis analysés"
+    },
+    {
+      label: "Vigilance",
+      value: formatCoverNumber(params.kpis.negativeCount),
+      detail: "Avis négatifs"
+    },
+    {
+      label: "Réponse",
+      value: formatCoverNumber(params.kpis.untreatedNegativeCount),
+      detail: "Réponses prioritaires"
+    },
+    {
+      label: "IA",
+      value: formatCoverNumber(params.ai.criticalCount),
+      detail: "Avis critiques IA"
+    }
+  ].map((item, index) =>
+    renderTimelineItem(item.label, item.value, item.detail, index)
+  );
+  const healthGauge = renderGauge(
+    "Business Health Score",
+    businessHealthScore,
+    healthPercent,
+    businessHealthScoreDetail
+  );
+  const ratingGauge =
+    params.kpis.avgRating === null
+      ? ""
+      : renderGauge(
+          "Note moyenne",
+          formatRating(params.kpis.avgRating) ?? "",
+          ratingPercent,
+          "Sur 5"
+        );
+  const responseDonut =
+    params.kpis.responseRate === null
+      ? ""
+      : renderDonut(
+          "Taux de réponse",
+          formatRatio(params.kpis.responseRate) ?? "",
+          responsePercent,
+          "Avis avec réponse"
+        );
+  const riskShare =
+    params.kpis.reviewsTotal > 0
+      ? (params.kpis.negativeCount / params.kpis.reviewsTotal) * 100
+      : null;
+  const riskDonut =
+    riskShare === null
+      ? ""
+      : renderDonut(
+          "Avis négatifs",
+          formatCoverNumber(params.kpis.negativeCount),
+          riskShare,
+          "Part des avis analysés"
+        );
+  const progressVisuals = [
+    healthPercent === null
+      ? ""
+      : renderProgress("Business Health Score", businessHealthScore, healthPercent),
+    params.kpis.avgRating === null
+      ? ""
+      : renderProgress(
+          "Note moyenne",
+          formatRating(params.kpis.avgRating) ?? "",
+          ratingPercent
+        ),
+    params.kpis.responseRate === null
+      ? ""
+      : renderProgress(
+          "Taux de réponse",
+          formatRatio(params.kpis.responseRate) ?? "",
+          responsePercent
+        )
+  ]
+    .filter(Boolean)
+    .join("");
+  const progressPanel = progressVisuals
+    ? `<div class="progress-panel">${progressVisuals}</div>`
+    : "";
+  const riskBars = renderHorizontalBars("Signaux de vigilance", [
+    { label: "Avis négatifs", value: params.kpis.negativeCount },
+    {
+      label: "Réponses prioritaires",
+      value: params.kpis.untreatedNegativeCount
+    },
+    { label: "Critiques IA", value: params.ai.criticalCount }
+  ]);
+  const tagBars = renderHorizontalBars(
+    "Thèmes les plus cités",
+    tags.slice(0, 5).map((tag) => ({ label: tag.tag, value: tag.count }))
+  );
+  const locationBars = renderHorizontalBars(
+    "Répartition établissements",
     params.perLocation
-      .slice(0, 6)
-      .map((row) => {
-        const ratingLabel = formatRating(row.avgRating);
-        const responseLabel = formatRatio(row.responseRate);
-        const locationMetrics = [
-          `<span>${row.reviewsTotal} avis</span>`,
-          ratingLabel ? `<span>${escapeHtml(ratingLabel)}</span>` : "",
-          responseLabel ? `<span>${escapeHtml(responseLabel)}</span>` : "",
-          `<span>${
-            row.untreatedNegativeCount === 0
-              ? "Aucun avis prioritaire"
-              : `${row.untreatedNegativeCount} réponse${row.untreatedNegativeCount > 1 ? "s" : ""} prioritaire${row.untreatedNegativeCount > 1 ? "s" : ""}`
-          }</span>`
-        ]
-          .filter(Boolean)
-          .join("");
-        return `
-          <div class="location-card">
-            <div class="location-name">${escapeHtml(row.name)}</div>
-            <div class="location-grid">
-              ${locationMetrics}
-            </div>
-          </div>
-        `;
-      })
-      .join("");
-
+      .slice(0, 5)
+      .map((location) => ({
+        label: location.name,
+        value: location.reviewsTotal
+      }))
+  );
+  const themeSparkline = renderMiniSparkline(
+    "Intensité des thèmes",
+    tags.slice(0, 6).map((tag) => tag.count),
+    "Lecture classée des thèmes existants"
+  );
+  const locationSparkline = renderMiniSparkline(
+    "Volumes établissements",
+    params.perLocation.slice(0, 6).map((location) => location.reviewsTotal),
+    "Répartition des avis par établissement"
+  );
+  const themeCloud = renderThemeCloud();
+  const summaryVisuals = [healthGauge, progressPanel].filter(Boolean).join("");
+  const performanceVisuals = [ratingGauge, responseDonut, riskDonut]
+    .filter(Boolean)
+    .join("");
+  const reputationVisuals = [riskBars, locationBars, locationSparkline]
+    .filter(Boolean)
+    .join("");
+  const voiceVisuals = [tagBars, themeSparkline].filter(Boolean).join("");
+  const actionCards = [
+    renderVerticalActionCard(
+      "Impact élevé",
+      highImpactActions.length ? highImpactActions : [priorityInsight],
+      0,
+      true
+    ),
+    renderVerticalActionCard(
+      "Impact moyen",
+      mediumImpactActions.length ? mediumImpactActions : [strengthInsight],
+      1
+    ),
+    renderVerticalActionCard(
+      "À surveiller",
+      lowImpactActions.length ? lowImpactActions : [weaknessInsight],
+      2
+    )
+  ]
+    .filter(Boolean)
+    .join("");
   return `
   <!doctype html>
   <html lang="fr">
@@ -730,7 +1044,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         body {
           margin: 0;
           font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
-          color: #0f172a;
+          color: #020617;
           background: #ffffff;
         }
         .page {
@@ -739,7 +1053,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           position: relative;
           display: flex;
           flex-direction: column;
-          gap: 22px;
+          gap: 26px;
           padding: 2mm 0;
         }
         .page:last-child {
@@ -750,22 +1064,22 @@ const buildHtml = (params: PremiumReportPayload) => {
           text-transform: uppercase;
           letter-spacing: 0.24em;
           font-weight: 800;
-          color: #0f172a;
+          color: #020617;
         }
         .page-kicker {
           font-size: 11px;
           font-weight: 700;
           letter-spacing: 0.18em;
           text-transform: uppercase;
-          color: #64748b;
+          color: #2563eb;
         }
         .page-title {
           margin: 6px 0 0;
-          font-size: 34px;
+          font-size: 36px;
           line-height: 1.05;
-          letter-spacing: -0.04em;
+          letter-spacing: 0;
           font-weight: 760;
-          color: #0f172a;
+          color: #020617;
         }
         h1 {
           margin: 0;
@@ -795,22 +1109,22 @@ const buildHtml = (params: PremiumReportPayload) => {
         .cover-logo {
           width: 54px;
           height: 54px;
-          border-radius: 16px;
+          border-radius: 18px;
           object-fit: cover;
           border: 1px solid #e2e8f0;
         }
         .cover-brand-name {
           font-size: 22px;
           line-height: 1.08;
-          letter-spacing: -0.035em;
+          letter-spacing: 0;
           font-weight: 780;
-          color: #0f172a;
+          color: #020617;
         }
         .cover-legal {
           margin-top: 6px;
           font-size: 12px;
           line-height: 1.35;
-          color: #64748b;
+          color: #2563eb;
           font-weight: 650;
         }
         .cover-report-label {
@@ -828,7 +1142,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         .cover-title h1 {
           font-size: 58px;
           line-height: 0.94;
-          letter-spacing: -0.065em;
+          letter-spacing: 0;
           font-weight: 780;
         }
         .cover-meta {
@@ -860,7 +1174,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         .action-card,
         .theme-column,
         .location-card {
-          border-radius: 18px;
+          border-radius: 24px;
           background: #f8fafc;
           padding: 16px;
         }
@@ -872,23 +1186,23 @@ const buildHtml = (params: PremiumReportPayload) => {
           font-weight: 740;
           text-transform: uppercase;
           letter-spacing: 0.09em;
-          color: #64748b;
+          color: #2563eb;
         }
         .meta-value {
           margin-top: 8px;
           font-size: 16px;
           line-height: 1.25;
           font-weight: 740;
-          color: #0f172a;
+          color: #020617;
         }
         .cover-score-hero {
           margin-top: 2px;
-          border-radius: 30px;
+          border-radius: 24px;
           padding: 30px;
           min-height: 186px;
           color: #ffffff;
           background:
-            linear-gradient(135deg, #0f172a 0%, #111827 58%, #334155 138%);
+            linear-gradient(135deg, #020617 0%, #0f172a 64%, #1d4ed8 140%);
           display: grid;
           grid-template-columns: minmax(0, 1fr) 1.35fr;
           gap: 26px;
@@ -912,19 +1226,19 @@ const buildHtml = (params: PremiumReportPayload) => {
           letter-spacing: 0.12em;
           text-transform: uppercase;
           font-weight: 760;
-          color: #a7f3d0;
+          color: #bfdbfe;
         }
         .cover-score-value,
         .score-value {
           margin-top: 10px;
           font-size: 76px;
           line-height: 0.9;
-          letter-spacing: -0.06em;
+          letter-spacing: 0;
           font-weight: 780;
         }
         .cover-score-value {
           font-size: 68px;
-          letter-spacing: -0.07em;
+          letter-spacing: 0;
         }
         .cover-score-subtitle {
           margin-top: 16px;
@@ -941,7 +1255,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           gap: 10px;
         }
         .cover-kpi-card {
-          border-radius: 18px;
+          border-radius: 24px;
           padding: 14px;
           background: rgba(255,255,255,0.09);
           border: 1px solid rgba(255,255,255,0.14);
@@ -958,21 +1272,21 @@ const buildHtml = (params: PremiumReportPayload) => {
           margin-top: 9px;
           font-size: 26px;
           line-height: 0.98;
-          letter-spacing: -0.045em;
+          letter-spacing: 0;
           font-weight: 780;
           color: #ffffff;
         }
         .cover-ai-line {
           margin-top: 18px;
-          border-radius: 22px;
+          border-radius: 24px;
           padding: 18px 20px;
           background: #f8fafc;
           border: 1px solid #e2e8f0;
           font-size: 20px;
           line-height: 1.25;
-          letter-spacing: -0.03em;
+          letter-spacing: 0;
           font-weight: 720;
-          color: #0f172a;
+          color: #020617;
         }
         .section-header {
           display: flex;
@@ -995,14 +1309,14 @@ const buildHtml = (params: PremiumReportPayload) => {
           min-height: 118px;
         }
         .insight-dark {
-          background: #0f172a;
+          background: #020617;
           color: #ffffff;
         }
         .insight-dark .eyebrow {
           color: #cbd5e1;
         }
         .insight-green {
-          background: #ecfdf5;
+          background: #eff6ff;
         }
         .insight-light {
           background: #f8fafc;
@@ -1025,9 +1339,9 @@ const buildHtml = (params: PremiumReportPayload) => {
           margin-top: 12px;
           font-size: 38px;
           line-height: 0.96;
-          letter-spacing: -0.045em;
+          letter-spacing: 0;
           font-weight: 780;
-          color: #0f172a;
+          color: #020617;
         }
         .metric-note {
           margin-top: 10px;
@@ -1048,7 +1362,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         .chart-title {
           font-size: 14px;
           font-weight: 740;
-          color: #0f172a;
+          color: #020617;
           margin-bottom: 14px;
         }
         .big-bar {
@@ -1061,7 +1375,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           display: block;
           height: 100%;
           border-radius: 999px;
-          background: #0f172a;
+          background: #2563eb;
         }
         .rating-band {
           margin-top: 22px;
@@ -1073,7 +1387,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           align-items: center;
           gap: 7px;
           font-size: 16px;
-          color: #0f172a;
+          color: #020617;
         }
         .volume-strip {
           display: grid;
@@ -1082,14 +1396,14 @@ const buildHtml = (params: PremiumReportPayload) => {
           margin-top: 22px;
         }
         .strip-item {
-          border-radius: 16px;
+          border-radius: 24px;
           background: #f8fafc;
           padding: 14px;
         }
         .strip-value {
           font-size: 26px;
           font-weight: 760;
-          letter-spacing: -0.04em;
+          letter-spacing: 0;
         }
         .theme-grid,
         .action-grid {
@@ -1106,7 +1420,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           font-size: 13px;
           line-height: 1.2;
           font-weight: 780;
-          color: #0f172a;
+          color: #020617;
           margin-bottom: 14px;
         }
         .tag-pill {
@@ -1132,7 +1446,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           color: #334155;
         }
         .action-item {
-          border-radius: 14px;
+          border-radius: 18px;
           background: #ffffff;
           padding: 12px;
           font-size: 13px;
@@ -1141,7 +1455,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           border: 1px solid #e2e8f0;
         }
         .action-high {
-          background: #ecfdf5;
+          background: #eff6ff;
         }
         .location-list {
           display: grid;
@@ -1151,7 +1465,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         .location-name {
           font-size: 14px;
           font-weight: 740;
-          color: #0f172a;
+          color: #020617;
           margin-bottom: 12px;
         }
         .location-grid {
@@ -1163,9 +1477,9 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .conclusion-panel {
           margin-top: auto;
-          border-radius: 28px;
+          border-radius: 24px;
           padding: 28px;
-          background: #0f172a;
+          background: #020617;
           color: #ffffff;
           display: grid;
           grid-template-columns: minmax(0, 1fr) 180px;
@@ -1173,13 +1487,13 @@ const buildHtml = (params: PremiumReportPayload) => {
           align-items: end;
         }
         .conclusion-panel .eyebrow {
-          color: #a7f3d0;
+          color: #bfdbfe;
         }
         .conclusion-text {
           margin-top: 12px;
           font-size: 28px;
           line-height: 1.15;
-          letter-spacing: -0.035em;
+          letter-spacing: 0;
           font-weight: 740;
         }
         .page-number {
@@ -1197,10 +1511,761 @@ const buildHtml = (params: PremiumReportPayload) => {
           color: #cbd5e1;
           letter-spacing: 0.08em;
         }
+        .consult-page {
+          gap: 28px;
+          padding: 8mm 0;
+        }
+        .consult-header {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 132px;
+          align-items: start;
+          gap: 28px;
+        }
+        .header-rule {
+          height: 2px;
+          margin-top: 18px;
+          border-radius: 999px;
+          background: #2563eb;
+        }
+        .consult-cover {
+          gap: 26px;
+          padding-top: 8mm;
+        }
+        .cover-stage {
+          display: grid;
+          gap: 18px;
+          margin-top: 12px;
+        }
+        .brand-line {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+        }
+        .brand-pill {
+          border-radius: 999px;
+          border: 1px solid #e2e8f0;
+          padding: 9px 12px;
+          color: #475569;
+          font-size: 12px;
+          line-height: 1.2;
+          font-weight: 760;
+        }
+        .cover-stage-title {
+          max-width: 680px;
+          font-size: 66px;
+          line-height: 0.92;
+          letter-spacing: 0;
+          font-weight: 790;
+        }
+        .cover-subtitle {
+          max-width: 560px;
+          font-size: 18px;
+          line-height: 1.35;
+          color: #475569;
+          font-weight: 650;
+        }
+        .location-strip {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          align-items: center;
+        }
+        .location-strip-label {
+          margin-right: 4px;
+          font-size: 11px;
+          font-weight: 820;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: #2563eb;
+        }
+        .board-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 14px;
+        }
+        .cover-board-grid {
+          grid-template-columns: repeat(3, 1fr);
+        }
+        .board-metric {
+          min-height: 150px;
+          border-radius: 24px;
+          padding: 18px;
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+        }
+        .board-metric-featured {
+          background: #020617;
+          color: #ffffff;
+          border-color: #020617;
+        }
+        .metric-index {
+          width: 30px;
+          height: 30px;
+          border-radius: 999px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+          color: #64748b;
+          font-size: 10px;
+          font-weight: 820;
+          letter-spacing: 0.08em;
+        }
+        .board-metric-featured .metric-index {
+          background: rgba(255,255,255,0.12);
+          border-color: rgba(255,255,255,0.16);
+          color: #cbd5e1;
+        }
+        .board-label {
+          margin-top: 18px;
+          font-size: 11px;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: #2563eb;
+          font-weight: 820;
+        }
+        .board-metric-featured .board-label {
+          color: #cbd5e1;
+        }
+        .board-value {
+          margin-top: 10px;
+          font-size: 42px;
+          line-height: 0.92;
+          letter-spacing: 0;
+          font-weight: 790;
+        }
+        .board-detail {
+          margin-top: 10px;
+          font-size: 11px;
+          line-height: 1.45;
+          color: #64748b;
+          font-weight: 650;
+        }
+        .board-metric-featured .board-detail {
+          color: #cbd5e1;
+        }
+        .visual-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 14px;
+        }
+        .viz-card {
+          border-radius: 24px;
+          padding: 18px;
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+        }
+        .viz-label {
+          font-size: 11px;
+          line-height: 1.2;
+          letter-spacing: 0.13em;
+          text-transform: uppercase;
+          font-weight: 850;
+          color: #64748b;
+        }
+        .gauge-shell {
+          margin-top: 16px;
+          display: flex;
+          justify-content: center;
+        }
+        .gauge-ring {
+          width: 154px;
+          height: 154px;
+          border-radius: 999px;
+          padding: 13px;
+        }
+        .gauge-core {
+          width: 100%;
+          height: 100%;
+          border-radius: 999px;
+          background: #ffffff;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid #e2e8f0;
+        }
+        .gauge-value {
+          font-size: 34px;
+          line-height: 0.92;
+          font-weight: 820;
+          color: #020617;
+        }
+        .gauge-caption,
+        .donut-caption,
+        .spark-caption {
+          margin-top: 8px;
+          font-size: 11px;
+          line-height: 1.25;
+          color: #64748b;
+          font-weight: 700;
+        }
+        .donut-row {
+          margin-top: 18px;
+          display: grid;
+          grid-template-columns: 88px minmax(0, 1fr);
+          gap: 16px;
+          align-items: center;
+        }
+        .donut-ring {
+          width: 88px;
+          height: 88px;
+          border-radius: 999px;
+          padding: 11px;
+        }
+        .donut-core {
+          width: 100%;
+          height: 100%;
+          border-radius: 999px;
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+        }
+        .donut-value {
+          font-size: 34px;
+          line-height: 0.96;
+          font-weight: 820;
+          color: #020617;
+        }
+        .progress-panel {
+          display: grid;
+          gap: 14px;
+        }
+        .progress-row {
+          border-radius: 24px;
+          padding: 14px;
+          background: #ffffff;
+          border: 1px solid #dbeafe;
+        }
+        .progress-top {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          font-size: 12px;
+          line-height: 1.2;
+          color: #475569;
+          font-weight: 760;
+        }
+        .progress-top strong {
+          color: #020617;
+        }
+        .progress-track,
+        .bar-track {
+          margin-top: 11px;
+          height: 10px;
+          border-radius: 999px;
+          background: #e2e8f0;
+          overflow: hidden;
+        }
+        .progress-track span,
+        .bar-track span {
+          display: block;
+          height: 100%;
+          border-radius: 999px;
+          background: #2563eb;
+        }
+        .bars-list {
+          margin-top: 16px;
+          display: grid;
+          gap: 13px;
+        }
+        .bar-meta {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          font-size: 12px;
+          line-height: 1.25;
+          color: #475569;
+          font-weight: 730;
+        }
+        .bar-meta strong {
+          color: #020617;
+        }
+        .sparkline {
+          margin-top: 18px;
+          width: 100%;
+          height: 76px;
+          overflow: visible;
+        }
+        .sparkline polyline {
+          fill: none;
+          stroke: #2563eb;
+          stroke-width: 4;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          vector-effect: non-scaling-stroke;
+        }
+        .summary-visual-grid {
+          grid-template-columns: 220px minmax(0, 1fr);
+        }
+        .summary-visual-grid .progress-panel {
+          align-self: stretch;
+        }
+        .performance-visual-grid {
+          grid-template-columns: repeat(3, 1fr);
+        }
+        .reputation-body {
+          display: grid;
+          grid-template-columns: 0.9fr 1.1fr;
+          gap: 14px;
+          align-items: start;
+        }
+        .reputation-visual-grid {
+          grid-template-columns: 1fr;
+        }
+        .voice-visual-grid {
+          grid-template-columns: 1.2fr 0.8fr;
+        }
+        .hero-decision {
+          border-radius: 24px;
+          padding: 30px;
+          background: #020617;
+          color: #ffffff;
+        }
+        .hero-decision-label {
+          font-size: 12px;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          font-weight: 820;
+          color: #cbd5e1;
+        }
+        .hero-decision-text {
+          margin-top: 18px;
+          max-width: 720px;
+          font-size: 38px;
+          line-height: 1.04;
+          letter-spacing: 0;
+          font-weight: 770;
+        }
+        .decision-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 14px;
+        }
+        .decision-card {
+          min-height: 160px;
+          border-radius: 24px;
+          padding: 18px;
+          display: grid;
+          grid-template-columns: 34px minmax(0, 1fr);
+          gap: 14px;
+          border: 1px solid #e2e8f0;
+          background: #ffffff;
+        }
+        .decision-dark {
+          background: #020617;
+          color: #ffffff;
+          border-color: #020617;
+        }
+        .decision-green {
+          background: #eff6ff;
+          border-color: #bfdbfe;
+        }
+        .decision-icon {
+          width: 32px;
+          height: 32px;
+          border-radius: 999px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #f8fafc;
+          color: #64748b;
+          font-size: 11px;
+          font-weight: 900;
+        }
+        .decision-dark .decision-icon {
+          background: rgba(255,255,255,0.12);
+          color: #cbd5e1;
+        }
+        .decision-label {
+          font-size: 11px;
+          letter-spacing: 0.13em;
+          text-transform: uppercase;
+          font-weight: 850;
+          color: #2563eb;
+        }
+        .decision-dark .decision-label {
+          color: #cbd5e1;
+        }
+        .decision-text {
+          margin-top: 16px;
+          font-size: 22px;
+          line-height: 1.13;
+          letter-spacing: 0;
+          font-weight: 760;
+        }
+        .consult-panel {
+          border-radius: 24px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          padding: 22px;
+        }
+        .consult-panel-title {
+          font-size: 12px;
+          line-height: 1.2;
+          font-weight: 820;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: #64748b;
+        }
+        .consult-panel-value {
+          margin-top: 18px;
+          font-size: 52px;
+          line-height: 0.92;
+          letter-spacing: 0;
+          font-weight: 790;
+        }
+        .consult-split {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 14px;
+        }
+        .wide-panel {
+          border-radius: 24px;
+          padding: 30px;
+          background: #020617;
+          color: #ffffff;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 1fr;
+          gap: 28px;
+          align-items: end;
+        }
+        .wide-panel .page-kicker {
+          color: #cbd5e1;
+        }
+        .big-score {
+          margin-top: 14px;
+          font-size: 86px;
+          line-height: 0.88;
+          letter-spacing: 0;
+          font-weight: 790;
+        }
+        .action-card {
+          min-height: 210px;
+          border-radius: 24px;
+          padding: 18px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+        }
+        .action-high {
+          background: #eff6ff;
+          border-color: #bfdbfe;
+        }
+        .action-item {
+          border-radius: 16px;
+          padding: 12px;
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+          color: #334155;
+          font-size: 13px;
+          line-height: 1.35;
+          font-weight: 650;
+        }
+        .conclusion-stage {
+          border-radius: 24px;
+          padding: 34px;
+          background: #020617;
+          color: #ffffff;
+          display: grid;
+          grid-template-columns: 220px minmax(0, 1fr);
+          gap: 30px;
+          align-items: center;
+        }
+        .conclusion-stage .page-kicker {
+          color: #cbd5e1;
+        }
+        .conclusion-line {
+          font-size: 34px;
+          line-height: 1.04;
+          letter-spacing: 0;
+          font-weight: 770;
+        }
+        .consult-cover {
+          background:
+            linear-gradient(180deg, #ffffff 0%, #ffffff 62%, #f8fafc 62%, #f8fafc 100%);
+        }
+        .consult-cover .cover-top {
+          border-bottom-color: #020617;
+        }
+        .consult-cover .board-metric-featured {
+          min-height: 178px;
+        }
+        .page-summary {
+          background: #f7fbff;
+          padding: 10mm;
+          border: 1px solid #dbeafe;
+        }
+        .page-summary .consult-header {
+          grid-template-columns: minmax(0, 1fr) 180px;
+        }
+        .page-summary .hero-decision {
+          background: #ffffff;
+          color: #020617;
+          border: 1px solid #bfdbfe;
+          box-shadow: 0 18px 46px rgba(15, 23, 42, 0.08);
+        }
+        .page-summary .hero-decision-label {
+          color: #2563eb;
+        }
+        .page-summary .decision-dark {
+          background: #1d4ed8;
+          border-color: #1d4ed8;
+        }
+        .page-performance .board-grid {
+          grid-template-columns: repeat(2, 1fr);
+          gap: 16px;
+        }
+        .page-performance .board-metric {
+          min-height: 194px;
+          padding: 22px;
+        }
+        .page-performance .board-value {
+          font-size: 66px;
+          line-height: 0.88;
+        }
+        .page-performance .consult-panel {
+          min-height: 170px;
+        }
+        .page-performance .consult-panel-value {
+          font-size: 64px;
+        }
+        .reputation-timeline {
+          position: relative;
+          display: grid;
+          gap: 14px;
+          padding-left: 30px;
+        }
+        .reputation-timeline::before {
+          content: "";
+          position: absolute;
+          left: 14px;
+          top: 18px;
+          bottom: 18px;
+          width: 2px;
+          border-radius: 999px;
+          background: #bfdbfe;
+        }
+        .timeline-item {
+          position: relative;
+          display: grid;
+          grid-template-columns: 42px minmax(0, 1fr);
+          gap: 14px;
+          align-items: center;
+          border-radius: 24px;
+          padding: 16px 18px;
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+        }
+        .timeline-index {
+          width: 42px;
+          height: 42px;
+          border-radius: 999px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #2563eb;
+          color: #ffffff;
+          font-size: 11px;
+          font-weight: 850;
+          letter-spacing: 0.08em;
+        }
+        .timeline-label {
+          font-size: 11px;
+          letter-spacing: 0.13em;
+          text-transform: uppercase;
+          font-weight: 820;
+          color: #2563eb;
+        }
+        .timeline-value {
+          margin-top: 4px;
+          font-size: 30px;
+          line-height: 1;
+          font-weight: 790;
+          color: #020617;
+        }
+        .timeline-detail {
+          margin-top: 6px;
+          font-size: 12px;
+          line-height: 1.3;
+          color: #64748b;
+          font-weight: 650;
+        }
+        .location-timeline {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 12px;
+        }
+        .location-timeline .timeline-item {
+          min-height: 120px;
+          grid-template-columns: 36px minmax(0, 1fr);
+        }
+        .location-timeline .timeline-index {
+          width: 36px;
+          height: 36px;
+          background: #f8fafc;
+          color: #475569;
+          border: 1px solid #e2e8f0;
+        }
+        .page-voice {
+          background: #f8fafc;
+          padding: 10mm;
+          border: 1px solid #dbeafe;
+        }
+        .theme-cloud {
+          min-height: 380px;
+          border-radius: 24px;
+          padding: 30px;
+          background: #ffffff;
+          border: 1px solid #dbeafe;
+          display: flex;
+          flex-wrap: wrap;
+          align-content: center;
+          justify-content: center;
+          gap: 12px;
+        }
+        .theme-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          border-radius: 999px;
+          padding: 12px 16px;
+          background: #020617;
+          color: #ffffff;
+          font-weight: 780;
+        }
+        .theme-pill strong {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 28px;
+          height: 28px;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.14);
+          font-size: 12px;
+        }
+        .theme-size-0 {
+          font-size: 28px;
+          padding: 16px 22px;
+        }
+        .theme-size-1 {
+          font-size: 22px;
+          background: #1d4ed8;
+        }
+        .theme-size-2 {
+          font-size: 17px;
+          background: #334155;
+        }
+        .theme-size-3 {
+          font-size: 14px;
+          background: #64748b;
+        }
+        .page-action .decision-grid {
+          grid-template-columns: 1fr;
+        }
+        .action-stack {
+          display: grid;
+          gap: 14px;
+        }
+        .action-lane-card {
+          min-height: 142px;
+          border-radius: 24px;
+          padding: 20px;
+          display: grid;
+          grid-template-columns: 56px minmax(0, 1fr);
+          gap: 18px;
+          align-items: start;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+        }
+        .action-lane-featured {
+          background: #020617;
+          color: #ffffff;
+          border-color: #020617;
+        }
+        .action-lane-featured .action-title {
+          color: #ffffff;
+        }
+        .action-lane-index {
+          width: 52px;
+          height: 52px;
+          border-radius: 18px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #ffffff;
+          color: #020617;
+          font-size: 15px;
+          font-weight: 850;
+        }
+        .action-lane-items {
+          display: grid;
+          gap: 8px;
+        }
+        .page-conclusion {
+          justify-content: space-between;
+        }
+        .quote-panel {
+          min-height: 520px;
+          border-radius: 24px;
+          padding: 42px;
+          background: #020617;
+          color: #ffffff;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+        }
+        .quote-mark {
+          font-size: 88px;
+          line-height: 0.8;
+          color: #94a3b8;
+          font-weight: 760;
+        }
+        .quote-text {
+          margin-top: 36px;
+          font-size: 46px;
+          line-height: 1.05;
+          letter-spacing: 0;
+          font-weight: 780;
+        }
+        .quote-meta {
+          margin-top: 28px;
+          font-size: 12px;
+          line-height: 1.4;
+          color: #cbd5e1;
+          font-weight: 720;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+        .conclusion-decision-row {
+          display: grid;
+          grid-template-columns: 220px minmax(0, 1fr);
+          gap: 14px;
+        }
+        .conclusion-score-card {
+          border-radius: 24px;
+          padding: 20px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+        }
+        .conclusion-score-card .big-score {
+          font-size: 58px;
+          color: #020617;
+        }
+        .conclusion-score-detail {
+          margin-top: 10px;
+          font-size: 12px;
+          line-height: 1.45;
+          color: #64748b;
+          font-weight: 650;
+        }
       </style>
     </head>
     <body>
-      <section class="page cover">
+      <section class="page consult-page consult-cover">
         <div class="cover-top">
           <div class="cover-brand-block">
             ${
@@ -1223,44 +2288,31 @@ const buildHtml = (params: PremiumReportPayload) => {
             <div class="muted" style="font-size:12px;margin-top:4px;">${escapeHtml(generatedDate)}</div>
           </div>
         </div>
-        <div class="cover-title">
-          <div class="page-kicker">${escapeHtml(params.subtitle)}</div>
-          <h1>${escapeHtml(commercialName)}</h1>
-          <div class="cover-meta">
-            <div class="meta-card">
-              <div class="meta-label">Période</div>
-              <div class="meta-value">${escapeHtml(params.subtitle)}</div>
-            </div>
-            <div class="meta-card">
-              <div class="meta-label">Date génération</div>
-              <div class="meta-value">${escapeHtml(generatedDate)}</div>
-            </div>
-            ${
-              locationCount !== null
-                ? `
-            <div class="meta-card">
-              <div class="meta-label">Établissements</div>
-              <div class="meta-value">${escapeHtml(formatCoverNumber(locationCount))}</div>
-            </div>
-            `
-                : ""
-            }
+        <div class="cover-stage">
+          <div class="brand-line">
+            <div class="page-kicker">Cover</div>
+            <div class="brand-pill">${escapeHtml(params.subtitle)}</div>
+          </div>
+          <h1 class="cover-stage-title">Rapport exécutif réputation</h1>
+          <div class="cover-subtitle">
+            ${escapeHtml(commercialName)} · ${escapeHtml(generatedDate)}
           </div>
           ${
             locationNames.length > 0
               ? `
-          <div class="cover-locations">
+          <div class="location-strip">
+            <span class="location-strip-label">Périmètre</span>
             ${locationNames
-              .slice(0, 8)
+              .slice(0, 5)
               .map(
                 (name) =>
                   `<span class="cover-location-pill">${escapeHtml(name)}</span>`
               )
               .join("")}
             ${
-              locationNames.length > 8
+              locationNames.length > 5
                 ? `<span class="cover-location-pill">+${escapeHtml(
-                    formatCoverNumber(locationNames.length - 8)
+                    formatCoverNumber(locationNames.length - 5)
                   )}</span>`
                 : ""
             }
@@ -1269,277 +2321,128 @@ const buildHtml = (params: PremiumReportPayload) => {
               : ""
           }
         </div>
-        <div class="cover-score-hero">
-          <div>
-            <div class="cover-score-label">Business Health Score</div>
-            <div class="cover-score-value">${escapeHtml(businessHealthScore)}</div>
-            <div class="cover-score-subtitle">Indice exécutif de réputation.</div>
-          </div>
-          <div class="cover-kpi-grid">
-            ${coverKpis
-              .map(
-                (kpi) => `
-            <div class="cover-kpi-card">
-              <div class="cover-kpi-label">${escapeHtml(kpi.label)}</div>
-              <div class="cover-kpi-value">${escapeHtml(kpi.value)}</div>
-            </div>
-            `
-              )
-              .join("")}
-          </div>
-        </div>
-        ${
-          coverAiSentence
-            ? `<div class="cover-ai-line">${escapeHtml(coverAiSentence)}</div>`
-            : ""
-        }
-        <div class="page-number">Page 1</div>
-      </section>
-
-      <section class="page">
-        <div class="section-header">
-          <div>
-            <div class="page-kicker">Synthèse exécutive</div>
-            <h1 class="page-title">Lecture métier de la période</h1>
-            <div class="muted">Interprétation des signaux consolidés, strictement à partir des données du rapport.</div>
-          </div>
-        </div>
-        <div class="summary-grid">
-          ${renderInsightCard("Ce que cela signifie", mainInsight, "dark")}
-          ${renderInsightCard("Forces à capitaliser", strengthInsight, "green")}
-          ${renderInsightCard("Points de vigilance", weaknessInsight, "light")}
-          ${renderInsightCard("Priorité de pilotage", priorityInsight, "light")}
-        </div>
-        <div class="summary-grid" style="margin-top:14px;">
-          ${summaryItems
-            .slice(0, 4)
-            .map((item, index) =>
-              renderInsightCard(`Lecture ${index + 1}`, item, "light")
+        <div class="board-grid cover-board-grid">
+          ${renderBoardMetric(
+            "Business Health Score",
+            businessHealthScore,
+            0,
+            true,
+            businessHealthScoreValue === null ? businessHealthScoreDetail : null
+          )}
+          ${coverKpis
+            .map((kpi, index) =>
+              renderBoardMetric(kpi.label, kpi.value, index + 1)
             )
             .join("")}
         </div>
-        <div class="page-number">Page 2</div>
+        <div class="page-number">Page 1</div>
       </section>
 
-      <section class="page">
-        <div class="section-header">
-          <div>
-            <div class="page-kicker">Performance commerciale</div>
-            <h1 class="page-title">Indicateurs de pilotage</h1>
-            <div class="muted">${escapeHtml(params.subtitle)}</div>
-          </div>
-        </div>
-        <div class="metric-grid" style="grid-template-columns: repeat(${Math.min(performanceKpis.length, 3)}, 1fr);">
-          ${performanceKpis.join("")}
-        </div>
-        <div class="chart-panel">
-          <div class="chart-block">
-            <div class="chart-title">Points de vigilance</div>
-            <div class="volume-strip">
-              <div class="strip-item">
-                <div class="meta-label">Avis négatifs</div>
-                <div class="strip-value">${params.kpis.negativeCount}</div>
-              </div>
-              <div class="strip-item">
-                <div class="meta-label">Réponses prioritaires</div>
-                <div class="strip-value">${params.kpis.untreatedNegativeCount}</div>
-              </div>
-              <div class="strip-item">
-                <div class="meta-label">Critiques IA</div>
-                <div class="strip-value">${params.ai.criticalCount}</div>
-              </div>
-            </div>
-          </div>
-          ${
-            params.kpis.avgRating !== null
-              ? `
-          <div class="chart-block">
-            <div class="chart-title">Satisfaction moyenne</div>
-            ${renderStars(params.kpis.avgRating)}
-            <div class="big-bar" style="margin-top:14px;">
-              <span style="width:${ratingPercent}%;"></span>
-            </div>
-          </div>
-          `
-              : ""
-          }
-        </div>
-        <div class="page-number">Page 3</div>
-      </section>
-
-      <section class="page">
-        <div class="section-header">
-          <div>
-            <div class="page-kicker">Santé de votre réputation</div>
-            <h1 class="page-title">Réactivité et signaux de risque</h1>
-            <div class="muted">Lecture des indicateurs existants pour évaluer la solidité de votre réputation.</div>
-          </div>
-        </div>
-        <div class="chart-panel">
-          ${
-            params.kpis.responseRate !== null
-              ? `
-          <div class="chart-block">
-            <div class="chart-title">Réactivité client</div>
-            <div style="font-size:56px;line-height:0.95;font-weight:780;letter-spacing:-0.06em;">
-              ${escapeHtml(formatRatio(params.kpis.responseRate) ?? "")}
-            </div>
-            <div class="big-bar" style="margin-top:22px;">
-              <span style="width:${responsePercent}%;background:#10b981;"></span>
-            </div>
-          </div>
-          `
-              : ""
-          }
-          <div class="chart-block">
-            <div class="chart-title">Volume et vigilance réputationnelle</div>
-            <div class="volume-strip">
-              <div class="strip-item">
-                <div class="meta-label">Avis analysés</div>
-                <div class="strip-value">${params.kpis.reviewsTotal}</div>
-              </div>
-              <div class="strip-item">
-                <div class="meta-label">Avis négatifs</div>
-                <div class="strip-value">${params.kpis.negativeCount}</div>
-              </div>
-              <div class="strip-item">
-                <div class="meta-label">Critiques IA</div>
-                <div class="strip-value">${params.ai.criticalCount}</div>
-              </div>
-            </div>
-          </div>
-        </div>
+      <section class="page consult-page page-summary">
+        ${renderConsultHeader("Executive Summary", "Synthèse de décision")}
         ${
-          params.perLocation.length > 0
+          mainInsight
             ? `
-        <div class="chart-title" style="margin-top:28px;">Lecture par établissement</div>
-        <div class="location-list">
-          ${renderMiniLocationCards()}
+        <div class="hero-decision">
+          <div class="hero-decision-label">Ce que l'IA retient</div>
+          <div class="hero-decision-text">${escapeHtml(compactInsight(mainInsight, 110))}</div>
         </div>
         `
             : ""
         }
+        ${renderDecisionSet(mainInsight, strengthInsight, priorityInsight)}
+        ${
+          summaryVisuals
+            ? `<div class="visual-grid summary-visual-grid">${summaryVisuals}</div>`
+            : ""
+        }
+        <div class="page-number">Page 2</div>
+      </section>
+
+      <section class="page consult-page page-performance">
+        ${renderConsultHeader("Performance", "Performance commerciale")}
+        <div class="board-grid">
+          ${performanceBoardMetrics.join("")}
+        </div>
+        ${
+          performanceVisuals
+            ? `<div class="visual-grid performance-visual-grid">${performanceVisuals}</div>`
+            : ""
+        }
+        <div class="page-number">Page 3</div>
+      </section>
+
+      <section class="page consult-page page-reputation">
+        ${renderConsultHeader("Réputation", "Santé de réputation")}
+        ${
+          reputationVisuals
+            ? `
+        <div class="reputation-body">
+          <div class="reputation-timeline">
+            ${reputationTimelineItems.join("")}
+          </div>
+          <div class="visual-grid reputation-visual-grid">${reputationVisuals}</div>
+        </div>
+        `
+            : `
+        <div class="reputation-timeline">
+          ${reputationTimelineItems.join("")}
+        </div>
+        `
+        }
+        ${renderDecisionSet(
+          businessHealthScoreValue === null
+            ? BUSINESS_HEALTH_SCORE_PENDING_DETAIL
+            : `Score actuel : ${businessHealthScore}.`,
+          weaknessInsight,
+          priorityInsight
+        )}
         <div class="page-number">Page 4</div>
       </section>
 
-      <section class="page">
-        <div class="section-header">
-          <div>
-            <div class="page-kicker">Voix client</div>
-            <h1 class="page-title">Thèmes à piloter</h1>
-            <div class="muted">Interprétation des thèmes et signaux déjà présents dans le rapport.</div>
-          </div>
-        </div>
-        <div class="theme-grid">
-          <div class="theme-column">
-            <div class="theme-title">Forces perçues</div>
-            <div class="text-list">
-              <div>${escapeHtml(strengthInsight)}</div>
-            </div>
-          </div>
-          <div class="theme-column">
-            <div class="theme-title">Irritants à réduire</div>
-            <div class="text-list">
-              <div>${escapeHtml(weaknessInsight)}</div>
-            </div>
-          </div>
-          ${
-            tags.length
-              ? `
-          <div class="theme-column">
-            <div class="theme-title">Leviers d'opportunité</div>
-            ${tags.slice(0, 5).map(renderTag).join("")}
-          </div>
-          `
-              : ""
-          }
-          <div class="theme-column">
-            <div class="theme-title">Risques à surveiller</div>
-            <div class="text-list">
-              <div>${escapeHtml(rewritePdfInsight(`${params.kpis.untreatedNegativeCount} avis négatifs nécessitent une réponse ; priorité à leur traitement.`))}</div>
-              <div>${escapeHtml(rewritePdfInsight(`${params.ai.criticalCount} avis critiques IA surveillés, sans action obligatoire si déjà répondus.`))}</div>
-              ${
-                params.untreatedNegatives[0]
-                  ? `<div>${escapeHtml(params.untreatedNegatives[0].comment)}</div>`
-                  : ""
-              }
-            </div>
-          </div>
-        </div>
+      <section class="page consult-page page-voice">
+        ${renderConsultHeader("Voix des clients", "Thèmes dominants")}
+        ${themeCloud ? `<div class="theme-cloud">${themeCloud}</div>` : ""}
+        ${
+          voiceVisuals
+            ? `<div class="visual-grid voice-visual-grid">${voiceVisuals}</div>`
+            : ""
+        }
         <div class="page-number">Page 5</div>
       </section>
 
-      ${
-        hasActionItems
-          ? `
-      <section class="page">
-        <div class="section-header">
-          <div>
-            <div class="page-kicker">Priorités recommandées</div>
-            <h1 class="page-title">Plan de décision</h1>
-            <div class="muted">Priorisation des signaux déjà présents dans la synthèse IA.</div>
-          </div>
-        </div>
-        <div class="action-grid" style="grid-template-columns: repeat(3, 1fr);">
-          ${
-            highImpactActions.length
-              ? `
-          <div class="action-card action-high">
-            <div class="action-title">Priorité immédiate</div>
-            ${renderActionItems(highImpactActions)}
-          </div>
-          `
-              : ""
-          }
-          ${
-            mediumImpactActions.length
-              ? `
-          <div class="action-card">
-            <div class="action-title">Priorité de consolidation</div>
-            ${renderActionItems(mediumImpactActions)}
-          </div>
-          `
-              : ""
-          }
-          ${
-            lowImpactActions.length
-              ? `
-          <div class="action-card">
-            <div class="action-title">À surveiller</div>
-            ${renderActionItems(lowImpactActions)}
-          </div>
-          `
-              : ""
-          }
-        </div>
+      <section class="page consult-page page-action">
+        ${renderConsultHeader("Plan d'action", "Décisions à engager")}
+        ${actionCards ? `<div class="action-stack">${actionCards}</div>` : ""}
         <div class="page-number">Page 6</div>
       </section>
-      `
-          : ""
-      }
 
-      <section class="page">
-        <div class="section-header">
+      <section class="page consult-page page-conclusion">
+        ${renderConsultHeader("Conclusion", "Ce que nous recommandons")}
+        ${
+          mainInsight
+            ? `
+        <div class="quote-panel">
           <div>
-            <div class="page-kicker">Ce que nous recommandons</div>
-            <h1 class="page-title">Décision du mois</h1>
+            <div class="quote-mark">"</div>
+            <div class="quote-text">${escapeHtml(compactInsight(mainInsight, 130))}</div>
           </div>
+          <div class="quote-meta">${escapeHtml(commercialName)} · ${escapeHtml(params.subtitle)}</div>
         </div>
-        <div class="conclusion-panel">
-          <div>
-            <div class="eyebrow">Lecture IA</div>
-            <div class="conclusion-text">${escapeHtml(mainInsight)}</div>
-            <div style="margin-top:26px;display:grid;gap:10px;">
-              <div class="eyebrow">Prochaine action recommandée</div>
-              <div style="font-size:16px;line-height:1.45;color:#e2e8f0;">
-                ${escapeHtml(priorityInsight)}
-              </div>
-            </div>
+        `
+            : ""
+        }
+        <div class="conclusion-decision-row">
+          <div class="conclusion-score-card">
+            <div class="page-kicker">Business Health Score</div>
+            <div class="big-score">${escapeHtml(businessHealthScore)}</div>
+            ${
+              businessHealthScoreValue === null
+                ? `<div class="conclusion-score-detail">${escapeHtml(businessHealthScoreDetail)}</div>`
+                : ""
+            }
           </div>
-          <div>
-            <div class="score-label">Business Health Score</div>
-            <div class="score-value" style="font-size:68px;">${businessHealthScore}</div>
-          </div>
+          ${renderDecisionCard("Décision", priorityInsight, "green")}
         </div>
         <div class="page-number">Page 7</div>
       </section>

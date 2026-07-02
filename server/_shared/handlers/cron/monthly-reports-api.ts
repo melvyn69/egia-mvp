@@ -293,6 +293,10 @@ const naturalizeEmailInsight = (item: string) => {
   return trimmed;
 };
 
+const BUSINESS_HEALTH_SCORE_PENDING = "Calcul en cours";
+const BUSINESS_HEALTH_SCORE_PENDING_DETAIL =
+  "Le score sera disponible dès que suffisamment d'historique aura été analysé.";
+
 const renderEmailKpiCard = (card: {
   label: string;
   value: string;
@@ -301,43 +305,32 @@ const renderEmailKpiCard = (card: {
 }) => `
   <td class="kpi-cell" style="padding:7px;width:50%;vertical-align:top;">
     <div class="${card.featured ? "kpi-card kpi-featured" : "kpi-card"}" style="border:1px solid ${
-      card.featured ? "rgba(15,23,42,0.92)" : "rgba(15,23,42,0.08)"
-    };border-radius:20px;background:${card.featured ? "#0f172a" : "#ffffff"};padding:17px 18px;box-shadow:0 14px 32px rgba(15,23,42,0.06);">
-      <div class="kpi-label" style="font-size:10px;line-height:14px;letter-spacing:.11em;text-transform:uppercase;color:${
-        card.featured ? "#cbd5e1" : "#64748b"
-      };font-weight:800;">
+      card.featured ? "#020617" : "rgba(15,23,42,0.08)"
+    };border-radius:24px;background:${card.featured ? "#020617" : "#ffffff"};padding:19px 19px 18px;box-shadow:0 16px 34px rgba(15,23,42,0.045);">
+      <div class="kpi-label" style="font-size:10px;line-height:14px;letter-spacing:.12em;text-transform:uppercase;color:${
+        card.featured ? "#bfdbfe" : "#64748b"
+      };font-weight:850;">
         ${escapeEmailHtml(card.label)}
       </div>
       <div class="${card.featured ? "kpi-value kpi-value-featured" : "kpi-value"}" style="margin-top:9px;font-size:30px;line-height:34px;color:${
-        card.featured ? "#ffffff" : "#0f172a"
-      };font-weight:780;letter-spacing:-.02em;">
+        card.featured ? "#ffffff" : "#020617"
+      };font-weight:820;letter-spacing:0;">
         ${escapeEmailHtml(card.value)}
       </div>
       ${
         card.detail
-          ? `<div class="kpi-detail" style="margin-top:6px;color:${card.featured ? "#cbd5e1" : "#64748b"};font-size:12px;line-height:17px;font-weight:600;">${escapeEmailHtml(card.detail)}</div>`
+          ? `<div class="kpi-detail" style="margin-top:8px;color:${card.featured ? "#cbd5e1" : "#64748b"};font-size:12px;line-height:18px;font-weight:650;">${escapeEmailHtml(card.detail)}</div>`
           : ""
       }
     </div>
   </td>
 `;
 
-const renderEmailChecklist = (items: string[]) =>
+const renderEmailOpportunityPills = (items: string[]) =>
   items
     .map(
       (item) => `
-        <div class="check-row" style="display:block;margin:0 0 10px 0;color:#0f172a;font-size:15px;line-height:23px;font-weight:620;">
-          <span style="display:inline-block;width:24px;color:#10b981;font-weight:900;">✓</span>${escapeEmailHtml(item)}
-        </div>
-      `
-    )
-    .join("");
-
-const renderEmailBullets = (items: string[]) =>
-  items
-    .map(
-      (item) => `
-        <span class="tag-pill" style="display:inline-block;margin:0 6px 8px 0;border-radius:999px;border:1px solid rgba(15,23,42,0.10);background:#ffffff;padding:8px 11px;color:#0f172a;font-size:13px;line-height:16px;font-weight:700;">
+        <span class="opportunity-pill" style="display:inline-block;margin:0 8px 8px 0;border-radius:999px;border:1px solid #dbeafe;background:#ffffff;padding:9px 12px;color:#1e3a8a;font-size:13px;line-height:17px;font-weight:760;">
           ${escapeEmailHtml(item)}
         </span>
       `
@@ -451,7 +444,6 @@ const buildMonthlyReportEmailHtml = (opts: {
   report?: PremiumReportPayload | null;
   branding?: EmailBrandingPayload | null;
 }) => {
-  const name = (opts.firstName ?? "").trim();
   const report = opts.report ?? null;
   const brandingSource = report ?? opts.branding ?? null;
   const businessName = getBusinessDisplayName(brandingSource);
@@ -473,20 +465,26 @@ const buildMonthlyReportEmailHtml = (opts: {
       "health_score",
       "score"
     ]);
-  const aiFindings =
-    report?.aiSummary.slice(0, 5).map(naturalizeEmailInsight) ?? [];
   const rawPriority =
     report?.aiSummary.find((item) => /priorit|nécessitent une réponse/i.test(item)) ??
     null;
+  const aiSummary =
+    report?.aiSummary
+      .filter((item) => item !== rawPriority)
+      .map(naturalizeEmailInsight)
+      .find((item) => item.trim()) ?? null;
   const priority = rawPriority ? naturalizeEmailInsight(rawPriority) : null;
   const opportunities =
-    report?.ai.topTags.slice(0, 5).map((tag) => {
-      const count = Number.isFinite(tag.count) ? tag.count : null;
-      return count === null
-        ? tag.tag
-        : `${tag.tag} · ${count} mention${count > 1 ? "s" : ""}`;
-    }) ?? [];
-  const kpiCards: Array<{
+    report?.ai.topTags
+      .filter((tag) => tag.tag.trim())
+      .slice(0, 2)
+      .map((tag) => {
+        const count = Number.isFinite(tag.count) ? tag.count : null;
+        return count === null
+          ? tag.tag
+          : `${tag.tag} · ${count} mention${count > 1 ? "s" : ""}`;
+      }) ?? [];
+  const kpiCandidates: Array<{
     label: string;
     value: string;
     detail?: string | null;
@@ -497,16 +495,18 @@ const buildMonthlyReportEmailHtml = (opts: {
       value:
         typeof healthScore === "number" && Number.isFinite(healthScore)
           ? `${Math.round(healthScore)}/100`
-          : "Calcul en cours",
-      detail: "Score consolidé",
+          : BUSINESS_HEALTH_SCORE_PENDING,
+      detail:
+        typeof healthScore === "number" && Number.isFinite(healthScore)
+          ? null
+          : BUSINESS_HEALTH_SCORE_PENDING_DETAIL,
       featured: true
     },
     ...(formatEmailRating(report?.kpis.avgRating)
       ? [
           {
             label: "Note moyenne",
-            value: formatEmailRating(report?.kpis.avgRating) as string,
-            detail: "Avis clients"
+            value: formatEmailRating(report?.kpis.avgRating) as string
           }
         ]
       : []),
@@ -514,8 +514,7 @@ const buildMonthlyReportEmailHtml = (opts: {
       ? [
           {
             label: "Avis analysés",
-            value: formatEmailCount(report.kpis.reviewsTotal) as string,
-            detail: opts.periodLabel
+            value: formatEmailCount(report.kpis.reviewsTotal) as string
           }
         ]
       : []),
@@ -523,22 +522,21 @@ const buildMonthlyReportEmailHtml = (opts: {
       ? [
           {
             label: "Taux de réponse",
-            value: formatEmailRatio(report?.kpis.responseRate) as string,
-            detail: "Sur les avis replyables"
+            value: formatEmailRatio(report?.kpis.responseRate) as string
           }
         ]
       : []),
     ...(locationsCount !== null && formatEmailCount(locationsCount)
       ? [
           {
-            label: "Établissements concernés",
-            value: formatEmailCount(locationsCount) as string,
-            detail: report?.locationsLabel ?? null
+            label: "Établissements",
+            value: formatEmailCount(locationsCount) as string
           }
         ]
       : [])
   ];
-  const kpiRows = [];
+  const kpiCards = kpiCandidates.slice(0, 4);
+  const kpiRows: Array<Array<(typeof kpiCards)[number]>> = [];
   for (let index = 0; index < kpiCards.length; index += 2) {
     kpiRows.push(kpiCards.slice(index, index + 2));
   }
@@ -555,41 +553,48 @@ const buildMonthlyReportEmailHtml = (opts: {
       @media screen and (max-width: 640px) {
         .outer { padding: 16px 10px !important; }
         .container { width: 100% !important; }
-        .section { padding: 20px !important; }
-        .header-card { padding: 18px !important; }
-        .header-right { text-align: left !important; padding-top: 16px !important; }
+        .main-card { padding: 22px !important; border-radius: 24px !important; }
+        .title { font-size: 34px !important; line-height: 38px !important; }
+        .summary { font-size: 20px !important; line-height: 28px !important; }
         .kpi-cell { display: block !important; width: 100% !important; padding: 6px 0 !important; }
         .button-link { display: block !important; text-align: center !important; }
         .mobile-block { display: block !important; width: 100% !important; }
+        .period-cell { text-align: left !important; padding-top: 18px !important; }
       }
       @media (prefers-color-scheme: dark) {
         body, .outer { background: #020617 !important; }
-        .container, .panel, .header-card, .section-card, .kpi-card, .soft-card { background: #0f172a !important; }
-        .hero { background: #111827 !important; }
-        .text-main, .kpi-value, .check-row, .tag-pill { color: #f8fafc !important; }
-        .text-muted, .kpi-label, .kpi-detail, .footer { color: #cbd5e1 !important; }
-        .kpi-card, .section-card, .soft-card, .tag-pill { border-color: rgba(248,250,252,0.14) !important; }
+        .main-card, .kpi-card, .summary-card, .priority-card { background: #0f172a !important; }
+        .opportunity-pill, .period-pill { background: #111827 !important; }
+        .text-main, .title, .summary, .kpi-value, .priority-text, .opportunity-pill { color: #f8fafc !important; }
+        .text-muted, .kpi-label, .kpi-detail, .footer, .meta-label { color: #cbd5e1 !important; }
+        .main-card, .kpi-card, .summary-card, .priority-card, .opportunity-pill, .period-pill { border-color: rgba(248,250,252,0.14) !important; }
         .kpi-featured { background: #f8fafc !important; border-color: #f8fafc !important; }
-        .kpi-value-featured { color: #0f172a !important; }
-        .divider { border-color: rgba(248,250,252,0.14) !important; }
+        .kpi-value-featured { color: #020617 !important; }
+        .kpi-featured .kpi-label { color: #475569 !important; }
+        .button-link { background: #f8fafc !important; color: #020617 !important; }
       }
     </style>
   </head>
   <body style="margin:0;background:#f8fafc;padding:0;">
-    <div class="outer" style="background:#f8fafc;padding:34px 18px;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+    <div class="outer" style="background:#f8fafc;padding:40px 18px;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
       <table role="presentation" class="container" style="width:640px;max-width:640px;margin:0 auto;border-collapse:collapse;">
         <tr>
-          <td class="header-card" style="padding:24px 26px 22px;background:#ffffff;border:1px solid rgba(15,23,42,0.08);border-radius:24px;">
+          <td class="main-card" style="padding:36px;background:#ffffff;border:1px solid rgba(15,23,42,0.08);border-radius:24px;box-shadow:0 24px 70px rgba(15,23,42,0.06);">
             <table role="presentation" style="width:100%;border-collapse:collapse;">
               <tr>
                 <td class="mobile-block" style="text-align:left;vertical-align:top;">
                   <table role="presentation" style="border-collapse:collapse;">
                     <tr>
-                      <td style="vertical-align:top;padding:0 14px 0 0;">
-                        ${renderLogo(logoUrl, businessName)}
-                      </td>
-                      <td style="vertical-align:top;">
-                        <div class="text-main" style="color:#0f172a;font-size:18px;line-height:24px;font-weight:820;letter-spacing:-.01em;">
+                      ${
+                        logoUrl
+                          ? `<td style="vertical-align:middle;padding:0 14px 0 0;">${renderLogo(
+                              logoUrl,
+                              businessName
+                            )}</td>`
+                          : ""
+                      }
+                      <td style="vertical-align:middle;">
+                        <div class="text-main" style="color:#020617;font-size:17px;line-height:23px;font-weight:820;">
                           ${escapeEmailHtml(businessName)}
                         </div>
                         ${
@@ -597,130 +602,91 @@ const buildMonthlyReportEmailHtml = (opts: {
                             ? `<div class="text-muted" style="margin-top:3px;color:#64748b;font-size:12px;line-height:17px;font-weight:650;">${escapeEmailHtml(legalName)}</div>`
                             : ""
                         }
-                        <div class="text-muted" style="margin-top:8px;color:#64748b;font-size:12px;line-height:17px;font-weight:800;letter-spacing:.10em;text-transform:uppercase;">
-                          Executive Monthly Report
-                        </div>
                       </td>
                     </tr>
                   </table>
                 </td>
-                <td class="mobile-block header-right" style="text-align:right;vertical-align:top;">
-                  <div class="text-main" style="color:#0f172a;font-size:18px;line-height:24px;font-weight:800;">
+                <td class="mobile-block period-cell" style="text-align:right;vertical-align:middle;">
+                  <div class="period-pill text-muted" style="display:inline-block;border:1px solid #dbeafe;border-radius:999px;padding:9px 12px;color:#1d4ed8;background:#eff6ff;font-size:12px;line-height:16px;font-weight:760;">
                     ${escapeEmailHtml(opts.periodLabel)}
                   </div>
-                  ${
-                    locationsCount !== null
-                      ? `<div class="text-muted" style="margin-top:8px;color:#64748b;font-size:12px;line-height:17px;font-weight:700;">${escapeEmailHtml(formatEmailCount(locationsCount))} établissement${locationsCount > 1 ? "s" : ""}</div>`
-                      : ""
-                  }
                 </td>
               </tr>
             </table>
-            <div class="divider" style="border-top:1px solid rgba(15,23,42,0.10);margin-top:22px;line-height:1px;font-size:1px;">&nbsp;</div>
-          </td>
-        </tr>
-        <tr>
-          <td style="height:14px;line-height:14px;font-size:14px;">&nbsp;</td>
-        </tr>
-        <tr>
-          <td class="hero section" style="background:#ffffff;border:1px solid rgba(15,23,42,0.08);border-radius:24px;padding:30px;">
+            <div class="meta-label text-muted" style="margin-top:34px;color:#2563eb;font-size:11px;line-height:16px;font-weight:850;letter-spacing:.16em;text-transform:uppercase;">
+              Briefing exécutif
+            </div>
+            <h1 class="title text-main" style="margin:10px 0 0;color:#020617;font-size:42px;line-height:46px;font-weight:860;letter-spacing:0;">
+              Votre réputation ce mois-ci.
+            </h1>
             ${
-              name
-                ? `<div class="text-muted" style="margin:0 0 12px 0;color:#64748b;font-size:13px;line-height:18px;font-weight:700;">Bonjour ${escapeEmailHtml(
-                    name
-                  )}</div>`
+              aiSummary
+                ? `
+            <div class="summary-card" style="margin-top:24px;border-radius:24px;background:#f8fafc;border:1px solid rgba(15,23,42,0.08);padding:24px 24px;">
+              <div class="meta-label text-muted" style="color:#2563eb;font-size:11px;line-height:16px;font-weight:850;letter-spacing:.14em;text-transform:uppercase;margin:0 0 10px;">
+                Résumé IA
+              </div>
+              <div class="summary text-main" style="color:#020617;font-size:24px;line-height:32px;font-weight:780;letter-spacing:0;">
+                ${escapeEmailHtml(aiSummary)}
+              </div>
+            </div>
+            `
                 : ""
             }
-            <h1 class="text-main" style="margin:0;color:#0f172a;font-size:32px;line-height:38px;font-weight:820;letter-spacing:-.03em;">
-              Executive Summary mensuel
-            </h1>
-            <div class="text-muted" style="margin:11px 0 0;color:#64748b;font-size:15px;line-height:23px;font-weight:560;">
-              Les signaux clés de votre réputation, préparés pour décider rapidement.
-            </div>
-            <table role="presentation" style="width:100%;border-collapse:collapse;margin-top:22px;">
+            ${
+              kpiRows.length > 0
+                ? `
+            <table role="presentation" style="width:100%;border-collapse:collapse;margin-top:18px;">
               ${kpiRows
                 .map(
                   (row) => `
-                    <tr>
-                      ${row
-                        .map((card) => renderEmailKpiCard(card))
-                        .join("")}
-                      ${row.length === 1 ? '<td class="kpi-cell" style="padding:8px;width:50%;"></td>' : ""}
-                    </tr>
-                  `
+              <tr>
+                ${row.map((card) => renderEmailKpiCard(card)).join("")}
+                ${row.length === 1 ? '<td class="kpi-cell" style="padding:7px;width:50%;"></td>' : ""}
+              </tr>
+            `
                 )
                 .join("")}
             </table>
-          </td>
-        </tr>
-        ${
-          aiFindings.length > 0
-            ? `
-        <tr>
-          <td style="height:14px;line-height:14px;font-size:14px;">&nbsp;</td>
-        </tr>
-        <tr>
-          <td class="section-card section" style="background:#ffffff;border:1px solid rgba(15,23,42,0.08);border-radius:24px;padding:24px 26px;">
-            <div class="text-main" style="color:#0f172a;font-size:19px;line-height:25px;font-weight:800;margin:0 0 14px;">
-              Aujourd’hui l’IA retient
-            </div>
-            ${renderEmailChecklist(aiFindings)}
-          </td>
-        </tr>
-        `
-            : ""
-        }
-        ${
-          priority
-            ? `
-        <tr>
-          <td style="height:14px;line-height:14px;font-size:14px;">&nbsp;</td>
-        </tr>
-        <tr>
-          <td>
-            <div class="soft-card section" style="border-radius:24px;background:#ecfdf5;border:1px solid rgba(16,185,129,0.22);padding:24px 26px;">
-              <div style="color:#065f46;font-size:11px;line-height:16px;text-transform:uppercase;letter-spacing:.12em;font-weight:900;margin:0 0 9px;">
+            `
+                : ""
+            }
+            ${
+              priority
+                ? `
+            <div class="priority-card" style="margin-top:18px;border-radius:24px;background:#eff6ff;border:1px solid #bfdbfe;padding:22px 24px;">
+              <div class="meta-label" style="color:#1d4ed8;font-size:11px;line-height:16px;text-transform:uppercase;letter-spacing:.14em;font-weight:900;margin:0 0 9px;">
                 Priorité du mois
               </div>
-              <div style="color:#064e3b;font-size:17px;line-height:25px;font-weight:760;">
+              <div class="priority-text" style="color:#020617;font-size:19px;line-height:27px;font-weight:780;">
                 ${escapeEmailHtml(priority)}
               </div>
             </div>
-          </td>
-        </tr>
-        `
-            : ""
-        }
-        ${
-          opportunities.length > 0
-            ? `
-        <tr>
-          <td style="height:14px;line-height:14px;font-size:14px;">&nbsp;</td>
-        </tr>
-        <tr>
-          <td class="section-card section" style="background:#ffffff;border:1px solid rgba(15,23,42,0.08);border-radius:24px;padding:24px 26px;">
-            <div class="text-main" style="color:#0f172a;font-size:19px;line-height:25px;font-weight:800;margin:0 0 14px;">
-              Opportunités
+            `
+                : ""
+            }
+            ${
+              opportunities.length > 0
+                ? `
+            <div style="margin-top:18px;">
+              <div class="meta-label text-muted" style="color:#2563eb;font-size:11px;line-height:16px;font-weight:850;letter-spacing:.14em;text-transform:uppercase;margin:0 0 10px;">
+                Opportunités
+              </div>
+              ${renderEmailOpportunityPills(opportunities)}
             </div>
-            ${renderEmailBullets(opportunities)}
-          </td>
-        </tr>
-        `
-            : ""
-        }
-        <tr>
-          <td style="height:18px;line-height:18px;font-size:18px;">&nbsp;</td>
-        </tr>
-        <tr>
-          <td style="text-align:center;">
-            <a class="button-link" href="${escapeEmailHtml(opts.reportUrl)}" style="display:inline-block;border-radius:999px;background:#0f172a;color:#ffffff;text-decoration:none;font-size:15px;line-height:21px;font-weight:820;padding:15px 24px;box-shadow:0 18px 36px rgba(15,23,42,0.18);">
-              Voir mon rapport complet
-            </a>
+            `
+                : ""
+            }
+            <div style="margin-top:24px;">
+              <a class="button-link" href="${escapeEmailHtml(opts.reportUrl)}" style="display:inline-block;border-radius:999px;background:#2563eb;color:#ffffff;text-decoration:none;font-size:15px;line-height:21px;font-weight:850;padding:15px 24px;box-shadow:0 16px 34px rgba(37,99,235,0.24);">
+                Voir le rapport
+              </a>
+            </div>
           </td>
         </tr>
         <tr>
-          <td class="footer" style="padding:26px 8px 0;color:#64748b;font-size:11px;line-height:17px;text-align:center;">
-            Vous recevez cet email car les rapports automatiques sont activés. Powered by EGIA.
+          <td class="footer" style="padding:22px 8px 0;color:#64748b;font-size:11px;line-height:17px;text-align:center;font-weight:650;">
+            Powered by EGIA
           </td>
         </tr>
       </table>
@@ -730,7 +696,7 @@ const buildMonthlyReportEmailHtml = (opts: {
 };
 
 const buildMonthlyReportSubject = (periodLabel: string) =>
-  `Votre rapport mensuel – ${periodLabel}`;
+  `Briefing réputation - ${periodLabel}`;
 
 const sendResendEmail = async (params: {
   to: string;
