@@ -294,7 +294,7 @@ const naturalizeEmailInsight = (item: string) => {
 };
 
 const HEALTH_SCORE_PENDING_NOTICE =
-  "Score santé en cours de calcul — disponible après plus d'historique.";
+  "Le Business Health Score apparaîtra automatiquement lorsque suffisamment d'historique sera disponible.";
 
 const renderEmailKpiCard = (
   card: {
@@ -327,17 +327,6 @@ const renderEmailKpiCard = (
     </div>
   </td>
 `;
-
-const renderEmailOpportunityPills = (items: string[]) =>
-  items
-    .map(
-      (item) => `
-        <span class="opportunity-pill" style="display:inline-block;margin:0 8px 8px 0;border-radius:999px;border:1px solid #dbeafe;background:#ffffff;padding:9px 12px;color:#1e3a8a;font-size:13px;line-height:17px;font-weight:760;">
-          ${escapeEmailHtml(item)}
-        </span>
-      `
-    )
-    .join("");
 
 const renderLogo = (logoUrl: string | null, displayName: string) =>
   logoUrl
@@ -476,16 +465,6 @@ const buildMonthlyReportEmailHtml = (opts: {
       .map(naturalizeEmailInsight)
       .find((item) => item.trim()) ?? null;
   const priority = rawPriority ? naturalizeEmailInsight(rawPriority) : null;
-  const opportunities =
-    report?.ai.topTags
-      .filter((tag) => tag.tag.trim())
-      .slice(0, 2)
-      .map((tag) => {
-        const count = Number.isFinite(tag.count) ? tag.count : null;
-        return count === null
-          ? tag.tag
-          : `${tag.tag} · ${count} mention${count > 1 ? "s" : ""}`;
-      }) ?? [];
   const kpiCandidates: Array<{
     label: string;
     value: string;
@@ -565,10 +544,10 @@ const buildMonthlyReportEmailHtml = (opts: {
       @media (prefers-color-scheme: dark) {
         body, .outer { background: #020617 !important; }
         .main-card, .kpi-card, .summary-card, .priority-card { background: #0f172a !important; }
-        .opportunity-pill, .period-pill { background: #111827 !important; }
-        .text-main, .title, .summary, .kpi-value, .priority-text, .opportunity-pill { color: #f8fafc !important; }
+        .period-pill { background: #111827 !important; }
+        .text-main, .title, .summary, .kpi-value, .priority-text { color: #f8fafc !important; }
         .text-muted, .kpi-label, .kpi-detail, .footer, .meta-label { color: #cbd5e1 !important; }
-        .main-card, .kpi-card, .summary-card, .priority-card, .opportunity-pill, .period-pill { border-color: rgba(248,250,252,0.14) !important; }
+        .main-card, .kpi-card, .summary-card, .priority-card, .period-pill { border-color: rgba(248,250,252,0.14) !important; }
         .kpi-featured { background: #f8fafc !important; border-color: #f8fafc !important; }
         .kpi-value-featured { color: #020617 !important; }
         .kpi-featured .kpi-label { color: #475569 !important; }
@@ -670,18 +649,6 @@ const buildMonthlyReportEmailHtml = (opts: {
               <div class="priority-text" style="color:#020617;font-size:19px;line-height:27px;font-weight:780;">
                 ${escapeEmailHtml(priority)}
               </div>
-            </div>
-            `
-                : ""
-            }
-            ${
-              opportunities.length > 0
-                ? `
-            <div style="margin-top:18px;">
-              <div class="meta-label text-muted" style="color:#2563eb;font-size:11px;line-height:16px;font-weight:850;letter-spacing:.14em;text-transform:uppercase;margin:0 0 10px;">
-                Opportunités
-              </div>
-              ${renderEmailOpportunityPills(opportunities)}
             </div>
             `
                 : ""

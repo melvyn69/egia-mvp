@@ -106,7 +106,7 @@ const formatRatio = (value: number | null) =>
 
 const EMPTY_DASH = String.fromCharCode(8212);
 const HEALTH_SCORE_PENDING_NOTICE =
-  "Score santé en cours de calcul — disponible après plus d'historique.";
+  "Le Business Health Score apparaîtra automatiquement lorsque suffisamment d'historique sera disponible.";
 
 const normalizeLocationTitle = (value: string) =>
   value.replace(/\s*-\s*/g, " - ").replace(/\s{2,}/g, " ").trim();
@@ -779,13 +779,15 @@ const buildHtml = (params: PremiumReportPayload) => {
     const cloudItems = tags.slice(0, 10).map((tag, index) => ({
       label: tag.tag,
       value: formatCoverNumber(tag.count),
-      size: Math.min(3, Math.floor(index / 3))
+      size: Math.min(3, Math.floor(index / 3)),
+      stars: "★".repeat(Math.max(3, 5 - Math.min(index, 2)))
     }));
 
     return cloudItems
       .map(
         (item) => `
     <div class="theme-pill theme-size-${item.size}">
+      <em>${escapeHtml(item.stars)}</em>
       <span>${escapeHtml(item.label)}</span>
       <strong>${escapeHtml(item.value)}</strong>
     </div>
@@ -1141,7 +1143,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           position: relative;
           display: flex;
           flex-direction: column;
-          gap: 18px;
+          gap: 16px;
           padding: 2mm 0;
           word-break: normal;
           overflow-wrap: normal;
@@ -1157,9 +1159,9 @@ const buildHtml = (params: PremiumReportPayload) => {
           color: #020617;
         }
         .page-kicker {
-          font-size: 11px;
-          font-weight: 700;
-          letter-spacing: 0.18em;
+          font-size: 10px;
+          font-weight: 780;
+          letter-spacing: 0.12em;
           text-transform: uppercase;
           color: #2563eb;
         }
@@ -1179,7 +1181,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .cover {
           justify-content: flex-start;
-          gap: 18px;
+          gap: 16px;
           padding-top: 4mm;
           padding-bottom: 4mm;
         }
@@ -1602,7 +1604,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           letter-spacing: 0.08em;
         }
         .consult-page {
-          gap: 18px;
+          gap: 16px;
           padding: 7mm 0;
         }
         .consult-header {
@@ -1760,7 +1762,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           border-radius: 24px;
           padding: 16px;
           background: #ffffff;
-          border: 1px solid #e2e8f0;
+          border: 1px solid rgba(15,23,42,0.08);
         }
         .viz-label {
           font-size: 11px;
@@ -1776,10 +1778,10 @@ const buildHtml = (params: PremiumReportPayload) => {
           justify-content: center;
         }
         .gauge-ring {
-          width: 126px;
-          height: 126px;
+          width: 116px;
+          height: 116px;
           border-radius: 999px;
-          padding: 11px;
+          padding: 9px;
         }
         .gauge-core {
           width: 100%;
@@ -1858,7 +1860,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         .progress-track,
         .bar-track {
           margin-top: 11px;
-          height: 10px;
+          height: 7px;
           border-radius: 999px;
           background: #e2e8f0;
           overflow: hidden;
@@ -1896,7 +1898,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         .sparkline polyline {
           fill: none;
           stroke: #2563eb;
-          stroke-width: 4;
+          stroke-width: 2.4;
           stroke-linecap: round;
           stroke-linejoin: round;
           vector-effect: non-scaling-stroke;
@@ -1925,7 +1927,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         .hero-decision {
           border-radius: 24px;
           padding: 24px;
-          background: #020617;
+          background: linear-gradient(135deg, #020617 0%, #0f172a 74%, #1d4ed8 145%);
           color: #ffffff;
         }
         .hero-decision-label {
@@ -2060,9 +2062,9 @@ const buildHtml = (params: PremiumReportPayload) => {
           min-height: 150px;
         }
         .page-summary {
-          background: #f7fbff;
+          background: #f8fafc;
           padding: 8mm;
-          border: 1px solid #dbeafe;
+          border: 1px solid rgba(15,23,42,0.06);
         }
         .page-summary .consult-header {
           grid-template-columns: minmax(0, 1fr) 180px;
@@ -2070,7 +2072,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         .page-summary .hero-decision {
           background: #ffffff;
           color: #020617;
-          border: 1px solid #bfdbfe;
+          border: 1px solid rgba(37,99,235,0.16);
           box-shadow: 0 18px 46px rgba(15, 23, 42, 0.08);
         }
         .page-summary .hero-decision-label {
@@ -2174,14 +2176,14 @@ const buildHtml = (params: PremiumReportPayload) => {
         .page-voice {
           background: #f8fafc;
           padding: 8mm;
-          border: 1px solid #dbeafe;
+          border: 1px solid rgba(15,23,42,0.06);
         }
         .theme-cloud {
-          min-height: 280px;
+          min-height: 250px;
           border-radius: 24px;
           padding: 22px;
           background: #ffffff;
-          border: 1px solid #dbeafe;
+          border: 1px solid rgba(15,23,42,0.08);
           display: flex;
           flex-wrap: wrap;
           align-content: center;
@@ -2191,12 +2193,20 @@ const buildHtml = (params: PremiumReportPayload) => {
         .theme-pill {
           display: inline-flex;
           align-items: center;
-          gap: 10px;
+          gap: 9px;
           border-radius: 999px;
           padding: 10px 14px;
-          background: #020617;
-          color: #ffffff;
+          background: #ffffff;
+          color: #020617;
+          border: 1px solid #dbeafe;
           font-weight: 780;
+          box-shadow: 0 12px 28px rgba(15,23,42,0.05);
+        }
+        .theme-pill em {
+          color: #2563eb;
+          font-size: 12px;
+          font-style: normal;
+          letter-spacing: 0;
         }
         .theme-pill strong {
           display: inline-flex;
@@ -2205,7 +2215,8 @@ const buildHtml = (params: PremiumReportPayload) => {
           min-width: 28px;
           height: 28px;
           border-radius: 999px;
-          background: rgba(255,255,255,0.14);
+          background: #eff6ff;
+          color: #1d4ed8;
           font-size: 12px;
         }
         .theme-size-0 {
@@ -2214,15 +2225,12 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .theme-size-1 {
           font-size: 18px;
-          background: #1d4ed8;
         }
         .theme-size-2 {
           font-size: 15px;
-          background: #334155;
         }
         .theme-size-3 {
           font-size: 13px;
-          background: #64748b;
         }
         .action-stack {
           display: grid;
@@ -2333,7 +2341,7 @@ const buildHtml = (params: PremiumReportPayload) => {
       </section>
 
       <section class="page consult-page page-summary">
-        ${renderConsultHeader("Executive Summary", "Synthèse de décision")}
+        ${renderConsultHeader("Résumé exécutif", "Ce qu'il faut retenir")}
         ${
           insightSlots.summary
             ? `
@@ -2354,7 +2362,7 @@ const buildHtml = (params: PremiumReportPayload) => {
       </section>
 
       <section class="page consult-page page-performance">
-        ${renderConsultHeader("Performance", "Performance commerciale")}
+        ${renderConsultHeader("Ce qui s'est passé", "Performance observée")}
         <div class="board-grid">
           ${performanceBoardMetrics.join("")}
         </div>
@@ -2367,7 +2375,7 @@ const buildHtml = (params: PremiumReportPayload) => {
       </section>
 
       <section class="page consult-page page-reputation">
-        ${renderConsultHeader("Réputation", "Santé de réputation")}
+        ${renderConsultHeader("Pourquoi", "Signaux d'explication")}
         ${riskInsightBanner}
         ${
           reputationVisuals
@@ -2389,7 +2397,7 @@ const buildHtml = (params: PremiumReportPayload) => {
       </section>
 
       <section class="page consult-page page-voice">
-        ${renderConsultHeader("Voix des clients", "Thèmes dominants")}
+        ${renderConsultHeader("Ce que disent les clients", "Thèmes dominants")}
         ${themeCloud ? `<div class="theme-cloud">${themeCloud}</div>` : ""}
         ${
           voiceVisuals
@@ -2401,13 +2409,13 @@ const buildHtml = (params: PremiumReportPayload) => {
       </section>
 
       <section class="page consult-page page-action">
-        ${renderConsultHeader("Plan d'action", "Décisions à engager")}
+        ${renderConsultHeader("Plan d'action", "Priorités à engager")}
         ${actionCards ? `<div class="action-stack">${actionCards}</div>` : ""}
         <div class="page-number">Page 6</div>
       </section>
 
       <section class="page consult-page page-conclusion">
-        ${renderConsultHeader("Conclusion", "Ce que nous recommandons")}
+        ${renderConsultHeader("Projection", "Prochain niveau")}
         ${
           conclusionBoardMetrics
             ? `<div class="board-grid conclusion-board-grid">${conclusionBoardMetrics}</div>`

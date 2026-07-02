@@ -104,7 +104,7 @@ const periodLabels: Record<string, string> = {
 };
 
 const HEALTH_SCORE_PENDING_NOTICE =
-  "Score santé en cours de calcul — disponible après plus d'historique.";
+  "Le Business Health Score apparaîtra automatiquement lorsque suffisamment d'historique sera disponible.";
 
 const formatDateLabel = (value: string | null) => {
   if (!value) return null;
@@ -182,6 +182,18 @@ const formatOptionalMetric = (value: unknown, suffix = "") => {
     return value;
   }
   return null;
+};
+
+const formatRatingStars = (value: unknown) => {
+  const numeric =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number(value.replace(",", ".").replace("/5", ""))
+        : null;
+  if (typeof numeric !== "number" || !Number.isFinite(numeric)) return null;
+  const filled = Math.max(0, Math.min(5, Math.round(numeric)));
+  return `${"★".repeat(filled)}${"☆".repeat(5 - filled)}`;
 };
 
 const formatOptionalPercentMetric = (value: unknown) => {
@@ -344,7 +356,7 @@ const getReportExecutiveInsight = (report: ReportRow) => {
     "score"
   ]);
   if (healthScore !== null && healthScore >= 80) {
-    return "Votre réputation reste excellente ce mois-ci. Les principaux leviers de progression ont été identifiés.";
+    return `Business Health Score : ${Math.round(healthScore)}/100.`;
   }
 
   const rating = getNumericReportMetric(report, [
@@ -354,10 +366,20 @@ const getReportExecutiveInsight = (report: ReportRow) => {
     "note"
   ]);
   if (rating !== null && rating >= 4.5) {
-    return "Votre satisfaction client reste très solide ce mois-ci. Les leviers prioritaires sont prêts à être exploités.";
+    return `Note moyenne : ${rating.toFixed(1)}/5.`;
   }
 
-  return "Votre rapport est prêt. L'IA a identifié les principaux leviers d'amélioration de votre réputation.";
+  const reviews = getNumericReportMetric(report, [
+    "reviews_count",
+    "review_count",
+    "reviews",
+    "avis"
+  ]);
+  if (reviews !== null) {
+    return `${Math.round(reviews)} avis analysés.`;
+  }
+
+  return null;
 };
 
 const getReportFocusSignal = (report: ReportRow) => {
@@ -549,15 +571,14 @@ const ReportReadyModal = ({
   const executiveInsight = getReportExecutiveInsight(state.report);
   const focusSignal = getReportFocusSignal(state.report);
   const establishmentCount = locationNames.length || state.report.locations.length;
-  const rating = formatOptionalMetric(
-    getReportMetric(state.report, [
+  const rawRating = getReportMetric(state.report, [
       "average_rating",
       "avg_rating",
       "rating",
       "note"
-    ]),
-    "/5"
-  );
+    ]);
+  const rating = formatOptionalMetric(rawRating, "/5");
+  const ratingStars = formatRatingStars(rawRating);
   const reviews = formatOptionalMetric(
     getReportMetric(state.report, [
       "reviews_count",
@@ -572,6 +593,14 @@ const ReportReadyModal = ({
       "responseRate",
       "response_rate_pct",
       "responses_rate"
+    ])
+  );
+  const negativeReviews = formatOptionalMetric(
+    getReportMetric(state.report, [
+      "negative_count",
+      "negative_reviews",
+      "negativeReviews",
+      "avis_negatifs"
     ])
   );
   const kpiCards: Array<{
@@ -590,7 +619,12 @@ const ReportReadyModal = ({
         ]
       : []),
     ...(reviews ? [{ label: "Avis analysés", value: reviews }] : []),
-    ...(rating ? [{ label: "Note moyenne", value: rating }] : []),
+    ...(rating
+      ? [{ label: "Note moyenne", value: rating, detail: ratingStars }]
+      : []),
+    ...(negativeReviews
+      ? [{ label: "Avis négatifs", value: negativeReviews }]
+      : []),
     ...(responseRate ? [{ label: "Taux de réponse", value: responseRate }] : []),
     ...(establishmentCount > 0
       ? [
@@ -602,10 +636,22 @@ const ReportReadyModal = ({
       : [])
   ];
   const hasAvailablePerformanceKpi = Boolean(
-    healthScore.value || reviews || rating || responseRate
+    healthScore.value || reviews || rating || negativeReviews || responseRate
   );
   const showCompactGeneratedSummary =
     healthScore.pending && establishmentCount > 0 && !hasAvailablePerformanceKpi;
+  const executiveSummaryLines = showCompactGeneratedSummary
+    ? [
+        `Rapport généré pour ${establishmentCount} établissement${establishmentCount > 1 ? "s" : ""}.`,
+        HEALTH_SCORE_PENDING_NOTICE
+      ]
+    : [
+        executiveInsight,
+        !executiveInsight && establishmentCount > 0
+          ? `Rapport généré pour ${establishmentCount} établissement${establishmentCount > 1 ? "s" : ""}.`
+          : null,
+        focusSignal ? `Priorité identifiée : ${focusSignal}` : null
+      ].filter((item): item is string => Boolean(item));
   const brandName = branding.companyName ?? state.report.name;
 
   return (
@@ -660,9 +706,23 @@ const ReportReadyModal = ({
             >
               Votre rapport est prêt.
             </h3>
-            <p className="mt-5 max-w-3xl text-xl leading-8 text-slate-700 md:text-2xl md:leading-9">
-              {executiveInsight}
-            </p>
+            {executiveSummaryLines.length > 0 && (
+              <div className="mt-5 max-w-3xl rounded-[24px] border border-white bg-white/80 px-5 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.05)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-700">
+                  Résumé exécutif
+                </p>
+                <div className="mt-3 space-y-2">
+                  {executiveSummaryLines.map((line) => (
+                    <p
+                      key={line}
+                      className="text-lg font-semibold leading-7 text-slate-950 md:text-xl md:leading-8"
+                    >
+                      {line}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
             <p className="mt-4 truncate text-sm font-medium text-slate-500">
               {state.report.name}
             </p>
@@ -670,17 +730,7 @@ const ReportReadyModal = ({
         </div>
 
         <div className="space-y-5 p-5 md:p-8">
-          {showCompactGeneratedSummary ? (
-            <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/80 px-5 py-4">
-              <p className="text-base font-semibold text-slate-950">
-                Rapport généré pour {establishmentCount} établissement
-                {establishmentCount > 1 ? "s" : ""}.
-              </p>
-              <p className="mt-1 text-sm leading-6 text-slate-500">
-                Le score santé sera enrichi automatiquement avec l'historique.
-              </p>
-            </div>
-          ) : kpiCards.length > 0 ? (
+          {!showCompactGeneratedSummary && kpiCards.length > 0 ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               {kpiCards.map((card) => (
                 <ReportReadyKpiCard
@@ -1166,7 +1216,6 @@ const Reports = ({ session, locations }: ReportsProps) => {
               <ReportHeroMetric
                 label="Business Health Score"
                 value={latestHealthScore.value}
-                detail="Donnée du rapport"
                 highlight
               />
             )}
@@ -1653,7 +1702,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
       <Card className="overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
         <CardHeader className="p-5 pb-0 md:p-6 md:pb-0">
           <div>
-            <CardTitle>Benchmark concurrents</CardTitle>
+            <CardTitle>Benchmark concurrentiel</CardTitle>
             <p className="mt-1 text-sm text-slate-500">
               Comparez votre réputation aux acteurs suivis.
             </p>
@@ -1666,7 +1715,76 @@ const Reports = ({ session, locations }: ReportsProps) => {
               <Skeleton className="h-56 w-full rounded-[24px]" />
             </div>
           ) : benchmarkQuery.data && benchmarkQuery.data.length > 0 ? (
-            <div className="grid gap-4 lg:grid-cols-2">
+            (() => {
+              const latestBenchmark = benchmarkQuery.data[0];
+              const latestPayload = latestBenchmark.payload as
+                | {
+                    stats?: Record<string, number | null>;
+                    radius_km?: number | null;
+                    position?: string | number | null;
+                    current_position?: string | number | null;
+                    gap_to_leader?: string | number | null;
+                    leader_gap?: string | number | null;
+                  }
+                | null;
+              const latestStats = latestPayload?.stats ?? {};
+              const positionValue =
+                latestPayload?.current_position ?? latestPayload?.position ?? null;
+              const gapValue =
+                latestPayload?.gap_to_leader ?? latestPayload?.leader_gap ?? null;
+              const benchmarkHeroMetrics = [
+                ...(typeof latestStats.total === "number"
+                  ? [{ label: "Concurrents", value: String(latestStats.total) }]
+                  : []),
+                ...(positionValue !== null && positionValue !== undefined
+                  ? [{ label: "Position actuelle", value: String(positionValue) }]
+                  : []),
+                ...(gapValue !== null && gapValue !== undefined
+                  ? [{ label: "Écart leader", value: String(gapValue) }]
+                  : []),
+                ...(typeof latestPayload?.radius_km === "number"
+                  ? [{ label: "Rayon analysé", value: `${latestPayload.radius_km} km` }]
+                  : [])
+              ];
+
+              return (
+            <div className="space-y-4">
+              <div className="rounded-[24px] border border-[#020617] bg-[#020617] p-5 text-white shadow-[0_24px_70px_rgba(2,6,23,0.18)] md:p-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-200">
+                      Benchmark concurrentiel
+                    </p>
+                    <h3 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">
+                      Lecture du marché local
+                    </h3>
+                  </div>
+                  {formatDateLabel(latestBenchmark.created_at ?? null) && (
+                    <p className="text-sm font-medium text-slate-300">
+                      {formatDateLabel(latestBenchmark.created_at ?? null)}
+                    </p>
+                  )}
+                </div>
+                {benchmarkHeroMetrics.length > 0 && (
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {benchmarkHeroMetrics.map((metric) => (
+                      <div
+                        key={metric.label}
+                        className="rounded-[20px] border border-white/10 bg-white/[0.08] px-4 py-3"
+                      >
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">
+                          {metric.label}
+                        </p>
+                        <p className="mt-2 text-2xl font-semibold leading-none">
+                          {metric.value}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
               {benchmarkQuery.data.map((report) => {
                 const payload = report.payload as
                   | {
@@ -1679,12 +1797,14 @@ const Reports = ({ session, locations }: ReportsProps) => {
                         reviews?: number | null;
                         distance_m?: number | null;
                       }>;
+                      radius_km?: number | null;
                     }
                   | null;
                 const stats = payload?.stats ?? {};
                 const swot = payload?.swot ?? {};
                 const plan = payload?.plan_14_days ?? [];
                 const topCompetitors = payload?.top_competitors ?? [];
+                const opportunities = swot.opportunities?.slice(0, 3) ?? [];
                 const bestCompetitor = topCompetitors.find((item) =>
                   item.name?.trim()
                 );
@@ -1704,9 +1824,8 @@ const Reports = ({ session, locations }: ReportsProps) => {
                 const zoneLabel =
                   report.title || (report as { name?: string | null }).name || null;
                 const radiusLabel =
-                  typeof (payload as { radius_km?: number | null })?.radius_km ===
-                  "number"
-                    ? `${(payload as { radius_km?: number | null }).radius_km} km`
+                  typeof payload?.radius_km === "number"
+                    ? `${payload.radius_km} km`
                     : null;
                 const actions = plan.length > 0 ? plan.slice(0, 3) : [];
 
@@ -1725,7 +1844,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                           Veille concurrentielle
                         </div>
                         <h4 className="mt-2 truncate text-lg font-semibold text-slate-950">
-                          {report.title ?? "Benchmark concurrents"}
+                          {report.title ?? "Benchmark concurrentiel"}
                         </h4>
                         {(locationLabel || zoneLabel || radiusLabel) && (
                           <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-500">
@@ -1793,27 +1912,37 @@ const Reports = ({ session, locations }: ReportsProps) => {
                       )}
                     </div>
 
-                    {report.summary && (
-                      <p className="mt-4 rounded-[20px] border border-slate-200/70 bg-slate-50/80 px-4 py-3 text-sm leading-6 text-slate-600">
-                        {report.summary}
-                      </p>
-                    )}
-
                     {isOpen && (
                       <div className="mt-6 space-y-4">
+                        {report.summary && (
+                          <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-5">
+                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">
+                              Résumé IA
+                            </p>
+                            <p className="mt-2 text-sm leading-6 text-slate-700">
+                              {report.summary}
+                            </p>
+                          </div>
+                        )}
+
                         {topCompetitors.length > 0 && (
                           <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-                            <div className="text-sm font-semibold text-slate-950">
-                              Podium concurrentiel
-                            </div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                              Classement
+                            </p>
                             <div className="mt-4 grid gap-3 md:grid-cols-3">
                               {topCompetitors.slice(0, 3).map((item, index) => (
                                 <div
                                   key={`${item.name ?? "competitor"}-${index}`}
-                                  className="rounded-[20px] border border-slate-200/70 bg-slate-50/70 p-4 text-xs text-slate-600"
+                                  className="rounded-[20px] border border-slate-200/70 bg-slate-50/70 p-4 text-xs text-slate-600 shadow-[0_12px_30px_rgba(15,23,42,0.035)]"
                                 >
-                                  <div className="font-semibold text-slate-950">
-                                    {item.name ?? "Concurrent"}
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="font-semibold text-slate-950">
+                                      {item.name ?? "Concurrent"}
+                                    </div>
+                                    <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-slate-500">
+                                      #{index + 1}
+                                    </span>
                                   </div>
                                   <div className="mt-2 space-y-1">
                                     {typeof item.rating === "number" && (
@@ -1838,9 +1967,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
                           typeof stats.best_rating === "number" ||
                           typeof stats.high_risk_count === "number") && (
                           <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-                            <div className="text-sm font-semibold text-slate-950">
-                              Analyse radar
-                            </div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                              Concurrents
+                            </p>
                             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                               {typeof stats.closest_m === "number" && (
                                 <ReportDataPoint
@@ -1864,30 +1993,21 @@ const Reports = ({ session, locations }: ReportsProps) => {
                           </div>
                         )}
 
-                        {(["forces", "weaknesses", "opportunities", "threats"] as const).some(
-                          (key) => swot[key]?.[0]
-                        ) && (
-                          <div className="grid gap-3 md:grid-cols-2">
-                            {([
-                              ["forces", "Force"],
-                              ["weaknesses", "Faiblesse"],
-                              ["opportunities", "Opportunité"],
-                              ["threats", "Menace"]
-                            ] as const).map(([key, label]) =>
-                              swot[key]?.[0] ? (
+                        {opportunities.length > 0 && (
+                          <div className="rounded-[24px] border border-slate-200 bg-white p-5">
+                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                              Opportunités
+                            </p>
+                            <div className="mt-4 grid gap-3 md:grid-cols-2">
+                              {opportunities.map((item) => (
                                 <div
-                                  key={key}
+                                  key={item}
                                   className="rounded-[24px] border border-slate-200 bg-white p-4 text-sm text-slate-600"
                                 >
-                                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                    {label}
-                                  </div>
-                                  <div className="mt-2 leading-6">
-                                    {swot[key]?.[0]}
-                                  </div>
+                                  {item}
                                 </div>
-                              ) : null
-                            )}
+                              ))}
+                            </div>
                           </div>
                         )}
 
@@ -1916,6 +2036,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
                 );
               })}
             </div>
+            </div>
+              );
+            })()
           ) : (
             <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center">
               <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-[18px] bg-white text-blue-600 shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
