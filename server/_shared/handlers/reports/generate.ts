@@ -99,16 +99,16 @@ const getRange = (
 };
 
 const formatDate = (value: Date | null) =>
-  value ? value.toISOString().slice(0, 10) : "—";
+  value ? value.toISOString().slice(0, 10) : null;
 
 const formatPercent = (value: number | null) =>
-  value === null ? "—" : `${Math.round(value)}%`;
+  value === null ? null : `${Math.round(value)}%`;
 
 const formatRating = (value: number | null) =>
-  value === null ? "—" : value.toFixed(1).replace(".", ",");
+  value === null ? null : value.toFixed(1).replace(".", ",");
 
 const formatRatio = (value: number | null) =>
-  value === null ? "—" : `${Math.round(value * 100)}%`;
+  value === null ? null : `${Math.round(value * 100)}%`;
 
 const normalizeLocationTitle = (value: string) =>
   value.replace(/\s*-\s*/g, " - ").replace(/\s{2,}/g, " ").trim();
@@ -120,11 +120,97 @@ const cleanReviewText = (value: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
+type ReportBranding = {
+  companyName: string | null;
+  legalName: string | null;
+  logoUrl: string | null;
+  locationNames: string[];
+  locationsCount: number | null;
+};
+
+const getSignedBrandLogoUrl = async (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabaseAdmin: any,
+  logoPath: string | null
+) => {
+  if (!logoPath) return null;
+  try {
+    const { data, error } = await supabaseAdmin.storage
+      .from("brand-assets")
+      .createSignedUrl(logoPath, 60 * 60);
+    if (error) return null;
+    return data?.signedUrl ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveReportBranding = async (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabaseAdmin: any,
+  userId: string,
+  fallbackName: string,
+  locationNames: string[]
+): Promise<ReportBranding> => {
+  const fallback = fallbackName.trim() || null;
+  const empty = {
+    companyName: fallback,
+    legalName: null,
+    logoUrl: null,
+    locationNames,
+    locationsCount: locationNames.length || null
+  };
+  try {
+    const { data: settings } = await supabaseAdmin
+      .from("business_settings")
+      .select("business_id, business_name")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const businessId =
+      (settings as { business_id?: string | null } | null)?.business_id ?? null;
+    const settingsName =
+      (settings as { business_name?: string | null } | null)?.business_name?.trim() ??
+      null;
+    if (!businessId) {
+      return { ...empty, companyName: settingsName ?? empty.companyName };
+    }
+    const { data: entities } = await supabaseAdmin
+      .from("legal_entities")
+      .select("company_name, legal_name, logo_path, logo_url, is_default, created_at")
+      .eq("business_id", businessId)
+      .order("is_default", { ascending: false })
+      .order("created_at", { ascending: true });
+    const entity = Array.isArray(entities)
+      ? (entities[0] as
+          | {
+              company_name?: string | null;
+              legal_name?: string | null;
+              logo_path?: string | null;
+              logo_url?: string | null;
+            }
+          | undefined)
+      : undefined;
+    const logoUrl =
+      entity?.logo_url ??
+      (await getSignedBrandLogoUrl(supabaseAdmin, entity?.logo_path ?? null));
+    return {
+      companyName: entity?.company_name?.trim() || settingsName || fallback,
+      legalName: entity?.legal_name?.trim() || null,
+      logoUrl,
+      locationNames,
+      locationsCount: locationNames.length || null
+    };
+  } catch {
+    return empty;
+  }
+};
+
 const buildPdf = async (params: {
   title: string;
   subtitle: string;
   locationsLabel: string;
   notes?: string | null;
+  branding?: ReportBranding;
   kpis: {
     reviewsTotal: number;
     avgRating: number | null;
@@ -197,6 +283,31 @@ const buildPdf = async (params: {
   const activeFont = useUnicode && unicodeFont ? unicodeFont : font;
   const activeBoldFont =
     useUnicode && unicodeBoldFont ? unicodeBoldFont : fontBold;
+  const brandName = params.branding?.companyName ?? params.title;
+  const legalName = params.branding?.legalName ?? null;
+  const embedBrandLogo = async (url: string | null | undefined) => {
+    if (!url) return null;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      const contentType = response.headers.get("content-type") ?? "";
+      const bytes = await response.arrayBuffer();
+      if (contentType.includes("png") || url.toLowerCase().includes(".png")) {
+        return await doc.embedPng(bytes);
+      }
+      if (
+        contentType.includes("jpeg") ||
+        contentType.includes("jpg") ||
+        /\.(jpe?g)(\?|$)/i.test(url)
+      ) {
+        return await doc.embedJpg(bytes);
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  };
+  const brandLogo = await embedBrandLogo(params.branding?.logoUrl);
   let y = 780;
   const margin = 50;
   const pageWidth = 595.28;
@@ -302,14 +413,33 @@ const buildPdf = async (params: {
     const titleSize = compact ? 16 : 26;
     const subtitleSize = compact ? 10 : 12;
     const locationSize = compact ? 9 : 11;
-    page.drawText("EGIA", {
-      x: margin,
+    const brandX = brandLogo && !compact ? margin + 34 : margin;
+    if (brandLogo && !compact) {
+      page.drawImage(brandLogo, {
+        x: margin,
+        y: y - 22,
+        width: 26,
+        height: 26
+      });
+    }
+    page.drawText(safeText(brandName), {
+      x: brandX,
       y,
       size: brandSize,
       font: activeBoldFont,
       color: rgb(0.2, 0.26, 0.3)
     });
     y -= brandSize + 6;
+    if (legalName && !compact) {
+      page.drawText(safeText(legalName), {
+        x: brandX,
+        y,
+        size: 9,
+        font: activeFont,
+        color: rgb(0.42, 0.47, 0.54)
+      });
+      y -= 14;
+    }
     drawText(safeText(params.title), titleSize, true);
     drawText(safeText(params.subtitle), subtitleSize);
     drawText(safeText(params.locationsLabel), locationSize);
@@ -339,6 +469,9 @@ const buildPdf = async (params: {
     rating: number | null,
     size = 10
   ) => {
+    if (rating === null) {
+      return;
+    }
     const safeRating = typeof rating === "number" ? rating : 0;
     const fullStars = Math.round(safeRating);
     const gap = 4;
@@ -352,14 +485,16 @@ const buildPdf = async (params: {
         scale: size / 20
       });
     }
-    const ratingLabel = formatRating(typeof rating === "number" ? rating : null);
-    page.drawText(ratingLabel, {
-      x: x + 5 * (size + gap) + 6,
-      y: yBase + 1,
-      size: 10,
-      font: activeBoldFont,
-      color: rgb(0.2, 0.25, 0.3)
-    });
+    const ratingLabel = formatRating(rating);
+    if (ratingLabel) {
+      page.drawText(ratingLabel, {
+        x: x + 5 * (size + gap) + 6,
+        y: yBase + 1,
+        size: 10,
+        font: activeBoldFont,
+        color: rgb(0.2, 0.25, 0.3)
+      });
+    }
   };
 
   const drawReviewItem = (item: {
@@ -370,9 +505,12 @@ const buildPdf = async (params: {
   }) => {
     ensureSpace(140);
     const ratingLabel = formatRating(item.rating);
-    const line1 = item.author
-      ? `★ ${ratingLabel} — ${item.date} · ${item.author}`
-      : `★ ${ratingLabel} — ${item.date}`;
+    const lineParts = [
+      ratingLabel ? `★ ${ratingLabel}` : "Avis client",
+      item.date,
+      item.author
+    ].filter(Boolean);
+    const line1 = lineParts.join(" · ");
     drawText(safeText(line1), 11, true);
     const cleaned = cleanReviewText(item.label);
     const authorNorm = item.author ? cleanReviewText(item.author) : "";
@@ -408,13 +546,15 @@ const buildPdf = async (params: {
     font: activeBoldFont,
     color: rgb(0.1, 0.12, 0.15)
   });
-  page.drawText("Note moyenne", {
-    x: rightX,
-    y: cardTitleY - 6,
-    size: 12,
-    font: activeBoldFont,
-    color: rgb(0.1, 0.12, 0.15)
-  });
+  if (params.kpis.avgRating !== null) {
+    page.drawText("Note moyenne", {
+      x: rightX,
+      y: cardTitleY - 6,
+      size: 12,
+      font: activeBoldFont,
+      color: rgb(0.1, 0.12, 0.15)
+    });
+  }
   const kpiLineY = cardTitleY - 20;
   page.drawText("Volume avis", {
     x: leftX,
@@ -431,35 +571,41 @@ const buildPdf = async (params: {
     color: rgb(0.08, 0.1, 0.12)
   });
   const responseY = kpiLineY - 36;
-  page.drawText("Taux de réponse", {
-    x: leftX,
-    y: responseY,
-    size: 10,
-    font: activeFont,
-    color: rgb(0.35, 0.4, 0.45)
-  });
-  page.drawText(formatRatio(params.kpis.responseRate), {
-    x: leftX,
-    y: responseY - 14,
-    size: 14,
-    font: activeBoldFont,
-    color: rgb(0.08, 0.1, 0.12)
-  });
+  const responseLabel = formatRatio(params.kpis.responseRate);
+  if (responseLabel) {
+    page.drawText("Taux de réponse", {
+      x: leftX,
+      y: responseY,
+      size: 10,
+      font: activeFont,
+      color: rgb(0.35, 0.4, 0.45)
+    });
+    page.drawText(responseLabel, {
+      x: leftX,
+      y: responseY - 14,
+      size: 14,
+      font: activeBoldFont,
+      color: rgb(0.08, 0.1, 0.12)
+    });
+  }
   const sentimentY = responseY - 36;
-  page.drawText("Sentiment positif", {
-    x: leftX,
-    y: sentimentY,
-    size: 10,
-    font: activeFont,
-    color: rgb(0.35, 0.4, 0.45)
-  });
-  page.drawText(formatPercent(params.kpis.sentimentPositive), {
-    x: leftX,
-    y: sentimentY - 14,
-    size: 14,
-    font: activeBoldFont,
-    color: rgb(0.08, 0.1, 0.12)
-  });
+  const sentimentLabel = formatPercent(params.kpis.sentimentPositive);
+  if (sentimentLabel) {
+    page.drawText("Sentiment positif", {
+      x: leftX,
+      y: sentimentY,
+      size: 10,
+      font: activeFont,
+      color: rgb(0.35, 0.4, 0.45)
+    });
+    page.drawText(sentimentLabel, {
+      x: leftX,
+      y: sentimentY - 14,
+      size: 14,
+      font: activeBoldFont,
+      color: rgb(0.08, 0.1, 0.12)
+    });
+  }
   const ratingY = cardTitleY - 30;
   renderStars(rightX, ratingY, params.kpis.avgRating, 12);
   y = cardTop - cardHeight - 12;
@@ -467,53 +613,51 @@ const buildPdf = async (params: {
 
   ensureSpace(200);
   drawText("Analyse IA", 14, true);
-  drawText(
-    safeText(`Score moyen IA: ${formatRating(params.ai.avgScore)}`),
-    12
-  );
+  const avgAiScoreLabel = formatRating(params.ai.avgScore);
+  if (avgAiScoreLabel) {
+    drawText(safeText(`Score moyen IA: ${avgAiScoreLabel}`), 12);
+  }
   drawText(safeText(`Avis critiques: ${params.ai.criticalCount}`), 12);
-  const tagsText = params.ai.topTags.length
-    ? params.ai.topTags
-        .slice(0, 10)
-        .map((tag) => `• ${tag.tag} (${tag.count})`)
-    : ["—"];
-  const half = Math.ceil(tagsText.length / 2);
-  const leftTags = tagsText.slice(0, half);
-  const rightTags = tagsText.slice(half);
-  const tagsY = y;
-  const colGap = 16;
-  const colWidth = (contentWidth - colGap) / 2;
-  const drawTagColumn = (items: string[], startX: number, startY: number) => {
-    let currentY = startY;
-    items.forEach((item) => {
-      page.drawText(safeText(item), {
-        x: startX,
-        y: currentY,
-        size: 11,
-        font: activeFont,
-        color: rgb(0.12, 0.14, 0.18)
+  if (params.ai.topTags.length > 0) {
+    const tagsText = params.ai.topTags
+      .slice(0, 10)
+      .map((tag) => `• ${tag.tag} (${tag.count})`);
+    const half = Math.ceil(tagsText.length / 2);
+    const leftTags = tagsText.slice(0, half);
+    const rightTags = tagsText.slice(half);
+    const tagsY = y;
+    const colGap = 16;
+    const colWidth = (contentWidth - colGap) / 2;
+    const drawTagColumn = (items: string[], startX: number, startY: number) => {
+      let currentY = startY;
+      items.forEach((item) => {
+        page.drawText(safeText(item), {
+          x: startX,
+          y: currentY,
+          size: 11,
+          font: activeFont,
+          color: rgb(0.12, 0.14, 0.18)
+        });
+        currentY -= 14;
       });
-      currentY -= 14;
-    });
-    return currentY;
-  };
-  const leftEnd = drawTagColumn(leftTags, margin, tagsY);
-  const rightEnd = drawTagColumn(
-    rightTags,
-    margin + colWidth + colGap,
-    tagsY
-  );
-  y = Math.min(leftEnd, rightEnd) - 10;
+      return currentY;
+    };
+    const leftEnd = drawTagColumn(leftTags, margin, tagsY);
+    const rightEnd = drawTagColumn(
+      rightTags,
+      margin + colWidth + colGap,
+      tagsY
+    );
+    y = Math.min(leftEnd, rightEnd) - 10;
+  }
   drawDivider();
 
-  ensureSpace(160);
-  drawText("Avis positifs", 14, true);
-  if (params.positives.length === 0) {
-    drawText("—", 11);
-  } else {
+  if (params.positives.length > 0) {
+    ensureSpace(160);
+    drawText("Avis positifs", 14, true);
     params.positives.forEach(drawReviewItem);
+    y -= 4;
   }
-  y -= 4;
 
   ensureSpace(160);
   drawText("Avis négatifs", 14, true);
@@ -528,12 +672,20 @@ const buildPdf = async (params: {
   );
   pages.forEach((p, index) => {
     const pageNumber = `Page ${index + 1}`;
+    const powered = "Powered by EGIA";
     p.drawText(generatedLabel, {
       x: margin,
       y: 30,
       size: 9,
       font: activeFont,
       color: rgb(0.4, 0.45, 0.5)
+    });
+    p.drawText(powered, {
+      x: margin,
+      y: 18,
+      size: 8,
+      font: activeFont,
+      color: rgb(0.55, 0.6, 0.66)
     });
     p.drawText(pageNumber, {
       x: pageWidth - margin - activeFont.widthOfTextAtSize(pageNumber, 9),
@@ -580,6 +732,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   let locationsLabel = "Établissements: Tous";
+  let selectedLocationNames: string[] = [];
   if (Array.isArray(report.locations) && report.locations.length > 0) {
     const { data: locationRows } = await supabaseAdmin
       .from("google_locations")
@@ -592,11 +745,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       )
       .filter(Boolean) as string[];
     const uniqueTitles = Array.from(new Set(titles));
+    selectedLocationNames = uniqueTitles;
     locationsLabel =
       uniqueTitles.length === 1
         ? `Établissement: ${uniqueTitles[0]}`
         : `${uniqueTitles.length} établissements`;
   }
+  const branding = await resolveReportBranding(
+    supabaseAdmin,
+    userId,
+    report.name,
+    selectedLocationNames
+  );
 
   await supabaseAdmin
     .from("reports")
@@ -606,10 +766,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const preset = normalizePreset(report.period_preset ?? "last_30_days");
     const { from, to } = getRange(preset, report.from_date, report.to_date);
+    const fromLabel = formatDate(from);
+    const toLabel = formatDate(to);
     const periodLabel =
       preset === "all_time"
         ? "Période: Depuis toujours"
-        : `Période: ${formatDate(from)} au ${formatDate(to)}`;
+        : fromLabel && toLabel
+          ? `Période: ${fromLabel} au ${toLabel}`
+          : "Période analysée";
 
     let query = supabaseAdmin
       .from("google_reviews")
@@ -723,7 +887,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .slice(0, 3)
       .map((review) => ({
         label: review.comment || review.author_name || "Avis positif",
-        date: review.create_time ? review.create_time.slice(0, 10) : "—",
+        date: review.create_time ? review.create_time.slice(0, 10) : "",
         rating: review.rating,
         author: review.author_name ?? null
       }));
@@ -733,7 +897,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .slice(0, 3)
       .map((review) => ({
         label: review.comment || review.author_name || "Avis négatif",
-        date: review.create_time ? review.create_time.slice(0, 10) : "—",
+        date: review.create_time ? review.create_time.slice(0, 10) : "",
         rating: review.rating,
         author: review.author_name ?? null
       }));
@@ -743,6 +907,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       subtitle: periodLabel,
       locationsLabel,
       notes: report.notes ?? null,
+      branding,
       kpis: {
         reviewsTotal,
         avgRating,

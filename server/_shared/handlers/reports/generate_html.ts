@@ -96,13 +96,15 @@ const getRange = (
 };
 
 const formatDate = (value: Date | null) =>
-  value ? value.toISOString().slice(0, 10) : "—";
+  value ? value.toISOString().slice(0, 10) : null;
 
 const formatRating = (value: number | null) =>
-  value === null ? "—" : value.toFixed(1).replace(".", ",");
+  value === null ? null : value.toFixed(1).replace(".", ",");
 
 const formatRatio = (value: number | null) =>
-  value === null ? "—" : `${Math.round(value * 100)}%`;
+  value === null ? null : `${Math.round(value * 100)}%`;
+
+const EMPTY_DASH = String.fromCharCode(8212);
 
 const normalizeLocationTitle = (value: string) =>
   value.replace(/\s*-\s*/g, " - ").replace(/\s{2,}/g, " ").trim();
@@ -116,7 +118,11 @@ const escapeHtml = (value: string) =>
     .replace(/'/g, "&#39;");
 
 const renderStars = (rating: number | null) => {
+  if (rating === null) {
+    return "";
+  }
   const normalized = typeof rating === "number" ? Math.max(0, Math.min(5, rating)) : 0;
+  const ratingLabel = formatRating(rating);
   const fullStars = Math.floor(normalized);
   const stars = Array.from({ length: 5 }, (_, index) => {
     const filled = index < fullStars;
@@ -128,7 +134,7 @@ const renderStars = (rating: number | null) => {
       </svg>
     `;
   });
-  return `<div class="stars">${stars.join("")}<span>${formatRating(rating)}</span></div>`;
+  return `<div class="stars">${stars.join("")}<span>${escapeHtml(ratingLabel ?? "")}</span></div>`;
 };
 
 const buildAiSummary = (params: {
@@ -179,6 +185,15 @@ export type PremiumReportPayload = {
   subtitle: string;
   locationsLabel: string;
   notes?: string | null;
+  businessName?: string | null;
+  commercialName?: string | null;
+  companyName?: string | null;
+  legalName?: string | null;
+  billingLegalName?: string | null;
+  logoUrl?: string | null;
+  billingLogoUrl?: string | null;
+  locationsCount?: number | null;
+  locationNames?: string[];
   kpis: {
     reviewsTotal: number;
     avgRating: number | null;
@@ -209,14 +224,356 @@ export type PremiumReportPayload = {
   }>;
 };
 
+const getPayloadString = (params: PremiumReportPayload, keys: string[]) => {
+  const source = params as unknown as Record<string, unknown>;
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+};
+
+const getPayloadNumber = (source: unknown, keys: string[]) => {
+  const record = source as Record<string, unknown> | null;
+  if (!record) return null;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return null;
+};
+
+const getSignedBrandLogoUrl = async (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabaseAdmin: any,
+  logoPath: string | null
+) => {
+  if (!logoPath) return null;
+  try {
+    const { data, error } = await supabaseAdmin.storage
+      .from("brand-assets")
+      .createSignedUrl(logoPath, 60 * 60);
+    if (error) return null;
+    return data?.signedUrl ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveReportBranding = async (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabaseAdmin: any,
+  userId: string,
+  fallbackName: string,
+  locationNames: string[]
+) => {
+  const fallback = fallbackName.trim() || null;
+  const empty = {
+    businessName: fallback,
+    commercialName: fallback,
+    companyName: fallback,
+    legalName: null,
+    billingLegalName: null,
+    logoUrl: null,
+    billingLogoUrl: null,
+    locationsCount: locationNames.length || null,
+    locationNames
+  };
+
+  try {
+    const { data: settings } = await supabaseAdmin
+      .from("business_settings")
+      .select("business_id, business_name")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const businessId =
+      (settings as { business_id?: string | null } | null)?.business_id ?? null;
+    const settingsName =
+      (settings as { business_name?: string | null } | null)?.business_name?.trim() ??
+      null;
+
+    if (!businessId) {
+      return {
+        ...empty,
+        businessName: settingsName ?? empty.businessName,
+        commercialName: settingsName ?? empty.commercialName,
+        companyName: settingsName ?? empty.companyName
+      };
+    }
+
+    const { data: entities } = await supabaseAdmin
+      .from("legal_entities")
+      .select("company_name, legal_name, logo_path, logo_url, is_default, created_at")
+      .eq("business_id", businessId)
+      .order("is_default", { ascending: false })
+      .order("created_at", { ascending: true });
+    const entity = Array.isArray(entities)
+      ? (entities[0] as
+          | {
+              company_name?: string | null;
+              legal_name?: string | null;
+              logo_path?: string | null;
+              logo_url?: string | null;
+            }
+          | undefined)
+      : undefined;
+    const companyName = entity?.company_name?.trim() || settingsName || fallback;
+    const legalName = entity?.legal_name?.trim() || null;
+    const logoUrl =
+      entity?.logo_url ??
+      (await getSignedBrandLogoUrl(supabaseAdmin, entity?.logo_path ?? null));
+
+    return {
+      businessName: companyName,
+      commercialName: companyName,
+      companyName,
+      legalName,
+      billingLegalName: legalName,
+      logoUrl,
+      billingLogoUrl: logoUrl,
+      locationsCount: locationNames.length || null,
+      locationNames
+    };
+  } catch {
+    return empty;
+  }
+};
+
+const formatCoverNumber = (value: number) =>
+  Number.isInteger(value) ? String(value) : value.toFixed(1).replace(".", ",");
+
+const buildCoverAiSentence = (params: PremiumReportPayload) => {
+  const summaries = params.aiSummary;
+  if (summaries.length === 0) return null;
+  if (
+    summaries.some((item) => /note moyenne/i.test(item)) &&
+    typeof params.kpis.avgRating === "number" &&
+    params.kpis.avgRating >= 4.5
+  ) {
+    return "Aujourd'hui votre réputation est excellente.";
+  }
+  if (
+    summaries.some((item) => /note moyenne/i.test(item)) &&
+    typeof params.kpis.avgRating === "number" &&
+    params.kpis.avgRating >= 4
+  ) {
+    return "La satisfaction client reste votre principal point fort.";
+  }
+  if (summaries.some((item) => /Aucun avis négatif en attente/i.test(item))) {
+    return "Votre réputation reste sous contrôle sur la période.";
+  }
+  if (
+    summaries.some((item) => /taux de réponse/i.test(item)) &&
+    typeof params.kpis.responseRate === "number" &&
+    params.kpis.responseRate >= 0.8
+  ) {
+    return "Votre réactivité soutient la qualité de votre réputation.";
+  }
+  const first = summaries[0]?.trim();
+  return first && first !== EMPTY_DASH ? first : null;
+};
+
+const rewritePdfInsight = (item: string) => {
+  const trimmed = item.trim();
+  if (!trimmed || trimmed === EMPTY_DASH) {
+    return "";
+  }
+
+  const ratingMatch = trimmed.match(/^La note moyenne est ([0-9,.]+)\/?5?\.$/i);
+  if (ratingMatch?.[1]) {
+    const rating = Number(ratingMatch[1].replace(",", "."));
+    if (Number.isFinite(rating) && rating >= 4.5) {
+      return "Vos clients attribuent une excellente note moyenne, signe d'une satisfaction constante.";
+    }
+    if (Number.isFinite(rating) && rating >= 4) {
+      return "Vos clients expriment une satisfaction solide, à consolider dans la durée.";
+    }
+    return "La note moyenne met en évidence un levier d'amélioration de l'expérience client.";
+  }
+
+  const responseMatch = trimmed.match(/^Le taux de réponse est de ([0-9]+)%\.$/i);
+  if (responseMatch?.[1]) {
+    const responseRate = Number(responseMatch[1]);
+    if (responseRate >= 80) {
+      return "Votre taux de réponse soutient efficacement la confiance client.";
+    }
+    if (responseRate >= 50) {
+      return "Votre taux de réponse reste solide mais inférieur au potentiel maximal.";
+    }
+    return "Votre taux de réponse constitue un levier prioritaire pour renforcer la réputation.";
+  }
+
+  const negativeMatch = trimmed.match(
+    /^(\d+) avis négatifs ont été recensés historiquement sur la période\.$/i
+  );
+  if (negativeMatch?.[1]) {
+    const count = Number(negativeMatch[1]);
+    if (count === 0) {
+      return "Aucun avis négatif n'a été identifié sur la période.";
+    }
+    return `${count} avis négatif${count > 1 ? "s" : ""} concentrent les principaux points de vigilance.`;
+  }
+
+  const untreatedMatch = trimmed.match(
+    /^(\d+) avis négatifs nécessitent une réponse ; priorité à leur traitement\.$/i
+  );
+  if (untreatedMatch?.[1]) {
+    const count = Number(untreatedMatch[1]);
+    if (count === 0) {
+      return "Aucun avis négatif n'appelle de réponse prioritaire.";
+    }
+    return `${count} avis négatif${count > 1 ? "s" : ""} appellent une réponse prioritaire.`;
+  }
+
+  if (/^Aucun avis négatif en attente de réponse/i.test(trimmed)) {
+    return "Aucun avis négatif n'attend de réponse : le traitement est maîtrisé.";
+  }
+
+  const tagsMatch = trimmed.match(/^Sujets récurrents\s*:\s*(.+)\.$/i);
+  if (tagsMatch?.[1]) {
+    return `Les thèmes clients les plus récurrents sont ${tagsMatch[1]}.`;
+  }
+
+  const criticalMatch = trimmed.match(/^(\d+) avis critiques IA surveillés/i);
+  if (criticalMatch?.[1]) {
+    const count = Number(criticalMatch[1]);
+    if (count === 0) {
+      return "Aucun avis critique n'a été signalé par l'IA.";
+    }
+    return `${count} avis critique${count > 1 ? "s" : ""} détecté${count > 1 ? "s" : ""} par l'IA mérite${count > 1 ? "nt" : ""} une surveillance spécifique.`;
+  }
+
+  if (/^Aucun avis sur la période/i.test(trimmed)) {
+    return "Aucun avis n'a été collecté sur la période analysée.";
+  }
+
+  return trimmed;
+};
+
 const buildHtml = (params: PremiumReportPayload) => {
   const tags = params.ai.topTags.slice(0, 10);
-  const generatedDate = formatDate(new Date());
+  const generatedDate = formatDate(new Date()) ?? new Date().toISOString().slice(0, 10);
   const coverName = params.locationsLabel
     .replace(/^Établissement:\s*/i, "")
     .replace(/^Établissements:\s*/i, "")
     .trim();
-  const businessHealthScore = "—";
+  const commercialName =
+    (getPayloadString(params, [
+      "businessName",
+      "business_name",
+      "commercialName",
+      "commercial_name",
+      "tradeName",
+      "trade_name",
+      "companyName",
+      "company_name"
+    ]) ?? coverName) ||
+    params.title;
+  const legalName = getPayloadString(params, [
+    "legalName",
+    "legal_name",
+    "raisonSociale",
+    "raison_sociale",
+    "billingLegalName",
+    "billing_legal_name"
+  ]);
+  const logoUrl = getPayloadString(params, [
+    "logoUrl",
+    "logo_url",
+    "billingLogoUrl",
+    "billing_logo_url",
+    "companyLogoUrl",
+    "company_logo_url"
+  ]);
+  const payloadLocationNames = Array.isArray(params.locationNames)
+    ? params.locationNames.filter(Boolean)
+    : [];
+  const locationNamesFromRows = payloadLocationNames.length
+    ? payloadLocationNames
+    : params.perLocation
+        .map((location) => location.name)
+        .filter((name) => name && name !== "Établissement");
+  const singleLocationFromLabel = /^Établissement\s*:/i.test(params.locationsLabel)
+    ? coverName
+    : null;
+  const locationNames =
+    locationNamesFromRows.length > 0
+      ? locationNamesFromRows
+      : singleLocationFromLabel
+        ? [singleLocationFromLabel]
+        : [];
+  const locationCountFromLabel = (() => {
+    const match = params.locationsLabel.match(/(\d+)\s+établissements?/i);
+    if (match?.[1]) return Number(match[1]);
+    return singleLocationFromLabel ? 1 : null;
+  })();
+  const locationCount =
+    params.locationsCount ?? (locationNamesFromRows.length || locationCountFromLabel);
+  const businessHealthScoreValue =
+    getPayloadNumber(params.kpis, [
+      "businessHealthScore",
+      "business_health_score",
+      "healthScore",
+      "health_score",
+      "score"
+    ]) ??
+    getPayloadNumber(params, [
+      "businessHealthScore",
+      "business_health_score",
+      "healthScore",
+      "health_score",
+      "score"
+    ]);
+  const businessHealthScore =
+    businessHealthScoreValue === null
+      ? "Calcul en cours"
+      : `${formatCoverNumber(businessHealthScoreValue)}/100`;
+  const coverKpis = [
+    {
+      label: "Avis analysés",
+      value: formatCoverNumber(params.kpis.reviewsTotal),
+      visible: Number.isFinite(params.kpis.reviewsTotal)
+    },
+    {
+      label: "Note moyenne",
+      value:
+        params.kpis.avgRating === null
+          ? null
+          : `${formatCoverNumber(params.kpis.avgRating)}/5`,
+      visible: params.kpis.avgRating !== null
+    },
+    {
+      label: "Taux de réponse",
+      value:
+        params.kpis.responseRate === null
+          ? null
+          : `${Math.round(params.kpis.responseRate * 100)}%`,
+      visible: params.kpis.responseRate !== null
+    },
+    {
+      label: "Nombre établissements",
+      value: locationCount === null ? null : formatCoverNumber(locationCount),
+      visible: locationCount !== null
+    },
+    {
+      label: "Avis négatifs",
+      value: formatCoverNumber(params.kpis.negativeCount),
+      visible: Number.isFinite(params.kpis.negativeCount)
+    },
+    {
+      label: "Avis IA critiques",
+      value: formatCoverNumber(params.ai.criticalCount),
+      visible: Number.isFinite(params.ai.criticalCount)
+    }
+  ].filter(
+    (item): item is { label: string; value: string; visible: true } =>
+      item.visible && item.value !== null
+  );
+  const coverAiSentence = buildCoverAiSentence(params);
   const ratingPercent =
     params.kpis.avgRating === null
       ? 0
@@ -225,12 +582,25 @@ const buildHtml = (params: PremiumReportPayload) => {
     params.kpis.responseRate === null
       ? 0
       : Math.max(0, Math.min(100, params.kpis.responseRate * 100));
-  const summaryItems = params.aiSummary.length ? params.aiSummary : ["—"];
+  const sourceSummaryItems = params.aiSummary.filter(
+    (item) => item.trim() && item.trim() !== EMPTY_DASH
+  );
+  const summaryItems = sourceSummaryItems.length
+    ? sourceSummaryItems.map(rewritePdfInsight)
+    : ["Aucune synthèse IA disponible dans les données du rapport."];
   const findSummary = (patterns: RegExp[], fallbackIndex = 0) =>
-    summaryItems.find((item) => patterns.some((pattern) => pattern.test(item))) ??
-    summaryItems[fallbackIndex] ??
-    "—";
-  const mainInsight = summaryItems[0] ?? "—";
+    rewritePdfInsight(
+      sourceSummaryItems.find((item) =>
+        patterns.some((pattern) => pattern.test(item))
+      ) ??
+        sourceSummaryItems[fallbackIndex] ??
+        ""
+    ) ||
+    summaryItems[fallbackIndex] ||
+    "Aucune synthèse IA disponible dans les données du rapport.";
+  const mainInsight =
+    (sourceSummaryItems[0] && rewritePdfInsight(sourceSummaryItems[0])) ||
+    "Aucune synthèse IA disponible dans les données du rapport.";
   const strengthInsight = findSummary(
     [/note moyenne/i, /taux de réponse/i, /maîtrisée/i],
     0
@@ -240,24 +610,34 @@ const buildHtml = (params: PremiumReportPayload) => {
     1
   );
   const priorityInsight = findSummary([/priorit/i, /nécessitent/i], 0);
-  const highImpactActions = summaryItems
+  const highImpactActions = sourceSummaryItems
     .filter((item) => /priorit|nécessitent|critique/i.test(item))
-    .slice(0, 2);
-  const mediumImpactActions = summaryItems
+    .slice(0, 2)
+    .map(rewritePdfInsight)
+    .filter(Boolean);
+  const mediumImpactActions = sourceSummaryItems
     .filter(
       (item) =>
-        !highImpactActions.includes(item) &&
+        !highImpactActions.includes(rewritePdfInsight(item)) &&
         /taux de réponse|note moyenne|négatif/i.test(item)
     )
-    .slice(0, 2);
-  const lowImpactActions = summaryItems
+    .slice(0, 2)
+    .map(rewritePdfInsight)
+    .filter(Boolean);
+  const lowImpactActions = sourceSummaryItems
     .filter(
       (item) =>
-        !highImpactActions.includes(item) &&
-        !mediumImpactActions.includes(item) &&
+        !highImpactActions.includes(rewritePdfInsight(item)) &&
+        !mediumImpactActions.includes(rewritePdfInsight(item)) &&
         /sujets|récurrents/i.test(item)
     )
-    .slice(0, 2);
+    .slice(0, 2)
+    .map(rewritePdfInsight)
+    .filter(Boolean);
+  const hasActionItems =
+    highImpactActions.length > 0 ||
+    mediumImpactActions.length > 0 ||
+    lowImpactActions.length > 0;
   const renderInsightCard = (
     label: string,
     value: string,
@@ -275,6 +655,31 @@ const buildHtml = (params: PremiumReportPayload) => {
       ${note ? `<div class="metric-note">${escapeHtml(note)}</div>` : ""}
     </div>
   `;
+  const performanceKpis = [
+    renderKpi(
+      "Avis analysés",
+      String(params.kpis.reviewsTotal),
+      "Volume d'avis collectés sur la période."
+    ),
+    ...(params.kpis.avgRating !== null
+      ? [
+          renderKpi(
+            "Note moyenne",
+            formatRating(params.kpis.avgRating) ?? "",
+            "Satisfaction exprimée par vos clients."
+          )
+        ]
+      : []),
+    ...(params.kpis.responseRate !== null
+      ? [
+          renderKpi(
+            "Taux de réponse",
+            formatRatio(params.kpis.responseRate) ?? "",
+            "Réactivité visible dans votre réputation."
+          )
+        ]
+      : [])
+  ];
   const renderTag = (tag: { tag: string; count: number }) => `
     <div class="tag-pill">
       <span>${escapeHtml(tag.tag)}</span>
@@ -282,25 +687,36 @@ const buildHtml = (params: PremiumReportPayload) => {
     </div>
   `;
   const renderActionItems = (items: string[]) =>
-    (items.length ? items : ["—"])
+    items
       .map((item) => `<div class="action-item">${escapeHtml(item)}</div>`)
       .join("");
   const renderMiniLocationCards = () =>
     params.perLocation
       .slice(0, 6)
-      .map(
-        (row) => `
+      .map((row) => {
+        const ratingLabel = formatRating(row.avgRating);
+        const responseLabel = formatRatio(row.responseRate);
+        const locationMetrics = [
+          `<span>${row.reviewsTotal} avis</span>`,
+          ratingLabel ? `<span>${escapeHtml(ratingLabel)}</span>` : "",
+          responseLabel ? `<span>${escapeHtml(responseLabel)}</span>` : "",
+          `<span>${
+            row.untreatedNegativeCount === 0
+              ? "Aucun avis prioritaire"
+              : `${row.untreatedNegativeCount} réponse${row.untreatedNegativeCount > 1 ? "s" : ""} prioritaire${row.untreatedNegativeCount > 1 ? "s" : ""}`
+          }</span>`
+        ]
+          .filter(Boolean)
+          .join("");
+        return `
           <div class="location-card">
             <div class="location-name">${escapeHtml(row.name)}</div>
             <div class="location-grid">
-              <span>${row.reviewsTotal} avis</span>
-              <span>${formatRating(row.avgRating)}</span>
-              <span>${formatRatio(row.responseRate)}</span>
-              <span>${row.untreatedNegativeCount} à traiter</span>
+              ${locationMetrics}
             </div>
           </div>
-        `
-      )
+        `;
+      })
       .join("");
 
   return `
@@ -358,7 +774,8 @@ const buildHtml = (params: PremiumReportPayload) => {
           color: #64748b;
         }
         .cover {
-          justify-content: space-between;
+          justify-content: flex-start;
+          gap: 18px;
           padding-top: 4mm;
           padding-bottom: 4mm;
         }
@@ -366,24 +783,76 @@ const buildHtml = (params: PremiumReportPayload) => {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          gap: 24px;
+          gap: 26px;
+          border-bottom: 1px solid #e2e8f0;
+          padding-bottom: 22px;
+        }
+        .cover-brand-block {
+          display: flex;
+          gap: 14px;
+          align-items: flex-start;
+        }
+        .cover-logo {
+          width: 54px;
+          height: 54px;
+          border-radius: 16px;
+          object-fit: cover;
+          border: 1px solid #e2e8f0;
+        }
+        .cover-brand-name {
+          font-size: 22px;
+          line-height: 1.08;
+          letter-spacing: -0.035em;
+          font-weight: 780;
+          color: #0f172a;
+        }
+        .cover-legal {
+          margin-top: 6px;
+          font-size: 12px;
+          line-height: 1.35;
+          color: #64748b;
+          font-weight: 650;
+        }
+        .cover-report-label {
+          margin-top: 10px;
+          font-size: 11px;
+          font-weight: 780;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: #64748b;
         }
         .cover-title {
-          margin-top: 38px;
-          max-width: 470px;
+          margin-top: 18px;
+          max-width: 620px;
         }
         .cover-title h1 {
-          font-size: 54px;
-          line-height: 0.96;
-          letter-spacing: -0.055em;
+          font-size: 58px;
+          line-height: 0.94;
+          letter-spacing: -0.065em;
           font-weight: 780;
         }
         .cover-meta {
-          margin-top: 20px;
+          margin-top: 18px;
           display: grid;
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: 1fr 1fr 1fr;
           gap: 12px;
-          max-width: 430px;
+          max-width: 620px;
+        }
+        .cover-locations {
+          margin-top: 16px;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .cover-location-pill {
+          border-radius: 999px;
+          border: 1px solid #e2e8f0;
+          padding: 8px 11px;
+          font-size: 12px;
+          line-height: 1.2;
+          font-weight: 680;
+          color: #334155;
+          background: #ffffff;
         }
         .meta-card,
         .metric-card,
@@ -407,37 +876,37 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .meta-value {
           margin-top: 8px;
-          font-size: 18px;
+          font-size: 16px;
           line-height: 1.25;
           font-weight: 740;
           color: #0f172a;
         }
-        .score-hero {
-          margin-top: 30px;
-          border-radius: 28px;
-          padding: 26px;
-          min-height: 210px;
+        .cover-score-hero {
+          margin-top: 2px;
+          border-radius: 30px;
+          padding: 30px;
+          min-height: 186px;
           color: #ffffff;
           background:
-            linear-gradient(135deg, #0f172a 0%, #111827 48%, #10b981 145%);
+            linear-gradient(135deg, #0f172a 0%, #111827 58%, #334155 138%);
           display: grid;
-          grid-template-columns: minmax(0, 1fr) 170px;
-          gap: 28px;
-          align-items: center;
+          grid-template-columns: minmax(0, 1fr) 1.35fr;
+          gap: 26px;
+          align-items: stretch;
           overflow: hidden;
           position: relative;
         }
-        .score-hero::after {
+        .cover-score-hero::after {
           content: "";
           position: absolute;
-          right: -70px;
-          bottom: -95px;
-          width: 260px;
-          height: 260px;
-          border-radius: 44px;
-          border: 1px solid rgba(255,255,255,0.18);
-          transform: rotate(18deg);
+          right: -80px;
+          top: -120px;
+          width: 280px;
+          height: 280px;
+          border-radius: 999px;
+          border: 1px solid rgba(255,255,255,0.12);
         }
+        .cover-score-label,
         .score-label {
           font-size: 12px;
           letter-spacing: 0.12em;
@@ -445,6 +914,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           font-weight: 760;
           color: #a7f3d0;
         }
+        .cover-score-value,
         .score-value {
           margin-top: 10px;
           font-size: 76px;
@@ -452,26 +922,57 @@ const buildHtml = (params: PremiumReportPayload) => {
           letter-spacing: -0.06em;
           font-weight: 780;
         }
-        .visual-stack {
-          display: grid;
-          gap: 10px;
+        .cover-score-value {
+          font-size: 68px;
+          letter-spacing: -0.07em;
+        }
+        .cover-score-subtitle {
+          margin-top: 16px;
+          max-width: 260px;
+          color: #cbd5e1;
+          font-size: 13px;
+          line-height: 1.45;
+        }
+        .cover-kpi-grid {
           position: relative;
           z-index: 1;
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 10px;
         }
-        .visual-bar {
-          height: 14px;
-          border-radius: 999px;
-          background: rgba(255,255,255,0.22);
+        .cover-kpi-card {
+          border-radius: 18px;
+          padding: 14px;
+          background: rgba(255,255,255,0.09);
+          border: 1px solid rgba(255,255,255,0.14);
         }
-        .visual-bar:nth-child(1) { width: 100%; }
-        .visual-bar:nth-child(2) { width: 78%; }
-        .visual-bar:nth-child(3) { width: 56%; }
-        .visual-card {
-          margin-top: 16px;
-          border-radius: 20px;
-          padding: 18px;
-          background: rgba(255,255,255,0.10);
-          border: 1px solid rgba(255,255,255,0.16);
+        .cover-kpi-label {
+          font-size: 10px;
+          line-height: 1.2;
+          font-weight: 780;
+          letter-spacing: 0.11em;
+          text-transform: uppercase;
+          color: #cbd5e1;
+        }
+        .cover-kpi-value {
+          margin-top: 9px;
+          font-size: 26px;
+          line-height: 0.98;
+          letter-spacing: -0.045em;
+          font-weight: 780;
+          color: #ffffff;
+        }
+        .cover-ai-line {
+          margin-top: 18px;
+          border-radius: 22px;
+          padding: 18px 20px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          font-size: 20px;
+          line-height: 1.25;
+          letter-spacing: -0.03em;
+          font-weight: 720;
+          color: #0f172a;
         }
         .section-header {
           display: flex;
@@ -690,20 +1191,41 @@ const buildHtml = (params: PremiumReportPayload) => {
           text-transform: uppercase;
           color: #94a3b8;
         }
+        .page-number::before {
+          content: "Powered by EGIA";
+          margin-right: 18px;
+          color: #cbd5e1;
+          letter-spacing: 0.08em;
+        }
       </style>
     </head>
     <body>
       <section class="page cover">
         <div class="cover-top">
-          <div class="brand">EGIA</div>
-          <div>
-            <div class="page-kicker">Rapport Premium</div>
+          <div class="cover-brand-block">
+            ${
+              logoUrl
+                ? `<img class="cover-logo" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(commercialName)}" />`
+                : ""
+            }
+            <div>
+              <div class="cover-brand-name">${escapeHtml(commercialName)}</div>
+              ${
+                legalName
+                  ? `<div class="cover-legal">${escapeHtml(legalName)}</div>`
+                  : ""
+              }
+              <div class="cover-report-label">Rapport exécutif réputation</div>
+            </div>
+          </div>
+          <div style="text-align:right;">
+            <div class="page-kicker">Rapport stratégique</div>
             <div class="muted" style="font-size:12px;margin-top:4px;">${escapeHtml(generatedDate)}</div>
           </div>
         </div>
         <div class="cover-title">
-          <div class="page-kicker">Nom établissement</div>
-          <h1>${escapeHtml(coverName || params.title)}</h1>
+          <div class="page-kicker">${escapeHtml(params.subtitle)}</div>
+          <h1>${escapeHtml(commercialName)}</h1>
           <div class="cover-meta">
             <div class="meta-card">
               <div class="meta-label">Période</div>
@@ -713,49 +1235,86 @@ const buildHtml = (params: PremiumReportPayload) => {
               <div class="meta-label">Date génération</div>
               <div class="meta-value">${escapeHtml(generatedDate)}</div>
             </div>
+            ${
+              locationCount !== null
+                ? `
+            <div class="meta-card">
+              <div class="meta-label">Établissements</div>
+              <div class="meta-value">${escapeHtml(formatCoverNumber(locationCount))}</div>
+            </div>
+            `
+                : ""
+            }
           </div>
+          ${
+            locationNames.length > 0
+              ? `
+          <div class="cover-locations">
+            ${locationNames
+              .slice(0, 8)
+              .map(
+                (name) =>
+                  `<span class="cover-location-pill">${escapeHtml(name)}</span>`
+              )
+              .join("")}
+            ${
+              locationNames.length > 8
+                ? `<span class="cover-location-pill">+${escapeHtml(
+                    formatCoverNumber(locationNames.length - 8)
+                  )}</span>`
+                : ""
+            }
+          </div>
+          `
+              : ""
+          }
         </div>
-        <div class="score-hero">
+        <div class="cover-score-hero">
           <div>
-            <div class="score-label">Business Health Score</div>
-            <div class="score-value">${businessHealthScore}</div>
-            <div style="margin-top:14px;color:#cbd5e1;font-size:13px;line-height:1.45;">
-              Score affiché uniquement lorsqu'il est présent dans les données du rapport.
-            </div>
+            <div class="cover-score-label">Business Health Score</div>
+            <div class="cover-score-value">${escapeHtml(businessHealthScore)}</div>
+            <div class="cover-score-subtitle">Indice exécutif de réputation.</div>
           </div>
-          <div class="visual-stack">
-            <div class="visual-bar"></div>
-            <div class="visual-bar"></div>
-            <div class="visual-bar"></div>
-            <div class="visual-card">
-              <div class="score-label">Executive view</div>
-              <div style="margin-top:8px;font-size:26px;font-weight:760;">${params.kpis.reviewsTotal}</div>
-              <div style="color:#cbd5e1;font-size:12px;">avis analysés</div>
+          <div class="cover-kpi-grid">
+            ${coverKpis
+              .map(
+                (kpi) => `
+            <div class="cover-kpi-card">
+              <div class="cover-kpi-label">${escapeHtml(kpi.label)}</div>
+              <div class="cover-kpi-value">${escapeHtml(kpi.value)}</div>
             </div>
+            `
+              )
+              .join("")}
           </div>
         </div>
+        ${
+          coverAiSentence
+            ? `<div class="cover-ai-line">${escapeHtml(coverAiSentence)}</div>`
+            : ""
+        }
         <div class="page-number">Page 1</div>
       </section>
 
       <section class="page">
         <div class="section-header">
           <div>
-            <div class="page-kicker">Executive Summary</div>
-            <h1 class="page-title">Ce que l'IA retient</h1>
-            <div class="muted">Principaux signaux consolidés sur la période, sans ajout de données externes.</div>
+            <div class="page-kicker">Synthèse exécutive</div>
+            <h1 class="page-title">Lecture métier de la période</h1>
+            <div class="muted">Interprétation des signaux consolidés, strictement à partir des données du rapport.</div>
           </div>
         </div>
         <div class="summary-grid">
-          ${renderInsightCard("Principaux constats", mainInsight, "dark")}
-          ${renderInsightCard("Points forts", strengthInsight, "green")}
-          ${renderInsightCard("Points faibles", weaknessInsight, "light")}
-          ${renderInsightCard("Priorité", priorityInsight, "light")}
+          ${renderInsightCard("Ce que cela signifie", mainInsight, "dark")}
+          ${renderInsightCard("Forces à capitaliser", strengthInsight, "green")}
+          ${renderInsightCard("Points de vigilance", weaknessInsight, "light")}
+          ${renderInsightCard("Priorité de pilotage", priorityInsight, "light")}
         </div>
         <div class="summary-grid" style="margin-top:14px;">
           ${summaryItems
             .slice(0, 4)
             .map((item, index) =>
-              renderInsightCard(`Constat ${index + 1}`, item, "light")
+              renderInsightCard(`Lecture ${index + 1}`, item, "light")
             )
             .join("")}
         </div>
@@ -765,27 +1324,24 @@ const buildHtml = (params: PremiumReportPayload) => {
       <section class="page">
         <div class="section-header">
           <div>
-            <div class="page-kicker">Performance</div>
-            <h1 class="page-title">Les indicateurs clés</h1>
+            <div class="page-kicker">Performance commerciale</div>
+            <h1 class="page-title">Indicateurs de pilotage</h1>
             <div class="muted">${escapeHtml(params.subtitle)}</div>
           </div>
         </div>
-        <div class="metric-grid">
-          ${renderKpi("Nombre avis", String(params.kpis.reviewsTotal), "Volume sur la période")}
-          ${renderKpi("Note", formatRating(params.kpis.avgRating), "Moyenne des avis")}
-          ${renderKpi("Réponses", formatRatio(params.kpis.responseRate), "Taux de réponse")}
-          ${renderKpi("Evolution", "—", "Non présente dans le payload")}
+        <div class="metric-grid" style="grid-template-columns: repeat(${Math.min(performanceKpis.length, 3)}, 1fr);">
+          ${performanceKpis.join("")}
         </div>
         <div class="chart-panel">
           <div class="chart-block">
-            <div class="chart-title">Lecture rapide</div>
+            <div class="chart-title">Points de vigilance</div>
             <div class="volume-strip">
               <div class="strip-item">
-                <div class="meta-label">Négatifs</div>
+                <div class="meta-label">Avis négatifs</div>
                 <div class="strip-value">${params.kpis.negativeCount}</div>
               </div>
               <div class="strip-item">
-                <div class="meta-label">À traiter</div>
+                <div class="meta-label">Réponses prioritaires</div>
                 <div class="strip-value">${params.kpis.untreatedNegativeCount}</div>
               </div>
               <div class="strip-item">
@@ -794,13 +1350,19 @@ const buildHtml = (params: PremiumReportPayload) => {
               </div>
             </div>
           </div>
+          ${
+            params.kpis.avgRating !== null
+              ? `
           <div class="chart-block">
-            <div class="chart-title">Note moyenne</div>
+            <div class="chart-title">Satisfaction moyenne</div>
             ${renderStars(params.kpis.avgRating)}
             <div class="big-bar" style="margin-top:14px;">
               <span style="width:${ratingPercent}%;"></span>
             </div>
           </div>
+          `
+              : ""
+          }
         </div>
         <div class="page-number">Page 3</div>
       </section>
@@ -808,30 +1370,36 @@ const buildHtml = (params: PremiumReportPayload) => {
       <section class="page">
         <div class="section-header">
           <div>
-            <div class="page-kicker">Réputation</div>
-            <h1 class="page-title">Signal réputation</h1>
-            <div class="muted">Graphiques agrandis à partir des indicateurs existants.</div>
+            <div class="page-kicker">Santé de votre réputation</div>
+            <h1 class="page-title">Réactivité et signaux de risque</h1>
+            <div class="muted">Lecture des indicateurs existants pour évaluer la solidité de votre réputation.</div>
           </div>
         </div>
         <div class="chart-panel">
+          ${
+            params.kpis.responseRate !== null
+              ? `
           <div class="chart-block">
-            <div class="chart-title">Taux de réponse</div>
+            <div class="chart-title">Réactivité client</div>
             <div style="font-size:56px;line-height:0.95;font-weight:780;letter-spacing:-0.06em;">
-              ${formatRatio(params.kpis.responseRate)}
+              ${escapeHtml(formatRatio(params.kpis.responseRate) ?? "")}
             </div>
             <div class="big-bar" style="margin-top:22px;">
               <span style="width:${responsePercent}%;background:#10b981;"></span>
             </div>
           </div>
+          `
+              : ""
+          }
           <div class="chart-block">
-            <div class="chart-title">Volume & risques</div>
+            <div class="chart-title">Volume et vigilance réputationnelle</div>
             <div class="volume-strip">
               <div class="strip-item">
-                <div class="meta-label">Avis</div>
+                <div class="meta-label">Avis analysés</div>
                 <div class="strip-value">${params.kpis.reviewsTotal}</div>
               </div>
               <div class="strip-item">
-                <div class="meta-label">Négatifs</div>
+                <div class="meta-label">Avis négatifs</div>
                 <div class="strip-value">${params.kpis.negativeCount}</div>
               </div>
               <div class="strip-item">
@@ -844,7 +1412,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         ${
           params.perLocation.length > 0
             ? `
-        <div class="chart-title" style="margin-top:28px;">Établissements</div>
+        <div class="chart-title" style="margin-top:28px;">Lecture par établissement</div>
         <div class="location-list">
           ${renderMiniLocationCards()}
         </div>
@@ -857,33 +1425,39 @@ const buildHtml = (params: PremiumReportPayload) => {
       <section class="page">
         <div class="section-header">
           <div>
-            <div class="page-kicker">Thèmes clients</div>
-            <h1 class="page-title">Ce qui ressort</h1>
-            <div class="muted">Thèmes et signaux issus des données déjà présentes dans le rapport.</div>
+            <div class="page-kicker">Voix client</div>
+            <h1 class="page-title">Thèmes à piloter</h1>
+            <div class="muted">Interprétation des thèmes et signaux déjà présents dans le rapport.</div>
           </div>
         </div>
         <div class="theme-grid">
           <div class="theme-column">
-            <div class="theme-title">Points positifs</div>
+            <div class="theme-title">Forces perçues</div>
             <div class="text-list">
               <div>${escapeHtml(strengthInsight)}</div>
             </div>
           </div>
           <div class="theme-column">
-            <div class="theme-title">Points négatifs</div>
+            <div class="theme-title">Irritants à réduire</div>
             <div class="text-list">
               <div>${escapeHtml(weaknessInsight)}</div>
             </div>
           </div>
+          ${
+            tags.length
+              ? `
           <div class="theme-column">
-            <div class="theme-title">Opportunités</div>
-            ${tags.length ? tags.slice(0, 5).map(renderTag).join("") : "<div class='text-list'><div>—</div></div>"}
+            <div class="theme-title">Leviers d'opportunité</div>
+            ${tags.slice(0, 5).map(renderTag).join("")}
           </div>
+          `
+              : ""
+          }
           <div class="theme-column">
-            <div class="theme-title">Risques</div>
+            <div class="theme-title">Risques à surveiller</div>
             <div class="text-list">
-              <div>${params.kpis.untreatedNegativeCount} avis négatifs non traités</div>
-              <div>${params.ai.criticalCount} avis critiques IA</div>
+              <div>${escapeHtml(rewritePdfInsight(`${params.kpis.untreatedNegativeCount} avis négatifs nécessitent une réponse ; priorité à leur traitement.`))}</div>
+              <div>${escapeHtml(rewritePdfInsight(`${params.ai.criticalCount} avis critiques IA surveillés, sans action obligatoire si déjà répondus.`))}</div>
               ${
                 params.untreatedNegatives[0]
                   ? `<div>${escapeHtml(params.untreatedNegatives[0].comment)}</div>`
@@ -895,44 +1469,68 @@ const buildHtml = (params: PremiumReportPayload) => {
         <div class="page-number">Page 5</div>
       </section>
 
+      ${
+        hasActionItems
+          ? `
       <section class="page">
         <div class="section-header">
           <div>
-            <div class="page-kicker">Plan d'action</div>
-            <h1 class="page-title">Priorisation</h1>
-            <div class="muted">Classement éditorial des signaux déjà présents dans la synthèse IA.</div>
+            <div class="page-kicker">Priorités recommandées</div>
+            <h1 class="page-title">Plan de décision</h1>
+            <div class="muted">Priorisation des signaux déjà présents dans la synthèse IA.</div>
           </div>
         </div>
         <div class="action-grid" style="grid-template-columns: repeat(3, 1fr);">
+          ${
+            highImpactActions.length
+              ? `
           <div class="action-card action-high">
-            <div class="action-title">Impact élevé</div>
+            <div class="action-title">Priorité immédiate</div>
             ${renderActionItems(highImpactActions)}
           </div>
+          `
+              : ""
+          }
+          ${
+            mediumImpactActions.length
+              ? `
           <div class="action-card">
-            <div class="action-title">Impact moyen</div>
+            <div class="action-title">Priorité de consolidation</div>
             ${renderActionItems(mediumImpactActions)}
           </div>
+          `
+              : ""
+          }
+          ${
+            lowImpactActions.length
+              ? `
           <div class="action-card">
-            <div class="action-title">Impact faible</div>
+            <div class="action-title">À surveiller</div>
             ${renderActionItems(lowImpactActions)}
           </div>
+          `
+              : ""
+          }
         </div>
         <div class="page-number">Page 6</div>
       </section>
+      `
+          : ""
+      }
 
       <section class="page">
         <div class="section-header">
           <div>
-            <div class="page-kicker">Conclusion</div>
-            <h1 class="page-title">Synthèse finale</h1>
+            <div class="page-kicker">Ce que nous recommandons</div>
+            <h1 class="page-title">Décision du mois</h1>
           </div>
         </div>
         <div class="conclusion-panel">
           <div>
-            <div class="eyebrow">Phrase IA</div>
+            <div class="eyebrow">Lecture IA</div>
             <div class="conclusion-text">${escapeHtml(mainInsight)}</div>
             <div style="margin-top:26px;display:grid;gap:10px;">
-              <div class="eyebrow">Prochaine action</div>
+              <div class="eyebrow">Prochaine action recommandée</div>
               <div style="font-size:16px;line-height:1.45;color:#e2e8f0;">
                 ${escapeHtml(priorityInsight)}
               </div>
@@ -1000,6 +1598,7 @@ export const generatePremiumReport = async (
   const reportUserId = report.user_id;
 
   let locationsLabel = "Établissements: Tous";
+  let selectedLocationNames: string[] = [];
   const locationNameByResource = new Map<string, string>();
   if (Array.isArray(report.locations) && report.locations.length > 0) {
     const { data: locationRows } = await supabaseAdmin
@@ -1019,11 +1618,18 @@ export const generatePremiumReport = async (
       })
       .filter(Boolean) as string[];
     const uniqueTitles = Array.from(new Set(titles));
+    selectedLocationNames = uniqueTitles;
     locationsLabel =
       uniqueTitles.length === 1
         ? `Établissement: ${uniqueTitles[0]}`
         : `${uniqueTitles.length} établissements`;
   }
+  const branding = await resolveReportBranding(
+    supabaseAdmin,
+    reportUserId,
+    report.name,
+    selectedLocationNames
+  );
 
   await supabaseAdmin
     .from("reports")
@@ -1033,10 +1639,14 @@ export const generatePremiumReport = async (
   try {
     const preset = normalizePreset(report.period_preset ?? "last_30_days");
     const { from, to } = getRange(preset, report.from_date, report.to_date);
+    const fromLabel = formatDate(from);
+    const toLabel = formatDate(to);
     const periodLabel =
       preset === "all_time"
         ? "Période: Depuis toujours"
-        : `Période: ${formatDate(from)} au ${formatDate(to)}`;
+        : fromLabel && toLabel
+          ? `Période: ${fromLabel} au ${toLabel}`
+          : "Période analysée";
 
     let query = supabaseAdmin
       .from("google_reviews")
@@ -1194,7 +1804,7 @@ export const generatePremiumReport = async (
         untreatedNegatives.push({
           comment: commentText || "Avis sans commentaire",
           rating: ratingValue,
-          date: review.create_time ? review.create_time.slice(0, 10) : "—",
+          date: review.create_time ? review.create_time.slice(0, 10) : "",
           dateValue: review.create_time
             ? new Date(review.create_time).getTime()
             : 0,
@@ -1241,6 +1851,7 @@ export const generatePremiumReport = async (
       subtitle: periodLabel,
       locationsLabel,
       notes: report.notes ?? null,
+      ...branding,
       kpis: {
         reviewsTotal,
         avgRating,

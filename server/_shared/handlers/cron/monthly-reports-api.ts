@@ -70,13 +70,34 @@ const escapeEmailHtml = (value: string) =>
 
 const formatEmailRating = (value: number | null | undefined) =>
   typeof value === "number" && Number.isFinite(value)
-    ? value.toFixed(1).replace(".", ",")
-    : "—";
+    ? `${value.toFixed(1).replace(".", ",")}/5`
+    : null;
 
 const formatEmailRatio = (value: number | null | undefined) =>
   typeof value === "number" && Number.isFinite(value)
     ? `${Math.round(value * 100)}%`
-    : "—";
+    : null;
+
+const formatEmailCount = (value: number | null | undefined) =>
+  typeof value === "number" && Number.isFinite(value)
+    ? String(Math.round(value))
+    : null;
+
+type EmailBrandingPayload = Partial<
+  Pick<
+    PremiumReportPayload,
+    | "businessName"
+    | "commercialName"
+    | "companyName"
+    | "legalName"
+    | "billingLegalName"
+    | "logoUrl"
+    | "billingLogoUrl"
+    | "locationsCount"
+    | "locationNames"
+    | "locationsLabel"
+  >
+>;
 
 const getAppBaseUrl = () => {
   const raw =
@@ -87,15 +108,216 @@ const getAppBaseUrl = () => {
   return raw.trim().replace(/\/+$/, "");
 };
 
-const renderEmailKpiCard = (label: string, value: string) => `
-  <td class="kpi-cell" style="padding:8px;width:50%;">
-    <div class="kpi-card" style="border:1px solid rgba(15,23,42,0.08);border-radius:18px;background:#ffffff;padding:16px;">
-      <div class="kpi-label" style="font-size:11px;line-height:16px;letter-spacing:.08em;text-transform:uppercase;color:#64748b;font-weight:700;">
-        ${escapeEmailHtml(label)}
+const getEmailStringField = (
+  report: PremiumReportPayload | EmailBrandingPayload | null,
+  keys: string[]
+) => {
+  const source = report as unknown as Record<string, unknown> | null;
+  if (!source) return null;
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+};
+
+const getEmailNumberField = (
+  report: PremiumReportPayload | EmailBrandingPayload | null,
+  keys: string[]
+) => {
+  const source = report as unknown as Record<string, unknown> | null;
+  if (!source) return null;
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return null;
+};
+
+const getEmailKpiNumber = (
+  report: PremiumReportPayload | EmailBrandingPayload | null,
+  keys: string[]
+) => {
+  const kpis = (report as PremiumReportPayload | null)?.kpis as
+    | Record<string, unknown>
+    | undefined;
+  if (!kpis) return null;
+  for (const key of keys) {
+    const value = kpis[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return null;
+};
+
+const getLocationsCount = (
+  report: PremiumReportPayload | EmailBrandingPayload | null
+) => {
+  if (!report) return null;
+  const explicit = getEmailNumberField(report, [
+    "locationsCount",
+    "locationCount",
+    "establishmentsCount",
+    "establishmentCount"
+  ]);
+  if (explicit !== null) return explicit;
+  const perLocation = (report as PremiumReportPayload).perLocation;
+  if (Array.isArray(perLocation) && perLocation.length > 0) {
+    return perLocation.length;
+  }
+  if (Array.isArray(report.locationNames) && report.locationNames.length > 0) {
+    return report.locationNames.length;
+  }
+  const match = report.locationsLabel?.match(/(\d+)\s+établissements?/i);
+  if (match?.[1]) return Number(match[1]);
+  if (report.locationsLabel && /^Établissement\s*:/i.test(report.locationsLabel)) {
+    return 1;
+  }
+  return null;
+};
+
+const getBusinessDisplayName = (
+  report: PremiumReportPayload | EmailBrandingPayload | null
+) => {
+  const explicit = getEmailStringField(report, [
+    "businessName",
+    "business_name",
+    "commercialName",
+    "commercial_name",
+    "tradeName",
+    "trade_name",
+    "companyName",
+    "company_name"
+  ]);
+  if (explicit) return explicit;
+  const perLocation = (report as PremiumReportPayload | null)?.perLocation;
+  if (Array.isArray(perLocation) && perLocation.length === 1 && perLocation[0]?.name) {
+    return perLocation[0].name;
+  }
+  if (report?.locationsLabel) {
+    return report.locationsLabel.replace(/^Établissements?\s*:\s*/i, "");
+  }
+  return "Rapport mensuel";
+};
+
+const getLegalDisplayName = (
+  report: PremiumReportPayload | EmailBrandingPayload | null
+) =>
+  getEmailStringField(report, [
+    "legalName",
+    "legal_name",
+    "raisonSociale",
+    "raison_sociale",
+    "billingLegalName",
+    "billing_legal_name"
+  ]);
+
+const getLogoUrl = (report: PremiumReportPayload | EmailBrandingPayload | null) =>
+  getEmailStringField(report, [
+    "logoUrl",
+    "logo_url",
+    "billingLogoUrl",
+    "billing_logo_url",
+    "companyLogoUrl",
+    "company_logo_url"
+  ]);
+
+const naturalizeEmailInsight = (item: string) => {
+  const trimmed = item.trim();
+  const ratingMatch = trimmed.match(/^La note moyenne est ([0-9,.]+)\/?5?\.$/i);
+  if (ratingMatch?.[1]) {
+    const rating = Number(ratingMatch[1].replace(",", "."));
+    if (Number.isFinite(rating) && rating >= 4.5) {
+      return "Vos clients continuent de donner une excellente note moyenne.";
+    }
+    if (Number.isFinite(rating) && rating >= 4) {
+      return "Vos clients maintiennent une note moyenne solide.";
+    }
+    return "La note moyenne invite à renforcer l'expérience client.";
+  }
+
+  const responseMatch = trimmed.match(/^Le taux de réponse est de ([0-9]+)%\.$/i);
+  if (responseMatch?.[1]) {
+    const responseRate = Number(responseMatch[1]);
+    if (responseRate >= 80) {
+      return "Votre équipe répond à une grande majorité des avis.";
+    }
+    if (responseRate >= 50) {
+      return "Votre équipe répond à une part significative des avis.";
+    }
+    return "La réponse aux avis reste le levier prioritaire du mois.";
+  }
+
+  const negativeMatch = trimmed.match(
+    /^(\d+) avis négatifs ont été recensés historiquement sur la période\.$/i
+  );
+  if (negativeMatch?.[1]) {
+    const count = Number(negativeMatch[1]);
+    return count > 0
+      ? `${count} avis négatif${count > 1 ? "s" : ""} concentrent l'attention sur la période.`
+      : "Aucun signal négatif notable n'a été recensé sur la période.";
+  }
+
+  const untreatedMatch = trimmed.match(
+    /^(\d+) avis négatifs nécessitent une réponse ; priorité à leur traitement\.$/i
+  );
+  if (untreatedMatch?.[1]) {
+    const count = Number(untreatedMatch[1]);
+    return `${count} avis négatif${count > 1 ? "s" : ""} attendent encore une réponse prioritaire.`;
+  }
+
+  if (/^Aucun avis négatif en attente de réponse/i.test(trimmed)) {
+    return "Aucun avis négatif n'attend de réponse : la situation est sous contrôle.";
+  }
+
+  const tagsMatch = trimmed.match(/^Sujets récurrents\s*:\s*(.+)\.$/i);
+  if (tagsMatch?.[1]) {
+    return `Les sujets qui reviennent le plus sont ${tagsMatch[1]}.`;
+  }
+
+  const criticalMatch = trimmed.match(/^(\d+) avis critiques IA surveillés/i);
+  if (criticalMatch?.[1]) {
+    const count = Number(criticalMatch[1]);
+    return `${count} avis critique${count > 1 ? "s" : ""} identifié${count > 1 ? "s" : ""} par l'IA restent à surveiller.`;
+  }
+
+  if (/^Aucun avis sur la période/i.test(trimmed)) {
+    return "Aucun avis n'a été enregistré sur la période.";
+  }
+
+  return trimmed;
+};
+
+const renderEmailKpiCard = (card: {
+  label: string;
+  value: string;
+  detail?: string | null;
+  featured?: boolean;
+}) => `
+  <td class="kpi-cell" style="padding:7px;width:50%;vertical-align:top;">
+    <div class="${card.featured ? "kpi-card kpi-featured" : "kpi-card"}" style="border:1px solid ${
+      card.featured ? "rgba(15,23,42,0.92)" : "rgba(15,23,42,0.08)"
+    };border-radius:20px;background:${card.featured ? "#0f172a" : "#ffffff"};padding:17px 18px;box-shadow:0 14px 32px rgba(15,23,42,0.06);">
+      <div class="kpi-label" style="font-size:10px;line-height:14px;letter-spacing:.11em;text-transform:uppercase;color:${
+        card.featured ? "#cbd5e1" : "#64748b"
+      };font-weight:800;">
+        ${escapeEmailHtml(card.label)}
       </div>
-      <div class="kpi-value" style="margin-top:8px;font-size:28px;line-height:32px;color:#0f172a;font-weight:750;">
-        ${escapeEmailHtml(value)}
+      <div class="${card.featured ? "kpi-value kpi-value-featured" : "kpi-value"}" style="margin-top:9px;font-size:30px;line-height:34px;color:${
+        card.featured ? "#ffffff" : "#0f172a"
+      };font-weight:780;letter-spacing:-.02em;">
+        ${escapeEmailHtml(card.value)}
       </div>
+      ${
+        card.detail
+          ? `<div class="kpi-detail" style="margin-top:6px;color:${card.featured ? "#cbd5e1" : "#64748b"};font-size:12px;line-height:17px;font-weight:600;">${escapeEmailHtml(card.detail)}</div>`
+          : ""
+      }
     </div>
   </td>
 `;
@@ -104,8 +326,8 @@ const renderEmailChecklist = (items: string[]) =>
   items
     .map(
       (item) => `
-        <div class="check-row" style="display:block;margin:0 0 10px 0;color:#0f172a;font-size:14px;line-height:20px;">
-          <span style="display:inline-block;width:22px;color:#10b981;font-weight:800;">✓</span>${escapeEmailHtml(item)}
+        <div class="check-row" style="display:block;margin:0 0 10px 0;color:#0f172a;font-size:15px;line-height:23px;font-weight:620;">
+          <span style="display:inline-block;width:24px;color:#10b981;font-weight:900;">✓</span>${escapeEmailHtml(item)}
         </div>
       `
     )
@@ -115,12 +337,111 @@ const renderEmailBullets = (items: string[]) =>
   items
     .map(
       (item) => `
-        <div style="display:block;margin:0 0 8px 0;color:#0f172a;font-size:14px;line-height:20px;">
-          <span style="display:inline-block;width:18px;color:#64748b;">•</span>${escapeEmailHtml(item)}
-        </div>
+        <span class="tag-pill" style="display:inline-block;margin:0 6px 8px 0;border-radius:999px;border:1px solid rgba(15,23,42,0.10);background:#ffffff;padding:8px 11px;color:#0f172a;font-size:13px;line-height:16px;font-weight:700;">
+          ${escapeEmailHtml(item)}
+        </span>
       `
     )
     .join("");
+
+const renderLogo = (logoUrl: string | null, displayName: string) =>
+  logoUrl
+    ? `<img src="${escapeEmailHtml(logoUrl)}" width="48" height="48" alt="${escapeEmailHtml(
+        displayName
+      )}" style="display:block;width:48px;height:48px;border-radius:16px;object-fit:cover;border:1px solid rgba(15,23,42,0.08);" />`
+    : "";
+
+const getSignedBrandLogoUrl = async (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabaseAdmin: any,
+  logoPath: string | null
+) => {
+  if (!logoPath) return null;
+  try {
+    const { data, error } = await supabaseAdmin.storage
+      .from("brand-assets")
+      .createSignedUrl(logoPath, 60 * 60);
+    if (error) return null;
+    return data?.signedUrl ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveEmailBranding = async (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabaseAdmin: any,
+  userId: string
+): Promise<EmailBrandingPayload> => {
+  try {
+    const { data: settings } = await supabaseAdmin
+      .from("business_settings")
+      .select("business_id, business_name")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const businessId =
+      (settings as { business_id?: string | null } | null)?.business_id ?? null;
+    const settingsName =
+      (settings as { business_name?: string | null } | null)?.business_name?.trim() ??
+      null;
+
+    const { data: locations } = await supabaseAdmin
+      .from("google_locations")
+      .select("location_title, location_resource_name")
+      .eq("user_id", userId);
+    const locationNames = (locations ?? [])
+      .map((row: { location_title?: string | null; location_resource_name?: string | null }) =>
+        row.location_title ?? row.location_resource_name ?? null
+      )
+      .filter((item: string | null): item is string => Boolean(item));
+
+    if (!businessId) {
+      return {
+        businessName: settingsName,
+        commercialName: settingsName,
+        companyName: settingsName,
+        locationsCount: locationNames.length || null,
+        locationNames
+      };
+    }
+
+    const { data: entities } = await supabaseAdmin
+      .from("legal_entities")
+      .select("company_name, legal_name, logo_path, logo_url, is_default, created_at")
+      .eq("business_id", businessId)
+      .order("is_default", { ascending: false })
+      .order("created_at", { ascending: true });
+    const entity = Array.isArray(entities)
+      ? (entities[0] as
+          | {
+              company_name?: string | null;
+              legal_name?: string | null;
+              logo_path?: string | null;
+              logo_url?: string | null;
+            }
+          | undefined)
+      : undefined;
+    const companyName = entity?.company_name?.trim() || settingsName || null;
+    const legalName = entity?.legal_name?.trim() || null;
+    const logoUrl =
+      entity?.logo_url ??
+      (await getSignedBrandLogoUrl(supabaseAdmin, entity?.logo_path ?? null));
+
+    return {
+      businessName: companyName,
+      commercialName: companyName,
+      companyName,
+      legalName,
+      billingLegalName: legalName,
+      logoUrl,
+      billingLogoUrl: logoUrl,
+      locationsCount: locationNames.length || null,
+      locationNames
+    };
+  } catch {
+    return {};
+  }
+};
 
 const buildMonthlyReportEmailHtml = (opts: {
   firstName?: string | null;
@@ -128,42 +449,94 @@ const buildMonthlyReportEmailHtml = (opts: {
   reportUrl: string;
   appUrl: string;
   report?: PremiumReportPayload | null;
+  branding?: EmailBrandingPayload | null;
 }) => {
   const name = (opts.firstName ?? "").trim();
   const report = opts.report ?? null;
-  const aiFindings = report?.aiSummary.slice(0, 5) ?? [];
-  const priority =
-    aiFindings.find((item) => /priorit|nécessitent une réponse/i.test(item)) ??
+  const brandingSource = report ?? opts.branding ?? null;
+  const businessName = getBusinessDisplayName(brandingSource);
+  const legalName = getLegalDisplayName(brandingSource);
+  const logoUrl = getLogoUrl(brandingSource);
+  const locationsCount = getLocationsCount(brandingSource);
+  const healthScore =
+    getEmailKpiNumber(report, [
+      "businessHealthScore",
+      "business_health_score",
+      "healthScore",
+      "health_score",
+      "score"
+    ]) ??
+    getEmailNumberField(report, [
+      "businessHealthScore",
+      "business_health_score",
+      "healthScore",
+      "health_score",
+      "score"
+    ]);
+  const aiFindings =
+    report?.aiSummary.slice(0, 5).map(naturalizeEmailInsight) ?? [];
+  const rawPriority =
+    report?.aiSummary.find((item) => /priorit|nécessitent une réponse/i.test(item)) ??
     null;
+  const priority = rawPriority ? naturalizeEmailInsight(rawPriority) : null;
   const opportunities =
-    report?.ai.topTags.slice(0, 5).map((tag) => `${tag.tag} (${tag.count})`) ??
-    [];
-  const maybeHealthScore =
-    report &&
-    "businessHealthScore" in report.kpis &&
-    typeof (report.kpis as { businessHealthScore?: unknown })
-      .businessHealthScore === "number"
-      ? String(
-          (report.kpis as { businessHealthScore: number }).businessHealthScore
-        )
-      : null;
-  const kpiCards = [
+    report?.ai.topTags.slice(0, 5).map((tag) => {
+      const count = Number.isFinite(tag.count) ? tag.count : null;
+      return count === null
+        ? tag.tag
+        : `${tag.tag} · ${count} mention${count > 1 ? "s" : ""}`;
+    }) ?? [];
+  const kpiCards: Array<{
+    label: string;
+    value: string;
+    detail?: string | null;
+    featured?: boolean;
+  }> = [
     {
       label: "Business Health Score",
-      value: maybeHealthScore ?? "—"
+      value:
+        typeof healthScore === "number" && Number.isFinite(healthScore)
+          ? `${Math.round(healthScore)}/100`
+          : "Calcul en cours",
+      detail: "Score consolidé",
+      featured: true
     },
-    {
-      label: "Note moyenne",
-      value: formatEmailRating(report?.kpis.avgRating)
-    },
-    {
-      label: "Nombre d'avis",
-      value: report ? String(report.kpis.reviewsTotal) : "—"
-    },
-    {
-      label: "Taux de réponse",
-      value: formatEmailRatio(report?.kpis.responseRate)
-    }
+    ...(formatEmailRating(report?.kpis.avgRating)
+      ? [
+          {
+            label: "Note moyenne",
+            value: formatEmailRating(report?.kpis.avgRating) as string,
+            detail: "Avis clients"
+          }
+        ]
+      : []),
+    ...(report && formatEmailCount(report.kpis.reviewsTotal)
+      ? [
+          {
+            label: "Avis analysés",
+            value: formatEmailCount(report.kpis.reviewsTotal) as string,
+            detail: opts.periodLabel
+          }
+        ]
+      : []),
+    ...(formatEmailRatio(report?.kpis.responseRate)
+      ? [
+          {
+            label: "Taux de réponse",
+            value: formatEmailRatio(report?.kpis.responseRate) as string,
+            detail: "Sur les avis replyables"
+          }
+        ]
+      : []),
+    ...(locationsCount !== null && formatEmailCount(locationsCount)
+      ? [
+          {
+            label: "Établissements concernés",
+            value: formatEmailCount(locationsCount) as string,
+            detail: report?.locationsLabel ?? null
+          }
+        ]
+      : [])
   ];
   const kpiRows = [];
   for (let index = 0; index < kpiCards.length; index += 2) {
@@ -180,56 +553,89 @@ const buildMonthlyReportEmailHtml = (opts: {
     <meta name="supported-color-schemes" content="light dark" />
     <style>
       @media screen and (max-width: 640px) {
-        .outer { padding: 18px 12px !important; }
+        .outer { padding: 16px 10px !important; }
         .container { width: 100% !important; }
         .section { padding: 20px !important; }
+        .header-card { padding: 18px !important; }
+        .header-right { text-align: left !important; padding-top: 16px !important; }
         .kpi-cell { display: block !important; width: 100% !important; padding: 6px 0 !important; }
-        .button-wrap { display: block !important; width: 100% !important; margin: 0 0 10px 0 !important; }
         .button-link { display: block !important; text-align: center !important; }
+        .mobile-block { display: block !important; width: 100% !important; }
       }
       @media (prefers-color-scheme: dark) {
-        body, .outer { background: #0f172a !important; }
-        .container, .section, .kpi-card { background: #111827 !important; }
-        .hero { background: #101827 !important; }
-        .text-main, .kpi-value, .check-row { color: #f8fafc !important; }
-        .text-muted, .kpi-label, .footer { color: #cbd5e1 !important; }
-        .secondary-button { color: #f8fafc !important; border-color: rgba(248,250,252,0.18) !important; }
+        body, .outer { background: #020617 !important; }
+        .container, .panel, .header-card, .section-card, .kpi-card, .soft-card { background: #0f172a !important; }
+        .hero { background: #111827 !important; }
+        .text-main, .kpi-value, .check-row, .tag-pill { color: #f8fafc !important; }
+        .text-muted, .kpi-label, .kpi-detail, .footer { color: #cbd5e1 !important; }
+        .kpi-card, .section-card, .soft-card, .tag-pill { border-color: rgba(248,250,252,0.14) !important; }
+        .kpi-featured { background: #f8fafc !important; border-color: #f8fafc !important; }
+        .kpi-value-featured { color: #0f172a !important; }
+        .divider { border-color: rgba(248,250,252,0.14) !important; }
       }
     </style>
   </head>
   <body style="margin:0;background:#f8fafc;padding:0;">
-    <div class="outer" style="background:#f8fafc;padding:36px 18px;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+    <div class="outer" style="background:#f8fafc;padding:34px 18px;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
       <table role="presentation" class="container" style="width:640px;max-width:640px;margin:0 auto;border-collapse:collapse;">
         <tr>
-          <td style="padding:0 0 18px 0;">
+          <td class="header-card" style="padding:24px 26px 22px;background:#ffffff;border:1px solid rgba(15,23,42,0.08);border-radius:24px;">
             <table role="presentation" style="width:100%;border-collapse:collapse;">
               <tr>
-                <td style="text-align:left;">
-                  <div style="display:inline-block;border-radius:18px;background:#ffffff;padding:12px 16px;border:1px solid rgba(15,23,42,0.08);">
-                    <span style="font-size:18px;letter-spacing:.18em;color:#0f172a;font-weight:800;">EGIA</span>
-                  </div>
+                <td class="mobile-block" style="text-align:left;vertical-align:top;">
+                  <table role="presentation" style="border-collapse:collapse;">
+                    <tr>
+                      <td style="vertical-align:top;padding:0 14px 0 0;">
+                        ${renderLogo(logoUrl, businessName)}
+                      </td>
+                      <td style="vertical-align:top;">
+                        <div class="text-main" style="color:#0f172a;font-size:18px;line-height:24px;font-weight:820;letter-spacing:-.01em;">
+                          ${escapeEmailHtml(businessName)}
+                        </div>
+                        ${
+                          legalName
+                            ? `<div class="text-muted" style="margin-top:3px;color:#64748b;font-size:12px;line-height:17px;font-weight:650;">${escapeEmailHtml(legalName)}</div>`
+                            : ""
+                        }
+                        <div class="text-muted" style="margin-top:8px;color:#64748b;font-size:12px;line-height:17px;font-weight:800;letter-spacing:.10em;text-transform:uppercase;">
+                          Executive Monthly Report
+                        </div>
+                      </td>
+                    </tr>
+                  </table>
                 </td>
-                <td class="text-muted" style="text-align:right;color:#64748b;font-size:12px;line-height:18px;font-weight:650;">
-                  ${escapeEmailHtml(opts.periodLabel)}
+                <td class="mobile-block header-right" style="text-align:right;vertical-align:top;">
+                  <div class="text-main" style="color:#0f172a;font-size:18px;line-height:24px;font-weight:800;">
+                    ${escapeEmailHtml(opts.periodLabel)}
+                  </div>
+                  ${
+                    locationsCount !== null
+                      ? `<div class="text-muted" style="margin-top:8px;color:#64748b;font-size:12px;line-height:17px;font-weight:700;">${escapeEmailHtml(formatEmailCount(locationsCount))} établissement${locationsCount > 1 ? "s" : ""}</div>`
+                      : ""
+                  }
                 </td>
               </tr>
             </table>
+            <div class="divider" style="border-top:1px solid rgba(15,23,42,0.10);margin-top:22px;line-height:1px;font-size:1px;">&nbsp;</div>
           </td>
         </tr>
         <tr>
-          <td class="hero section" style="background:#ffffff;border:1px solid rgba(15,23,42,0.08);border-radius:20px;padding:28px;">
+          <td style="height:14px;line-height:14px;font-size:14px;">&nbsp;</td>
+        </tr>
+        <tr>
+          <td class="hero section" style="background:#ffffff;border:1px solid rgba(15,23,42,0.08);border-radius:24px;padding:30px;">
             ${
               name
-                ? `<div class="text-muted" style="margin:0 0 12px 0;color:#64748b;font-size:13px;line-height:18px;font-weight:650;">Bonjour ${escapeEmailHtml(
+                ? `<div class="text-muted" style="margin:0 0 12px 0;color:#64748b;font-size:13px;line-height:18px;font-weight:700;">Bonjour ${escapeEmailHtml(
                     name
                   )}</div>`
                 : ""
             }
-            <h1 class="text-main" style="margin:0;color:#0f172a;font-size:30px;line-height:36px;font-weight:780;letter-spacing:-.02em;">
-              Votre rapport mensuel est prêt
+            <h1 class="text-main" style="margin:0;color:#0f172a;font-size:32px;line-height:38px;font-weight:820;letter-spacing:-.03em;">
+              Executive Summary mensuel
             </h1>
-            <div class="text-muted" style="margin:10px 0 0;color:#64748b;font-size:15px;line-height:22px;">
-              Voici les principaux enseignements de votre activité.
+            <div class="text-muted" style="margin:11px 0 0;color:#64748b;font-size:15px;line-height:23px;font-weight:560;">
+              Les signaux clés de votre réputation, préparés pour décider rapidement.
             </div>
             <table role="presentation" style="width:100%;border-collapse:collapse;margin-top:22px;">
               ${kpiRows
@@ -237,7 +643,7 @@ const buildMonthlyReportEmailHtml = (opts: {
                   (row) => `
                     <tr>
                       ${row
-                        .map((card) => renderEmailKpiCard(card.label, card.value))
+                        .map((card) => renderEmailKpiCard(card))
                         .join("")}
                       ${row.length === 1 ? '<td class="kpi-cell" style="padding:8px;width:50%;"></td>' : ""}
                     </tr>
@@ -251,9 +657,12 @@ const buildMonthlyReportEmailHtml = (opts: {
           aiFindings.length > 0
             ? `
         <tr>
-          <td class="section" style="padding:24px 28px 0;">
-            <div class="text-main" style="color:#0f172a;font-size:18px;line-height:24px;font-weight:760;margin:0 0 14px;">
-              Aujourd'hui l'IA retient
+          <td style="height:14px;line-height:14px;font-size:14px;">&nbsp;</td>
+        </tr>
+        <tr>
+          <td class="section-card section" style="background:#ffffff;border:1px solid rgba(15,23,42,0.08);border-radius:24px;padding:24px 26px;">
+            <div class="text-main" style="color:#0f172a;font-size:19px;line-height:25px;font-weight:800;margin:0 0 14px;">
+              Aujourd’hui l’IA retient
             </div>
             ${renderEmailChecklist(aiFindings)}
           </td>
@@ -265,12 +674,15 @@ const buildMonthlyReportEmailHtml = (opts: {
           priority
             ? `
         <tr>
-          <td style="padding:24px 0 0;">
-            <div class="section" style="border-radius:20px;background:#ecfdf5;border:1px solid rgba(16,185,129,0.24);padding:22px 24px;">
-              <div style="color:#065f46;font-size:12px;line-height:16px;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin:0 0 8px;">
+          <td style="height:14px;line-height:14px;font-size:14px;">&nbsp;</td>
+        </tr>
+        <tr>
+          <td>
+            <div class="soft-card section" style="border-radius:24px;background:#ecfdf5;border:1px solid rgba(16,185,129,0.22);padding:24px 26px;">
+              <div style="color:#065f46;font-size:11px;line-height:16px;text-transform:uppercase;letter-spacing:.12em;font-weight:900;margin:0 0 9px;">
                 Priorité du mois
               </div>
-              <div style="color:#064e3b;font-size:16px;line-height:24px;font-weight:720;">
+              <div style="color:#064e3b;font-size:17px;line-height:25px;font-weight:760;">
                 ${escapeEmailHtml(priority)}
               </div>
             </div>
@@ -283,9 +695,12 @@ const buildMonthlyReportEmailHtml = (opts: {
           opportunities.length > 0
             ? `
         <tr>
-          <td class="section" style="padding:24px 28px 0;">
-            <div class="text-main" style="color:#0f172a;font-size:18px;line-height:24px;font-weight:760;margin:0 0 14px;">
-              Opportunités détectées
+          <td style="height:14px;line-height:14px;font-size:14px;">&nbsp;</td>
+        </tr>
+        <tr>
+          <td class="section-card section" style="background:#ffffff;border:1px solid rgba(15,23,42,0.08);border-radius:24px;padding:24px 26px;">
+            <div class="text-main" style="color:#0f172a;font-size:19px;line-height:25px;font-weight:800;margin:0 0 14px;">
+              Opportunités
             </div>
             ${renderEmailBullets(opportunities)}
           </td>
@@ -294,32 +709,18 @@ const buildMonthlyReportEmailHtml = (opts: {
             : ""
         }
         <tr>
-          <td style="padding:28px 0 0;">
-            <table role="presentation" style="border-collapse:collapse;">
-              <tr>
-                <td class="button-wrap" style="padding:0 10px 0 0;">
-                  <a class="button-link" href="${escapeEmailHtml(opts.reportUrl)}" style="display:inline-block;border-radius:999px;background:#0f172a;color:#ffffff;text-decoration:none;font-size:14px;line-height:20px;font-weight:760;padding:13px 20px;">
-                    Consulter le rapport
-                  </a>
-                </td>
-                ${
-                  opts.appUrl
-                    ? `
-                <td class="button-wrap" style="padding:0;">
-                  <a class="button-link secondary-button" href="${escapeEmailHtml(opts.appUrl)}" style="display:inline-block;border-radius:999px;background:transparent;color:#0f172a;text-decoration:none;font-size:14px;line-height:20px;font-weight:760;padding:12px 18px;border:1px solid rgba(15,23,42,0.14);">
-                    Ouvrir EGIA
-                  </a>
-                </td>
-                `
-                    : ""
-                }
-              </tr>
-            </table>
+          <td style="height:18px;line-height:18px;font-size:18px;">&nbsp;</td>
+        </tr>
+        <tr>
+          <td style="text-align:center;">
+            <a class="button-link" href="${escapeEmailHtml(opts.reportUrl)}" style="display:inline-block;border-radius:999px;background:#0f172a;color:#ffffff;text-decoration:none;font-size:15px;line-height:21px;font-weight:820;padding:15px 24px;box-shadow:0 18px 36px rgba(15,23,42,0.18);">
+              Voir mon rapport complet
+            </a>
           </td>
         </tr>
         <tr>
-          <td class="footer" style="padding:28px 0 0;color:#64748b;font-size:11px;line-height:17px;">
-            Vous recevez cet email car les rapports automatiques sont activés.
+          <td class="footer" style="padding:26px 8px 0;color:#64748b;font-size:11px;line-height:17px;text-align:center;">
+            Vous recevez cet email car les rapports automatiques sont activés. Powered by EGIA.
           </td>
         </tr>
       </table>
@@ -329,7 +730,7 @@ const buildMonthlyReportEmailHtml = (opts: {
 };
 
 const buildMonthlyReportSubject = (periodLabel: string) =>
-  `Votre rapport mensuel EGIA – ${periodLabel}`;
+  `Votre rapport mensuel – ${periodLabel}`;
 
 const sendResendEmail = async (params: {
   to: string;
@@ -649,6 +1050,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let emailed = Boolean(emailedAt);
       let reportUrl: string | null = null;
       let reportEmailPayload: PremiumReportPayload | null = null;
+      let emailBranding: EmailBrandingPayload | null = null;
       let reason: string | undefined;
 
       console.log("[monthly-report] fetching data for period:", fromIso, toIso);
@@ -708,6 +1110,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             reason = "no_report_url";
             console.log("[monthly-report] skipped email because:", reason);
           } else {
+            emailBranding = reportEmailPayload
+              ? null
+              : await resolveEmailBranding(supabaseAdmin, userId);
             const attachmentContent = await fetchPdfAsBase64(reportUrl);
             for (const recipient of recipients) {
               console.log("[monthly-report] sending email to:", recipient.email);
@@ -716,7 +1121,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 periodLabel,
                 reportUrl,
                 appUrl,
-                report: reportEmailPayload
+                report: reportEmailPayload,
+                branding: emailBranding
               });
               await sendResendEmail({
                 to: recipient.email,

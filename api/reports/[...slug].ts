@@ -59,6 +59,11 @@ type CompetitorRow = {
   place_id: string;
   is_followed: boolean | null;
 };
+type BenchmarkBranding = {
+  companyName: string | null;
+  legalName: string | null;
+  logoUrl: string | null;
+};
 
 const median = (values: number[]) => {
   if (values.length === 0) return 0;
@@ -196,7 +201,7 @@ const buildCompetitorsBenchmark = (
 };
 
 const formatPdfDate = (value: string | null) => {
-  if (!value) return "—";
+  if (!value) return null;
   const date = new Date(value);
   return date.toLocaleDateString("fr-FR", {
     day: "2-digit",
@@ -205,11 +210,85 @@ const formatPdfDate = (value: string | null) => {
   });
 };
 
+const getSignedBrandLogoUrl = async (
+  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
+  logoPath: string | null
+) => {
+  if (!logoPath) return null;
+  try {
+    const { data, error } = await supabaseAdmin.storage
+      .from("brand-assets")
+      .createSignedUrl(logoPath, 60 * 60);
+    if (error) return null;
+    return data?.signedUrl ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveBenchmarkBranding = async (
+  supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
+  userId: string,
+  fallbackName: string
+): Promise<BenchmarkBranding> => {
+  const fallback = fallbackName.trim() || null;
+  try {
+    const { data: settings } = await supabaseAdmin
+      .from("business_settings")
+      .select("business_id, business_name")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const businessId =
+      (settings as { business_id?: string | null } | null)?.business_id ?? null;
+    const settingsName =
+      (settings as { business_name?: string | null } | null)?.business_name?.trim() ??
+      null;
+    if (!businessId) {
+      return {
+        companyName: settingsName ?? fallback,
+        legalName: null,
+        logoUrl: null
+      };
+    }
+    const { data: entities } = await supabaseAdmin
+      .from("legal_entities")
+      .select("company_name, legal_name, logo_path, logo_url, is_default, created_at")
+      .eq("business_id", businessId)
+      .order("is_default", { ascending: false })
+      .order("created_at", { ascending: true });
+    const entity = Array.isArray(entities)
+      ? (entities[0] as
+          | {
+              company_name?: string | null;
+              legal_name?: string | null;
+              logo_path?: string | null;
+              logo_url?: string | null;
+            }
+          | undefined)
+      : undefined;
+    const logoUrl =
+      entity?.logo_url ??
+      (await getSignedBrandLogoUrl(supabaseAdmin, entity?.logo_path ?? null));
+    return {
+      companyName: entity?.company_name?.trim() || settingsName || fallback,
+      legalName: entity?.legal_name?.trim() || null,
+      logoUrl
+    };
+  } catch {
+    return {
+      companyName: fallback,
+      legalName: null,
+      logoUrl: null
+    };
+  }
+};
+
 const buildBenchmarkHtml = (input: {
   title: string;
+  branding: BenchmarkBranding;
   locationLabel: string;
   zoneLabel: string;
-  radiusLabel: string;
+  radiusLabel: string | null;
   createdAt: string | null;
   stats: Record<string, number | null>;
   swot: Record<string, string[]>;
@@ -224,33 +303,75 @@ const buildBenchmarkHtml = (input: {
 }) => {
   const risks = input.swot.threats?.slice(0, 3) ?? [];
   const opportunities = input.swot.opportunities?.slice(0, 3) ?? [];
-  const force =
-    input.swot.forces?.[0] ?? "Données insuffisantes pour qualifier une force.";
-  const weakness =
-    input.swot.weaknesses?.[0] ??
-    "Données insuffisantes pour qualifier une faiblesse.";
-  const opportunity =
-    input.swot.opportunities?.[0] ??
-    "Données insuffisantes pour qualifier une opportunité.";
-  const threat =
-    input.swot.threats?.[0] ??
-    "Données insuffisantes pour qualifier une menace.";
+  const force = input.swot.forces?.[0] ?? null;
+  const weakness = input.swot.weaknesses?.[0] ?? null;
+  const opportunity = input.swot.opportunities?.[0] ?? null;
+  const threat = input.swot.threats?.[0] ?? null;
   const bestRating =
     typeof input.stats.best_rating === "number"
       ? input.stats.best_rating.toFixed(1)
-      : "—";
+      : null;
   const closest =
     typeof input.stats.closest_m === "number"
       ? input.stats.closest_m < 1000
         ? `${input.stats.closest_m} m`
         : `${(input.stats.closest_m / 1000).toFixed(1)} km`
-      : "—";
+      : null;
   const total = typeof input.stats.total === "number" ? input.stats.total : null;
   const riskCount =
     typeof input.stats.high_risk_count === "number"
       ? input.stats.high_risk_count
       : null;
   const actions = input.actions.slice(0, 3);
+  const brandName = input.branding.companyName ?? input.locationLabel;
+  const createdAtLabel = formatPdfDate(input.createdAt);
+  const coverMeta = [
+    input.locationLabel ? `Établissement : ${input.locationLabel}` : null,
+    input.zoneLabel ? `Zone analysée : ${input.zoneLabel}` : null,
+    input.radiusLabel ? `Rayon : ${input.radiusLabel}` : null
+  ].filter(Boolean);
+  const marketMetrics = [
+    total !== null ? `${total} concurrents` : null,
+    riskCount !== null ? `${riskCount} à risque élevé` : null
+  ].filter(Boolean);
+  const radarItems = [
+    closest ? `Concurrent le plus proche : ${closest}` : null,
+    bestRating ? `Meilleure note du marché : ${bestRating}` : null,
+    total !== null ? `Concurrents observés : ${total}` : null
+  ].filter(Boolean);
+  const interpretation = [
+    bestRating ? `concurrence jusqu'à ${bestRating}/5` : null,
+    closest ? `acteur très proche à ${closest}` : null
+  ].filter(Boolean);
+  const swotCards = [
+    force ? { title: "Force", value: force, className: "success" } : null,
+    weakness ? { title: "Faiblesse", value: weakness, className: "danger" } : null,
+    opportunity ? { title: "Opportunité", value: opportunity, className: "info" } : null,
+    threat ? { title: "Menace", value: threat, className: "soft" } : null
+  ].filter(
+    (item): item is { title: string; value: string; className: string } =>
+      item !== null
+  );
+  const competitorCards = input.topCompetitors
+    .slice(0, 2)
+    .map((item) => {
+      const distance =
+        typeof item.distance_m === "number"
+          ? item.distance_m < 1000
+            ? `${item.distance_m} m`
+            : `${(item.distance_m / 1000).toFixed(1)} km`
+          : null;
+      const details = [
+        typeof item.rating === "number" ? `Note: ${item.rating}` : null,
+        typeof item.reviews === "number" ? `Avis: ${item.reviews}` : null,
+        distance ? `Distance: ${distance}` : null
+      ].filter(Boolean);
+      return {
+        name: item.name ?? "Concurrent",
+        details
+      };
+    })
+    .filter((item) => item.details.length > 0);
 
   return `<!doctype html>
   <html lang="fr">
@@ -261,8 +382,13 @@ const buildBenchmarkHtml = (input: {
         body { font-family: "Inter", Arial, sans-serif; color: #111827; margin: 0; background: #f8fafc; }
         .page { background: #ffffff; border-radius: 18px; padding: 32px; margin: 24px auto; width: 100%; }
         .cover { background: #0f172a; color: #ffffff; border-radius: 20px; padding: 36px; }
+        .brand-row { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+        .brand-logo { width: 48px; height: 48px; border-radius: 16px; object-fit: cover; background: #ffffff; }
+        .brand-name { font-size: 16px; font-weight: 800; }
+        .brand-legal { color: #cbd5e1; font-size: 12px; margin-top: 3px; }
         .badge { display: inline-block; padding: 6px 12px; border-radius: 999px; font-size: 12px; background: rgba(255,255,255,0.15); }
         .muted { color: #64748b; font-size: 13px; }
+        .footer { color: #94a3b8; font-size: 11px; text-align: center; margin: 18px auto 0; }
         h1 { margin: 12px 0 4px; font-size: 28px; }
         h2 { margin: 0; font-size: 18px; }
         .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
@@ -282,111 +408,165 @@ const buildBenchmarkHtml = (input: {
     </head>
     <body>
       <div class="page cover">
-        <div class="badge">Veille concurrentielle – EGIA</div>
-        <h1>${input.locationLabel}</h1>
-        <div class="muted" style="color:#e2e8f0;">
-          Zone analysée : ${input.zoneLabel} · Rayon : ${input.radiusLabel}
+        <div class="brand-row">
+          ${
+            input.branding.logoUrl
+              ? `<img class="brand-logo" src="${input.branding.logoUrl}" alt="${brandName}" />`
+              : ""
+          }
+          <div>
+            <div class="brand-name">${brandName}</div>
+            ${
+              input.branding.legalName
+                ? `<div class="brand-legal">${input.branding.legalName}</div>`
+                : ""
+            }
+          </div>
         </div>
-        <div class="muted" style="color:#e2e8f0; margin-top: 8px;">
-          Généré le ${formatPdfDate(input.createdAt)}
-        </div>
+        <div class="badge">Veille concurrentielle</div>
+        <h1>${input.title}</h1>
+        ${
+          coverMeta.length
+            ? `<div class="muted" style="color:#e2e8f0;">${coverMeta.join(" · ")}</div>`
+            : ""
+        }
+        ${
+          createdAtLabel
+            ? `<div class="muted" style="color:#e2e8f0; margin-top: 8px;">Généré le ${createdAtLabel}</div>`
+            : ""
+        }
       </div>
 
       <div class="page">
         <div class="section-title">Résumé exécutif</div>
         <div class="grid-2">
-          <div class="card soft">
-            <div class="kpi">Positionnement global</div>
-            <p class="metric">${input.summary ?? "Positionnement en cours d'analyse."}</p>
-          </div>
-          <div class="card soft">
-            <div class="kpi">Marché observé</div>
-            <p class="metric">${total ?? "—"} concurrents · ${riskCount ?? "—"} à risque élevé</p>
-          </div>
+          ${
+            input.summary
+              ? `<div class="card soft">
+                  <div class="kpi">Positionnement global</div>
+                  <p class="metric">${input.summary}</p>
+                </div>`
+              : ""
+          }
+          ${
+            marketMetrics.length
+              ? `<div class="card soft">
+                  <div class="kpi">Marché observé</div>
+                  <p class="metric">${marketMetrics.join(" · ")}</p>
+                </div>`
+              : ""
+          }
         </div>
-        <div class="grid-2" style="margin-top: 12px;">
+        ${
+          risks.length || opportunities.length
+            ? `<div class="grid-2" style="margin-top: 12px;">
+          ${
+            risks.length
+              ? `
           <div class="card">
             <div class="section-title">Top 3 risques</div>
-            <ul>${(risks.length ? risks : ["Aucun risque majeur détecté."])
+            <ul>${risks
               .slice(0, 3)
               .map((item) => `<li>${item}</li>`)
               .join("")}</ul>
           </div>
+          `
+              : ""
+          }
+          ${
+            opportunities.length
+              ? `
           <div class="card">
             <div class="section-title">Top 3 opportunités</div>
-            <ul>${(opportunities.length ? opportunities : ["Opportunités à préciser."])
+            <ul>${opportunities
               .slice(0, 3)
               .map((item) => `<li>${item}</li>`)
               .join("")}</ul>
           </div>
-        </div>
+          `
+              : ""
+          }
+        </div>`
+            : ""
+        }
       </div>
 
+      ${
+        competitorCards.length
+          ? `
       <div class="page">
         <div class="section-title">Podium concurrentiel</div>
         <div class="grid-3">
-          <div class="card">
-            <div class="kpi">Vous</div>
-            <div class="metric">Note: n.c. · Avis: n.c.</div>
-            <div class="metric">Distance: —</div>
-          </div>
-          ${input.topCompetitors.slice(0, 2).map((item) => `
+          ${competitorCards.map((item) => `
             <div class="card">
-              <div class="kpi">${item.name ?? "Concurrent"}</div>
-              <div class="metric">Note: ${item.rating ?? "n.c."} · Avis: ${item.reviews ?? "n.c."}</div>
-              <div class="metric">Distance: ${typeof item.distance_m === "number" ? (item.distance_m < 1000 ? `${item.distance_m} m` : `${(item.distance_m / 1000).toFixed(1)} km`) : "—"}</div>
+              <div class="kpi">${item.name}</div>
+              ${item.details.map((detail) => `<div class="metric">${detail}</div>`).join("")}
             </div>
           `).join("")}
         </div>
       </div>
+      `
+          : ""
+      }
 
+      ${
+        radarItems.length
+          ? `
       <div class="page">
         <div class="section-title">Analyse radar</div>
         <div class="grid-2">
           <div class="card soft">
             <div class="kpi">Statistiques clés</div>
             <ul>
-              <li>Concurrent le plus proche : ${closest}</li>
-              <li>Meilleure note du marché : ${bestRating}</li>
-              <li>Concurrents observés : ${total ?? "—"}</li>
+              ${radarItems.map((item) => `<li>${item}</li>`).join("")}
             </ul>
           </div>
+          ${
+            interpretation.length
+              ? `
           <div class="card">
             <div class="kpi">Interprétation</div>
             <p class="metric">
-              Le marché local montre une concurrence ${bestRating !== "—" ? `jusqu’à ${bestRating}/5` : "en cours d’analyse"} avec un acteur très proche à ${closest}.
+              Le marché local montre une ${interpretation.join(" avec un ")}.
             </p>
           </div>
+          `
+              : ""
+          }
         </div>
       </div>
+      `
+          : ""
+      }
 
+      ${
+        swotCards.length
+          ? `
       <div class="page">
         <div class="section-title">Analyse SWOT</div>
         <div class="grid-2">
-          <div class="card success">
-            <div class="kpi">Force</div>
-            <p class="metric">${force}</p>
-          </div>
-          <div class="card danger">
-            <div class="kpi">Faiblesse</div>
-            <p class="metric">${weakness}</p>
-          </div>
-          <div class="card info">
-            <div class="kpi">Opportunité</div>
-            <p class="metric">${opportunity}</p>
-          </div>
-          <div class="card soft">
-            <div class="kpi">Menace</div>
-            <p class="metric">${threat}</p>
-          </div>
+          ${swotCards
+            .map(
+              (item) => `
+          <div class="card ${item.className}">
+            <div class="kpi">${item.title}</div>
+            <p class="metric">${item.value}</p>
+          </div>`
+            )
+            .join("")}
         </div>
       </div>
+      `
+          : ""
+      }
 
+      ${
+        actions.length
+          ? `
       <div class="page">
         <div class="section-title">Actions recommandées</div>
         <div class="grid-2">
-          ${(actions.length ? actions : ["Définir une action prioritaire cette semaine."])
-            .slice(0, 3)
+          ${actions
             .map((action) => `
               <div class="card">
                 <div class="kpi">Action</div>
@@ -398,6 +578,10 @@ const buildBenchmarkHtml = (input: {
             .join("")}
         </div>
       </div>
+      `
+          : ""
+      }
+      <div class="footer">Powered by EGIA</div>
     </body>
   </html>`;
 };
@@ -1214,7 +1398,7 @@ const handleCompetitorsBenchmark = async (
   );
 
   const today = new Date().toISOString().slice(0, 10);
-  const title = `Benchmark concurrents — ${today}`;
+  const title = `Benchmark concurrents - ${today}`;
   const reportPayload = {
     location_id: locationId,
     keyword: keyword || null,
@@ -1325,10 +1509,16 @@ const handleCompetitorsBenchmarkPdf = async (
   const radiusLabel =
     typeof payloadData?.radius_km === "number"
       ? `${payloadData.radius_km} km`
-      : "—";
+      : null;
+  const branding = await resolveBenchmarkBranding(
+    supabaseAdmin,
+    userId,
+    locationLabel
+  );
 
   const html = buildBenchmarkHtml({
     title: report.title ?? "Benchmark concurrents",
+    branding,
     locationLabel,
     zoneLabel,
     radiusLabel,

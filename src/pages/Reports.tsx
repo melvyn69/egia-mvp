@@ -18,6 +18,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
 import { supabase } from "../lib/supabase";
+import { getActiveLegalEntityLogo } from "../lib/businessBranding";
 import { cn } from "../lib/utils";
 import type { Database } from "../database.types";
 
@@ -78,6 +79,11 @@ type GeneratedReportModalState = {
   pageCount: number | null;
   pdfSize: string | null;
 };
+type ReportsBranding = {
+  logoUrl: string | null;
+  companyName: string | null;
+  legalName: string | null;
+};
 
 const reportFilterOptions: Array<{ value: ReportFilter; label: string }> = [
   { value: "all", label: "Tous" },
@@ -98,7 +104,7 @@ const periodLabels: Record<string, string> = {
 };
 
 const formatDateLabel = (value: string | null) => {
-  if (!value) return "—";
+  if (!value) return null;
   const date = new Date(value);
   return date.toLocaleDateString("fr-FR", {
     day: "2-digit",
@@ -108,7 +114,7 @@ const formatDateLabel = (value: string | null) => {
 };
 
 const formatDistance = (value: number | null | undefined) => {
-  if (typeof value !== "number") return "n.c.";
+  if (typeof value !== "number") return null;
   if (value < 1000) return `${value} m`;
   return `${(value / 1000).toFixed(1)} km`;
 };
@@ -122,7 +128,7 @@ const getReportTimestamp = (report: ReportRow) => {
 };
 
 const formatMonthSection = (value: string | null) => {
-  if (!value) return "Sans date";
+  if (!value) return "";
   const label = new Date(value).toLocaleDateString("fr-FR", {
     month: "long",
     year: "numeric"
@@ -132,9 +138,11 @@ const formatMonthSection = (value: string | null) => {
 
 const formatReportPeriod = (report: ReportRow) => {
   if (report.period_preset === "custom") {
-    return `${formatDateLabel(report.from_date)} - ${formatDateLabel(report.to_date)}`;
+    const fromLabel = formatDateLabel(report.from_date);
+    const toLabel = formatDateLabel(report.to_date);
+    return fromLabel && toLabel ? `${fromLabel} - ${toLabel}` : null;
   }
-  return report.period_preset ? periodLabels[report.period_preset] ?? report.period_preset : "—";
+  return report.period_preset ? periodLabels[report.period_preset] ?? report.period_preset : null;
 };
 
 const getReportPeriodFamily = (report: ReportRow): ReportFilter => {
@@ -170,7 +178,7 @@ const formatOptionalMetric = (value: unknown, suffix = "") => {
   if (typeof value === "string" && value.trim()) {
     return value;
   }
-  return "—";
+  return null;
 };
 
 const formatFileSize = (value: number | string | null | undefined) => {
@@ -193,7 +201,7 @@ const getReportHealthScore = (report: ReportRow) =>
       "score"
     ]),
     "/100"
-  );
+  ) ?? "Calcul en cours";
 
 const getGeneratedPageCount = (data: ReportGenerationResponse | null) =>
   data?.pdf?.page_count ??
@@ -237,6 +245,72 @@ const getReportThemes = (report: ReportRow) => {
     })
     .filter((item): item is string => Boolean(item))
     .slice(0, 3);
+};
+
+const getReportLocationNames = (
+  report: ReportRow,
+  locations: ReportsProps["locations"]
+) => {
+  const namesByKey = new Map<string, string>();
+  locations.forEach((location) => {
+    const label = location.location_title ?? location.location_resource_name;
+    namesByKey.set(location.id, label);
+    namesByKey.set(location.location_resource_name, label);
+  });
+  return report.locations
+    .map((locationId) => namesByKey.get(locationId) ?? null)
+    .filter((item): item is string => Boolean(item));
+};
+
+const ReportBrandBlock = ({
+  branding,
+  locationNames,
+  compact = false
+}: {
+  branding: ReportsBranding;
+  locationNames: string[];
+  compact?: boolean;
+}) => {
+  if (!branding.companyName && !branding.logoUrl && locationNames.length === 0) {
+    return null;
+  }
+  return (
+    <div className={cn("flex min-w-0 items-center gap-3", compact && "gap-2")}>
+      {branding.logoUrl && (
+        <img
+          src={branding.logoUrl}
+          alt={branding.companyName ?? "Logo entreprise"}
+          className={cn(
+            "shrink-0 rounded-2xl border border-slate-200 bg-white object-cover shadow-sm",
+            compact ? "h-10 w-10" : "h-12 w-12"
+          )}
+        />
+      )}
+      <div className="min-w-0">
+        {branding.companyName && (
+          <p
+            className={cn(
+              "truncate font-semibold text-slate-950",
+              compact ? "text-sm" : "text-base"
+            )}
+          >
+            {branding.companyName}
+          </p>
+        )}
+        {branding.legalName && !compact && (
+          <p className="mt-0.5 truncate text-xs font-medium text-slate-500">
+            {branding.legalName}
+          </p>
+        )}
+        {locationNames.length > 0 && !compact && (
+          <p className="mt-1 truncate text-xs text-slate-500">
+            {locationNames.slice(0, 3).join(" · ")}
+            {locationNames.length > 3 ? ` +${locationNames.length - 3}` : ""}
+          </p>
+        )}
+      </div>
+    </div>
+  );
 };
 
 const ReportHeroMetric = ({
@@ -283,60 +357,92 @@ const ReportDataPoint = ({
   </div>
 );
 
-const ReportReadyFact = ({
+const ReportReadyKpiCard = ({
   label,
-  value
+  value,
+  highlight = false
 }: {
   label: string;
   value: ReactNode;
+  highlight?: boolean;
 }) => (
-  <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-3">
-    <div className="flex min-w-0 items-center gap-3">
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
-        <CheckCircle2 className="h-4 w-4" />
-      </span>
-      <span className="truncate text-sm font-medium text-slate-600">{label}</span>
-    </div>
-    <span className="shrink-0 text-right text-sm font-semibold text-slate-950">
-      {value}
-    </span>
+  <div
+    className={cn(
+      "rounded-2xl border p-4 shadow-[0_14px_34px_rgba(15,23,42,0.055)]",
+      highlight
+        ? "border-slate-950 bg-slate-950 text-white"
+        : "border-slate-100 bg-white text-slate-950"
+    )}
+  >
+    <p
+      className={cn(
+        "text-xs font-semibold uppercase tracking-[0.09em]",
+        highlight ? "text-slate-300" : "text-slate-500"
+      )}
+    >
+      {label}
+    </p>
+    <div className="mt-2 text-2xl font-semibold leading-none">{value}</div>
   </div>
 );
 
 const ReportReadyModal = ({
   state,
+  branding,
+  locationNames,
   onClose,
   onOpenReport,
   onDownload
 }: {
   state: GeneratedReportModalState;
+  branding: ReportsBranding;
+  locationNames: string[];
   onClose: () => void;
   onOpenReport: () => void;
   onDownload: () => void;
 }) => {
   const canAccessPdf = Boolean(state.pdfUrl || state.storagePath);
-  const facts = [
+  const healthScore = getReportHealthScore(state.report);
+  const rating = formatOptionalMetric(
+    getReportMetric(state.report, [
+      "average_rating",
+      "avg_rating",
+      "rating",
+      "note"
+    ]),
+    "/5"
+  );
+  const reviews = formatOptionalMetric(
+    getReportMetric(state.report, [
+      "reviews_count",
+      "review_count",
+      "reviews",
+      "avis"
+    ])
+  );
+  const responseRate = formatOptionalMetric(
+    getReportMetric(state.report, [
+      "response_rate",
+      "responseRate",
+      "response_rate_pct",
+      "responses_rate"
+    ]),
+    "%"
+  );
+  const kpiCards = [
     {
       label: "Business Health Score",
-      value: getReportHealthScore(state.report)
+      value: healthScore,
+      highlight: true
     },
-    {
-      label: "Période",
-      value: formatReportPeriod(state.report)
-    },
-    {
-      label: "Nombre de pages",
-      value: state.pageCount ?? "—"
-    },
-    {
-      label: "Date génération",
-      value: formatDateLabel(state.generatedAt)
-    },
-    ...(state.pdfSize
+    ...(rating ? [{ label: "Note moyenne", value: rating }] : []),
+    ...(reviews ? [{ label: "Avis analysés", value: reviews }] : []),
+    ...(responseRate ? [{ label: "Taux réponse", value: responseRate }] : []),
+    ...(state.report.locations.length > 0
       ? [
           {
-            label: "Taille du PDF",
-            value: state.pdfSize
+            label: "Établissements",
+            value: state.report.locations.length
           }
         ]
       : [])
@@ -344,12 +450,12 @@ const ReportReadyModal = ({
 
   return (
     <div
-      className="report-ready-backdrop fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm"
+      className="report-ready-backdrop fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="report-ready-title"
     >
-      <div className="report-ready-modal relative w-full max-w-2xl overflow-hidden rounded-[28px] border border-white/70 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.22)]">
+      <div className="report-ready-modal relative w-full max-w-3xl overflow-hidden rounded-[30px] border border-white/70 bg-white shadow-[0_34px_100px_rgba(15,23,42,0.26)]">
         <button
           type="button"
           className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 text-slate-500 shadow-sm transition hover:bg-slate-100 hover:text-slate-900"
@@ -359,15 +465,25 @@ const ReportReadyModal = ({
           <X className="h-4 w-4" />
         </button>
 
-        <div className="border-b border-slate-100 bg-slate-50/90 px-5 pb-5 pt-6 md:px-7 md:pb-6 md:pt-7">
-          <div className="flex items-start gap-4">
+        <div className="bg-slate-50/90 px-5 pb-5 pt-6 md:px-8 md:pb-7 md:pt-8">
+          <div className="flex items-start gap-4 pr-10">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-[0_16px_34px_rgba(15,23,42,0.2)]">
               <FileText className="h-6 w-6" />
             </div>
-            <div className="min-w-0 pr-10">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                Document généré
-              </p>
+            <div className="min-w-0">
+              {(branding.companyName || branding.logoUrl) && (
+                <div className="mb-4">
+                  <ReportBrandBlock
+                    branding={branding}
+                    locationNames={locationNames}
+                    compact
+                  />
+                </div>
+              )}
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Génération terminée
+              </div>
               <h3
                 id="report-ready-title"
                 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 md:text-3xl"
@@ -377,22 +493,26 @@ const ReportReadyModal = ({
               <p className="mt-2 truncate text-sm font-medium text-slate-500">
                 {state.report.name}
               </p>
+              <p className="mt-4 max-w-xl text-sm leading-6 text-slate-600">
+                L'IA a identifié les principaux leviers d'amélioration de votre réputation.
+              </p>
             </div>
           </div>
         </div>
 
-        <div className="space-y-5 p-5 md:p-7">
-          <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_16px_42px_rgba(15,23,42,0.055)]">
-            <div className="grid gap-2">
-              {facts.map((fact) => (
-                <ReportReadyFact
-                  key={fact.label}
-                  label={fact.label}
-                  value={fact.value}
+        <div className="space-y-5 p-5 md:p-8">
+          {kpiCards.length > 0 && (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {kpiCards.map((card) => (
+                <ReportReadyKpiCard
+                  key={card.label}
+                  label={card.label}
+                  value={card.value}
+                  highlight={card.highlight}
                 />
               ))}
             </div>
-          </div>
+          )}
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
             <Button
@@ -401,7 +521,7 @@ const ReportReadyModal = ({
               onClick={onOpenReport}
             >
               <Eye className="h-4 w-4" />
-              Consulter le rapport
+              Voir
             </Button>
             <Button
               variant="outline"
@@ -437,11 +557,44 @@ const Reports = ({ session, locations }: ReportsProps) => {
   const [reportSearch, setReportSearch] = useState("");
   const [generatedReportModal, setGeneratedReportModal] =
     useState<GeneratedReportModalState | null>(null);
+  const userId = session?.user?.id ?? null;
+
+  const brandingQuery = useQuery({
+    queryKey: ["report-branding", userId],
+    queryFn: async () => {
+      if (!userId) {
+        return {
+          logoUrl: null,
+          companyName: null,
+          legalName: null
+        } satisfies ReportsBranding;
+      }
+      const branding = await getActiveLegalEntityLogo(userId);
+      return {
+        logoUrl: branding.logoUrl,
+        companyName: branding.companyName,
+        legalName: branding.legalName
+      } satisfies ReportsBranding;
+    },
+    enabled: Boolean(userId)
+  });
+  const reportBranding: ReportsBranding = brandingQuery.data ?? {
+    logoUrl: null,
+    companyName: null,
+    legalName: null
+  };
+  const allLocationNames = useMemo(
+    () =>
+      locations
+        .map((location) => location.location_title ?? location.location_resource_name)
+        .filter(Boolean),
+    [locations]
+  );
 
   const reportsQuery = useQuery({
-    queryKey: ["reports", session?.user?.id ?? null],
+    queryKey: ["reports", userId],
     queryFn: async () => {
-      if (!supabaseClient || !session?.user?.id) {
+      if (!supabaseClient || !userId) {
         return [] as ReportRow[];
       }
       const { data, error: queryError } = await supabaseClient
@@ -453,13 +606,13 @@ const Reports = ({ session, locations }: ReportsProps) => {
       }
       return (data ?? []) as ReportRow[];
     },
-    enabled: Boolean(supabaseClient) && Boolean(session?.user?.id)
+    enabled: Boolean(supabaseClient) && Boolean(userId)
   });
 
   const benchmarkQuery = useQuery({
-    queryKey: ["generated-reports", session?.user?.id ?? null],
+    queryKey: ["generated-reports", userId],
     queryFn: async () => {
-      if (!supabaseClient || !session?.user?.id) {
+      if (!supabaseClient || !userId) {
         return [] as GeneratedReportRow[];
       }
       const { data, error: queryError } = await supabaseClient
@@ -472,7 +625,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
       }
       return (data ?? []) as GeneratedReportRow[];
     },
-    enabled: Boolean(supabaseClient) && Boolean(session?.user?.id)
+    enabled: Boolean(supabaseClient) && Boolean(userId)
   });
 
   const locationOptions = useMemo(
@@ -651,7 +804,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
     setTimeout(() => window.URL.revokeObjectURL(url), 1000);
   };
 
-  const reports = reportsQuery.data ?? [];
+  const reports = useMemo(() => reportsQuery.data ?? [], [reportsQuery.data]);
   const latestReport = useMemo(
     () =>
       reports.reduce<ReportRow | null>((latest, report) => {
@@ -687,17 +840,18 @@ const Reports = ({ session, locations }: ReportsProps) => {
     filteredReports.forEach((report) => {
       const dateValue = getReportDateValue(report);
       const key = dateValue ? new Date(dateValue).toISOString().slice(0, 7) : "undated";
-      const label = formatMonthSection(dateValue);
+      const label = formatMonthSection(dateValue) || "Historique";
       const group = groups.get(key) ?? { label, reports: [] };
       group.reports.push(report);
       groups.set(key, group);
     });
     return Array.from(groups.values());
   }, [filteredReports]);
-  const latestHealthScore = latestReport
-    ? getReportHealthScore(latestReport)
-    : "—";
-  const latestReportDate = latestReport ? formatDateLabel(getReportDateValue(latestReport)) : "—";
+  const latestHealthScore = latestReport ? getReportHealthScore(latestReport) : "Calcul en cours";
+  const latestReportDate = latestReport ? formatDateLabel(getReportDateValue(latestReport)) : null;
+  const generatedReportLocationNames = generatedReportModal
+    ? getReportLocationNames(generatedReportModal.report, locations)
+    : [];
   const handleOpenGeneratedReport = () => {
     if (!generatedReportModal) return;
     if (generatedReportModal.pdfUrl) {
@@ -744,6 +898,8 @@ const Reports = ({ session, locations }: ReportsProps) => {
       {generatedReportModal && (
         <ReportReadyModal
           state={generatedReportModal}
+          branding={reportBranding}
+          locationNames={generatedReportLocationNames}
           onClose={() => setGeneratedReportModal(null)}
           onOpenReport={handleOpenGeneratedReport}
           onDownload={handleDownloadGeneratedReport}
@@ -754,9 +910,18 @@ const Reports = ({ session, locations }: ReportsProps) => {
         <div className="grid gap-6 p-5 md:p-7 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.9fr)]">
           <div className="flex min-h-[180px] flex-col justify-between">
             <div>
-              <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-slate-900 shadow-sm">
-                <FileText className="h-5 w-5" />
-              </div>
+              {(reportBranding.companyName || reportBranding.logoUrl) ? (
+                <div className="mb-5">
+                  <ReportBrandBlock
+                    branding={reportBranding}
+                    locationNames={allLocationNames}
+                  />
+                </div>
+              ) : (
+                <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-slate-900 shadow-sm">
+                  <FileText className="h-5 w-5" />
+                </div>
+              )}
               <h2 className="text-4xl font-semibold tracking-tight text-slate-950">
                 Rapports
               </h2>
@@ -771,6 +936,11 @@ const Reports = ({ session, locations }: ReportsProps) => {
               <span className="rounded-full border border-slate-200 bg-white px-3 py-1">
                 PDF premium
               </span>
+              {allLocationNames.length > 0 && (
+                <span className="rounded-full border border-slate-200 bg-white px-3 py-1">
+                  {allLocationNames.length} établissement{allLocationNames.length > 1 ? "s" : ""}
+                </span>
+              )}
             </div>
           </div>
 
@@ -780,11 +950,13 @@ const Reports = ({ session, locations }: ReportsProps) => {
               value={reports.length}
               detail={reports.length > 1 ? "rapports disponibles" : "rapport disponible"}
             />
-            <ReportHeroMetric
-              label="Dernier rapport"
-              value={latestReportDate}
-              detail={latestReport?.name ?? "Aucun rapport généré"}
-            />
+            {latestReport && latestReportDate && (
+              <ReportHeroMetric
+                label="Dernier rapport"
+                value={latestReportDate}
+                detail={latestReport.name}
+              />
+            )}
             <ReportHeroMetric
               label="Business Health Score"
               value={latestHealthScore}
@@ -1041,8 +1213,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                         "health_score",
                         "score"
                       ]);
-                      const healthScore =
-                        formatOptionalMetric(rawHealthScore, "/100");
+                      const healthScore = getReportHealthScore(report);
                       const scoreWidth =
                         typeof rawHealthScore === "number"
                           ? Math.min(Math.max(rawHealthScore, 0), 100)
@@ -1081,6 +1252,11 @@ const Reports = ({ session, locations }: ReportsProps) => {
                         ])
                       );
                       const themes = getReportThemes(report);
+                      const periodLabel = formatReportPeriod(report);
+                      const generatedLabel = formatDateLabel(report.last_generated_at);
+                      const reportLocationNames = getReportLocationNames(report, locations);
+                      const reportLocationCount =
+                        reportLocationNames.length || report.locations.length;
 
                       return (
                         <article
@@ -1089,6 +1265,15 @@ const Reports = ({ session, locations }: ReportsProps) => {
                         >
                           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                             <div className="min-w-0">
+                              {(reportBranding.companyName || reportBranding.logoUrl) && (
+                                <div className="mb-3">
+                                  <ReportBrandBlock
+                                    branding={reportBranding}
+                                    locationNames={reportLocationNames}
+                                    compact
+                                  />
+                                </div>
+                              )}
                               <div className="flex flex-wrap items-center gap-2">
                                 <h4 className="truncate text-lg font-semibold text-slate-950">
                                   {report.name}
@@ -1096,10 +1281,22 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                 <Badge variant="neutral">{report.status}</Badge>
                               </div>
                               <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
-                                <span>{formatReportPeriod(report)}</span>
-                                <span className="h-1 w-1 rounded-full bg-slate-300" />
-                                <span>{report.locations.length} lieu(x)</span>
+                                {periodLabel && <span>{periodLabel}</span>}
+                                {periodLabel && reportLocationCount > 0 && (
+                                  <span className="h-1 w-1 rounded-full bg-slate-300" />
+                                )}
+                                {reportLocationCount > 0 && (
+                                  <span>
+                                    {reportLocationCount} établissement
+                                    {reportLocationCount > 1 ? "s" : ""}
+                                  </span>
+                                )}
                               </p>
+                              {reportLocationNames.length > 0 && (
+                                <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">
+                                  {reportLocationNames.join(" · ")}
+                                </p>
+                              )}
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
                               <Button size="sm" onClick={() => handleEdit(report)}>
@@ -1137,21 +1334,21 @@ const Reports = ({ session, locations }: ReportsProps) => {
 
                           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                             <ReportDataPoint label="Business Health Score" value={healthScore} />
-                            <ReportDataPoint label="Note" value={rating} />
-                            <ReportDataPoint label="Avis" value={reviews} />
-                            <ReportDataPoint label="Réponses" value={responses} />
-                            <ReportDataPoint
-                              label="Période"
-                              value={<span className="text-base">{formatReportPeriod(report)}</span>}
-                            />
-                            <ReportDataPoint
-                              label="Date génération"
-                              value={
-                                <span className="text-base">
-                                  {formatDateLabel(report.last_generated_at)}
-                                </span>
-                              }
-                            />
+                            {rating && <ReportDataPoint label="Note" value={rating} />}
+                            {reviews && <ReportDataPoint label="Avis" value={reviews} />}
+                            {responses && <ReportDataPoint label="Réponses" value={responses} />}
+                            {periodLabel && (
+                              <ReportDataPoint
+                                label="Période"
+                                value={<span className="text-base">{periodLabel}</span>}
+                              />
+                            )}
+                            {generatedLabel && (
+                              <ReportDataPoint
+                                label="Date génération"
+                                value={<span className="text-base">{generatedLabel}</span>}
+                              />
+                            )}
                           </div>
 
                           <div className="mt-4 grid gap-3 lg:grid-cols-[0.9fr_0.8fr_1.2fr]">
@@ -1161,6 +1358,11 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                   <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
                                     Aperçu
                                   </p>
+                                  {reportBranding.companyName && (
+                                    <p className="mt-1 truncate text-xs font-medium text-slate-300">
+                                      {reportBranding.companyName}
+                                    </p>
+                                  )}
                                   <p className="mt-2 text-3xl font-semibold leading-none">
                                     {healthScore}
                                   </p>
@@ -1168,29 +1370,30 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                 <TrendingUp className="h-5 w-5 text-slate-300" />
                               </div>
                               <div className="mt-4 h-2 rounded-full bg-white/15">
-                                <div
-                                  className="h-full rounded-full bg-white"
-                                  style={{ width: `${scoreWidth}%` }}
-                                />
+                                {typeof rawHealthScore === "number" && (
+                                  <div
+                                    className="h-full rounded-full bg-white"
+                                    style={{ width: `${scoreWidth}%` }}
+                                  />
+                                )}
                               </div>
                             </div>
-                            <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
-                              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
-                                <CalendarDays className="h-4 w-4" />
-                                Evolution
+                            {evolution && (
+                              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+                                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                                  <CalendarDays className="h-4 w-4" />
+                                  Evolution
+                                </div>
+                                <p className="mt-3 text-2xl font-semibold text-slate-950">
+                                  {evolution}
+                                </p>
                               </div>
-                              <p className="mt-3 text-2xl font-semibold text-slate-950">
-                                {evolution}
-                              </p>
-                              <p className="mt-1 text-xs text-slate-500">
-                                Donnée disponible dans le rapport
-                              </p>
-                            </div>
-                            <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
-                              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
-                                Top thèmes
-                              </p>
-                              {themes.length > 0 ? (
+                            )}
+                            {themes.length > 0 && (
+                              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+                                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                                  Top thèmes
+                                </p>
                                 <div className="mt-3 flex flex-wrap gap-2">
                                   {themes.map((theme) => (
                                     <span
@@ -1201,12 +1404,8 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                     </span>
                                   ))}
                                 </div>
-                              ) : (
-                                <p className="mt-3 text-sm text-slate-500">
-                                  Non disponible dans ce rapport.
-                                </p>
-                              )}
-                            </div>
+                              </div>
+                            )}
                           </div>
                         </article>
                       );
@@ -1219,6 +1418,8 @@ const Reports = ({ session, locations }: ReportsProps) => {
         </CardContent>
       </Card>
 
+      {(benchmarkQuery.isLoading ||
+        (benchmarkQuery.data && benchmarkQuery.data.length > 0)) && (
       <Card>
         <CardHeader>
           <CardTitle>Benchmark concurrents</CardTitle>
@@ -1286,13 +1487,13 @@ const Reports = ({ session, locations }: ReportsProps) => {
                     const topCompetitors = payload?.top_competitors ?? [];
                     const locationLabel =
                       locations.find((location) => location.id === report.location_id)
-                        ?.location_title ?? "Établissement";
+                        ?.location_title ?? null;
                     const zoneLabel =
-                      report.title || (report as { name?: string | null }).name || "Zone non précisée";
+                      report.title || (report as { name?: string | null }).name || null;
                     const radiusLabel =
                       typeof (payload as { radius_km?: number | null })?.radius_km === "number"
                         ? `${(payload as { radius_km?: number | null }).radius_km} km`
-                        : "—";
+                        : null;
                     const generatedAt = formatDateLabel(report.created_at ?? null);
                     const positioning =
                       typeof stats.high_risk_count === "number" && stats.high_risk_count >= 3
@@ -1305,7 +1506,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                         ? swot.threats.slice(0, 3)
                         : typeof stats.high_risk_count === "number"
                           ? [`${stats.high_risk_count} concurrent(s) à fort impact local.`]
-                          : ["Risque concurrentiel non quantifié."];
+                          : [];
                     const opportunities =
                       swot.opportunities?.length
                         ? swot.opportunities.slice(0, 3)
@@ -1315,19 +1516,21 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                 stats.median_reviews
                               )} avis à capter.`
                             ]
-                          : ["Opportunités en attente de données complémentaires."];
+                          : [];
                     const executiveSummary =
                       report.summary ||
                       (typeof stats.best_rating === "number"
                         ? `Marché compétitif avec des acteurs jusqu'à ${stats.best_rating.toFixed(
                             1
                           )}/5.`
-                        : "Marché concurrentiel à surveiller.");
+                        : null);
                     const actions = plan.length > 0 ? plan.slice(0, 3) : [];
                     const actionWhy =
                       typeof stats.best_rating === "number"
                         ? `Pourquoi : marché noté jusqu'à ${stats.best_rating.toFixed(1)}/5.`
-                        : `Pourquoi : ${stats.total ?? "—"} concurrents observés.`;
+                        : typeof stats.total === "number"
+                          ? `Pourquoi : ${stats.total} concurrents observés.`
+                          : null;
                     const actionImpact =
                       "Impact attendu : améliorer la perception et la préférence locale.";
                     return (
@@ -1335,17 +1538,30 @@ const Reports = ({ session, locations }: ReportsProps) => {
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <Badge variant="neutral">
-                              Veille concurrentielle – EGIA
+                              Veille concurrentielle
                             </Badge>
-                            <span className="text-xs text-slate-500">{generatedAt}</span>
+                            {generatedAt && (
+                              <span className="text-xs text-slate-500">
+                                {generatedAt}
+                              </span>
+                            )}
                           </div>
                           <div className="mt-4 space-y-1">
-                            <p className="text-xl font-semibold text-slate-900">
-                              {locationLabel}
-                            </p>
-                            <p className="text-sm text-slate-500">
-                              Zone analysée : {zoneLabel} · Rayon : {radiusLabel}
-                            </p>
+                            {locationLabel && (
+                              <p className="text-xl font-semibold text-slate-900">
+                                {locationLabel}
+                              </p>
+                            )}
+                            {(zoneLabel || radiusLabel) && (
+                              <p className="text-sm text-slate-500">
+                                {[
+                                  zoneLabel ? `Zone analysée : ${zoneLabel}` : null,
+                                  radiusLabel ? `Rayon : ${radiusLabel}` : null
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </p>
+                            )}
                           </div>
                         </div>
 
@@ -1356,23 +1572,27 @@ const Reports = ({ session, locations }: ReportsProps) => {
                           <div className="mt-3 grid gap-4 md:grid-cols-2">
                             <div className="space-y-2 text-sm text-slate-600">
                               <div>
-                                Positionnement global :{" "}
                                 <span className="font-semibold text-slate-900">
-                                  {positioning}
+                                  Positionnement global : {positioning}
                                 </span>
                               </div>
-                              <div>
-                                Concurrents observés :{" "}
-                                <span className="font-semibold text-slate-900">
-                                  {stats.total ?? "—"}
-                                </span>
-                              </div>
-                              <div className="text-xs text-slate-500">
-                                {executiveSummary}
-                              </div>
+                              {typeof stats.total === "number" && (
+                                <div>
+                                  Concurrents observés :{" "}
+                                  <span className="font-semibold text-slate-900">
+                                    {stats.total}
+                                  </span>
+                                </div>
+                              )}
+                              {executiveSummary && (
+                                <div className="text-xs text-slate-500">
+                                  {executiveSummary}
+                                </div>
+                              )}
                             </div>
-                            <div className="grid gap-3 text-xs text-slate-600">
-                              <div>
+                            {(risks.length > 0 || opportunities.length > 0) && (
+                              <div className="grid gap-3 text-xs text-slate-600">
+                              {risks.length > 0 && <div>
                                 <div className="font-semibold text-slate-700">
                                   Top 3 risques
                                 </div>
@@ -1381,8 +1601,8 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                     <li key={item}>{item}</li>
                                   ))}
                                 </ul>
-                              </div>
-                              <div>
+                              </div>}
+                              {opportunities.length > 0 && <div>
                                 <div className="font-semibold text-slate-700">
                                   Top 3 opportunités
                                 </div>
@@ -1391,24 +1611,18 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                     <li key={item}>{item}</li>
                                   ))}
                                 </ul>
-                              </div>
+                              </div>}
                             </div>
+                            )}
                           </div>
                         </div>
 
+                        {topCompetitors.length > 0 && (
                         <div className="rounded-2xl border border-slate-200 bg-white p-6">
                           <div className="text-sm font-semibold text-slate-900">
                             Podium concurrentiel
                           </div>
                           <div className="mt-4 grid gap-4 md:grid-cols-3">
-                            <div className="rounded-xl border border-slate-200 p-4 text-xs text-slate-600">
-                              <div className="font-semibold text-slate-900">Vous</div>
-                              <div className="mt-2 space-y-1">
-                                <div>Note : —</div>
-                                <div>Avis : —</div>
-                                <div>Distance : —</div>
-                              </div>
-                            </div>
                             {topCompetitors.slice(0, 2).map((item, index) => (
                               <div
                                 key={`${item.name ?? "competitor"}-${index}`}
@@ -1418,47 +1632,62 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                   {item.name ?? "Concurrent"}
                                 </div>
                                 <div className="mt-2 space-y-1">
-                                  <div>Note : {item.rating ?? "n.c."}</div>
-                                  <div>Avis : {item.reviews ?? "n.c."}</div>
-                                  <div>Distance : {formatDistance(item.distance_m)}</div>
+                                  {typeof item.rating === "number" && (
+                                    <div>Note : {item.rating}</div>
+                                  )}
+                                  {typeof item.reviews === "number" && (
+                                    <div>Avis : {item.reviews}</div>
+                                  )}
+                                  {formatDistance(item.distance_m) && (
+                                    <div>Distance : {formatDistance(item.distance_m)}</div>
+                                  )}
                                 </div>
                               </div>
                             ))}
                           </div>
                         </div>
+                        )}
 
+                        {(typeof stats.closest_m === "number" ||
+                          typeof stats.best_rating === "number" ||
+                          typeof stats.high_risk_count === "number") && (
                         <div className="rounded-2xl border border-slate-200 bg-white p-6">
                           <div className="text-sm font-semibold text-slate-900">
                             Analyse radar
                           </div>
                           <div className="mt-3 grid gap-3 text-xs text-slate-600 md:grid-cols-2">
-                            <div>
-                              % mieux notés que vous :{" "}
-                              <span className="font-semibold text-slate-900">Non disponible</span>
-                            </div>
-                            <div>
+                            {typeof stats.closest_m === "number" && (
+                              <div>
                               Concurrent le plus proche :{" "}
                               <span className="font-semibold text-slate-900">
                                 {formatDistance(stats.closest_m)}
                               </span>
                             </div>
-                            <div>
+                            )}
+                            {typeof stats.best_rating === "number" && (
+                              <div>
                               Meilleure note du marché :{" "}
                               <span className="font-semibold text-slate-900">
-                                {typeof stats.best_rating === "number"
-                                  ? stats.best_rating.toFixed(1)
-                                  : "n.c."}
+                                {stats.best_rating.toFixed(1)}
                               </span>
                             </div>
-                            <div className="text-xs text-slate-500">
+                            )}
+                            {typeof stats.high_risk_count === "number" &&
+                              stats.high_risk_count > 0 && (
+                              <div className="text-xs text-slate-500">
                               {typeof stats.high_risk_count === "number" &&
                               stats.high_risk_count > 0
                                 ? "Pression concurrentielle élevée à proximité."
                                 : "Marché concurrentiel maîtrisable avec des actions ciblées."}
                             </div>
+                            )}
                           </div>
                         </div>
+                        )}
 
+                        {(["forces", "weaknesses", "opportunities", "threats"] as const).some(
+                          (key) => swot[key]?.[0]
+                        ) && (
                         <div className="grid gap-4 md:grid-cols-2">
                           {([
                             ["forces", "Force"],
@@ -1466,6 +1695,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                             ["opportunities", "Opportunité"],
                             ["threats", "Menace"]
                           ] as const).map(([key, label]) => (
+                            swot[key]?.[0] ? (
                             <div
                               key={key}
                               className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-600"
@@ -1474,7 +1704,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                 {label}
                               </div>
                               <div className="mt-2 text-sm text-slate-600">
-                                {swot[key]?.[0] ?? "Donnée non disponible."}
+                                {swot[key]?.[0]}
                               </div>
                               <div className="mt-2 text-[11px] text-slate-500">
                                 Prochaine action :{" "}
@@ -1488,9 +1718,12 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                   "mettre en place un suivi hebdomadaire dédié."}
                               </div>
                             </div>
+                            ) : null
                           ))}
                         </div>
+                        )}
 
+                        {actions.length > 0 && (
                         <div className="rounded-2xl border border-slate-200 bg-white p-6">
                           <div className="text-sm font-semibold text-slate-900">
                             Actions recommandées
@@ -1505,32 +1738,29 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                   <div className="font-semibold text-slate-700">
                                     Action : {item}
                                   </div>
-                                  <div className="mt-1">{actionWhy}</div>
+                                  {actionWhy && <div className="mt-1">{actionWhy}</div>}
                                   <div className="mt-1 text-[11px] text-slate-500">
                                     {actionImpact}
                                   </div>
                                 </div>
                               ))
-                            ) : (
-                              <div className="text-sm text-slate-500">
-                                Actions en attente de données supplémentaires.
-                              </div>
-                            )}
+                            ) : null}
                           </div>
                         </div>
+                        )}
                       </div>
                     );
                   })()}
                 </div>
               );
             })
-          ) : (
-            <p className="text-sm text-slate-500">
-              Aucun benchmark concurrentiel pour le moment.
-            </p>
-          )}
+          ) : null}
         </CardContent>
       </Card>
+      )}
+      <p className="pb-2 text-center text-[11px] font-medium text-slate-400">
+        Powered by EGIA
+      </p>
     </div>
   );
 };

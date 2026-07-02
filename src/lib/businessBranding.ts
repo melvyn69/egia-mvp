@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 type BrandingInfo = {
   logoUrl: string | null;
   companyName: string | null;
+  legalName: string | null;
   logoPath: string | null;
   businessId: string | null;
 };
@@ -15,17 +16,20 @@ const pickInitials = (value: string | null) => {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 };
 
-const getBusinessId = async (userId: string) => {
+const getBusinessBrandSeed = async (userId: string) => {
   if (!supabase) return null;
   const { data, error } = await supabase
     .from("business_settings")
-    .select("business_id")
+    .select("business_id, business_name")
     .eq("user_id", userId)
     .maybeSingle();
   if (error || !data?.business_id) {
     return null;
   }
-  return data.business_id as string;
+  return {
+    businessId: data.business_id as string,
+    businessName: (data.business_name as string | null | undefined) ?? null
+  };
 };
 
 const getSignedLogoUrl = async (path: string | null) => {
@@ -42,12 +46,25 @@ const getSignedLogoUrl = async (path: string | null) => {
 
 const getActiveLegalEntityLogo = async (userId: string): Promise<BrandingInfo> => {
   if (!supabase) {
-    return { logoUrl: null, companyName: null, logoPath: null, businessId: null };
+    return {
+      logoUrl: null,
+      companyName: null,
+      legalName: null,
+      logoPath: null,
+      businessId: null
+    };
   }
-  const businessId = await getBusinessId(userId);
-  if (!businessId) {
-    return { logoUrl: null, companyName: null, logoPath: null, businessId: null };
+  const businessSeed = await getBusinessBrandSeed(userId);
+  if (!businessSeed?.businessId) {
+    return {
+      logoUrl: null,
+      companyName: null,
+      legalName: null,
+      logoPath: null,
+      businessId: null
+    };
   }
+  const { businessId, businessName } = businessSeed;
 
   // NOTE: "legal_entities" not yet in generated Supabase types. Cast to a loose client until types are regenerated.
   const sb = supabase as unknown as {
@@ -69,25 +86,38 @@ const getActiveLegalEntityLogo = async (userId: string): Promise<BrandingInfo> =
   };
   const { data: entities, error } = await sb
     .from("legal_entities")
-    .select("id, company_name, logo_path, logo_url, is_default, created_at")
+    .select("id, company_name, legal_name, logo_path, logo_url, is_default, created_at")
     .eq("business_id", businessId)
     .order("is_default", { ascending: false })
     .order("created_at", { ascending: false });
   if (error) {
     console.warn("[branding] legal_entities load failed", error);
-    return { logoUrl: null, companyName: null, logoPath: null, businessId };
+    return {
+      logoUrl: null,
+      companyName: businessName,
+      legalName: null,
+      logoPath: null,
+      businessId
+    };
   }
 
   const entitiesArr = Array.isArray(entities) ? entities : [];
   const entity = entitiesArr[0] as
     | {
         company_name?: string | null;
+        legal_name?: string | null;
         logo_path?: string | null;
         logo_url?: string | null;
       }
     | undefined;
   if (!entity) {
-    return { logoUrl: null, companyName: null, logoPath: null, businessId };
+    return {
+      logoUrl: null,
+      companyName: businessName,
+      legalName: null,
+      logoPath: null,
+      businessId
+    };
   }
 
   const logoUrl =
@@ -95,7 +125,8 @@ const getActiveLegalEntityLogo = async (userId: string): Promise<BrandingInfo> =
 
   return {
     logoUrl,
-    companyName: entity.company_name ?? null,
+    companyName: entity.company_name ?? businessName,
+    legalName: entity.legal_name ?? null,
     logoPath: entity.logo_path ?? null,
     businessId
   };
