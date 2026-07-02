@@ -219,46 +219,6 @@ const getNumericReportMetric = (report: ReportRow, keys: string[]) => {
   return null;
 };
 
-const getReportTextSignal = (report: ReportRow, keys: string[]) => {
-  const source = report as unknown as Record<string, unknown>;
-  for (const key of keys) {
-    const value = source[key];
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-    if (Array.isArray(value)) {
-      const first = value.find(
-        (item) => typeof item === "string" && item.trim()
-      );
-      if (typeof first === "string") return first.trim();
-      const firstObject = value.find(
-        (item) => item && typeof item === "object"
-      ) as Record<string, unknown> | undefined;
-      const objectText =
-        firstObject &&
-        ["label", "name", "title", "summary", "recommendation", "action"]
-          .map((field) => firstObject[field])
-          .find((item) => typeof item === "string" && item.trim());
-      if (typeof objectText === "string") return objectText.trim();
-    }
-    if (value && typeof value === "object") {
-      const record = value as Record<string, unknown>;
-      const objectText = [
-        "label",
-        "name",
-        "title",
-        "summary",
-        "recommendation",
-        "action"
-      ]
-        .map((field) => record[field])
-        .find((item) => typeof item === "string" && item.trim());
-      if (typeof objectText === "string") return objectText.trim();
-    }
-  }
-  return null;
-};
-
 const formatFileSize = (value: number | string | null | undefined) => {
   if (typeof value === "string" && value.trim()) return value;
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
@@ -336,67 +296,53 @@ const getReportThemes = (report: ReportRow) => {
     .slice(0, 3);
 };
 
-const getReportExecutiveInsight = (report: ReportRow) => {
-  const existing = getReportTextSignal(report, [
-    "executive_summary",
-    "executiveSummary",
-    "ai_summary",
-    "aiSummary",
-    "summary",
-    "ai_insight",
-    "insight",
-    "conclusion"
-  ]);
-  if (existing) return existing;
-
-  const healthScore = getNumericReportMetric(report, [
-    "business_health_score",
-    "businessHealthScore",
-    "health_score",
-    "score"
-  ]);
-  if (healthScore !== null && healthScore >= 80) {
-    return `Business Health Score : ${Math.round(healthScore)}/100.`;
-  }
-
+const getReportBriefSignal = (report: ReportRow, establishmentCount: number) => {
   const rating = getNumericReportMetric(report, [
     "average_rating",
     "avg_rating",
     "rating",
     "note"
   ]);
-  if (rating !== null && rating >= 4.5) {
-    return `Note moyenne : ${rating.toFixed(1)}/5.`;
-  }
-
   const reviews = getNumericReportMetric(report, [
     "reviews_count",
     "review_count",
     "reviews",
     "avis"
   ]);
-  if (reviews !== null) {
-    return `${Math.round(reviews)} avis analysés.`;
+  if (reviews !== null && establishmentCount > 0) {
+    return `${Math.round(reviews)} avis analysé${reviews > 1 ? "s" : ""} sur ${establishmentCount} établissement${establishmentCount > 1 ? "s" : ""}.`;
+  }
+
+  const criticalAlerts = getNumericReportMetric(report, [
+    "critical_count",
+    "critical_reviews",
+    "criticalReviews",
+    "ai_critical_count",
+    "avis_critiques"
+  ]);
+  if (criticalAlerts === 0) {
+    return "Aucune alerte critique détectée.";
+  }
+
+  if (rating !== null && rating >= 4.5) {
+    return "La satisfaction client reste excellente.";
+  }
+
+  const negativeReviews = getNumericReportMetric(report, [
+    "negative_count",
+    "negative_reviews",
+    "negativeReviews",
+    "avis_negatifs"
+  ]);
+  if (negativeReviews === 0) {
+    return "Aucun avis négatif détecté.";
+  }
+
+  if (establishmentCount > 0) {
+    return `Rapport généré pour ${establishmentCount} établissement${establishmentCount > 1 ? "s" : ""}.`;
   }
 
   return null;
-};
-
-const getReportFocusSignal = (report: ReportRow) => {
-  const existing = getReportTextSignal(report, [
-    "next_best_action",
-    "nextBestAction",
-    "priority",
-    "priorite",
-    "priority_action",
-    "recommended_action",
-    "recommendation",
-    "ai_recommendation",
-    "main_opportunity",
-    "focus_area"
-  ]);
-  if (existing) return existing;
-  return getReportThemes(report)[0] ?? null;
 };
 
 const getReportLocationNames = (
@@ -566,17 +512,15 @@ const ReportReadyModal = ({
   onDownload: () => void;
 }) => {
   const canAccessPdf = Boolean(state.pdfUrl || state.storagePath);
-  const healthScore = getReportHealthScoreState(state.report);
   const periodLabel = formatReportPeriod(state.report);
-  const executiveInsight = getReportExecutiveInsight(state.report);
-  const focusSignal = getReportFocusSignal(state.report);
   const establishmentCount = locationNames.length || state.report.locations.length;
+  const briefSignal = getReportBriefSignal(state.report, establishmentCount);
   const rawRating = getReportMetric(state.report, [
-      "average_rating",
-      "avg_rating",
-      "rating",
-      "note"
-    ]);
+    "average_rating",
+    "avg_rating",
+    "rating",
+    "note"
+  ]);
   const rating = formatOptionalMetric(rawRating, "/5");
   const ratingStars = formatRatingStars(rawRating);
   const reviews = formatOptionalMetric(
@@ -595,63 +539,32 @@ const ReportReadyModal = ({
       "responses_rate"
     ])
   );
-  const negativeReviews = formatOptionalMetric(
-    getReportMetric(state.report, [
-      "negative_count",
-      "negative_reviews",
-      "negativeReviews",
-      "avis_negatifs"
-    ])
-  );
   const kpiCards: Array<{
     label: string;
     value: ReactNode;
     detail?: ReactNode;
-    highlight?: boolean;
   }> = [
-    ...(healthScore.value
-      ? [
-          {
-            label: "Business Health Score",
-            value: healthScore.value,
-            highlight: true
-          }
-        ]
-      : []),
-    ...(reviews ? [{ label: "Avis analysés", value: reviews }] : []),
     ...(rating
       ? [{ label: "Note moyenne", value: rating, detail: ratingStars }]
       : []),
-    ...(negativeReviews
-      ? [{ label: "Avis négatifs", value: negativeReviews }]
-      : []),
-    ...(responseRate ? [{ label: "Taux de réponse", value: responseRate }] : []),
+    ...(reviews ? [{ label: "Avis analysés", value: reviews }] : []),
+    ...(responseRate ? [{ label: "Réponses", value: responseRate }] : []),
     ...(establishmentCount > 0
       ? [
           {
-            label: "Établissements concernés",
+            label: "Établissements",
             value: establishmentCount
           }
         ]
       : [])
   ];
-  const hasAvailablePerformanceKpi = Boolean(
-    healthScore.value || reviews || rating || negativeReviews || responseRate
-  );
-  const showCompactGeneratedSummary =
-    healthScore.pending && establishmentCount > 0 && !hasAvailablePerformanceKpi;
-  const executiveSummaryLines = showCompactGeneratedSummary
-    ? [
-        `Rapport généré pour ${establishmentCount} établissement${establishmentCount > 1 ? "s" : ""}.`,
-        HEALTH_SCORE_PENDING_NOTICE
-      ]
-    : [
-        executiveInsight,
-        !executiveInsight && establishmentCount > 0
-          ? `Rapport généré pour ${establishmentCount} établissement${establishmentCount > 1 ? "s" : ""}.`
-          : null,
-        focusSignal ? `Priorité identifiée : ${focusSignal}` : null
-      ].filter((item): item is string => Boolean(item));
+  const reportContents = [
+    "Executive Summary",
+    "Performance",
+    "Réputation",
+    "Plan d'action",
+    "Benchmark"
+  ];
   const brandName = branding.companyName ?? state.report.name;
 
   return (
@@ -661,7 +574,7 @@ const ReportReadyModal = ({
       aria-modal="true"
       aria-labelledby="report-ready-title"
     >
-      <div className="report-ready-modal relative max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-[24px] border border-white/80 bg-white shadow-[0_34px_110px_rgba(2,6,23,0.32)]">
+      <div className="report-ready-modal relative max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-[24px] border border-white/80 bg-white shadow-[0_34px_110px_rgba(2,6,23,0.32)]">
         <button
           type="button"
           className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-500 shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition hover:bg-slate-100 hover:text-slate-900"
@@ -671,95 +584,93 @@ const ReportReadyModal = ({
           <X className="h-4 w-4" />
         </button>
 
-        <div className="border-b border-slate-100 bg-[#f8fafc] px-5 pb-8 pt-7 md:px-10 md:pb-11 md:pt-9">
-          <div className="flex flex-wrap items-center gap-3 pr-10 text-sm text-slate-500">
-            {branding.logoUrl && (
-              <img
-                src={branding.logoUrl}
-                alt={brandName}
-                className="h-10 w-10 rounded-[18px] border border-white bg-white object-cover shadow-[0_12px_28px_rgba(15,23,42,0.08)]"
-              />
-            )}
-            <span className="font-semibold text-slate-950">{brandName}</span>
-            {branding.legalName && (
-              <>
-                <span className="h-1 w-1 rounded-full bg-slate-300" />
-                <span className="font-medium">{branding.legalName}</span>
-              </>
-            )}
+        <div className="p-5 md:p-7">
+          <div className="flex flex-col gap-4 pr-10 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              {branding.logoUrl && (
+                <img
+                  src={branding.logoUrl}
+                  alt={brandName}
+                  className="h-11 w-11 rounded-[18px] border border-slate-200 bg-white object-cover shadow-[0_12px_28px_rgba(15,23,42,0.08)]"
+                />
+              )}
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-950">
+                  {brandName}
+                </p>
+                {branding.legalName && (
+                  <p className="mt-0.5 truncate text-xs font-medium text-slate-500">
+                    {branding.legalName}
+                  </p>
+                )}
+              </div>
+            </div>
             {periodLabel && (
-              <>
-                <span className="h-1 w-1 rounded-full bg-slate-300" />
-                <span>{periodLabel}</span>
-              </>
+              <span className="w-fit rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600">
+                {periodLabel}
+              </span>
             )}
           </div>
 
-          <div className="mt-8 max-w-4xl">
-            <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-semibold text-blue-700 shadow-[0_10px_24px_rgba(37,99,235,0.10)]">
+          <div className="mt-6 rounded-[28px] bg-[#020617] p-6 text-white shadow-[0_24px_70px_rgba(2,6,23,0.20)] md:p-8">
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.08] px-3 py-1 text-xs font-semibold text-blue-100">
               <CheckCircle2 className="h-3.5 w-3.5" />
               Rapport généré
-            </div>
+            </span>
             <h3
               id="report-ready-title"
-              className="mt-5 text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl"
+              className="mt-5 max-w-3xl text-4xl font-semibold tracking-tight text-white md:text-6xl"
             >
-              Votre rapport est prêt.
+              Votre rapport stratégique est prêt.
             </h3>
-            {executiveSummaryLines.length > 0 && (
-              <div className="mt-5 max-w-3xl rounded-[24px] border border-white bg-white/80 px-5 py-4 shadow-[0_16px_42px_rgba(15,23,42,0.05)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-700">
-                  Résumé exécutif
-                </p>
-                <div className="mt-3 space-y-2">
-                  {executiveSummaryLines.map((line) => (
-                    <p
-                      key={line}
-                      className="text-lg font-semibold leading-7 text-slate-950 md:text-xl md:leading-8"
-                    >
-                      {line}
-                    </p>
-                  ))}
-                </div>
+            <p className="mt-4 text-lg font-medium leading-7 text-slate-300">
+              L'analyse de votre réputation est terminée.
+            </p>
+            {briefSignal && (
+              <p className="mt-5 max-w-2xl text-xl font-semibold leading-8 text-white md:text-2xl md:leading-9">
+                {briefSignal}
+              </p>
+            )}
+          </div>
+
+          <div
+            className={cn(
+              "mt-5 grid gap-5",
+              kpiCards.length > 0 && "lg:grid-cols-[minmax(0,1fr)_300px]"
+            )}
+          >
+            {kpiCards.length > 0 && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {kpiCards.map((card) => (
+                  <ReportReadyKpiCard
+                    key={card.label}
+                    label={card.label}
+                    value={card.value}
+                    detail={card.detail}
+                  />
+                ))}
               </div>
             )}
-            <p className="mt-4 truncate text-sm font-medium text-slate-500">
-              {state.report.name}
-            </p>
+
+            <div className="rounded-[24px] border border-slate-200/80 bg-slate-50 p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                Ce que contient votre rapport
+              </p>
+              <div className="mt-4 grid gap-2">
+                {reportContents.map((item) => (
+                  <div
+                    key={item}
+                    className="flex items-center gap-3 rounded-[18px] bg-white px-3 py-2.5 text-sm font-semibold text-slate-800 shadow-[0_10px_24px_rgba(15,23,42,0.035)]"
+                  >
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-blue-600" />
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
 
-        <div className="space-y-5 p-5 md:p-8">
-          {!showCompactGeneratedSummary && kpiCards.length > 0 ? (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              {kpiCards.map((card) => (
-                <ReportReadyKpiCard
-                  key={card.label}
-                  label={card.label}
-                  value={card.value}
-                  detail={card.detail}
-                  highlight={card.highlight}
-                />
-              ))}
-            </div>
-          ) : null}
-
-          {healthScore.pending && !showCompactGeneratedSummary && (
-            <div className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-500">
-              {HEALTH_SCORE_PENDING_NOTICE}
-            </div>
-          )}
-
-          {focusSignal && (
-            <div className="rounded-[24px] border border-blue-100 bg-blue-50 px-5 py-4 text-sm leading-6 text-slate-900">
-              <span className="font-semibold text-blue-700">
-                L'IA recommande de concentrer vos efforts sur
-              </span>{" "}
-              {focusSignal}
-            </div>
-          )}
-
-          <div className="flex flex-col gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-end">
+          <div className="mt-5 flex flex-col gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-end">
             <Button
               size="lg"
               className="w-full bg-blue-600 px-7 shadow-[0_18px_38px_rgba(37,99,235,0.24)] hover:bg-blue-700 sm:w-auto"
@@ -777,7 +688,7 @@ const ReportReadyModal = ({
               onClick={onDownload}
             >
               <Download className="h-4 w-4" />
-              Télécharger
+              Télécharger PDF
             </Button>
             <Button
               variant="ghost"
@@ -1700,14 +1611,6 @@ const Reports = ({ session, locations }: ReportsProps) => {
       </Card>
 
       <Card className="overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
-        <CardHeader className="p-5 pb-0 md:p-6 md:pb-0">
-          <div>
-            <CardTitle>Benchmark concurrentiel</CardTitle>
-            <p className="mt-1 text-sm text-slate-500">
-              Comparez votre réputation aux acteurs suivis.
-            </p>
-          </div>
-        </CardHeader>
         <CardContent className="p-5 md:p-6">
           {benchmarkQuery.isLoading ? (
             <div className="grid gap-4 lg:grid-cols-2">
@@ -1716,162 +1619,98 @@ const Reports = ({ session, locations }: ReportsProps) => {
             </div>
           ) : benchmarkQuery.data && benchmarkQuery.data.length > 0 ? (
             (() => {
+              type BenchmarkPayload = {
+                stats?: Record<string, number | null>;
+                swot?: Record<string, string[]>;
+                plan_14_days?: string[];
+                top_competitors?: Array<{
+                  name?: string;
+                  rating?: number | null;
+                  reviews?: number | null;
+                  distance_m?: number | null;
+                  gap?: string | number | null;
+                  gap_to_leader?: string | number | null;
+                  leader_gap?: string | number | null;
+                  rating_gap?: string | number | null;
+                }>;
+                radius_km?: number | null;
+              };
+              const readPayload = (report: GeneratedReportRow) =>
+                report.payload as BenchmarkPayload | null;
               const latestBenchmark = benchmarkQuery.data[0];
-              const latestPayload = latestBenchmark.payload as
-                | {
-                    stats?: Record<string, number | null>;
-                    radius_km?: number | null;
-                    position?: string | number | null;
-                    current_position?: string | number | null;
-                    gap_to_leader?: string | number | null;
-                    leader_gap?: string | number | null;
-                  }
-                | null;
-              const latestStats = latestPayload?.stats ?? {};
-              const positionValue =
-                latestPayload?.current_position ?? latestPayload?.position ?? null;
-              const gapValue =
-                latestPayload?.gap_to_leader ?? latestPayload?.leader_gap ?? null;
+              const activeBenchmark =
+                benchmarkQuery.data.find((report) => report.id === selectedBenchmarkId) ??
+                latestBenchmark;
+              const activePayload = readPayload(activeBenchmark);
+              const activeStats = activePayload?.stats ?? {};
+              const radiusLabel =
+                typeof activePayload?.radius_km === "number"
+                  ? `${activePayload.radius_km} km`
+                  : null;
+              const medianRating =
+                typeof activeStats.median_rating === "number"
+                  ? `${activeStats.median_rating.toFixed(1)}/5`
+                  : null;
+              const totalCompetitors =
+                typeof activeStats.total === "number"
+                  ? String(activeStats.total)
+                  : null;
+              const marketPhrase =
+                totalCompetitors && radiusLabel && medianRating
+                  ? `${totalCompetitors} concurrents analysés dans un rayon de ${radiusLabel}, avec une note médiane de ${medianRating}.`
+                  : totalCompetitors && radiusLabel
+                    ? `${totalCompetitors} concurrents analysés dans un rayon de ${radiusLabel}.`
+                    : totalCompetitors
+                      ? `${totalCompetitors} concurrents analysés.`
+                      : activeBenchmark.summary?.trim() || null;
               const benchmarkHeroMetrics = [
-                ...(typeof latestStats.total === "number"
-                  ? [{ label: "Concurrents", value: String(latestStats.total) }]
+                ...(totalCompetitors
+                  ? [{ label: "Concurrents analysés", value: totalCompetitors }]
                   : []),
-                ...(positionValue !== null && positionValue !== undefined
-                  ? [{ label: "Position actuelle", value: String(positionValue) }]
+                ...(medianRating
+                  ? [{ label: "Note médiane", value: medianRating }]
                   : []),
-                ...(gapValue !== null && gapValue !== undefined
-                  ? [{ label: "Écart leader", value: String(gapValue) }]
-                  : []),
-                ...(typeof latestPayload?.radius_km === "number"
-                  ? [{ label: "Rayon analysé", value: `${latestPayload.radius_km} km` }]
+                ...(radiusLabel
+                  ? [{ label: "Rayon étudié", value: radiusLabel }]
                   : [])
               ];
+              const competitors = (activePayload?.top_competitors ?? [])
+                .filter((item) => item.name?.trim())
+                .slice(0, 5);
+              const bestRating =
+                typeof activeStats.best_rating === "number"
+                  ? `${activeStats.best_rating.toFixed(1)}/5`
+                  : null;
+              const opportunities =
+                activePayload?.swot?.opportunities?.slice(0, 2) ?? [];
 
               return (
-            <div className="space-y-4">
-              <div className="rounded-[24px] border border-[#020617] bg-[#020617] p-5 text-white shadow-[0_24px_70px_rgba(2,6,23,0.18)] md:p-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-200">
-                      Benchmark concurrentiel
-                    </p>
-                    <h3 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">
-                      Lecture du marché local
-                    </h3>
-                  </div>
-                  {formatDateLabel(latestBenchmark.created_at ?? null) && (
-                    <p className="text-sm font-medium text-slate-300">
-                      {formatDateLabel(latestBenchmark.created_at ?? null)}
-                    </p>
-                  )}
-                </div>
-                {benchmarkHeroMetrics.length > 0 && (
-                  <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {benchmarkHeroMetrics.map((metric) => (
-                      <div
-                        key={metric.label}
-                        className="rounded-[20px] border border-white/10 bg-white/[0.08] px-4 py-3"
-                      >
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">
-                          {metric.label}
+                <div className="space-y-5">
+                  <div className="rounded-[28px] bg-[#020617] p-5 text-white shadow-[0_24px_70px_rgba(2,6,23,0.18)] md:p-7">
+                    <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                      <div className="max-w-3xl">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-200">
+                          Benchmark concurrentiel
                         </p>
-                        <p className="mt-2 text-2xl font-semibold leading-none">
-                          {metric.value}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-2">
-              {benchmarkQuery.data.map((report) => {
-                const payload = report.payload as
-                  | {
-                      stats?: Record<string, number | null>;
-                      swot?: Record<string, string[]>;
-                      plan_14_days?: string[];
-                      top_competitors?: Array<{
-                        name?: string;
-                        rating?: number | null;
-                        reviews?: number | null;
-                        distance_m?: number | null;
-                      }>;
-                      radius_km?: number | null;
-                    }
-                  | null;
-                const stats = payload?.stats ?? {};
-                const swot = payload?.swot ?? {};
-                const plan = payload?.plan_14_days ?? [];
-                const topCompetitors = payload?.top_competitors ?? [];
-                const opportunities = swot.opportunities?.slice(0, 3) ?? [];
-                const bestCompetitor = topCompetitors.find((item) =>
-                  item.name?.trim()
-                );
-                const isOpen = selectedBenchmarkId === report.id;
-                const generatedAt = formatDateLabel(report.created_at ?? null);
-                const total =
-                  typeof stats.total === "number"
-                    ? String(stats.total)
-                    : null;
-                const medianRating =
-                  typeof stats.median_rating === "number"
-                    ? `${stats.median_rating.toFixed(1)}/5`
-                    : null;
-                const locationLabel =
-                  locations.find((location) => location.id === report.location_id)
-                    ?.location_title ?? null;
-                const zoneLabel =
-                  report.title || (report as { name?: string | null }).name || null;
-                const radiusLabel =
-                  typeof payload?.radius_km === "number"
-                    ? `${payload.radius_km} km`
-                    : null;
-                const actions = plan.length > 0 ? plan.slice(0, 3) : [];
-
-                return (
-                  <article
-                    key={report.id}
-                    className={cn(
-                      "rounded-[24px] border border-slate-200/80 bg-white p-5 shadow-[0_18px_48px_rgba(15,23,42,0.045)] transition hover:-translate-y-0.5 hover:border-blue-100 hover:shadow-[0_24px_64px_rgba(15,23,42,0.07)] md:p-6",
-                      isOpen && "lg:col-span-2"
-                    )}
-                  >
-                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">
-                          <TrendingUp className="h-4 w-4" />
-                          Veille concurrentielle
-                        </div>
-                        <h4 className="mt-2 truncate text-lg font-semibold text-slate-950">
-                          {report.title ?? "Benchmark concurrentiel"}
-                        </h4>
-                        {(locationLabel || zoneLabel || radiusLabel) && (
-                          <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-500">
-                            {[
-                              locationLabel,
-                              zoneLabel ? `Zone : ${zoneLabel}` : null,
-                              radiusLabel ? `Rayon : ${radiusLabel}` : null
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")}
+                        <h3 className="mt-2 text-3xl font-semibold tracking-tight md:text-5xl">
+                          Lecture du marché local
+                        </h3>
+                        {marketPhrase && (
+                          <p className="mt-4 max-w-2xl text-base font-medium leading-7 text-slate-300">
+                            {marketPhrase}
                           </p>
                         )}
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
+                        {formatDateLabel(activeBenchmark.created_at ?? null) && (
+                          <span className="rounded-full border border-white/10 bg-white/[0.08] px-3 py-1.5 text-xs font-semibold text-slate-200">
+                            {formatDateLabel(activeBenchmark.created_at ?? null)}
+                          </span>
+                        )}
                         <Button
+                          variant="secondary"
                           size="sm"
-                          onClick={() =>
-                            setSelectedBenchmarkId(isOpen ? null : report.id)
-                          }
-                        >
-                          <Eye className="h-4 w-4" />
-                          {isOpen ? "Fermer" : "Voir"}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDownloadBenchmark(report.id)}
+                          onClick={() => handleDownloadBenchmark(activeBenchmark.id)}
                         >
                           <Download className="h-4 w-4" />
                           Télécharger
@@ -1879,164 +1718,217 @@ const Reports = ({ session, locations }: ReportsProps) => {
                       </div>
                     </div>
 
-                    <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      {generatedAt && (
-                        <ReportDataPoint
-                          label="Date"
-                          value={<span className="text-base">{generatedAt}</span>}
-                        />
-                      )}
-                      {total && <ReportDataPoint label="Total" value={total} />}
-                      {medianRating && (
-                        <ReportDataPoint label="Note médiane" value={medianRating} />
-                      )}
-                      {bestCompetitor?.name && (
-                        <ReportDataPoint
-                          label="Meilleur concurrent"
-                          value={
-                            <span className="line-clamp-1 text-base">
-                              {bestCompetitor.name}
-                            </span>
-                          }
-                          detail={[
-                            typeof bestCompetitor.rating === "number"
-                              ? `${bestCompetitor.rating.toFixed(1)}/5`
-                              : null,
-                            typeof bestCompetitor.reviews === "number"
-                              ? `${bestCompetitor.reviews} avis`
-                              : null
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        />
-                      )}
-                    </div>
-
-                    {isOpen && (
-                      <div className="mt-6 space-y-4">
-                        {report.summary && (
-                          <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-5">
-                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">
-                              Résumé IA
+                    {benchmarkHeroMetrics.length > 0 && (
+                      <div className="mt-6 grid gap-3 md:grid-cols-3">
+                        {benchmarkHeroMetrics.map((metric) => (
+                          <div
+                            key={metric.label}
+                            className="rounded-[22px] border border-white/10 bg-white/[0.08] px-4 py-4"
+                          >
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">
+                              {metric.label}
                             </p>
-                            <p className="mt-2 text-sm leading-6 text-slate-700">
-                              {report.summary}
+                            <p className="mt-3 text-3xl font-semibold leading-none">
+                              {metric.value}
                             </p>
                           </div>
-                        )}
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
-                        {topCompetitors.length > 0 && (
-                          <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                              Classement
-                            </p>
-                            <div className="mt-4 grid gap-3 md:grid-cols-3">
-                              {topCompetitors.slice(0, 3).map((item, index) => (
-                                <div
-                                  key={`${item.name ?? "competitor"}-${index}`}
-                                  className="rounded-[20px] border border-slate-200/70 bg-slate-50/70 p-4 text-xs text-slate-600 shadow-[0_12px_30px_rgba(15,23,42,0.035)]"
+                  {(competitors.length > 0 || bestRating || opportunities.length > 0) && (
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+                      {competitors.length > 0 && (
+                        <div>
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">
+                                Classement
+                              </p>
+                              <h4 className="mt-1 text-xl font-semibold text-slate-950">
+                                Concurrents suivis
+                              </h4>
+                            </div>
+                          </div>
+                          <div className="mt-4 grid gap-3 md:grid-cols-2">
+                            {competitors.map((item, index) => {
+                              const gapRaw =
+                                item.gap ??
+                                item.gap_to_leader ??
+                                item.leader_gap ??
+                                item.rating_gap ??
+                                null;
+                              const gapValue =
+                                typeof gapRaw === "number"
+                                  ? `${gapRaw > 0 ? "+" : ""}${gapRaw.toFixed(1)}`
+                                  : typeof gapRaw === "string" && gapRaw.trim()
+                                    ? gapRaw
+                                    : formatDistance(item.distance_m);
+                              const gapLabel = gapRaw !== null ? "Écart" : "Écart terrain";
+                              const badges = [
+                                index === 0 ? "Leader suivi" : `Rang ${index + 1}`,
+                                typeof item.rating === "number" ? "Note suivie" : null,
+                                typeof item.reviews === "number" ? "Volume avis" : null
+                              ].filter((badge): badge is string => Boolean(badge));
+
+                              return (
+                                <article
+                                  key={`${item.name}-${index}`}
+                                  className="rounded-[24px] border border-slate-200/70 bg-white p-5 shadow-[0_18px_48px_rgba(15,23,42,0.045)]"
                                 >
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="font-semibold text-slate-950">
-                                      {item.name ?? "Concurrent"}
+                                  <div className="flex items-start justify-between gap-4">
+                                    <div className="min-w-0">
+                                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">
+                                        Rang {index + 1}
+                                      </div>
+                                      <h5 className="mt-2 line-clamp-2 text-lg font-semibold leading-6 text-slate-950">
+                                        {item.name}
+                                      </h5>
                                     </div>
-                                    <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-slate-500">
+                                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] bg-[#020617] text-sm font-semibold text-white">
                                       #{index + 1}
-                                    </span>
+                                    </div>
                                   </div>
-                                  <div className="mt-2 space-y-1">
+
+                                  <div className="mt-5 grid grid-cols-3 gap-2">
                                     {typeof item.rating === "number" && (
-                                      <div>Note : {item.rating.toFixed(1)}/5</div>
+                                      <div className="rounded-[18px] bg-slate-50 px-3 py-3">
+                                        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+                                          Note
+                                        </p>
+                                        <p className="mt-2 text-xl font-semibold text-slate-950">
+                                          {item.rating.toFixed(1)}
+                                        </p>
+                                      </div>
                                     )}
                                     {typeof item.reviews === "number" && (
-                                      <div>Avis : {item.reviews}</div>
+                                      <div className="rounded-[18px] bg-slate-50 px-3 py-3">
+                                        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+                                          Avis
+                                        </p>
+                                        <p className="mt-2 text-xl font-semibold text-slate-950">
+                                          {item.reviews}
+                                        </p>
+                                      </div>
                                     )}
-                                    {formatDistance(item.distance_m) && (
-                                      <div>
-                                        Distance : {formatDistance(item.distance_m)}
+                                    {gapValue && (
+                                      <div className="rounded-[18px] bg-blue-50 px-3 py-3">
+                                        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-blue-600">
+                                          {gapLabel}
+                                        </p>
+                                        <p className="mt-2 text-xl font-semibold text-slate-950">
+                                          {gapValue}
+                                        </p>
                                       </div>
                                     )}
                                   </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
 
-                        {(typeof stats.closest_m === "number" ||
-                          typeof stats.best_rating === "number" ||
-                          typeof stats.high_risk_count === "number") && (
-                          <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                              Concurrents
-                            </p>
-                            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                              {typeof stats.closest_m === "number" && (
-                                <ReportDataPoint
-                                  label="Plus proche"
-                                  value={formatDistance(stats.closest_m)}
-                                />
-                              )}
-                              {typeof stats.best_rating === "number" && (
-                                <ReportDataPoint
-                                  label="Meilleure note"
-                                  value={`${stats.best_rating.toFixed(1)}/5`}
-                                />
-                              )}
-                              {typeof stats.high_risk_count === "number" && (
-                                <ReportDataPoint
-                                  label="Forte pression"
-                                  value={stats.high_risk_count}
-                                />
-                              )}
-                            </div>
+                                  {badges.length > 0 && (
+                                    <div className="mt-4 flex flex-wrap gap-2">
+                                      {badges.map((badge) => (
+                                        <span
+                                          key={badge}
+                                          className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600"
+                                        >
+                                          {badge}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </article>
+                              );
+                            })}
                           </div>
-                        )}
+                        </div>
+                      )}
 
-                        {opportunities.length > 0 && (
-                          <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                              Opportunités
-                            </p>
-                            <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      {(bestRating || opportunities.length > 0) && (
+                        <aside className="rounded-[24px] border border-slate-200/70 bg-slate-50 p-5">
+                          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                            Lecture Gartner
+                          </p>
+                          {bestRating && (
+                            <div className="mt-4 rounded-[20px] bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.035)]">
+                              <p className="text-xs font-medium text-slate-500">
+                                Meilleure note observée
+                              </p>
+                              <p className="mt-2 text-3xl font-semibold leading-none text-slate-950">
+                                {bestRating}
+                              </p>
+                            </div>
+                          )}
+                          {opportunities.length > 0 && (
+                            <div className="mt-4 space-y-2">
                               {opportunities.map((item) => (
                                 <div
                                   key={item}
-                                  className="rounded-[24px] border border-slate-200 bg-white p-4 text-sm text-slate-600"
+                                  className="rounded-[18px] border border-blue-100 bg-white px-4 py-3 text-sm font-medium leading-5 text-slate-700"
                                 >
                                   {item}
                                 </div>
                               ))}
                             </div>
-                          </div>
-                        )}
+                          )}
+                        </aside>
+                      )}
+                    </div>
+                  )}
 
-                        {actions.length > 0 && (
-                          <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-                            <div className="text-sm font-semibold text-slate-950">
-                              Actions recommandées
-                            </div>
-                            <div className="mt-4 grid gap-3">
-                              {actions.map((item) => (
-                                <div
-                                  key={item}
-                                  className="rounded-[20px] border border-slate-200/70 bg-slate-50/80 px-4 py-3 text-sm text-slate-600"
-                                >
-                                  <div className="font-semibold text-slate-950">
-                                    {item}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                  {benchmarkQuery.data.length > 1 && (
+                    <div className="rounded-[24px] border border-slate-200/70 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.035)]">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                          Timeline
+                        </p>
+                        <p className="text-xs font-medium text-slate-400">
+                          {benchmarkQuery.data.length} benchmarks
+                        </p>
                       </div>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
-            </div>
+                      <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+                        {benchmarkQuery.data.map((report) => {
+                          const date = report.created_at
+                            ? new Date(report.created_at)
+                            : null;
+                          const rawMonth = date
+                            ? date.toLocaleDateString("fr-FR", { month: "long" })
+                            : "Benchmark";
+                          const monthLabel =
+                            rawMonth.charAt(0).toUpperCase() + rawMonth.slice(1);
+                          const isActive = report.id === activeBenchmark.id;
+
+                          return (
+                            <button
+                              key={report.id}
+                              type="button"
+                              onClick={() => setSelectedBenchmarkId(report.id)}
+                              className={cn(
+                                "min-w-[118px] rounded-[18px] border px-4 py-3 text-left transition",
+                                isActive
+                                  ? "border-[#020617] bg-[#020617] text-white shadow-[0_14px_34px_rgba(2,6,23,0.16)]"
+                                  : "border-slate-200 bg-slate-50 text-slate-600 hover:border-blue-200 hover:bg-white"
+                              )}
+                            >
+                              <span className="block text-sm font-semibold">
+                                {monthLabel}
+                              </span>
+                              {date && (
+                                <span
+                                  className={cn(
+                                    "mt-1 block text-xs",
+                                    isActive ? "text-slate-300" : "text-slate-400"
+                                  )}
+                                >
+                                  {date.getFullYear()}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
               );
             })()
           ) : (
