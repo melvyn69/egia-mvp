@@ -293,17 +293,19 @@ const naturalizeEmailInsight = (item: string) => {
   return trimmed;
 };
 
-const BUSINESS_HEALTH_SCORE_PENDING = "Calcul en cours";
-const BUSINESS_HEALTH_SCORE_PENDING_DETAIL =
-  "Le score sera disponible dès que suffisamment d'historique aura été analysé.";
+const HEALTH_SCORE_PENDING_NOTICE =
+  "Score santé en cours de calcul — disponible après plus d'historique.";
 
-const renderEmailKpiCard = (card: {
-  label: string;
-  value: string;
-  detail?: string | null;
-  featured?: boolean;
-}) => `
-  <td class="kpi-cell" style="padding:7px;width:50%;vertical-align:top;">
+const renderEmailKpiCard = (
+  card: {
+    label: string;
+    value: string;
+    detail?: string | null;
+    featured?: boolean;
+  },
+  fullWidth = false
+) => `
+  <td class="kpi-cell" style="padding:7px;width:${fullWidth ? "100%" : "50%"};vertical-align:top;"${fullWidth ? ' colspan="2"' : ""}>
     <div class="${card.featured ? "kpi-card kpi-featured" : "kpi-card"}" style="border:1px solid ${
       card.featured ? "#020617" : "rgba(15,23,42,0.08)"
     };border-radius:24px;background:${card.featured ? "#020617" : "#ffffff"};padding:19px 19px 18px;box-shadow:0 16px 34px rgba(15,23,42,0.045);">
@@ -490,18 +492,15 @@ const buildMonthlyReportEmailHtml = (opts: {
     detail?: string | null;
     featured?: boolean;
   }> = [
-    {
-      label: "Business Health Score",
-      value:
-        typeof healthScore === "number" && Number.isFinite(healthScore)
-          ? `${Math.round(healthScore)}/100`
-          : BUSINESS_HEALTH_SCORE_PENDING,
-      detail:
-        typeof healthScore === "number" && Number.isFinite(healthScore)
-          ? null
-          : BUSINESS_HEALTH_SCORE_PENDING_DETAIL,
-      featured: true
-    },
+    ...(typeof healthScore === "number" && Number.isFinite(healthScore)
+      ? [
+          {
+            label: "Business Health Score",
+            value: `${Math.round(healthScore)}/100`,
+            featured: true
+          }
+        ]
+      : []),
     ...(formatEmailRating(report?.kpis.avgRating)
       ? [
           {
@@ -536,6 +535,8 @@ const buildMonthlyReportEmailHtml = (opts: {
       : [])
   ];
   const kpiCards = kpiCandidates.slice(0, 4);
+  const showHealthScorePending =
+    Boolean(report) && (typeof healthScore !== "number" || !Number.isFinite(healthScore));
   const kpiRows: Array<Array<(typeof kpiCards)[number]>> = [];
   for (let index = 0; index < kpiCards.length; index += 2) {
     kpiRows.push(kpiCards.slice(index, index + 2));
@@ -641,13 +642,21 @@ const buildMonthlyReportEmailHtml = (opts: {
                 .map(
                   (row) => `
               <tr>
-                ${row.map((card) => renderEmailKpiCard(card)).join("")}
-                ${row.length === 1 ? '<td class="kpi-cell" style="padding:7px;width:50%;"></td>' : ""}
+                ${row.map((card) => renderEmailKpiCard(card, row.length === 1)).join("")}
               </tr>
             `
                 )
                 .join("")}
             </table>
+            `
+                : ""
+            }
+            ${
+              showHealthScorePending
+                ? `
+            <div style="margin-top:14px;border-radius:999px;border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;padding:9px 13px;font-size:12px;line-height:18px;font-weight:650;">
+              ${escapeEmailHtml(HEALTH_SCORE_PENDING_NOTICE)}
+            </div>
             `
                 : ""
             }

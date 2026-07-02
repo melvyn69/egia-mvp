@@ -103,9 +103,8 @@ const periodLabels: Record<string, string> = {
   custom: "Personnalisé"
 };
 
-const BUSINESS_HEALTH_SCORE_PENDING = "Calcul en cours";
-const BUSINESS_HEALTH_SCORE_PENDING_DETAIL =
-  "Le score sera disponible dès que suffisamment d'historique aura été analysé.";
+const HEALTH_SCORE_PENDING_NOTICE =
+  "Score santé en cours de calcul — disponible après plus d'historique.";
 
 const formatDateLabel = (value: string | null) => {
   if (!value) return null;
@@ -181,6 +180,17 @@ const formatOptionalMetric = (value: unknown, suffix = "") => {
   }
   if (typeof value === "string" && value.trim()) {
     return value;
+  }
+  return null;
+};
+
+const formatOptionalPercentMetric = (value: unknown) => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const normalized = value > 0 && value <= 1 ? value * 100 : value;
+    return `${Math.round(normalized)}%`;
+  }
+  if (typeof value === "string" && value.trim()) {
+    return value.includes("%") ? value : `${value}`;
   }
   return null;
 };
@@ -264,9 +274,9 @@ const getReportHealthScoreValue = (report: ReportRow | null) =>
 const getReportHealthScoreState = (report: ReportRow | null) => {
   const value = getReportHealthScoreValue(report);
   return {
-    value: value ?? BUSINESS_HEALTH_SCORE_PENDING,
+    value,
     pending: value === null,
-    detail: value === null ? BUSINESS_HEALTH_SCORE_PENDING_DETAIL : null
+    notice: value === null ? HEALTH_SCORE_PENDING_NOTICE : null
   };
 };
 
@@ -556,14 +566,13 @@ const ReportReadyModal = ({
       "avis"
     ])
   );
-  const responseRate = formatOptionalMetric(
+  const responseRate = formatOptionalPercentMetric(
     getReportMetric(state.report, [
       "response_rate",
       "responseRate",
       "response_rate_pct",
       "responses_rate"
-    ]),
-    "%"
+    ])
   );
   const kpiCards: Array<{
     label: string;
@@ -571,12 +580,15 @@ const ReportReadyModal = ({
     detail?: ReactNode;
     highlight?: boolean;
   }> = [
-    {
-      label: "Business Health Score",
-      value: healthScore.value,
-      detail: healthScore.detail,
-      highlight: true
-    },
+    ...(healthScore.value
+      ? [
+          {
+            label: "Business Health Score",
+            value: healthScore.value,
+            highlight: true
+          }
+        ]
+      : []),
     ...(reviews ? [{ label: "Avis analysés", value: reviews }] : []),
     ...(rating ? [{ label: "Note moyenne", value: rating }] : []),
     ...(responseRate ? [{ label: "Taux de réponse", value: responseRate }] : []),
@@ -589,6 +601,11 @@ const ReportReadyModal = ({
         ]
       : [])
   ];
+  const hasAvailablePerformanceKpi = Boolean(
+    healthScore.value || reviews || rating || responseRate
+  );
+  const showCompactGeneratedSummary =
+    healthScore.pending && establishmentCount > 0 && !hasAvailablePerformanceKpi;
   const brandName = branding.companyName ?? state.report.name;
 
   return (
@@ -652,8 +669,18 @@ const ReportReadyModal = ({
           </div>
         </div>
 
-        <div className="space-y-6 p-5 md:p-10">
-          {kpiCards.length > 0 && (
+        <div className="space-y-5 p-5 md:p-8">
+          {showCompactGeneratedSummary ? (
+            <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/80 px-5 py-4">
+              <p className="text-base font-semibold text-slate-950">
+                Rapport généré pour {establishmentCount} établissement
+                {establishmentCount > 1 ? "s" : ""}.
+              </p>
+              <p className="mt-1 text-sm leading-6 text-slate-500">
+                Le score santé sera enrichi automatiquement avec l'historique.
+              </p>
+            </div>
+          ) : kpiCards.length > 0 ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               {kpiCards.map((card) => (
                 <ReportReadyKpiCard
@@ -664,6 +691,12 @@ const ReportReadyModal = ({
                   highlight={card.highlight}
                 />
               ))}
+            </div>
+          ) : null}
+
+          {healthScore.pending && !showCompactGeneratedSummary && (
+            <div className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-500">
+              {HEALTH_SCORE_PENDING_NOTICE}
             </div>
           )}
 
@@ -676,7 +709,7 @@ const ReportReadyModal = ({
             </div>
           )}
 
-          <div className="flex flex-col gap-2 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-end">
+          <div className="flex flex-col gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-end">
             <Button
               size="lg"
               className="w-full bg-blue-600 px-7 shadow-[0_18px_38px_rgba(37,99,235,0.24)] hover:bg-blue-700 sm:w-auto"
@@ -699,7 +732,7 @@ const ReportReadyModal = ({
             <Button
               variant="ghost"
               size="lg"
-              className="w-full sm:w-auto"
+              className="w-full text-slate-500 hover:text-slate-700 sm:w-auto"
               onClick={onClose}
             >
               Fermer
@@ -1129,12 +1162,19 @@ const Reports = ({ session, locations }: ReportsProps) => {
                 detail={latestReport.name}
               />
             )}
-            <ReportHeroMetric
-              label="Business Health Score"
-              value={latestHealthScore.value}
-              detail={latestHealthScore.detail ?? "Donnée du rapport"}
-              highlight
-            />
+            {latestHealthScore.value && (
+              <ReportHeroMetric
+                label="Business Health Score"
+                value={latestHealthScore.value}
+                detail="Donnée du rapport"
+                highlight
+              />
+            )}
+            {latestReport && latestHealthScore.pending && (
+              <div className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-500 sm:col-span-3 lg:col-span-1 xl:col-span-3">
+                {HEALTH_SCORE_PENDING_NOTICE}
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -1407,12 +1447,12 @@ const Reports = ({ session, locations }: ReportsProps) => {
                           "avis"
                         ])
                       );
-                      const responses = formatOptionalMetric(
+                      const responseRate = formatOptionalPercentMetric(
                         getReportMetric(report, [
-                          "responses_count",
-                          "response_count",
-                          "responses",
-                          "reponses"
+                          "response_rate",
+                          "responseRate",
+                          "response_rate_pct",
+                          "responses_rate"
                         ])
                       );
                       const evolution = formatOptionalMetric(
@@ -1505,14 +1545,6 @@ const Reports = ({ session, locations }: ReportsProps) => {
                           </div>
 
                           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-                            <ReportDataPoint
-                              label="Business Health Score"
-                              value={healthScore.value}
-                              detail={healthScore.detail}
-                            />
-                            {rating && <ReportDataPoint label="Note" value={rating} />}
-                            {reviews && <ReportDataPoint label="Avis" value={reviews} />}
-                            {responses && <ReportDataPoint label="Réponses" value={responses} />}
                             {periodLabel && (
                               <ReportDataPoint
                                 label="Période"
@@ -1525,9 +1557,31 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                 value={<span className="text-base">{generatedLabel}</span>}
                               />
                             )}
+                            {reportLocationCount > 0 && (
+                              <ReportDataPoint
+                                label="Établissements"
+                                value={reportLocationCount}
+                              />
+                            )}
+                            {reviews && <ReportDataPoint label="Avis" value={reviews} />}
+                            {rating && <ReportDataPoint label="Note" value={rating} />}
+                            {responseRate && (
+                              <ReportDataPoint
+                                label="Taux de réponse"
+                                value={responseRate}
+                              />
+                            )}
+                            {healthScore.value && (
+                              <ReportDataPoint
+                                label="Business Health Score"
+                                value={healthScore.value}
+                              />
+                            )}
                           </div>
 
+                          {(healthScore.value || evolution || themes.length > 0) && (
                           <div className="mt-4 grid gap-3 lg:grid-cols-[0.9fr_0.8fr_1.2fr]">
+                            {healthScore.value && (
                             <div className="rounded-[24px] border border-[#020617] bg-[#020617] p-5 text-white shadow-[0_18px_42px_rgba(2,6,23,0.18)]">
                               <div className="flex items-center justify-between gap-3">
                                 <div>
@@ -1545,19 +1599,16 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                 </div>
                                 <TrendingUp className="h-5 w-5 text-blue-200" />
                               </div>
-                              {typeof rawHealthScore === "number" ? (
+                              {typeof rawHealthScore === "number" && (
                                 <div className="mt-4 h-2 rounded-full bg-white/15">
                                   <div
                                     className="h-full rounded-full bg-blue-400"
                                     style={{ width: `${scoreWidth}%` }}
                                   />
                                 </div>
-                              ) : (
-                                <p className="mt-4 text-xs leading-5 text-slate-300">
-                                  {BUSINESS_HEALTH_SCORE_PENDING_DETAIL}
-                                </p>
                               )}
                             </div>
+                            )}
                             {evolution && (
                               <div className="rounded-[24px] border border-slate-200/70 bg-slate-50/70 p-5">
                                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
@@ -1587,6 +1638,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                               </div>
                             )}
                           </div>
+                          )}
                         </article>
                       );
                     })}
@@ -1598,346 +1650,287 @@ const Reports = ({ session, locations }: ReportsProps) => {
         </CardContent>
       </Card>
 
-      {(benchmarkQuery.isLoading ||
-        (benchmarkQuery.data && benchmarkQuery.data.length > 0)) && (
-      <Card>
-        <CardHeader>
-          <CardTitle>Benchmark concurrents</CardTitle>
+      <Card className="overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
+        <CardHeader className="p-5 pb-0 md:p-6 md:pb-0">
+          <div>
+            <CardTitle>Benchmark concurrents</CardTitle>
+            <p className="mt-1 text-sm text-slate-500">
+              Comparez votre réputation aux acteurs suivis.
+            </p>
+          </div>
         </CardHeader>
-        <CardContent className="space-y-3 overflow-x-auto">
+        <CardContent className="p-5 md:p-6">
           {benchmarkQuery.isLoading ? (
-            <Skeleton className="h-24 w-full" />
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Skeleton className="h-56 w-full rounded-[24px]" />
+              <Skeleton className="h-56 w-full rounded-[24px]" />
+            </div>
           ) : benchmarkQuery.data && benchmarkQuery.data.length > 0 ? (
-            benchmarkQuery.data.map((report) => {
-              const payload = report.payload as
-                | {
-                    stats?: Record<string, number | null>;
-                    swot?: Record<string, string[]>;
-                    plan_14_days?: string[];
-                    top_competitors?: Array<{
-                      name?: string;
-                      rating?: number | null;
-                      reviews?: number | null;
-                      distance_m?: number | null;
-                    }>;
-                  }
-                | null;
-              const isOpen = selectedBenchmarkId === report.id;
-              return (
-                <div
-                  key={report.id}
-                  className="rounded-xl border border-slate-100 bg-white px-3 py-3 text-sm"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="space-y-1">
-                      <p className="font-semibold text-slate-900">
-                        {report.title ?? "Benchmark concurrents"}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        Genere le {report.created_at.slice(0, 10)}
-                      </p>
-                      {report.summary && (
-                        <p className="text-xs text-slate-500">{report.summary}</p>
+            <div className="grid gap-4 lg:grid-cols-2">
+              {benchmarkQuery.data.map((report) => {
+                const payload = report.payload as
+                  | {
+                      stats?: Record<string, number | null>;
+                      swot?: Record<string, string[]>;
+                      plan_14_days?: string[];
+                      top_competitors?: Array<{
+                        name?: string;
+                        rating?: number | null;
+                        reviews?: number | null;
+                        distance_m?: number | null;
+                      }>;
+                    }
+                  | null;
+                const stats = payload?.stats ?? {};
+                const swot = payload?.swot ?? {};
+                const plan = payload?.plan_14_days ?? [];
+                const topCompetitors = payload?.top_competitors ?? [];
+                const bestCompetitor = topCompetitors.find((item) =>
+                  item.name?.trim()
+                );
+                const isOpen = selectedBenchmarkId === report.id;
+                const generatedAt = formatDateLabel(report.created_at ?? null);
+                const total =
+                  typeof stats.total === "number"
+                    ? String(stats.total)
+                    : null;
+                const medianRating =
+                  typeof stats.median_rating === "number"
+                    ? `${stats.median_rating.toFixed(1)}/5`
+                    : null;
+                const locationLabel =
+                  locations.find((location) => location.id === report.location_id)
+                    ?.location_title ?? null;
+                const zoneLabel =
+                  report.title || (report as { name?: string | null }).name || null;
+                const radiusLabel =
+                  typeof (payload as { radius_km?: number | null })?.radius_km ===
+                  "number"
+                    ? `${(payload as { radius_km?: number | null }).radius_km} km`
+                    : null;
+                const actions = plan.length > 0 ? plan.slice(0, 3) : [];
+
+                return (
+                  <article
+                    key={report.id}
+                    className={cn(
+                      "rounded-[24px] border border-slate-200/80 bg-white p-5 shadow-[0_18px_48px_rgba(15,23,42,0.045)] transition hover:-translate-y-0.5 hover:border-blue-100 hover:shadow-[0_24px_64px_rgba(15,23,42,0.07)] md:p-6",
+                      isOpen && "lg:col-span-2"
+                    )}
+                  >
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">
+                          <TrendingUp className="h-4 w-4" />
+                          Veille concurrentielle
+                        </div>
+                        <h4 className="mt-2 truncate text-lg font-semibold text-slate-950">
+                          {report.title ?? "Benchmark concurrents"}
+                        </h4>
+                        {(locationLabel || zoneLabel || radiusLabel) && (
+                          <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-500">
+                            {[
+                              locationLabel,
+                              zoneLabel ? `Zone : ${zoneLabel}` : null,
+                              radiusLabel ? `Rayon : ${radiusLabel}` : null
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          size="sm"
+                          onClick={() =>
+                            setSelectedBenchmarkId(isOpen ? null : report.id)
+                          }
+                        >
+                          <Eye className="h-4 w-4" />
+                          {isOpen ? "Fermer" : "Voir"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDownloadBenchmark(report.id)}
+                        >
+                          <Download className="h-4 w-4" />
+                          Télécharger
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      {generatedAt && (
+                        <ReportDataPoint
+                          label="Date"
+                          value={<span className="text-base">{generatedAt}</span>}
+                        />
+                      )}
+                      {total && <ReportDataPoint label="Total" value={total} />}
+                      {medianRating && (
+                        <ReportDataPoint label="Note médiane" value={medianRating} />
+                      )}
+                      {bestCompetitor?.name && (
+                        <ReportDataPoint
+                          label="Meilleur concurrent"
+                          value={
+                            <span className="line-clamp-1 text-base">
+                              {bestCompetitor.name}
+                            </span>
+                          }
+                          detail={[
+                            typeof bestCompetitor.rating === "number"
+                              ? `${bestCompetitor.rating.toFixed(1)}/5`
+                              : null,
+                            typeof bestCompetitor.reviews === "number"
+                              ? `${bestCompetitor.reviews} avis`
+                              : null
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        />
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="neutral">Snapshot</Badge>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDownloadBenchmark(report.id)}
-                      >
-                        Télécharger PDF
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          setSelectedBenchmarkId(isOpen ? null : report.id)
-                        }
-                      >
-                        {isOpen ? "Fermer" : "Voir"}
-                      </Button>
-                    </div>
-                  </div>
-                  {isOpen && (() => {
-                    const stats = payload?.stats ?? {};
-                    const swot = payload?.swot ?? {};
-                    const plan = payload?.plan_14_days ?? [];
-                    const topCompetitors = payload?.top_competitors ?? [];
-                    const locationLabel =
-                      locations.find((location) => location.id === report.location_id)
-                        ?.location_title ?? null;
-                    const zoneLabel =
-                      report.title || (report as { name?: string | null }).name || null;
-                    const radiusLabel =
-                      typeof (payload as { radius_km?: number | null })?.radius_km === "number"
-                        ? `${(payload as { radius_km?: number | null }).radius_km} km`
-                        : null;
-                    const generatedAt = formatDateLabel(report.created_at ?? null);
-                    const positioning =
-                      typeof stats.high_risk_count === "number" && stats.high_risk_count >= 3
-                        ? "Outsider"
-                        : typeof stats.best_rating === "number" && stats.best_rating >= 4.7
-                          ? "Challenger"
-                          : "Leader";
-                    const risks =
-                      swot.threats?.length
-                        ? swot.threats.slice(0, 3)
-                        : typeof stats.high_risk_count === "number"
-                          ? [`${stats.high_risk_count} concurrent(s) à fort impact local.`]
-                          : [];
-                    const opportunities =
-                      swot.opportunities?.length
-                        ? swot.opportunities.slice(0, 3)
-                        : typeof stats.median_reviews === "number"
-                          ? [
-                              `Volume moyen ~${Math.round(
-                                stats.median_reviews
-                              )} avis à capter.`
-                            ]
-                          : [];
-                    const executiveSummary =
-                      report.summary ||
-                      (typeof stats.best_rating === "number"
-                        ? `Marché compétitif avec des acteurs jusqu'à ${stats.best_rating.toFixed(
-                            1
-                          )}/5.`
-                        : null);
-                    const actions = plan.length > 0 ? plan.slice(0, 3) : [];
-                    const actionWhy =
-                      typeof stats.best_rating === "number"
-                        ? `Pourquoi : marché noté jusqu'à ${stats.best_rating.toFixed(1)}/5.`
-                        : typeof stats.total === "number"
-                          ? `Pourquoi : ${stats.total} concurrents observés.`
-                          : null;
-                    const actionImpact =
-                      "Impact attendu : améliorer la perception et la préférence locale.";
-                    return (
-                      <div className="mt-6 space-y-6">
-                        <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-6">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <Badge variant="neutral">
-                              Veille concurrentielle
-                            </Badge>
-                            {generatedAt && (
-                              <span className="text-xs text-slate-500">
-                                {generatedAt}
-                              </span>
-                            )}
-                          </div>
-                          <div className="mt-4 space-y-1">
-                            {locationLabel && (
-                              <p className="text-xl font-semibold text-slate-900">
-                                {locationLabel}
-                              </p>
-                            )}
-                            {(zoneLabel || radiusLabel) && (
-                              <p className="text-sm text-slate-500">
-                                {[
-                                  zoneLabel ? `Zone analysée : ${zoneLabel}` : null,
-                                  radiusLabel ? `Rayon : ${radiusLabel}` : null
-                                ]
-                                  .filter(Boolean)
-                                  .join(" · ")}
-                              </p>
-                            )}
-                          </div>
-                        </div>
 
-                        <div className="rounded-[24px] border border-slate-200 bg-white p-6">
-                          <div className="text-sm font-semibold text-slate-900">
-                            Résumé exécutif
-                          </div>
-                          <div className="mt-3 grid gap-4 md:grid-cols-2">
-                            <div className="space-y-2 text-sm text-slate-600">
-                              <div>
-                                <span className="font-semibold text-slate-900">
-                                  Positionnement global : {positioning}
-                                </span>
-                              </div>
-                              {typeof stats.total === "number" && (
-                                <div>
-                                  Concurrents observés :{" "}
-                                  <span className="font-semibold text-slate-900">
-                                    {stats.total}
-                                  </span>
-                                </div>
-                              )}
-                              {executiveSummary && (
-                                <div className="text-xs text-slate-500">
-                                  {executiveSummary}
-                                </div>
-                              )}
-                            </div>
-                            {(risks.length > 0 || opportunities.length > 0) && (
-                              <div className="grid gap-3 text-xs text-slate-600">
-                              {risks.length > 0 && <div>
-                                <div className="font-semibold text-slate-700">
-                                  Top 3 risques
-                                </div>
-                                <ul className="mt-2 list-disc space-y-1 pl-4">
-                                  {risks.map((item) => (
-                                    <li key={item}>{item}</li>
-                                  ))}
-                                </ul>
-                              </div>}
-                              {opportunities.length > 0 && <div>
-                                <div className="font-semibold text-slate-700">
-                                  Top 3 opportunités
-                                </div>
-                                <ul className="mt-2 list-disc space-y-1 pl-4">
-                                  {opportunities.map((item) => (
-                                    <li key={item}>{item}</li>
-                                  ))}
-                                </ul>
-                              </div>}
-                            </div>
-                            )}
-                          </div>
-                        </div>
+                    {report.summary && (
+                      <p className="mt-4 rounded-[20px] border border-slate-200/70 bg-slate-50/80 px-4 py-3 text-sm leading-6 text-slate-600">
+                        {report.summary}
+                      </p>
+                    )}
 
+                    {isOpen && (
+                      <div className="mt-6 space-y-4">
                         {topCompetitors.length > 0 && (
-                        <div className="rounded-[24px] border border-slate-200 bg-white p-6">
-                          <div className="text-sm font-semibold text-slate-900">
-                            Podium concurrentiel
-                          </div>
-                          <div className="mt-4 grid gap-4 md:grid-cols-3">
-                            {topCompetitors.slice(0, 2).map((item, index) => (
-                              <div
-                                key={`${item.name ?? "competitor"}-${index}`}
-                                className="rounded-xl border border-slate-200 p-4 text-xs text-slate-600"
-                              >
-                                <div className="font-semibold text-slate-900">
-                                  {item.name ?? "Concurrent"}
+                          <div className="rounded-[24px] border border-slate-200 bg-white p-5">
+                            <div className="text-sm font-semibold text-slate-950">
+                              Podium concurrentiel
+                            </div>
+                            <div className="mt-4 grid gap-3 md:grid-cols-3">
+                              {topCompetitors.slice(0, 3).map((item, index) => (
+                                <div
+                                  key={`${item.name ?? "competitor"}-${index}`}
+                                  className="rounded-[20px] border border-slate-200/70 bg-slate-50/70 p-4 text-xs text-slate-600"
+                                >
+                                  <div className="font-semibold text-slate-950">
+                                    {item.name ?? "Concurrent"}
+                                  </div>
+                                  <div className="mt-2 space-y-1">
+                                    {typeof item.rating === "number" && (
+                                      <div>Note : {item.rating.toFixed(1)}/5</div>
+                                    )}
+                                    {typeof item.reviews === "number" && (
+                                      <div>Avis : {item.reviews}</div>
+                                    )}
+                                    {formatDistance(item.distance_m) && (
+                                      <div>
+                                        Distance : {formatDistance(item.distance_m)}
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
-                                <div className="mt-2 space-y-1">
-                                  {typeof item.rating === "number" && (
-                                    <div>Note : {item.rating}</div>
-                                  )}
-                                  {typeof item.reviews === "number" && (
-                                    <div>Avis : {item.reviews}</div>
-                                  )}
-                                  {formatDistance(item.distance_m) && (
-                                    <div>Distance : {formatDistance(item.distance_m)}</div>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
+                              ))}
+                            </div>
                           </div>
-                        </div>
                         )}
 
                         {(typeof stats.closest_m === "number" ||
                           typeof stats.best_rating === "number" ||
                           typeof stats.high_risk_count === "number") && (
-                        <div className="rounded-[24px] border border-slate-200 bg-white p-6">
-                          <div className="text-sm font-semibold text-slate-900">
-                            Analyse radar
+                          <div className="rounded-[24px] border border-slate-200 bg-white p-5">
+                            <div className="text-sm font-semibold text-slate-950">
+                              Analyse radar
+                            </div>
+                            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                              {typeof stats.closest_m === "number" && (
+                                <ReportDataPoint
+                                  label="Plus proche"
+                                  value={formatDistance(stats.closest_m)}
+                                />
+                              )}
+                              {typeof stats.best_rating === "number" && (
+                                <ReportDataPoint
+                                  label="Meilleure note"
+                                  value={`${stats.best_rating.toFixed(1)}/5`}
+                                />
+                              )}
+                              {typeof stats.high_risk_count === "number" && (
+                                <ReportDataPoint
+                                  label="Forte pression"
+                                  value={stats.high_risk_count}
+                                />
+                              )}
+                            </div>
                           </div>
-                          <div className="mt-3 grid gap-3 text-xs text-slate-600 md:grid-cols-2">
-                            {typeof stats.closest_m === "number" && (
-                              <div>
-                              Concurrent le plus proche :{" "}
-                              <span className="font-semibold text-slate-900">
-                                {formatDistance(stats.closest_m)}
-                              </span>
-                            </div>
-                            )}
-                            {typeof stats.best_rating === "number" && (
-                              <div>
-                              Meilleure note du marché :{" "}
-                              <span className="font-semibold text-slate-900">
-                                {stats.best_rating.toFixed(1)}
-                              </span>
-                            </div>
-                            )}
-                            {typeof stats.high_risk_count === "number" &&
-                              stats.high_risk_count > 0 && (
-                              <div className="text-xs text-slate-500">
-                              {typeof stats.high_risk_count === "number" &&
-                              stats.high_risk_count > 0
-                                ? "Pression concurrentielle élevée à proximité."
-                                : "Marché concurrentiel maîtrisable avec des actions ciblées."}
-                            </div>
-                            )}
-                          </div>
-                        </div>
                         )}
 
                         {(["forces", "weaknesses", "opportunities", "threats"] as const).some(
                           (key) => swot[key]?.[0]
                         ) && (
-                        <div className="grid gap-4 md:grid-cols-2">
-                          {([
-                            ["forces", "Force"],
-                            ["weaknesses", "Faiblesse"],
-                            ["opportunities", "Opportunité"],
-                            ["threats", "Menace"]
-                          ] as const).map(([key, label]) => (
-                            swot[key]?.[0] ? (
-                            <div
-                              key={key}
-                              className="rounded-[24px] border border-slate-200 bg-white p-4 text-xs text-slate-600"
-                            >
-                              <div className="font-semibold text-slate-700">
-                                {label}
-                              </div>
-                              <div className="mt-2 text-sm text-slate-600">
-                                {swot[key]?.[0]}
-                              </div>
-                              <div className="mt-2 text-[11px] text-slate-500">
-                                Prochaine action :{" "}
-                                {key === "forces" &&
-                                  "capitaliser sur ce point fort dans la communication."}
-                                {key === "weaknesses" &&
-                                  "corriger ce point faible avant le prochain cycle d’avis."}
-                                {key === "opportunities" &&
-                                  "prioriser ce levier pour gagner des avis."}
-                                {key === "threats" &&
-                                  "mettre en place un suivi hebdomadaire dédié."}
-                              </div>
-                            </div>
-                            ) : null
-                          ))}
-                        </div>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            {([
+                              ["forces", "Force"],
+                              ["weaknesses", "Faiblesse"],
+                              ["opportunities", "Opportunité"],
+                              ["threats", "Menace"]
+                            ] as const).map(([key, label]) =>
+                              swot[key]?.[0] ? (
+                                <div
+                                  key={key}
+                                  className="rounded-[24px] border border-slate-200 bg-white p-4 text-sm text-slate-600"
+                                >
+                                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                    {label}
+                                  </div>
+                                  <div className="mt-2 leading-6">
+                                    {swot[key]?.[0]}
+                                  </div>
+                                </div>
+                              ) : null
+                            )}
+                          </div>
                         )}
 
                         {actions.length > 0 && (
-                        <div className="rounded-[24px] border border-slate-200 bg-white p-6">
-                          <div className="text-sm font-semibold text-slate-900">
-                            Actions recommandées
-                          </div>
-                          <div className="mt-4 grid gap-3 text-xs text-slate-600">
-                            {actions.length > 0 ? (
-                              actions.map((item) => (
+                          <div className="rounded-[24px] border border-slate-200 bg-white p-5">
+                            <div className="text-sm font-semibold text-slate-950">
+                              Actions recommandées
+                            </div>
+                            <div className="mt-4 grid gap-3">
+                              {actions.map((item) => (
                                 <div
                                   key={item}
-                                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3"
+                                  className="rounded-[20px] border border-slate-200/70 bg-slate-50/80 px-4 py-3 text-sm text-slate-600"
                                 >
-                                  <div className="font-semibold text-slate-700">
-                                    Action : {item}
-                                  </div>
-                                  {actionWhy && <div className="mt-1">{actionWhy}</div>}
-                                  <div className="mt-1 text-[11px] text-slate-500">
-                                    {actionImpact}
+                                  <div className="font-semibold text-slate-950">
+                                    {item}
                                   </div>
                                 </div>
-                              ))
-                            ) : null}
+                              ))}
+                            </div>
                           </div>
-                        </div>
                         )}
                       </div>
-                    );
-                  })()}
-                </div>
-              );
-            })
-          ) : null}
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center">
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-[18px] bg-white text-blue-600 shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
+                <TrendingUp className="h-5 w-5" />
+              </div>
+              <p className="mt-4 text-sm font-semibold text-slate-950">
+                Aucun benchmark concurrent pour le moment
+              </p>
+              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
+                Les benchmarks générés apparaîtront ici pour comparer votre réputation aux acteurs suivis.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
-      )}
       <p className="pb-2 text-center text-[11px] font-medium text-slate-400">
         Powered by EGIA
       </p>

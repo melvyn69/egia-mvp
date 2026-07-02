@@ -105,9 +105,8 @@ const formatRatio = (value: number | null) =>
   value === null ? null : `${Math.round(value * 100)}%`;
 
 const EMPTY_DASH = String.fromCharCode(8212);
-const BUSINESS_HEALTH_SCORE_PENDING = "Calcul en cours";
-const BUSINESS_HEALTH_SCORE_PENDING_DETAIL =
-  "Le score sera disponible dès que suffisamment d'historique aura été analysé.";
+const HEALTH_SCORE_PENDING_NOTICE =
+  "Score santé en cours de calcul — disponible après plus d'historique.";
 
 const normalizeLocationTitle = (value: string) =>
   value.replace(/\s*-\s*/g, " - ").replace(/\s{2,}/g, " ").trim();
@@ -482,12 +481,8 @@ const buildHtml = (params: PremiumReportPayload) => {
     ]);
   const businessHealthScore =
     businessHealthScoreValue === null
-      ? BUSINESS_HEALTH_SCORE_PENDING
+      ? null
       : `${formatCoverNumber(businessHealthScoreValue)}/100`;
-  const businessHealthScoreDetail =
-    businessHealthScoreValue === null
-      ? BUSINESS_HEALTH_SCORE_PENDING_DETAIL
-      : "Score actuel";
   const coverKpis = [
     {
       label: "Avis analysés",
@@ -544,52 +539,46 @@ const buildHtml = (params: PremiumReportPayload) => {
   const sourceSummaryItems = params.aiSummary.filter(
     (item) => item.trim() && item.trim() !== EMPTY_DASH
   );
-  const summaryItems = sourceSummaryItems.map(rewritePdfInsight).filter(Boolean);
-  const findSummary = (patterns: RegExp[], fallbackIndex = 0) =>
-    rewritePdfInsight(
-      sourceSummaryItems.find((item) =>
-        patterns.some((pattern) => pattern.test(item))
-      ) ??
-        sourceSummaryItems[fallbackIndex] ??
-        ""
-    ) ||
-    summaryItems[fallbackIndex] ||
-    "";
-  const mainInsight =
-    (sourceSummaryItems[0] && rewritePdfInsight(sourceSummaryItems[0])) || "";
-  const strengthInsight = findSummary(
-    [/note moyenne/i, /taux de réponse/i, /maîtrisée/i],
-    0
-  );
-  const weaknessInsight = findSummary(
-    [/négatif/i, /critique/i, /nécessitent/i],
-    1
-  );
-  const priorityInsight = findSummary([/priorit/i, /nécessitent/i], 0);
-  const highImpactActions = sourceSummaryItems
-    .filter((item) => /priorit|nécessitent|critique/i.test(item))
-    .slice(0, 2)
-    .map(rewritePdfInsight)
-    .filter(Boolean);
-  const mediumImpactActions = sourceSummaryItems
+  const summarySignals = sourceSummaryItems
+    .map((raw) => ({ raw, text: rewritePdfInsight(raw).trim() }))
+    .filter((item) => item.text)
     .filter(
-      (item) =>
-        !highImpactActions.includes(rewritePdfInsight(item)) &&
-        /taux de réponse|note moyenne|négatif/i.test(item)
-    )
-    .slice(0, 2)
-    .map(rewritePdfInsight)
-    .filter(Boolean);
-  const lowImpactActions = sourceSummaryItems
-    .filter(
-      (item) =>
-        !highImpactActions.includes(rewritePdfInsight(item)) &&
-        !mediumImpactActions.includes(rewritePdfInsight(item)) &&
-        /sujets|récurrents/i.test(item)
-    )
-    .slice(0, 2)
-    .map(rewritePdfInsight)
-    .filter(Boolean);
+      (item, index, items) =>
+        items.findIndex((candidate) => candidate.text === item.text) === index
+    );
+  const selectInsightSlots = () => {
+    const takeMatching = (patterns: RegExp[], used: Set<string>) => {
+      const match = summarySignals.find(
+        (item) =>
+          !used.has(item.text) &&
+          patterns.some(
+            (pattern) => pattern.test(item.raw) || pattern.test(item.text)
+          )
+      );
+      if (!match) return "";
+      used.add(match.text);
+      return match.text;
+    };
+
+    const summary = summarySignals[0]?.text ?? "";
+    const used = new Set<string>(summary ? [summary] : []);
+    if (summarySignals.length <= 1) {
+      return { summary, risk: "", action: "" };
+    }
+
+    return {
+      summary,
+      risk: takeMatching(
+        [/négatif/i, /critique/i, /vigilance/i, /réponse prioritaire/i],
+        used
+      ),
+      action: takeMatching(
+        [/priorit/i, /nécessitent/i, /levier/i, /traitement/i],
+        used
+      )
+    };
+  };
+  const insightSlots = selectInsightSlots();
   const compactInsight = (value: string, maxLength = 92) => {
     const normalized = value.replace(/\s+/g, " ").trim();
     const firstSentence = normalized.split(/(?<=[.!?])\s+/)[0] ?? normalized;
@@ -606,6 +595,16 @@ const buildHtml = (params: PremiumReportPayload) => {
           `<div class="action-item">${escapeHtml(item)}</div>`
       )
       .join("");
+  const renderInsightBanner = (label: string, value: string) => {
+    const text = compactInsight(value, 118);
+    if (!text) return "";
+    return `
+    <div class="insight-banner">
+      <div class="insight-banner-label">${escapeHtml(label)}</div>
+      <div class="insight-banner-text">${escapeHtml(text)}</div>
+    </div>
+  `;
+  };
   const renderConsultHeader = (kicker: string, title: string) => `
     <div class="consult-header">
       <div>
@@ -615,43 +614,6 @@ const buildHtml = (params: PremiumReportPayload) => {
       <div class="header-rule"></div>
     </div>
   `;
-  const renderDecisionCard = (
-    label: "Constat" | "Impact" | "Décision",
-    value: string,
-    tone: "dark" | "light" | "green" = "light"
-  ) => {
-    const text = compactInsight(value);
-    if (!text) return "";
-    return `
-    <div class="decision-card decision-${tone}">
-      <div class="decision-icon">${label.charAt(0)}</div>
-      <div>
-        <div class="decision-label">${escapeHtml(label)}</div>
-        <div class="decision-text">${escapeHtml(text)}</div>
-      </div>
-    </div>
-  `;
-  };
-  const renderDecisionSet = (
-    constat: string,
-    impact: string,
-    decision: string
-  ) => {
-    const cards = [
-      renderDecisionCard("Constat", constat, "dark"),
-      renderDecisionCard("Impact", impact, "light"),
-      renderDecisionCard("Décision", decision, "green")
-    ]
-      .filter(Boolean)
-      .join("");
-    return cards
-      ? `
-    <div class="decision-grid">
-      ${cards}
-    </div>
-  `
-      : "";
-  };
   const renderBoardMetric = (
     label: string,
     value: string,
@@ -884,11 +846,15 @@ const buildHtml = (params: PremiumReportPayload) => {
     renderBoardMetric(metric.label, metric.value, index, metric.featured)
   );
   const reputationTimelineItems = [
-    {
-      label: "Score",
-      value: businessHealthScore,
-      detail: businessHealthScoreDetail
-    },
+    ...(businessHealthScore
+      ? [
+          {
+            label: "Score",
+            value: businessHealthScore,
+            detail: "Score actuel"
+          }
+        ]
+      : []),
     {
       label: "Volume",
       value: formatCoverNumber(params.kpis.reviewsTotal),
@@ -912,12 +878,14 @@ const buildHtml = (params: PremiumReportPayload) => {
   ].map((item, index) =>
     renderTimelineItem(item.label, item.value, item.detail, index)
   );
-  const healthGauge = renderGauge(
-    "Business Health Score",
-    businessHealthScore,
-    healthPercent,
-    businessHealthScoreDetail
-  );
+  const healthGauge = businessHealthScore
+    ? renderGauge(
+        "Business Health Score",
+        businessHealthScore,
+        healthPercent,
+        "Score actuel"
+      )
+    : "";
   const ratingGauge =
     params.kpis.avgRating === null
       ? ""
@@ -950,7 +918,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           "Part des avis analysés"
         );
   const progressVisuals = [
-    healthPercent === null
+    healthPercent === null || !businessHealthScore
       ? ""
       : renderProgress("Business Health Score", businessHealthScore, healthPercent),
     params.kpis.avgRating === null
@@ -1013,25 +981,145 @@ const buildHtml = (params: PremiumReportPayload) => {
     .filter(Boolean)
     .join("");
   const voiceVisuals = [tagBars, themeSparkline].filter(Boolean).join("");
-  const actionCards = [
-    renderVerticalActionCard(
-      "Impact élevé",
-      highImpactActions.length ? highImpactActions : [priorityInsight],
-      0,
-      true
-    ),
-    renderVerticalActionCard(
-      "Impact moyen",
-      mediumImpactActions.length ? mediumImpactActions : [strengthInsight],
-      1
-    ),
-    renderVerticalActionCard(
-      "À surveiller",
-      lowImpactActions.length ? lowImpactActions : [weaknessInsight],
-      2
+  const riskInsightBanner = renderInsightBanner(
+    "Lecture risque",
+    insightSlots.risk
+  );
+  const summaryFallback =
+    !insightSlots.summary && !summaryVisuals
+      ? renderInsightBanner(
+          "Lecture factuelle",
+          `${formatCoverNumber(params.kpis.reviewsTotal)} avis analysés sur la période.`
+        )
+      : "";
+  const voiceFallback =
+    !themeCloud && !voiceVisuals
+      ? renderInsightBanner(
+          "Lecture thèmes",
+          "Aucun thème récurrent exploitable sur la période analysée."
+        )
+      : "";
+  const actionCardDefinitions = [
+    ...(insightSlots.action
+      ? [
+          {
+            title: "Priorité IA",
+            items: [insightSlots.action],
+            featured: true
+          }
+        ]
+      : []),
+    ...(params.kpis.responseRate !== null
+      ? [
+          {
+            title: "Réponse",
+            items: [`Taux de réponse : ${formatRatio(params.kpis.responseRate)}.`],
+            featured: false
+          }
+        ]
+      : []),
+    {
+      title: "Vigilance",
+      items: [
+        `Avis négatifs : ${formatCoverNumber(params.kpis.negativeCount)}.`,
+        `Réponses prioritaires : ${formatCoverNumber(params.kpis.untreatedNegativeCount)}.`
+      ],
+      featured: false
+    },
+    ...(tags[0]
+      ? [
+          {
+            title: "Thème principal",
+            items: [`${tags[0].tag} : ${formatCoverNumber(tags[0].count)} avis.`],
+            featured: false
+          }
+        ]
+      : []),
+    ...(locationCount !== null
+      ? [
+          {
+            title: "Périmètre",
+            items: [
+              `${formatCoverNumber(locationCount)} établissement${locationCount > 1 ? "s" : ""} concerné${locationCount > 1 ? "s" : ""}.`
+            ],
+            featured: false
+          }
+        ]
+      : [])
+  ];
+  const actionCards = actionCardDefinitions
+    .map((card, index) =>
+      renderVerticalActionCard(card.title, card.items, index, card.featured)
     )
-  ]
     .filter(Boolean)
+    .join("");
+  const coverBoardMetrics = [
+    ...(businessHealthScore
+      ? [
+          renderBoardMetric(
+            "Business Health Score",
+            businessHealthScore,
+            0,
+            true
+          )
+        ]
+      : []),
+    ...coverKpis.map((kpi, index) =>
+      renderBoardMetric(
+        kpi.label,
+        kpi.value,
+        index + (businessHealthScore ? 1 : 0)
+      )
+    )
+  ].join("");
+  const healthScorePendingBanner = businessHealthScore
+    ? ""
+    : `<div class="score-pending-banner">${escapeHtml(HEALTH_SCORE_PENDING_NOTICE)}</div>`;
+  const conclusionBoardMetrics = [
+    ...(businessHealthScore
+      ? [
+          renderBoardMetric(
+            "Business Health Score",
+            businessHealthScore,
+            0,
+            true
+          )
+        ]
+      : []),
+    renderBoardMetric(
+      "Avis analysés",
+      formatCoverNumber(params.kpis.reviewsTotal),
+      businessHealthScore ? 1 : 0
+    ),
+    ...(params.kpis.avgRating !== null
+      ? [
+          renderBoardMetric(
+            "Note moyenne",
+            formatRating(params.kpis.avgRating) ?? "",
+            businessHealthScore ? 2 : 1
+          )
+        ]
+      : []),
+    ...(params.kpis.responseRate !== null
+      ? [
+          renderBoardMetric(
+            "Taux de réponse",
+            formatRatio(params.kpis.responseRate) ?? "",
+            businessHealthScore ? 3 : 2
+          )
+        ]
+      : []),
+    ...(locationCount !== null
+      ? [
+          renderBoardMetric(
+            "Établissements",
+            formatCoverNumber(locationCount),
+            businessHealthScore ? 4 : 3
+          )
+        ]
+      : [])
+  ]
+    .slice(0, 4)
     .join("");
   return `
   <!doctype html>
@@ -1053,8 +1141,10 @@ const buildHtml = (params: PremiumReportPayload) => {
           position: relative;
           display: flex;
           flex-direction: column;
-          gap: 26px;
+          gap: 18px;
           padding: 2mm 0;
+          word-break: normal;
+          overflow-wrap: normal;
         }
         .page:last-child {
           page-break-after: auto;
@@ -1075,7 +1165,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .page-title {
           margin: 6px 0 0;
-          font-size: 36px;
+          font-size: 32px;
           line-height: 1.05;
           letter-spacing: 0;
           font-weight: 760;
@@ -1512,8 +1602,8 @@ const buildHtml = (params: PremiumReportPayload) => {
           letter-spacing: 0.08em;
         }
         .consult-page {
-          gap: 28px;
-          padding: 8mm 0;
+          gap: 18px;
+          padding: 7mm 0;
         }
         .consult-header {
           display: grid;
@@ -1528,13 +1618,13 @@ const buildHtml = (params: PremiumReportPayload) => {
           background: #2563eb;
         }
         .consult-cover {
-          gap: 26px;
-          padding-top: 8mm;
+          gap: 20px;
+          padding-top: 7mm;
         }
         .cover-stage {
           display: grid;
-          gap: 18px;
-          margin-top: 12px;
+          gap: 14px;
+          margin-top: 8px;
         }
         .brand-line {
           display: flex;
@@ -1553,8 +1643,8 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .cover-stage-title {
           max-width: 680px;
-          font-size: 66px;
-          line-height: 0.92;
+          font-size: 56px;
+          line-height: 0.96;
           letter-spacing: 0;
           font-weight: 790;
         }
@@ -1582,15 +1672,27 @@ const buildHtml = (params: PremiumReportPayload) => {
         .board-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
-          gap: 14px;
+          gap: 12px;
         }
         .cover-board-grid {
           grid-template-columns: repeat(3, 1fr);
         }
+        .score-pending-banner {
+          border-radius: 999px;
+          border: 1px solid #dbeafe;
+          background: #ffffff;
+          color: #475569;
+          padding: 9px 13px;
+          font-size: 11px;
+          line-height: 1.35;
+          font-weight: 700;
+          display: inline-block;
+          max-width: 420px;
+        }
         .board-metric {
-          min-height: 150px;
+          min-height: 128px;
           border-radius: 24px;
-          padding: 18px;
+          padding: 16px;
           background: #ffffff;
           border: 1px solid #e2e8f0;
           display: flex;
@@ -1622,7 +1724,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           color: #cbd5e1;
         }
         .board-label {
-          margin-top: 18px;
+          margin-top: 14px;
           font-size: 11px;
           letter-spacing: 0.12em;
           text-transform: uppercase;
@@ -1634,7 +1736,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .board-value {
           margin-top: 10px;
-          font-size: 42px;
+          font-size: 36px;
           line-height: 0.92;
           letter-spacing: 0;
           font-weight: 790;
@@ -1656,7 +1758,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .viz-card {
           border-radius: 24px;
-          padding: 18px;
+          padding: 16px;
           background: #ffffff;
           border: 1px solid #e2e8f0;
         }
@@ -1669,15 +1771,15 @@ const buildHtml = (params: PremiumReportPayload) => {
           color: #64748b;
         }
         .gauge-shell {
-          margin-top: 16px;
+          margin-top: 12px;
           display: flex;
           justify-content: center;
         }
         .gauge-ring {
-          width: 154px;
-          height: 154px;
+          width: 126px;
+          height: 126px;
           border-radius: 999px;
-          padding: 13px;
+          padding: 11px;
         }
         .gauge-core {
           width: 100%;
@@ -1691,7 +1793,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           border: 1px solid #e2e8f0;
         }
         .gauge-value {
-          font-size: 34px;
+          font-size: 28px;
           line-height: 0.92;
           font-weight: 820;
           color: #020617;
@@ -1706,15 +1808,15 @@ const buildHtml = (params: PremiumReportPayload) => {
           font-weight: 700;
         }
         .donut-row {
-          margin-top: 18px;
+          margin-top: 14px;
           display: grid;
-          grid-template-columns: 88px minmax(0, 1fr);
-          gap: 16px;
+          grid-template-columns: 76px minmax(0, 1fr);
+          gap: 14px;
           align-items: center;
         }
         .donut-ring {
-          width: 88px;
-          height: 88px;
+          width: 76px;
+          height: 76px;
           border-radius: 999px;
           padding: 11px;
         }
@@ -1726,18 +1828,18 @@ const buildHtml = (params: PremiumReportPayload) => {
           border: 1px solid #e2e8f0;
         }
         .donut-value {
-          font-size: 34px;
+          font-size: 30px;
           line-height: 0.96;
           font-weight: 820;
           color: #020617;
         }
         .progress-panel {
           display: grid;
-          gap: 14px;
+          gap: 10px;
         }
         .progress-row {
           border-radius: 24px;
-          padding: 14px;
+          padding: 12px;
           background: #ffffff;
           border: 1px solid #dbeafe;
         }
@@ -1769,9 +1871,9 @@ const buildHtml = (params: PremiumReportPayload) => {
           background: #2563eb;
         }
         .bars-list {
-          margin-top: 16px;
+          margin-top: 12px;
           display: grid;
-          gap: 13px;
+          gap: 10px;
         }
         .bar-meta {
           display: flex;
@@ -1786,9 +1888,9 @@ const buildHtml = (params: PremiumReportPayload) => {
           color: #020617;
         }
         .sparkline {
-          margin-top: 18px;
+          margin-top: 14px;
           width: 100%;
-          height: 76px;
+          height: 62px;
           overflow: visible;
         }
         .sparkline polyline {
@@ -1811,7 +1913,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         .reputation-body {
           display: grid;
           grid-template-columns: 0.9fr 1.1fr;
-          gap: 14px;
+          gap: 12px;
           align-items: start;
         }
         .reputation-visual-grid {
@@ -1822,7 +1924,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .hero-decision {
           border-radius: 24px;
-          padding: 30px;
+          padding: 24px;
           background: #020617;
           color: #ffffff;
         }
@@ -1834,67 +1936,30 @@ const buildHtml = (params: PremiumReportPayload) => {
           color: #cbd5e1;
         }
         .hero-decision-text {
-          margin-top: 18px;
+          margin-top: 14px;
           max-width: 720px;
-          font-size: 38px;
-          line-height: 1.04;
+          font-size: 30px;
+          line-height: 1.12;
           letter-spacing: 0;
           font-weight: 770;
         }
-        .decision-grid {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 14px;
-        }
-        .decision-card {
-          min-height: 160px;
+        .insight-banner {
           border-radius: 24px;
-          padding: 18px;
-          display: grid;
-          grid-template-columns: 34px minmax(0, 1fr);
-          gap: 14px;
-          border: 1px solid #e2e8f0;
+          padding: 16px 18px;
           background: #ffffff;
+          border: 1px solid #dbeafe;
         }
-        .decision-dark {
-          background: #020617;
-          color: #ffffff;
-          border-color: #020617;
-        }
-        .decision-green {
-          background: #eff6ff;
-          border-color: #bfdbfe;
-        }
-        .decision-icon {
-          width: 32px;
-          height: 32px;
-          border-radius: 999px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: #f8fafc;
-          color: #64748b;
-          font-size: 11px;
-          font-weight: 900;
-        }
-        .decision-dark .decision-icon {
-          background: rgba(255,255,255,0.12);
-          color: #cbd5e1;
-        }
-        .decision-label {
+        .insight-banner-label {
           font-size: 11px;
           letter-spacing: 0.13em;
           text-transform: uppercase;
           font-weight: 850;
           color: #2563eb;
         }
-        .decision-dark .decision-label {
-          color: #cbd5e1;
-        }
-        .decision-text {
-          margin-top: 16px;
-          font-size: 22px;
-          line-height: 1.13;
+        .insight-banner-text {
+          margin-top: 8px;
+          font-size: 17px;
+          line-height: 1.35;
           letter-spacing: 0;
           font-weight: 760;
         }
@@ -1992,11 +2057,11 @@ const buildHtml = (params: PremiumReportPayload) => {
           border-bottom-color: #020617;
         }
         .consult-cover .board-metric-featured {
-          min-height: 178px;
+          min-height: 150px;
         }
         .page-summary {
           background: #f7fbff;
-          padding: 10mm;
+          padding: 8mm;
           border: 1px solid #dbeafe;
         }
         .page-summary .consult-header {
@@ -2011,33 +2076,29 @@ const buildHtml = (params: PremiumReportPayload) => {
         .page-summary .hero-decision-label {
           color: #2563eb;
         }
-        .page-summary .decision-dark {
-          background: #1d4ed8;
-          border-color: #1d4ed8;
-        }
         .page-performance .board-grid {
           grid-template-columns: repeat(2, 1fr);
-          gap: 16px;
+          gap: 14px;
         }
         .page-performance .board-metric {
-          min-height: 194px;
-          padding: 22px;
+          min-height: 154px;
+          padding: 18px;
         }
         .page-performance .board-value {
-          font-size: 66px;
-          line-height: 0.88;
+          font-size: 54px;
+          line-height: 0.9;
         }
         .page-performance .consult-panel {
-          min-height: 170px;
+          min-height: 140px;
         }
         .page-performance .consult-panel-value {
-          font-size: 64px;
+          font-size: 54px;
         }
         .reputation-timeline {
           position: relative;
           display: grid;
-          gap: 14px;
-          padding-left: 30px;
+          gap: 10px;
+          padding-left: 26px;
         }
         .reputation-timeline::before {
           content: "";
@@ -2052,17 +2113,17 @@ const buildHtml = (params: PremiumReportPayload) => {
         .timeline-item {
           position: relative;
           display: grid;
-          grid-template-columns: 42px minmax(0, 1fr);
-          gap: 14px;
+          grid-template-columns: 36px minmax(0, 1fr);
+          gap: 12px;
           align-items: center;
           border-radius: 24px;
-          padding: 16px 18px;
+          padding: 12px 14px;
           background: #ffffff;
           border: 1px solid #e2e8f0;
         }
         .timeline-index {
-          width: 42px;
-          height: 42px;
+          width: 36px;
+          height: 36px;
           border-radius: 999px;
           display: flex;
           align-items: center;
@@ -2082,7 +2143,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .timeline-value {
           margin-top: 4px;
-          font-size: 30px;
+          font-size: 24px;
           line-height: 1;
           font-weight: 790;
           color: #020617;
@@ -2112,27 +2173,27 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .page-voice {
           background: #f8fafc;
-          padding: 10mm;
+          padding: 8mm;
           border: 1px solid #dbeafe;
         }
         .theme-cloud {
-          min-height: 380px;
+          min-height: 280px;
           border-radius: 24px;
-          padding: 30px;
+          padding: 22px;
           background: #ffffff;
           border: 1px solid #dbeafe;
           display: flex;
           flex-wrap: wrap;
           align-content: center;
           justify-content: center;
-          gap: 12px;
+          gap: 10px;
         }
         .theme-pill {
           display: inline-flex;
           align-items: center;
           gap: 10px;
           border-radius: 999px;
-          padding: 12px 16px;
+          padding: 10px 14px;
           background: #020617;
           color: #ffffff;
           font-weight: 780;
@@ -2148,35 +2209,32 @@ const buildHtml = (params: PremiumReportPayload) => {
           font-size: 12px;
         }
         .theme-size-0 {
-          font-size: 28px;
-          padding: 16px 22px;
+          font-size: 22px;
+          padding: 13px 18px;
         }
         .theme-size-1 {
-          font-size: 22px;
+          font-size: 18px;
           background: #1d4ed8;
         }
         .theme-size-2 {
-          font-size: 17px;
+          font-size: 15px;
           background: #334155;
         }
         .theme-size-3 {
-          font-size: 14px;
+          font-size: 13px;
           background: #64748b;
-        }
-        .page-action .decision-grid {
-          grid-template-columns: 1fr;
         }
         .action-stack {
           display: grid;
-          gap: 14px;
+          gap: 12px;
         }
         .action-lane-card {
-          min-height: 142px;
+          min-height: 112px;
           border-radius: 24px;
-          padding: 20px;
+          padding: 16px;
           display: grid;
-          grid-template-columns: 56px minmax(0, 1fr);
-          gap: 18px;
+          grid-template-columns: 48px minmax(0, 1fr);
+          gap: 14px;
           align-items: start;
           background: #f8fafc;
           border: 1px solid #e2e8f0;
@@ -2190,9 +2248,9 @@ const buildHtml = (params: PremiumReportPayload) => {
           color: #ffffff;
         }
         .action-lane-index {
-          width: 52px;
-          height: 52px;
-          border-radius: 18px;
+          width: 46px;
+          height: 46px;
+          border-radius: 16px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -2205,62 +2263,8 @@ const buildHtml = (params: PremiumReportPayload) => {
           display: grid;
           gap: 8px;
         }
-        .page-conclusion {
-          justify-content: space-between;
-        }
-        .quote-panel {
-          min-height: 520px;
-          border-radius: 24px;
-          padding: 42px;
-          background: #020617;
-          color: #ffffff;
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-        }
-        .quote-mark {
-          font-size: 88px;
-          line-height: 0.8;
-          color: #94a3b8;
-          font-weight: 760;
-        }
-        .quote-text {
-          margin-top: 36px;
-          font-size: 46px;
-          line-height: 1.05;
-          letter-spacing: 0;
-          font-weight: 780;
-        }
-        .quote-meta {
-          margin-top: 28px;
-          font-size: 12px;
-          line-height: 1.4;
-          color: #cbd5e1;
-          font-weight: 720;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-        }
-        .conclusion-decision-row {
-          display: grid;
-          grid-template-columns: 220px minmax(0, 1fr);
-          gap: 14px;
-        }
-        .conclusion-score-card {
-          border-radius: 24px;
-          padding: 20px;
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
-        }
-        .conclusion-score-card .big-score {
-          font-size: 58px;
-          color: #020617;
-        }
-        .conclusion-score-detail {
-          margin-top: 10px;
-          font-size: 12px;
-          line-height: 1.45;
-          color: #64748b;
-          font-weight: 650;
+        .conclusion-board-grid {
+          grid-template-columns: repeat(2, 1fr);
         }
       </style>
     </head>
@@ -2321,19 +2325,9 @@ const buildHtml = (params: PremiumReportPayload) => {
               : ""
           }
         </div>
+        ${healthScorePendingBanner}
         <div class="board-grid cover-board-grid">
-          ${renderBoardMetric(
-            "Business Health Score",
-            businessHealthScore,
-            0,
-            true,
-            businessHealthScoreValue === null ? businessHealthScoreDetail : null
-          )}
-          ${coverKpis
-            .map((kpi, index) =>
-              renderBoardMetric(kpi.label, kpi.value, index + 1)
-            )
-            .join("")}
+          ${coverBoardMetrics}
         </div>
         <div class="page-number">Page 1</div>
       </section>
@@ -2341,21 +2335,21 @@ const buildHtml = (params: PremiumReportPayload) => {
       <section class="page consult-page page-summary">
         ${renderConsultHeader("Executive Summary", "Synthèse de décision")}
         ${
-          mainInsight
+          insightSlots.summary
             ? `
         <div class="hero-decision">
           <div class="hero-decision-label">Ce que l'IA retient</div>
-          <div class="hero-decision-text">${escapeHtml(compactInsight(mainInsight, 110))}</div>
+          <div class="hero-decision-text">${escapeHtml(compactInsight(insightSlots.summary, 110))}</div>
         </div>
         `
             : ""
         }
-        ${renderDecisionSet(mainInsight, strengthInsight, priorityInsight)}
         ${
           summaryVisuals
             ? `<div class="visual-grid summary-visual-grid">${summaryVisuals}</div>`
             : ""
         }
+        ${summaryFallback}
         <div class="page-number">Page 2</div>
       </section>
 
@@ -2374,6 +2368,7 @@ const buildHtml = (params: PremiumReportPayload) => {
 
       <section class="page consult-page page-reputation">
         ${renderConsultHeader("Réputation", "Santé de réputation")}
+        ${riskInsightBanner}
         ${
           reputationVisuals
             ? `
@@ -2390,13 +2385,6 @@ const buildHtml = (params: PremiumReportPayload) => {
         </div>
         `
         }
-        ${renderDecisionSet(
-          businessHealthScoreValue === null
-            ? BUSINESS_HEALTH_SCORE_PENDING_DETAIL
-            : `Score actuel : ${businessHealthScore}.`,
-          weaknessInsight,
-          priorityInsight
-        )}
         <div class="page-number">Page 4</div>
       </section>
 
@@ -2408,6 +2396,7 @@ const buildHtml = (params: PremiumReportPayload) => {
             ? `<div class="visual-grid voice-visual-grid">${voiceVisuals}</div>`
             : ""
         }
+        ${voiceFallback}
         <div class="page-number">Page 5</div>
       </section>
 
@@ -2420,30 +2409,10 @@ const buildHtml = (params: PremiumReportPayload) => {
       <section class="page consult-page page-conclusion">
         ${renderConsultHeader("Conclusion", "Ce que nous recommandons")}
         ${
-          mainInsight
-            ? `
-        <div class="quote-panel">
-          <div>
-            <div class="quote-mark">"</div>
-            <div class="quote-text">${escapeHtml(compactInsight(mainInsight, 130))}</div>
-          </div>
-          <div class="quote-meta">${escapeHtml(commercialName)} · ${escapeHtml(params.subtitle)}</div>
-        </div>
-        `
+          conclusionBoardMetrics
+            ? `<div class="board-grid conclusion-board-grid">${conclusionBoardMetrics}</div>`
             : ""
         }
-        <div class="conclusion-decision-row">
-          <div class="conclusion-score-card">
-            <div class="page-kicker">Business Health Score</div>
-            <div class="big-score">${escapeHtml(businessHealthScore)}</div>
-            ${
-              businessHealthScoreValue === null
-                ? `<div class="conclusion-score-detail">${escapeHtml(businessHealthScoreDetail)}</div>`
-                : ""
-            }
-          </div>
-          ${renderDecisionCard("Décision", priorityInsight, "green")}
-        </div>
         <div class="page-number">Page 7</div>
       </section>
     </body>
