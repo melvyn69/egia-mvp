@@ -7,14 +7,12 @@ import {
   BookmarkPlus,
   BookmarkX,
   CalendarDays,
-  Crown,
   Download,
   MapPin,
   RefreshCw,
   Search,
   ShieldAlert,
   Sparkles,
-  Star,
   Target,
   Trophy,
   TrendingDown,
@@ -169,6 +167,9 @@ const formatCountDelta = (delta: number | null) => {
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
+const clampPercent = (value: number) =>
+  Math.max(4, Math.min(100, Math.round(value)));
+
 const median = (values: number[]) => {
   if (values.length === 0) return 0;
   const sorted = values.slice().sort((a, b) => a - b);
@@ -262,6 +263,13 @@ const getMajorWeakPoint = (row: CompetitorRow, radiusKm: number) => {
   if (reviews !== null && reviews < 40) return "Visibilité";
   if (distance !== null && distance > radiusKm * 1000 * 0.7) return "Proximité";
   return "Expérience";
+};
+
+const getActionRecommendation = (weakPoint: string) => {
+  if (weakPoint === "Qualité") return "Travailler les irritants visibles dans les avis.";
+  if (weakPoint === "Visibilité") return "Renforcer la collecte d'avis récente.";
+  if (weakPoint === "Proximité") return "Concentrer l'analyse sur les acteurs plus proches.";
+  return "Valoriser les preuves d'expérience locale.";
 };
 
 const normalizeZoneLabel = (value: string) => {
@@ -1029,7 +1037,6 @@ const Competitors = ({ session }: CompetitorsProps) => {
   ));
 
   const swotBullets = useMemo(() => {
-    const hasEnoughData = swotReport.source.length >= 10;
     const forces: string[] = [];
     const weaknesses: string[] = [];
     const opportunities: string[] = [];
@@ -1161,33 +1168,6 @@ const Competitors = ({ session }: CompetitorsProps) => {
       );
     }
 
-    if (hasEnoughData) {
-      if (forces.length === 0 && swotReport.avgRating !== null) {
-        forces.push(
-          `Marché stable autour de ${swotReport.avgRating.toFixed(1)} de note.`
-        );
-      }
-      if (weaknesses.length === 0 && swotReport.avgRating !== null) {
-        weaknesses.push(
-          `Écart de note à surveiller vs moyenne (${swotReport.avgRating.toFixed(1)}).`
-        );
-      }
-      if (opportunities.length === 0 && swotReport.avgVolume !== null) {
-        opportunities.push(
-          `Volume moyen ~${Math.round(swotReport.avgVolume)} avis à capter.`
-        );
-      }
-      if (threats.length === 0 && swotReport.highRatedCount > 0) {
-        threats.push(
-          `${swotReport.highRatedCount} concurrent(s) très bien notés.`
-        );
-      }
-      if (actions.length === 0) {
-        actions.push(
-          "Prioriser la collecte d’avis sur les périodes creuses."
-        );
-      }
-    }
     const trimList = (list: string[]) => list.slice(0, 3);
     return {
       forces: trimList(forces),
@@ -1229,52 +1209,130 @@ const Competitors = ({ session }: CompetitorsProps) => {
     const reviews = marketRows
       .map((row) => row.user_ratings_total)
       .filter((value): value is number => isFiniteNumber(value));
+    const distances = marketRows
+      .map((row) => row.distance_m)
+      .filter((value): value is number => isFiniteNumber(value));
+    const closeThreshold = Math.max(800, radiusKm * 1000 * 0.25);
     return {
       total: marketRows.length,
       medianRating: ratings.length > 0 ? median(ratings) : null,
       medianReviews: reviews.length > 0 ? median(reviews) : null,
+      medianDistance: distances.length > 0 ? median(distances) : null,
       bestRating: ratings.length > 0 ? Math.max(...ratings) : null,
       closestCompetitor: distanceRankedMarket[0] ?? null,
-      leader: rankedMarket[0] ?? null
+      leader: rankedMarket[0] ?? null,
+      closeCount: marketRows.filter(
+        (row) => isFiniteNumber(row.distance_m) && row.distance_m <= closeThreshold
+      ).length,
+      highRatedCount: marketRows.filter(
+        (row) => isFiniteNumber(row.rating) && row.rating >= 4.5
+      ).length
     };
-  }, [distanceRankedMarket, marketRows, rankedMarket]);
+  }, [distanceRankedMarket, marketRows, radiusKm, rankedMarket]);
+
+  const selfMarketPosition = useMemo(() => {
+    if (displaySelfAvg === null || displaySelfCount === null || marketRows.length === 0) {
+      return null;
+    }
+    const selfScore = scoreCompetitor({
+      rating: displaySelfAvg,
+      user_ratings_total: displaySelfCount
+    });
+    const rank = rankedMarket.filter((row) => scoreCompetitor(row) > selfScore).length + 1;
+    const totalWithSelf = marketRows.length + 1;
+    const percentile = rank / totalWithSelf;
+    const label =
+      percentile <= 0.25
+        ? "Leader"
+        : percentile <= 0.4
+          ? "Solide"
+          : percentile <= 0.65
+            ? "À défendre"
+            : "À renforcer";
+    return {
+      rank,
+      totalWithSelf,
+      label,
+      value: rank <= 3 ? `#${rank}` : `Top ${Math.round(percentile * 100)}%`
+    };
+  }, [displaySelfAvg, displaySelfCount, marketRows.length, rankedMarket]);
 
   const marketKpis = useMemo(() => {
     const cards: DisplayKpi[] = [];
-    if (marketStats.total > 0) {
+    if (selfMarketPosition) {
       cards.push({
-        label: "Concurrents observés",
-        value: formatInteger(marketStats.total),
-        detail:
-          sortedFollowed.length > 0
-            ? `${formatInteger(sortedFollowed.length)} suivis`
-            : undefined,
-        Icon: Users,
+        label: "Position marché",
+        value: selfMarketPosition.value,
+        detail: `${selfMarketPosition.label} · rang ${selfMarketPosition.rank}/${selfMarketPosition.totalWithSelf}`,
+        Icon: Trophy,
         tone: "bg-blue-50 text-blue-700"
       });
     }
-    if (marketStats.medianRating !== null) {
+    if (marketStats.total > 0) {
+      const pressure =
+        marketStats.closeCount >= 3 || marketStats.highRatedCount >= 4
+          ? "Élevée"
+          : marketStats.closeCount > 0 || marketStats.highRatedCount > 0
+            ? "À surveiller"
+            : "Modérée";
       cards.push({
-        label: "Note médiane",
-        value: formatRating(marketStats.medianRating),
-        Icon: Star,
-        tone: "bg-amber-50 text-amber-700"
+        label: "Pression concurrentielle",
+        value: pressure,
+        detail:
+          marketStats.closeCount > 0
+            ? `${formatInteger(marketStats.closeCount)} acteur(s) proches`
+            : `${formatInteger(marketStats.total)} observés`,
+        Icon: ShieldAlert,
+        tone:
+          pressure === "Élevée"
+            ? "bg-rose-50 text-rose-700"
+            : "bg-amber-50 text-amber-700"
       });
     }
-    if (marketStats.medianReviews !== null) {
+    if (
+      (displaySelfCount !== null && marketStats.medianReviews !== null) ||
+      (displaySelfAvg !== null && marketStats.bestRating !== null)
+    ) {
+      const reviewGap =
+        displaySelfCount !== null && marketStats.medianReviews !== null
+          ? marketStats.medianReviews - displaySelfCount
+          : null;
+      const ratingGap =
+        displaySelfAvg !== null && marketStats.bestRating !== null
+          ? marketStats.bestRating - displaySelfAvg
+          : null;
+      const hasReviewGap = reviewGap !== null && reviewGap > 0;
+      const hasRatingGap = ratingGap !== null && ratingGap > 0.1;
       cards.push({
-        label: "Médiane avis",
-        value: formatInteger(marketStats.medianReviews),
-        Icon: Trophy,
-        tone: "bg-slate-100 text-slate-700"
-      });
-    }
-    if (marketStats.bestRating !== null) {
-      cards.push({
-        label: "Meilleure note",
-        value: formatRating(marketStats.bestRating),
-        Icon: Crown,
+        label: "Potentiel de progression",
+        value: hasReviewGap || hasRatingGap ? "Important" : "Favorable",
+        detail: hasReviewGap
+          ? `${formatInteger(Math.ceil(reviewGap))} avis vers la médiane`
+          : hasRatingGap && ratingGap !== null
+            ? `${formatDelta(ratingGap)} pt face au leader`
+            : "Écart limité",
+        Icon: TrendingUp,
         tone: "bg-emerald-50 text-emerald-700"
+      });
+    }
+    if (displaySelfCount !== null && marketStats.medianReviews !== null) {
+      const visibility =
+        displaySelfCount >= marketStats.medianReviews
+          ? "Solide"
+          : displaySelfCount >= marketStats.medianReviews * 0.7
+            ? "À renforcer"
+            : "Faible";
+      cards.push({
+        label: "Visibilité locale",
+        value: visibility,
+        detail: `${formatInteger(displaySelfCount)} avis vs médiane ${formatInteger(
+          marketStats.medianReviews
+        )}`,
+        Icon: Users,
+        tone:
+          visibility === "Solide"
+            ? "bg-emerald-50 text-emerald-700"
+            : "bg-slate-100 text-slate-700"
       });
     }
     const closestDistance = formatDistance(marketStats.closestCompetitor?.distance_m);
@@ -1288,7 +1346,12 @@ const Competitors = ({ session }: CompetitorsProps) => {
       });
     }
     return cards;
-  }, [marketStats, sortedFollowed.length]);
+  }, [
+    displaySelfAvg,
+    displaySelfCount,
+    marketStats,
+    selfMarketPosition
+  ]);
 
   const topRankByPlaceId = useMemo(() => {
     const ranks = new Map<string, number>();
@@ -1354,12 +1417,25 @@ const Competitors = ({ session }: CompetitorsProps) => {
           isTop3,
           aboveMedianRating && aboveMedianVolume
         ].filter(Boolean).length;
+        const signals = [
+          isNear ? "Très proche" : null,
+          hasBetterRating ? "Note supérieure" : null,
+          hasHigherVolume ? "Volume d'avis supérieur" : null,
+          isTop3 ? "Top 3 local" : null,
+          aboveMedianRating && aboveMedianVolume ? "Forte visibilité" : null
+        ].filter((item): item is string => item !== null);
         const level =
           pressureSignals >= 3 || (isTop3 && (hasBetterRating || hasHigherVolume || isNear))
             ? "Menace forte"
             : pressureSignals >= 1 || isClose
               ? "À surveiller"
               : "Faible menace";
+        const impact =
+          level === "Menace forte"
+            ? "Fort"
+            : level === "À surveiller"
+              ? "Moyen"
+              : "Faible";
         const reason =
           isNear && hasHigherVolume
             ? "Très proche et volume d'avis supérieur."
@@ -1379,7 +1455,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
         return {
           row,
           level,
+          impact,
           reason,
+          signals,
           rank: topRankByPlaceId.get(key) ?? null
         };
       })
@@ -1393,6 +1471,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
     rankedMarket,
     topRankByPlaceId
   ]);
+
+  const visibleThreatRows = useMemo(() => {
+    const activeThreats = threatRows.filter((item) => item.level !== "Faible menace");
+    return (activeThreats.length > 0 ? activeThreats : threatRows).slice(0, 6);
+  }, [threatRows]);
 
   const podiumCards = useMemo(() => {
     const used = new Set<string>();
@@ -1466,49 +1549,110 @@ const Competitors = ({ session }: CompetitorsProps) => {
     return cards;
   }, [displaySelfAvg, displaySelfCount, marketStats]);
 
-  const priorityActions = useMemo(() => {
-    const actions: string[] = [];
+  const opportunityCards = useMemo(() => {
+    const cards: Array<{ title: string; detail: string; tone: string }> = [];
+    if (
+      displaySelfCount !== null &&
+      marketStats.medianReviews !== null &&
+      marketStats.medianReviews > displaySelfCount
+    ) {
+      cards.push({
+        title: "Avis à rattraper",
+        detail: "Se rapprocher du volume médian d'avis.",
+        tone: "border-blue-100 bg-blue-50/70 text-blue-800"
+      });
+    }
+    if (
+      displaySelfAvg !== null &&
+      marketStats.bestRating !== null &&
+      marketStats.bestRating > displaySelfAvg &&
+      marketStats.bestRating - displaySelfAvg <= 0.3
+    ) {
+      cards.push({
+        title: "Leader accessible",
+        detail: "Faible écart de note avec le leader local.",
+        tone: "border-emerald-100 bg-emerald-50/70 text-emerald-800"
+      });
+    }
+    if (marketStats.closeCount >= 2) {
+      cards.push({
+        title: "Zone dense",
+        detail: "Se différencier auprès des clients à proximité.",
+        tone: "border-amber-100 bg-amber-50/70 text-amber-800"
+      });
+    }
+    if (marketStats.total > 0 && marketStats.highRatedCount <= 2) {
+      cards.push({
+        title: "Terrain qualité",
+        detail: "Occuper le territoire des meilleures notes locales.",
+        tone: "border-slate-200 bg-white text-slate-800"
+      });
+    }
+    return cards.slice(0, 4);
+  }, [displaySelfAvg, displaySelfCount, marketStats]);
+
+  const roadmapActions = useMemo(() => {
+    const actions: Array<{ label: string; action: string; detail?: string }> = [];
+    const addAction = (label: string, action: string, detail?: string) => {
+      if (!actions.find((item) => item.label === label || item.action === action)) {
+        actions.push({ label, action, detail });
+      }
+    };
+
+    if (
+      marketStats.closestCompetitor &&
+      isFiniteNumber(marketStats.closestCompetitor.distance_m) &&
+      marketStats.closestCompetitor.distance_m <= 1000
+    ) {
+      addAction(
+        "Aujourd'hui",
+        `Surveiller ${marketStats.closestCompetitor.name}.`,
+        "Concurrent très proche dans le rayon étudié."
+      );
+    }
     if (
       displaySelfCount !== null &&
       marketStats.medianReviews !== null &&
       marketStats.medianReviews > displaySelfCount
     ) {
       const missingReviews = Math.ceil(marketStats.medianReviews - displaySelfCount);
-      actions.push(
+      addAction(
+        "Cette semaine",
         `Obtenir ${formatInteger(
           missingReviews
-        )} nouveaux avis pour se rapprocher de la médiane locale.`
+        )} nouveaux avis.`,
+        "Objectif: se rapprocher de la médiane locale."
       );
-    }
-    if (
-      marketStats.closestCompetitor &&
-      isFiniteNumber(marketStats.closestCompetitor.distance_m) &&
-      marketStats.closestCompetitor.distance_m <= 1000
-    ) {
-      actions.push("Renforcer la différenciation locale face au concurrent le plus proche.");
     }
     if (
       displaySelfAvg !== null &&
       marketStats.bestRating !== null &&
       marketStats.bestRating > displaySelfAvg
     ) {
-      actions.push("Répondre aux avis et valoriser les points forts pour réduire l'écart de note.");
+      addAction(
+        "30 jours",
+        "Réduire l'écart de note avec le leader.",
+        "Répondre aux avis et valoriser les points forts déjà visibles."
+      );
     }
-    swotBullets.actions.forEach((item) => {
-      if (!actions.includes(item)) actions.push(item);
-    });
-    const labels = ["Semaine 1", "Semaine 2", "Ce mois-ci"];
-    return actions.slice(0, 3).map((action, index) => ({
-      label: labels[index],
-      action
-    }));
+    if (marketStats.closeCount >= 2 || marketStats.highRatedCount >= 3) {
+      addAction(
+        "90 jours",
+        "Installer une différenciation locale durable.",
+        marketStats.closeCount >= 2
+          ? `${formatInteger(marketStats.closeCount)} concurrent(s) proches détectés.`
+          : `${formatInteger(marketStats.highRatedCount)} concurrent(s) très bien notés.`
+      );
+    }
+    return actions.slice(0, 4);
   }, [
     displaySelfAvg,
     displaySelfCount,
     marketStats.bestRating,
+    marketStats.closeCount,
     marketStats.closestCompetitor,
-    marketStats.medianReviews,
-    swotBullets.actions
+    marketStats.highRatedCount,
+    marketStats.medianReviews
   ]);
 
   const swotSections = useMemo(
@@ -1569,27 +1713,182 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const latestAnalysisDate =
     formatDateLabel(lastScanAt) ?? formatDateLabel(scanHistory[0]?.ts ?? null);
 
-  const heroSignal = useMemo(() => {
+  const marketNarrative = useMemo(() => {
+    const insights: string[] = [];
+    if (displaySelfAvg !== null && marketStats.medianRating !== null) {
+      const delta = displaySelfAvg - marketStats.medianRating;
+      if (delta >= 0.2) {
+        insights.push("Votre note est au-dessus de la médiane locale.");
+      } else if (delta <= -0.2) {
+        insights.push("L'écart de note avec la médiane locale doit être réduit.");
+      } else {
+        insights.push("Votre note est alignée avec le marché local.");
+      }
+    }
+    if (displaySelfCount !== null && marketStats.medianReviews !== null) {
+      if (displaySelfCount < marketStats.medianReviews) {
+        insights.push("Le principal écart à combler concerne le volume d'avis.");
+      } else {
+        insights.push("Votre volume d'avis soutient votre visibilité locale.");
+      }
+    }
     if (marketStats.leader?.name && marketStats.bestRating !== null) {
-      return `${marketStats.leader.name} mène le marché local avec ${formatRating(
-        marketStats.bestRating
-      )}.`;
+      insights.push(
+        `${marketStats.leader.name} mène le marché avec ${formatRating(
+          marketStats.bestRating
+        )}.`
+      );
     }
-    if (marketStats.total > 0 && marketStats.medianRating !== null) {
-      return `${formatInteger(marketStats.total)} concurrents observés avec une note médiane de ${formatRating(
-        marketStats.medianRating
-      )}.`;
+    const closestDistance = formatDistance(marketStats.closestCompetitor?.distance_m);
+    if (marketStats.closestCompetitor?.name && closestDistance) {
+      insights.push(
+        `${marketStats.closestCompetitor.name} est le concurrent le plus proche (${closestDistance}).`
+      );
     }
-    if (selectedLocationLabel) {
-      return `Analyse prête pour ${selectedLocationLabel}.`;
-    }
-    return null;
+    return insights.slice(0, 3);
   }, [
+    displaySelfAvg,
+    displaySelfCount,
     marketStats.bestRating,
-    marketStats.leader,
+    marketStats.closestCompetitor,
     marketStats.medianRating,
-    marketStats.total,
-    selectedLocationLabel
+    marketStats.medianReviews,
+    marketStats.leader
+  ]);
+
+  const comparisonPanels = useMemo(() => {
+    const panels: Array<{
+      title: string;
+      caption: string;
+      rows: Array<{ label: string; value: string; width: number; tone: string }>;
+    }> = [];
+
+    const noteRows = [
+      displaySelfAvg !== null
+        ? {
+            label: "Vous",
+            value: formatRating(displaySelfAvg),
+            width: clampPercent((displaySelfAvg / 5) * 100),
+            tone: "bg-blue-600"
+          }
+        : null,
+      marketStats.leader?.rating !== null && isFiniteNumber(marketStats.leader?.rating)
+        ? {
+            label: "Leader",
+            value: formatRating(marketStats.leader.rating),
+            width: clampPercent((marketStats.leader.rating / 5) * 100),
+            tone: "bg-slate-950"
+          }
+        : null,
+      marketStats.medianRating !== null
+        ? {
+            label: "Médiane",
+            value: formatRating(marketStats.medianRating),
+            width: clampPercent((marketStats.medianRating / 5) * 100),
+            tone: "bg-slate-400"
+          }
+        : null
+    ].filter(
+      (row): row is { label: string; value: string; width: number; tone: string } =>
+        row !== null
+    );
+    if (noteRows.length >= 2) {
+      panels.push({
+        title: "Note",
+        caption: "Position qualitative sur 5.",
+        rows: noteRows
+      });
+    }
+
+    const reviewValues = [
+      displaySelfCount,
+      marketStats.leader?.user_ratings_total ?? null,
+      marketStats.medianReviews
+    ].filter((value): value is number => isFiniteNumber(value) && value > 0);
+    const maxReviews = reviewValues.length > 0 ? Math.max(...reviewValues) : null;
+    if (maxReviews) {
+      const reviewRows = [
+        displaySelfCount !== null
+          ? {
+              label: "Vous",
+              value: `${formatInteger(displaySelfCount)} avis`,
+              width: clampPercent((displaySelfCount / maxReviews) * 100),
+              tone: "bg-blue-600"
+            }
+          : null,
+        marketStats.leader?.user_ratings_total !== null &&
+        isFiniteNumber(marketStats.leader?.user_ratings_total)
+          ? {
+              label: "Leader",
+              value: `${formatInteger(marketStats.leader.user_ratings_total)} avis`,
+              width: clampPercent(
+                (marketStats.leader.user_ratings_total / maxReviews) * 100
+              ),
+              tone: "bg-slate-950"
+            }
+          : null,
+        marketStats.medianReviews !== null
+          ? {
+              label: "Médiane",
+              value: `${formatInteger(marketStats.medianReviews)} avis`,
+              width: clampPercent((marketStats.medianReviews / maxReviews) * 100),
+              tone: "bg-slate-400"
+            }
+          : null
+      ].filter(
+        (row): row is { label: string; value: string; width: number; tone: string } =>
+          row !== null
+      );
+      if (reviewRows.length >= 2) {
+        panels.push({
+          title: "Volume d'avis",
+          caption: "Visibilité cumulée Google.",
+          rows: reviewRows
+        });
+      }
+    }
+
+    const closestDistance = marketStats.closestCompetitor?.distance_m ?? null;
+    const distanceValues = [closestDistance, marketStats.medianDistance].filter(
+      (value): value is number => isFiniteNumber(value) && value > 0
+    );
+    const maxDistance = distanceValues.length > 0 ? Math.max(...distanceValues) : null;
+    if (maxDistance && distanceValues.length >= 2) {
+      panels.push({
+        title: "Proximité",
+        caption: "Distance réelle dans la zone étudiée.",
+        rows: [
+          closestDistance !== null
+            ? {
+                label: "Plus proche",
+                value: formatDistance(closestDistance) ?? "",
+                width: clampPercent((closestDistance / maxDistance) * 100),
+                tone: "bg-rose-500"
+              }
+            : null,
+          marketStats.medianDistance !== null
+            ? {
+                label: "Médiane",
+                value: formatDistance(marketStats.medianDistance) ?? "",
+                width: clampPercent((marketStats.medianDistance / maxDistance) * 100),
+                tone: "bg-slate-400"
+              }
+            : null
+        ].filter(
+          (row): row is { label: string; value: string; width: number; tone: string } =>
+            row !== null && row.value.length > 0
+        )
+      });
+    }
+    return panels;
+  }, [
+    displaySelfAvg,
+    displaySelfCount,
+    marketStats.closestCompetitor,
+    marketStats.leader,
+    marketStats.medianDistance,
+    marketStats.medianRating,
+    marketStats.medianReviews
   ]);
 
   const runCurrentScan = () => {
@@ -1785,10 +2084,17 @@ const Competitors = ({ session }: CompetitorsProps) => {
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 md:text-base">
                 Comprendre votre position locale et les écarts à combler.
               </p>
-              {heroSignal && (
-                <p className="mt-3 max-w-2xl rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-2.5 text-sm font-medium leading-6 text-slate-800">
-                  {heroSignal}
-                </p>
+              {marketNarrative.length > 0 && (
+                <div className="mt-3 grid max-w-3xl gap-2 sm:grid-cols-2">
+                  {marketNarrative.map((item) => (
+                    <p
+                      key={item}
+                      className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-2.5 text-sm font-medium leading-6 text-slate-800"
+                    >
+                      {item}
+                    </p>
+                  ))}
+                </div>
               )}
             </div>
             <div className="flex flex-wrap gap-2 text-xs text-slate-600">
@@ -1809,6 +2115,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
               {sectorLabel && (
                 <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 font-medium">
                   Secteur: {sectorLabel}
+                </span>
+              )}
+              {marketStats.total > 0 && (
+                <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 font-medium">
+                  {formatInteger(marketStats.total)} concurrents
                 </span>
               )}
             </div>
@@ -1881,6 +2192,53 @@ const Competitors = ({ session }: CompetitorsProps) => {
           )}
         </div>
       </section>
+
+      {comparisonPanels.length > 0 && (
+        <section className="competitors-print-card rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_14px_40px_rgba(15,23,42,0.045)] md:p-5">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">
+                Positionnement comparé
+              </p>
+              <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-950">
+                Vous, le leader et la médiane
+              </h2>
+            </div>
+            <Badge variant="neutral">Données réelles</Badge>
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            {comparisonPanels.map((panel) => (
+              <article
+                key={panel.title}
+                className="competitors-print-card rounded-[20px] border border-slate-200 bg-slate-50/70 p-3 transition hover:-translate-y-0.5 hover:shadow-[0_16px_40px_rgba(15,23,42,0.07)] motion-reduce:hover:translate-y-0"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-950">{panel.title}</h3>
+                    <p className="mt-1 text-xs text-slate-500">{panel.caption}</p>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-3">
+                  {panel.rows.map((row) => (
+                    <div key={`${panel.title}-${row.label}`} className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-3 text-xs">
+                        <span className="font-semibold text-slate-600">{row.label}</span>
+                        <span className="font-semibold text-slate-900">{row.value}</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-white">
+                        <div
+                          className={cn("h-full rounded-full", row.tone)}
+                          style={{ width: `${row.width}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="competitors-print-hidden grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <Card className="rounded-[24px] shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
@@ -2126,11 +2484,28 @@ const Competitors = ({ session }: CompetitorsProps) => {
             {podiumCards.map(({ competitor, label, badge, rank, tone }) => {
               const distance = formatDistance(competitor.distance_m);
               const tags = getCompetitorBadges(competitor);
+              const leaderScore = podiumCards[0]
+                ? scoreCompetitor(podiumCards[0].competitor)
+                : 0;
+              const progressWidth =
+                leaderScore > 0
+                  ? clampPercent((scoreCompetitor(competitor) / leaderScore) * 100)
+                  : null;
+              const ratingDelta = formatVsDelta(
+                displaySelfAvg !== null && isFiniteNumber(competitor.rating)
+                  ? competitor.rating - displaySelfAvg
+                  : null
+              );
+              const reviewsDelta = formatCountDelta(
+                displaySelfCount !== null && isFiniteNumber(competitor.user_ratings_total)
+                  ? competitor.user_ratings_total - displaySelfCount
+                  : null
+              );
               return (
                 <article
                   key={`${label}-${competitor.place_id}`}
                   className={cn(
-                    "competitors-print-card rounded-[22px] border border-slate-200 p-4 shadow-[0_14px_40px_rgba(15,23,42,0.05)]",
+                    "competitors-print-card rounded-[22px] border border-slate-200 p-4 shadow-[0_14px_40px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_18px_48px_rgba(15,23,42,0.08)] motion-reduce:hover:translate-y-0",
                     tone
                   )}
                 >
@@ -2174,6 +2549,31 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       ))}
                     </div>
                   )}
+                  {(progressWidth !== null || ratingDelta || reviewsDelta) && (
+                    <div className="mt-4 space-y-3">
+                      {progressWidth !== null && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs opacity-70">
+                            <span>Force locale</span>
+                            <span>{progressWidth}%</span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-slate-200/70">
+                            <div
+                              className={cn(
+                                "h-full rounded-full",
+                                rank === 1 ? "bg-blue-300" : "bg-blue-600"
+                              )}
+                              style={{ width: `${progressWidth}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-2 text-xs font-semibold opacity-75">
+                        {ratingDelta && <span>Note {ratingDelta}</span>}
+                        {reviewsDelta && <span>Avis {reviewsDelta}</span>}
+                      </div>
+                    </div>
+                  )}
                 </article>
               );
             })}
@@ -2182,7 +2582,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
       )}
 
       <section className="grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-        {threatRows.length > 0 && (
+        {visibleThreatRows.length > 0 && (
           <Card className="competitors-print-card rounded-[22px] shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
             <CardHeader className="p-4 pb-0 md:p-5 md:pb-0">
               <CardTitle className="flex items-center gap-2 text-base">
@@ -2190,66 +2590,56 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 Menaces locales
               </CardTitle>
               <p className="text-sm text-slate-500">
-                Classification UI basée sur note, avis, distance et rang local.
+                Pourquoi certains acteurs pèsent vraiment sur votre zone.
               </p>
             </CardHeader>
-            <CardContent className="space-y-3 p-4">
-              {(["Menace forte", "À surveiller", "Faible menace"] as const).map(
-                (level) => {
-                  const rows = threatRows.filter((item) => item.level === level).slice(0, 3);
-                  if (rows.length === 0) return null;
-                  return (
-                    <div key={level} className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            "h-2 w-2 rounded-full",
-                            level === "Menace forte"
-                              ? "bg-rose-500"
-                              : level === "À surveiller"
-                                ? "bg-amber-500"
-                                : "bg-slate-300"
-                          )}
-                        />
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                          {level}
+            <CardContent className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+              {visibleThreatRows.map(({ row, reason, rank, impact, level, signals }) => (
+                <article
+                  key={`threat-${row.place_id}`}
+                  className="competitors-print-card rounded-2xl border border-slate-200 bg-white p-3 transition hover:-translate-y-0.5 hover:shadow-[0_16px_40px_rgba(15,23,42,0.07)] motion-reduce:hover:translate-y-0"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate text-sm font-semibold text-slate-950">
+                          {row.name}
                         </p>
+                        {rank && <Badge variant="neutral">#{rank}</Badge>}
                       </div>
-                      <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
-                        {rows.map(({ row, reason, rank }) => (
-                          <article
-                            key={`${level}-${row.place_id}`}
-                            className="competitors-print-card rounded-2xl border border-slate-200 bg-white p-3"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-slate-950">
-                                  {row.name}
-                                </p>
-                                <p className="mt-1 text-xs leading-5 text-slate-500">
-                                  {reason}
-                                </p>
-                              </div>
-                              {rank && <Badge variant="neutral">#{rank}</Badge>}
-                            </div>
-                            <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium text-slate-600">
-                              {isFiniteNumber(row.rating) && (
-                                <span>{formatRating(row.rating)}</span>
-                              )}
-                              {isFiniteNumber(row.user_ratings_total) && (
-                                <span>{formatInteger(row.user_ratings_total)} avis</span>
-                              )}
-                              {formatDistance(row.distance_m) && (
-                                <span>{formatDistance(row.distance_m)}</span>
-                              )}
-                            </div>
-                          </article>
-                        ))}
-                      </div>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">
+                        {reason}
+                      </p>
                     </div>
-                  );
-                }
-              )}
+                    <Badge variant={level === "Menace forte" ? "warning" : "neutral"}>
+                      Impact {impact}
+                    </Badge>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium text-slate-600">
+                    {isFiniteNumber(row.rating) && (
+                      <span>{formatRating(row.rating)}</span>
+                    )}
+                    {isFiniteNumber(row.user_ratings_total) && (
+                      <span>{formatInteger(row.user_ratings_total)} avis</span>
+                    )}
+                    {formatDistance(row.distance_m) && (
+                      <span>{formatDistance(row.distance_m)}</span>
+                    )}
+                  </div>
+                  {signals.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {signals.slice(0, 3).map((signal) => (
+                        <span
+                          key={`${row.place_id}-${signal}`}
+                          className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600"
+                        >
+                          {signal}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              ))}
             </CardContent>
           </Card>
         )}
@@ -2285,21 +2675,50 @@ const Competitors = ({ session }: CompetitorsProps) => {
         )}
       </section>
 
-      {priorityActions.length > 0 && (
+      {opportunityCards.length > 0 && (
+        <section className="competitors-print-card rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_14px_40px_rgba(15,23,42,0.05)] md:p-5">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">
+                Opportunités
+              </p>
+              <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-950">
+                Où progresser sans inventer de nouveaux leviers
+              </h2>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {opportunityCards.map((card) => (
+              <article
+                key={card.title}
+                className={cn(
+                  "competitors-print-card rounded-[20px] border p-3 transition hover:-translate-y-0.5 hover:shadow-[0_16px_40px_rgba(15,23,42,0.07)] motion-reduce:hover:translate-y-0",
+                  card.tone
+                )}
+              >
+                <p className="text-sm font-semibold">{card.title}</p>
+                <p className="mt-2 text-sm leading-6 opacity-80">{card.detail}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {roadmapActions.length > 0 && (
         <section className="competitors-print-card rounded-[22px] border border-slate-200 bg-slate-950 p-4 text-white shadow-[0_18px_50px_rgba(15,23,42,0.12)] md:p-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-200">
-                Actions prioritaires
+                Plan d'action
               </p>
               <h2 className="mt-2 text-2xl font-semibold tracking-tight">
-                Que faire cette semaine
+                Roadmap concurrentielle
               </h2>
             </div>
             <Badge variant="neutral">Plan court</Badge>
           </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            {priorityActions.map((item) => (
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {roadmapActions.map((item) => (
               <article
                 key={item.label}
                 className="competitors-print-card rounded-2xl border border-white/10 bg-white/[0.06] p-3"
@@ -2310,6 +2729,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 <p className="mt-3 text-sm font-medium leading-6 text-slate-100">
                   {item.action}
                 </p>
+                {item.detail && (
+                  <p className="mt-2 text-xs leading-5 text-slate-400">
+                    {item.detail}
+                  </p>
+                )}
               </article>
             ))}
           </div>
@@ -2461,7 +2885,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 </Button>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="grid gap-3 xl:grid-cols-2">
                 {visibleRadar.map((competitor) => {
                   const rank = topRankByPlaceId.get(competitor.place_id || competitor.id);
                   const tier = getRadarTier(competitor);
@@ -2486,87 +2910,135 @@ const Competitors = ({ session }: CompetitorsProps) => {
                       : null
                   );
                   const distance = formatDistance(competitor.distance_m);
-                  const risk =
-                    threatRows.find((item) => item.row.place_id === competitor.place_id)
-                      ?.level ?? tier.label;
+                  const riskItem = threatRows.find(
+                    (item) => item.row.place_id === competitor.place_id
+                  );
+                  const risk = riskItem?.level ?? tier.label;
                   const action = getMajorWeakPoint(competitor, radiusKm);
+                  const actionText = getActionRecommendation(action);
+                  const leaderScore = rankedMarket[0]
+                    ? scoreCompetitor(rankedMarket[0])
+                    : 0;
+                  const competitorProgress =
+                    leaderScore > 0
+                      ? clampPercent((scoreCompetitor(competitor) / leaderScore) * 100)
+                      : null;
+                  const metricCards = [
+                    isFiniteNumber(competitor.rating)
+                      ? { label: "Note", value: formatRating(competitor.rating) }
+                      : null,
+                    isFiniteNumber(competitor.user_ratings_total)
+                      ? {
+                          label: "Avis",
+                          value: formatInteger(competitor.user_ratings_total)
+                        }
+                      : null,
+                    distance ? { label: "Distance", value: distance } : null,
+                    ratingDeltaLabel || reviewsDeltaLabel
+                      ? {
+                          label: "Écart",
+                          value: ratingDeltaLabel ?? reviewsDeltaLabel ?? ""
+                        }
+                      : null
+                  ].filter(
+                    (item): item is { label: string; value: string } => item !== null
+                  );
                   return (
                     <article
                       key={competitor.id}
-                      className="competitors-print-card rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_10px_28px_rgba(15,23,42,0.035)]"
+                      className="competitors-print-card rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_10px_28px_rgba(15,23,42,0.035)] transition hover:-translate-y-0.5 hover:shadow-[0_18px_48px_rgba(15,23,42,0.08)] motion-reduce:hover:translate-y-0"
                     >
-                      <div className="grid gap-4 lg:grid-cols-[56px_minmax(0,1.4fr)_86px_86px_92px_110px_120px_minmax(140px,0.8fr)] lg:items-center">
-                        <div className="flex items-center gap-2 lg:block">
-                          <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-sm font-semibold text-slate-900">
-                            {rank ?? ""}
-                          </span>
-                          <span className="text-xs font-semibold text-slate-500 lg:hidden">
-                            Rang
-                          </span>
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="min-w-0 truncate text-sm font-semibold text-slate-950">
-                              {competitor.name}
-                            </h3>
-                            <Badge variant={tier.variant}>{tier.label}</Badge>
-                            {isFollowed && <Badge variant="neutral">Suivi</Badge>}
-                          </div>
-                          {competitor.address && (
-                            <p className="mt-1 truncate text-xs text-slate-500">
-                              {competitor.address}
-                            </p>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
+                          {rank && (
+                            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-sm font-semibold text-slate-900">
+                              #{rank}
+                            </span>
                           )}
-                          {chips.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              {renderChipList(chips)}
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="min-w-0 truncate text-base font-semibold text-slate-950">
+                                {competitor.name}
+                              </h3>
+                              <Badge variant={tier.variant}>{tier.label}</Badge>
+                              {isFollowed && <Badge variant="neutral">Suivi</Badge>}
                             </div>
+                            {competitor.address && (
+                              <p className="mt-1 truncate text-xs text-slate-500">
+                                {competitor.address}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <Badge
+                          variant={risk === "Menace forte" ? "warning" : "neutral"}
+                          className="shrink-0"
+                        >
+                          {risk}
+                        </Badge>
+                      </div>
+
+                      {metricCards.length > 0 && (
+                        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          {metricCards.map((metric) => (
+                            <div
+                              key={`${competitor.id}-${metric.label}`}
+                              className="rounded-2xl border border-slate-200 bg-slate-50/80 p-2.5"
+                            >
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                                {metric.label}
+                              </p>
+                              <p className="mt-1 text-sm font-semibold text-slate-950">
+                                {metric.value}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {competitorProgress !== null && (
+                        <div className="mt-4 space-y-1.5">
+                          <div className="flex items-center justify-between text-xs text-slate-500">
+                            <span>Force relative</span>
+                            <span>{competitorProgress}% du leader</span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className="h-full rounded-full bg-blue-600"
+                              style={{ width: `${competitorProgress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="mt-4 grid gap-2 md:grid-cols-2">
+                        {riskItem?.reason && (
+                          <div className="rounded-2xl bg-slate-50 px-3 py-2.5">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                              Pourquoi il compte
+                            </p>
+                            <p className="mt-1 text-xs leading-5 text-slate-600">
+                              {riskItem.reason}
+                            </p>
+                          </div>
+                        )}
+                        <div className="rounded-2xl bg-blue-50/70 px-3 py-2.5">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-blue-700">
+                            Action
+                          </p>
+                          <p className="mt-1 text-xs leading-5 text-slate-700">
+                            {actionText}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex flex-wrap gap-1.5">
+                          {chips.length > 0 ? (
+                            renderChipList(chips)
+                          ) : (
+                            <Badge variant="neutral">{action}</Badge>
                           )}
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 text-sm lg:block">
-                          <span className="text-xs font-semibold text-slate-400 lg:hidden">
-                            Note
-                          </span>
-                          <span className="font-semibold text-slate-900">
-                            {isFiniteNumber(competitor.rating)
-                              ? formatRating(competitor.rating)
-                              : ""}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 text-sm lg:block">
-                          <span className="text-xs font-semibold text-slate-400 lg:hidden">
-                            Avis
-                          </span>
-                          <span className="font-semibold text-slate-900">
-                            {isFiniteNumber(competitor.user_ratings_total)
-                              ? formatInteger(competitor.user_ratings_total)
-                              : ""}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 text-sm lg:block">
-                          <span className="text-xs font-semibold text-slate-400 lg:hidden">
-                            Distance
-                          </span>
-                          <span className="font-medium text-slate-700">{distance ?? ""}</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 text-sm lg:block">
-                          <span className="text-xs font-semibold text-slate-400 lg:hidden">
-                            Écart
-                          </span>
-                          <span className="font-medium text-slate-700">
-                            {ratingDeltaLabel ?? reviewsDeltaLabel ?? ""}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 text-sm lg:block">
-                          <span className="text-xs font-semibold text-slate-400 lg:hidden">
-                            Risque
-                          </span>
-                          <Badge
-                            variant={risk === "Menace forte" ? "warning" : "neutral"}
-                            className="w-fit"
-                          >
-                            {risk}
-                          </Badge>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <Button
@@ -2600,9 +3072,6 @@ const Competitors = ({ session }: CompetitorsProps) => {
                             Google
                             <ArrowUpRight size={12} />
                           </a>
-                          <span className="hidden text-xs text-slate-400 xl:inline">
-                            {action}
-                          </span>
                         </div>
                       </div>
                     </article>

@@ -482,9 +482,13 @@ const buildBenchmarkHtml = (input: {
       <meta charset="utf-8" />
       <style>
         * { box-sizing: border-box; }
-        body { font-family: Inter, Arial, sans-serif; color: #0f172a; margin: 0; background: #ffffff; }
-        .page { min-height: 246mm; break-after: page; page-break-after: always; display: flex; flex-direction: column; gap: 18px; }
+        body { font-family: Inter, Arial, sans-serif; color: #0f172a; margin: 0; background: #ffffff; font-feature-settings: "tnum"; }
+        .page { min-height: 246mm; break-after: page; page-break-after: always; display: flex; flex-direction: column; gap: 16px; }
         .page:last-child { break-after: auto; page-break-after: auto; }
+        .market-cover { background: linear-gradient(135deg, #ffffff 0%, #f8fafc 48%, #eff6ff 100%); }
+        .positioning-page { background: #ffffff; }
+        .threat-page { background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%); }
+        .roadmap-page { background: #ffffff; }
         .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; border-bottom: 1px solid #e2e8f0; padding-bottom: 14px; }
         .brand-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
         .brand-logo { width: 42px; height: 42px; border-radius: 14px; object-fit: contain; border: 1px solid #e2e8f0; background: #ffffff; }
@@ -492,24 +496,25 @@ const buildBenchmarkHtml = (input: {
         .brand-name { font-size: 15px; font-weight: 800; color: #0f172a; }
         .brand-legal { color: #64748b; font-size: 11px; margin-top: 2px; }
         .eyebrow { color: #2563eb; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 800; }
-        h1 { margin: 12px 0 0; font-size: 42px; line-height: 0.98; letter-spacing: -0.04em; }
+        h1 { margin: 12px 0 0; font-size: 44px; line-height: 0.98; letter-spacing: -0.04em; max-width: 620px; }
         h2 { margin: 0; font-size: 28px; line-height: 1.05; letter-spacing: -0.03em; }
         h3 { margin: 0; font-size: 15px; }
         .subtle { color: #64748b; font-size: 12px; line-height: 1.55; }
         .summary { max-width: 560px; color: #334155; font-size: 15px; line-height: 1.65; margin-top: 14px; }
         .meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
         .pill { border: 1px solid #dbeafe; background: #eff6ff; color: #1e40af; border-radius: 999px; padding: 7px 10px; font-size: 11px; font-weight: 700; }
-        .hero-panel { margin-top: auto; border-radius: 28px; background: #0f172a; color: #ffffff; padding: 28px; }
+        .hero-panel { margin-top: auto; border-radius: 28px; background: #0f172a; color: #ffffff; padding: 28px; box-shadow: 0 22px 60px rgba(15,23,42,0.16); }
         .hero-panel .subtle { color: #cbd5e1; }
         .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-        .metric-card { border: 1px solid #e2e8f0; border-radius: 20px; padding: 16px; background: #f8fafc; min-height: 86px; }
+        .decision-strip .kpi-grid { grid-template-columns: 1fr; }
+        .metric-card { border: 1px solid #e2e8f0; border-radius: 22px; padding: 16px; background: #f8fafc; min-height: 86px; break-inside: avoid; page-break-inside: avoid; }
         .hero-panel .metric-card { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.12); }
         .metric-label { color: #64748b; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }
         .hero-panel .metric-label { color: #cbd5e1; }
-        .metric-value { margin-top: 9px; font-size: 30px; line-height: 1; font-weight: 850; letter-spacing: -0.04em; }
+        .metric-value { margin-top: 9px; font-size: 34px; line-height: 1; font-weight: 850; letter-spacing: -0.04em; }
         .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
         .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-        .card { border: 1px solid #e2e8f0; border-radius: 22px; padding: 16px; background: #ffffff; break-inside: avoid; page-break-inside: avoid; }
+        .card { border: 1px solid #e2e8f0; border-radius: 24px; padding: 16px; background: #ffffff; break-inside: avoid; page-break-inside: avoid; box-shadow: 0 12px 34px rgba(15,23,42,0.05); }
         .dark-card { background: #0f172a; color: #ffffff; border-color: #0f172a; }
         .rank { width: 36px; height: 36px; border-radius: 14px; display: flex; align-items: center; justify-content: center; background: #eff6ff; color: #1d4ed8; font-weight: 850; }
         .competitor { display: flex; gap: 12px; align-items: flex-start; }
@@ -519,6 +524,12 @@ const buildBenchmarkHtml = (input: {
         .section-note { color: #475569; font-size: 13px; line-height: 1.6; margin-top: 10px; }
         .list { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
         .list li { color: #334155; font-size: 12px; line-height: 1.45; border-left: 3px solid #dbeafe; padding-left: 10px; }
+        .decision-strip { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 14px; align-items: stretch; }
+        .signal-card { border-radius: 24px; padding: 18px; background: #0f172a; color: #ffffff; break-inside: avoid; page-break-inside: avoid; }
+        .signal-card .section-note { color: #cbd5e1; }
+        .timeline { display: grid; gap: 10px; }
+        .timeline-item { display: grid; grid-template-columns: 32px 1fr; gap: 10px; align-items: flex-start; break-inside: avoid; page-break-inside: avoid; }
+        .timeline-dot { width: 12px; height: 12px; margin: 4px auto 0; border-radius: 999px; background: #2563eb; box-shadow: 0 0 0 6px #dbeafe; }
         .success { background: #f0fdf4; border-color: #bbf7d0; }
         .danger { background: #fff1f2; border-color: #fecdd3; }
         .info { background: #eff6ff; border-color: #bfdbfe; }
@@ -527,7 +538,7 @@ const buildBenchmarkHtml = (input: {
       </style>
     </head>
     <body>
-      <section class="page">
+      <section class="page market-cover">
         <div class="page-head">
           <div class="brand-row">
             ${
@@ -565,7 +576,7 @@ const buildBenchmarkHtml = (input: {
         ${renderFooter()}
       </section>
 
-      <section class="page">
+      <section class="page positioning-page">
         <div class="page-head">
           <div>
             <div class="eyebrow">Page 2</div>
@@ -573,8 +584,21 @@ const buildBenchmarkHtml = (input: {
           </div>
           <div class="subtle">${escapeHtml(input.locationLabel)}</div>
         </div>
-        ${renderKpis(positioningCards)}
-        <div class="grid-3">
+        <div class="decision-strip">
+          <div class="signal-card">
+            <div class="eyebrow">Lecture stratégique</div>
+            <p class="section-note">${escapeHtml(marketSummary)}</p>
+          </div>
+          ${renderKpis(positioningCards.slice(0, 2))}
+        </div>
+        ${
+          positioningCards.length > 2
+            ? renderKpis(positioningCards.slice(2))
+            : ""
+        }
+        ${
+          podiumCards.length
+            ? `<div class="grid-3">
           ${podiumCards
             .map(
               (item) => `
@@ -591,11 +615,13 @@ const buildBenchmarkHtml = (input: {
             </div>`
             )
             .join("")}
-        </div>
+        </div>`
+            : ""
+        }
         ${renderFooter()}
       </section>
 
-      <section class="page">
+      <section class="page threat-page">
         <div class="page-head">
           <div>
             <div class="eyebrow">Page 3</div>
@@ -603,7 +629,9 @@ const buildBenchmarkHtml = (input: {
           </div>
           <div class="subtle">${input.radiusLabel ? `Rayon ${escapeHtml(input.radiusLabel)}` : ""}</div>
         </div>
-        <div class="grid-2">
+        ${
+          competitorCards.length
+            ? `<div class="grid-2">
           ${competitorCards
             .slice(0, 4)
             .map(
@@ -622,8 +650,12 @@ const buildBenchmarkHtml = (input: {
           `
             )
             .join("")}
-        </div>
-        <div class="grid-2">
+        </div>`
+            : ""
+        }
+        ${
+          risks.length || opportunities.length
+            ? `<div class="grid-2">
           ${
             risks.length
               ? `<div class="card danger">
@@ -640,11 +672,13 @@ const buildBenchmarkHtml = (input: {
                 </div>`
               : ""
           }
-        </div>
+        </div>`
+            : ""
+        }
         ${renderFooter()}
       </section>
 
-      <section class="page">
+      <section class="page roadmap-page">
         <div class="page-head">
           <div>
             <div class="eyebrow">Page 4</div>
@@ -652,7 +686,9 @@ const buildBenchmarkHtml = (input: {
           </div>
           <div class="subtle">Plan d'action</div>
         </div>
-        <div class="grid-2">
+        ${
+          swotCards.length
+            ? `<div class="grid-2">
           ${swotCards
             .map(
               (item) => `
@@ -662,16 +698,21 @@ const buildBenchmarkHtml = (input: {
             </div>`
             )
             .join("")}
-        </div>
+        </div>`
+            : ""
+        }
         ${
           actions.length
-            ? `<div class="grid-2">
+            ? `<div class="timeline">
           ${actions
               .map(
                 (action, index) => `
-              <div class="card">
-                <div class="eyebrow">Action ${index + 1}</div>
-                <p class="section-note">${escapeHtml(action)}</p>
+              <div class="timeline-item">
+                <div class="timeline-dot"></div>
+                <div class="card">
+                  <div class="eyebrow">Action ${index + 1}</div>
+                  <p class="section-note">${escapeHtml(action)}</p>
+                </div>
               </div>
             `)
               .join("")}
