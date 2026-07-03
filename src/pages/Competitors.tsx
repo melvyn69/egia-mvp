@@ -3,20 +3,30 @@ import type { Session } from "@supabase/supabase-js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
-  Trophy,
-  Eye,
+  ArrowUpRight,
+  BookmarkPlus,
+  BookmarkX,
+  CalendarDays,
+  Crown,
+  Download,
+  MapPin,
+  RefreshCw,
+  Search,
+  ShieldAlert,
   Sparkles,
+  Star,
+  Target,
+  Trophy,
   TrendingDown,
   TrendingUp,
-  ShieldAlert,
-  Download,
-  BookmarkPlus,
-  BookmarkX
+  Users
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
+import { cn } from "../lib/utils";
 import { supabase } from "../lib/supabase";
 
 type CompetitorsProps = {
@@ -50,7 +60,52 @@ type SettingsRow = {
   competitive_monitoring_radius_km?: number | null;
 };
 
-type TabId = "selection" | "radar" | "swot";
+type BenchmarkHistoryRow = {
+  id: string;
+  created_at: string | null;
+  summary?: string | null;
+  payload?: BenchmarkPayload | null;
+};
+
+type BenchmarkPayload = {
+  stats?: Record<string, number | null | undefined>;
+  top_competitors?: Array<{
+    name?: string | null;
+    rating?: number | null;
+    reviews?: number | null;
+    user_ratings_total?: number | null;
+    distance_m?: number | null;
+  }>;
+  swot?: Record<string, string[] | undefined>;
+  plan_14_days?: string[];
+  radius_km?: number | null;
+  location_id?: string | null;
+};
+
+type DisplayKpi = {
+  label: string;
+  value: string;
+  detail?: string;
+  Icon: LucideIcon;
+  tone: string;
+};
+
+type DisplayCompetitor = {
+  competitor: CompetitorRow;
+  label: string;
+  badge: string;
+  rank: number;
+  tone: string;
+};
+
+const integerFormatter = new Intl.NumberFormat("fr-FR", {
+  maximumFractionDigits: 0
+});
+
+const decimalFormatter = new Intl.NumberFormat("fr-FR", {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1
+});
 
 const scoreCompetitor = (row: {
   rating: number | null;
@@ -61,11 +116,58 @@ const scoreCompetitor = (row: {
   return rating * Math.log10(1 + reviews);
 };
 
-const formatDistance = (value: number | null) => {
-  if (!value) return "—";
+const formatDistance = (value: number | null | undefined) => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
   if (value < 1000) return `${value} m`;
   return `${(value / 1000).toFixed(1)} km`;
 };
+
+const formatDateLabel = (value: Date | string | number | null | undefined) => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString("fr-FR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
+  });
+};
+
+const formatMonthLabel = (value: string | null | undefined) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const label = date.toLocaleDateString("fr-FR", {
+    month: "short",
+    year: "numeric"
+  });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+};
+
+const formatRating = (value: number) => `${decimalFormatter.format(value)}/5`;
+
+const formatInteger = (value: number) => integerFormatter.format(Math.round(value));
+
+const formatDelta = (delta: number) =>
+  `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`;
+
+const formatVsDelta = (delta: number | null) => {
+  if (delta === null) return null;
+  if (Math.abs(delta) < 0.05) return null;
+  return formatDelta(delta);
+};
+
+const formatCountDelta = (delta: number | null) => {
+  if (delta === null) return null;
+  if (Math.abs(delta) < 1) return null;
+  const rounded = Math.round(delta);
+  return `${rounded >= 0 ? "+" : ""}${rounded}`;
+};
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
 
 const median = (values: number[]) => {
   if (values.length === 0) return 0;
@@ -150,69 +252,6 @@ const getStrategicTags = (
   return tags.slice(0, 3);
 };
 
-const getOpportunitiesToCheck = (row: CompetitorRow) => {
-  const rating = typeof row.rating === "number" ? row.rating : null;
-  const reviews =
-    typeof row.user_ratings_total === "number" ? row.user_ratings_total : null;
-  const distance = typeof row.distance_m === "number" ? row.distance_m : null;
-  const bullets: string[] = [];
-  const addBullet = (value: string) => {
-    if (!bullets.includes(value)) bullets.push(value);
-  };
-
-  if (rating !== null && rating >= 4.6 && (reviews === null || reviews < 80)) {
-    addBullet("Accélérer l’acquisition d’avis pour rattraper le volume.");
-  }
-  if (rating !== null && rating < 4.0 && reviews !== null && reviews >= 150) {
-    addBullet("Travailler la qualité d’expérience pour réduire l’écart.");
-  }
-  if (distance !== null && distance <= 800) {
-    addBullet("Renforcer la différenciation locale à proximité.");
-  }
-  if (bullets.length === 0) {
-    addBullet("Analyser les axes perçus comme prioritaires.");
-  }
-  return bullets.slice(0, 2);
-};
-
-const getWatchlistRationale = (row: CompetitorRow, selfAvg: number | null) => {
-  const rating = typeof row.rating === "number" ? row.rating : null;
-  const distance = typeof row.distance_m === "number" ? row.distance_m : null;
-  const reviews =
-    typeof row.user_ratings_total === "number" ? row.user_ratings_total : null;
-  const isVeryClose = distance !== null && distance <= 1000;
-  const isClose = distance !== null && distance <= 3000;
-  const hasStrongVolume = reviews !== null && reviews >= 150;
-
-  if (selfAvg !== null && rating !== null) {
-    const delta = rating - selfAvg;
-    if (delta >= 0.2 && isVeryClose) {
-      return "Note supérieure et concurrent très proche.";
-    }
-    if (delta >= 0.2 && hasStrongVolume) {
-      return "Note supérieure avec des avis élevés.";
-    }
-    if (delta <= -0.2 && hasStrongVolume) {
-      return "Avis élevés mais note inférieure à la vôtre.";
-    }
-    if (delta >= 0.2 && isClose) {
-      return "Note supérieure dans votre zone immédiate.";
-    }
-  }
-
-  if (isVeryClose && hasStrongVolume) {
-    return "Concurrent très proche avec des avis élevés.";
-  }
-  if (isVeryClose) {
-    return "Concurrent très proche de votre emplacement.";
-  }
-  if (hasStrongVolume) {
-    return "Avis élevés dans votre zone.";
-  }
-  return "Concurrent comparable dans votre zone.";
-};
-
-
 const getMajorWeakPoint = (row: CompetitorRow, radiusKm: number) => {
   const rating = typeof row.rating === "number" ? row.rating : null;
   const reviews =
@@ -254,10 +293,9 @@ const passiveQueryOptions = {
   refetchOnWindowFocus: false
 } as const;
 
-const Competitors = ({ session, isAdmin = false }: CompetitorsProps) => {
+const Competitors = ({ session }: CompetitorsProps) => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<TabId>("selection");
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
   const [radiusKm, setRadiusKm] = useState(5);
   const [scanMessage, setScanMessage] = useState<string | null>(null);
@@ -272,7 +310,6 @@ const Competitors = ({ session, isAdmin = false }: CompetitorsProps) => {
   const [radarSearch, setRadarSearch] = useState("");
   const [radarFollowedOnly, setRadarFollowedOnly] = useState(false);
   const [radarTopLimit, setRadarTopLimit] = useState<number | null>(25);
-  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [radarPageSize, setRadarPageSize] = useState(6);
   const [pendingPlaceIds, setPendingPlaceIds] = useState<string[]>([]);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -440,6 +477,23 @@ const Competitors = ({ session, isAdmin = false }: CompetitorsProps) => {
       return { avg: rating, count: reviewCount };
     },
     enabled: Boolean(token && selectedLocationId),
+    ...passiveQueryOptions
+  });
+
+  const benchmarkHistoryQuery = useQuery({
+    queryKey: ["competitors-benchmark-history", userId],
+    queryFn: async () => {
+      if (!supabase || !userId) return [] as BenchmarkHistoryRow[];
+      const { data, error } = await supabase
+        .from("generated_reports")
+        .select("id, created_at, summary, payload")
+        .eq("report_type", "competitors_benchmark")
+        .order("created_at", { ascending: false })
+        .limit(8);
+      if (error) throw error;
+      return (data ?? []) as BenchmarkHistoryRow[];
+    },
+    enabled: Boolean(supabase && userId),
     ...passiveQueryOptions
   });
 
@@ -792,9 +846,11 @@ const Competitors = ({ session, isAdmin = false }: CompetitorsProps) => {
     (settingsRow?.competitive_monitoring_keyword ?? "").trim();
   const sectorMissing = !sectorLabel;
   const normalizedZoneInput = normalizeZoneLabel(zoneInput);
+  const selectedLocationLabel =
+    selectedLocation?.location_title || selectedLocation?.location_resource_name || null;
   const zoneLabel = normalizedZoneInput
     ? normalizedZoneInput
-    : selectedLocation?.location_title || "—";
+    : selectedLocationLabel;
   const rawLocationRating =
     typeof (selectedLocation as { rating?: number | null })?.rating === "number"
       ? (selectedLocation as { rating?: number | null }).rating
@@ -823,27 +879,8 @@ const Competitors = ({ session, isAdmin = false }: CompetitorsProps) => {
     typeof rawSelfCount === "number" && rawSelfCount > 0 ? rawSelfCount : null;
   const displaySelfAvg = locationRating ?? selfAvg;
   const displaySelfCount = locationReviewCount ?? selfCount;
-  const selfScoreLabel = displaySelfAvg !== null ? displaySelfAvg.toFixed(2) : "—";
-  const selfReviewsLabel =
-    displaySelfCount !== null ? `${displaySelfCount}` : "—";
   const buildGoogleLink = (placeId: string) =>
     `https://www.google.com/maps/place/?q=place_id:${placeId}`;
-const formatDelta = (delta: number) =>
-  `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`;
-
-const formatVsDelta = (delta: number | null) => {
-  if (delta === null) return null;
-  if (Math.abs(delta) < 0.05) return null;
-  return formatDelta(delta);
-};
-
-const formatCountDelta = (delta: number | null) => {
-  if (delta === null) return null;
-  if (Math.abs(delta) < 1) return null;
-  const rounded = Math.round(delta);
-  return `${rounded >= 0 ? "+" : ""}${rounded}`;
-};
-
 
   const filteredRadar = useMemo(() => {
     let items = radarItems.slice();
@@ -947,24 +984,6 @@ const formatCountDelta = (delta: number | null) => {
       .sort((a, b) => scoreCompetitor(b) - scoreCompetitor(a));
   }, [followedItems]);
 
-  const getSelectionTier = (row: CompetitorRow) => {
-    const rating = typeof row.rating === "number" ? row.rating : null;
-    const reviews =
-      typeof row.user_ratings_total === "number" ? row.user_ratings_total : null;
-    if (displaySelfAvg !== null && displaySelfCount !== null) {
-      if (rating !== null && reviews !== null) {
-        if (rating >= displaySelfAvg && reviews >= displaySelfCount) {
-          return { label: "LEADER", variant: "success" as const };
-        }
-        if (rating >= displaySelfAvg || reviews >= displaySelfCount) {
-          return { label: "CHALLENGER", variant: "warning" as const };
-        }
-        return { label: "OUTSIDER", variant: "neutral" as const };
-      }
-    }
-    return { label: "OUTSIDER", variant: "neutral" as const };
-  };
-
   const swotReport = useMemo(() => {
     const source = sortedFollowed.length > 0 ? sortedFollowed : radarItems;
     const ratings = source
@@ -1003,81 +1022,11 @@ const formatCountDelta = (delta: number | null) => {
     };
   }, [radarItems, sortedFollowed]);
 
-  const podium = useMemo(() => {
-    const selfAvg = displaySelfAvg;
-    const selfCount = displaySelfCount;
-    const selfScore =
-      selfAvg !== null && selfCount !== null
-        ? selfAvg * Math.log10(1 + selfCount)
-        : null;
-    const source = sortedFollowed.length > 0 ? sortedFollowed : radarItems;
-    const topCompetitors = source
-      .slice()
-      .sort((a, b) => scoreCompetitor(b) - scoreCompetitor(a))
-      .slice(0, 2);
-    return {
-      self: { score: selfScore, avg: selfAvg, count: selfCount },
-      competitors: topCompetitors
-    };
-  }, [radarItems, sortedFollowed, displaySelfAvg, displaySelfCount]);
-
-  const topScores = radarItems.map((row) => scoreCompetitor(row));
-  const selfScoreValue = podium.self.score ?? null;
-  const top10Threshold = topScores
-    .slice()
-    .sort((a, b) => b - a)
-    .slice(0, Math.max(1, Math.ceil(topScores.length * 0.1)))
-    .pop();
-  const isTop10 =
-    selfScoreValue !== null && top10Threshold !== undefined
-      ? selfScoreValue >= top10Threshold
-      : false;
-
   const visibleRadar = filteredRadar.slice(0, radarPageSize);
   const canLoadMore = filteredRadar.length > radarPageSize;
   const skeletonCards = Array.from({ length: 4 }, (_, index) => (
     <Skeleton key={`skeleton-${index}`} className="h-40 w-full" />
   ));
-
-
-  const radarSummary = useMemo(() => {
-    const total = radarItems.length;
-    const higherThanSelf =
-      displaySelfAvg !== null
-        ? radarItems.filter((row) => (row.rating ?? 0) > displaySelfAvg).length
-        : null;
-    const distances = radarItems
-      .map((row) => row.distance_m)
-      .filter((value): value is number => typeof value === "number");
-    const closestDistance =
-      distances.length > 0 ? Math.min(...distances) : null;
-    const ratings = radarItems
-      .map((row) => row.rating)
-      .filter((value): value is number => typeof value === "number");
-    const reviews = radarItems
-      .map((row) => row.user_ratings_total)
-      .filter((value): value is number => typeof value === "number");
-    const medianRating = ratings.length > 0 ? median(ratings) : null;
-    const medianReviews = reviews.length > 0 ? median(reviews) : null;
-    const bestRating = ratings.length > 0 ? Math.max(...ratings) : null;
-    const dangerRadius = radiusKm * 1000 * 0.5;
-    const riskyCount = radarItems.filter(
-      (row) =>
-        typeof row.rating === "number" &&
-        typeof row.distance_m === "number" &&
-        row.rating >= 4.8 &&
-        row.distance_m <= dangerRadius
-    ).length;
-    return {
-      total,
-      higherThanSelf,
-      closestDistance,
-      medianRating,
-      medianReviews,
-      bestRating,
-      riskyCount
-    };
-  }, [radarItems, displaySelfAvg, radiusKm]);
 
   const swotBullets = useMemo(() => {
     const hasEnoughData = swotReport.source.length >= 10;
@@ -1239,7 +1188,7 @@ const formatCountDelta = (delta: number | null) => {
         );
       }
     }
-    const trimList = (list: string[]) => list.slice(0, 1);
+    const trimList = (list: string[]) => list.slice(0, 3);
     return {
       forces: trimList(forces),
       weaknesses: trimList(weaknesses),
@@ -1249,54 +1198,446 @@ const formatCountDelta = (delta: number | null) => {
     };
   }, [displaySelfAvg, displaySelfCount, swotReport]);
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-semibold text-slate-900">
-              Veille concurrentielle
-            </h1>
-            <Badge variant="neutral">Analyse locale</Badge>
-          </div>
-          <p className="text-sm text-slate-500">
-            Surveillez votre marché et anticipez les évolutions locales.
-          </p>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-            <Badge variant={googleConnected ? "success" : "neutral"}>
-              {googleConnected ? "Google connecté" : "Google non connecté"}
-            </Badge>
-            <Badge variant={enabled ? "success" : "neutral"}>
-              {enabled ? "Veille activée" : "Veille désactivée"}
-            </Badge>
-            {sectorLabel ? (
-              <Badge variant="neutral">Secteur : {sectorLabel}</Badge>
-            ) : (
-              <Badge variant="neutral">Secteur manquant</Badge>
-            )}
-            <Badge variant="neutral">Rayon : {statusRadius} km</Badge>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {(["selection", "radar", "swot"] as TabId[]).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => setActiveTab(tab)}
-              className={`rounded-full border px-4 py-2 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30 ${
-                activeTab === tab
-                  ? "border-ink bg-ink text-white shadow-sm"
-                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              {tab === "selection" && "Ma sélection"}
-              {tab === "radar" && "Radar"}
-              {tab === "swot" && "Analyse SWOT"}
-            </button>
-          ))}
-        </div>
-      </div>
+  const marketRows = useMemo(() => {
+    const rows = new Map<string, CompetitorRow>();
+    [...sortedFollowed, ...radarItems].forEach((row) => {
+      const key = row.place_id || row.id;
+      if (!rows.has(key)) {
+        rows.set(key, row);
+      }
+    });
+    return Array.from(rows.values());
+  }, [radarItems, sortedFollowed]);
 
+  const rankedMarket = useMemo(
+    () => marketRows.slice().sort((a, b) => scoreCompetitor(b) - scoreCompetitor(a)),
+    [marketRows]
+  );
+
+  const distanceRankedMarket = useMemo(
+    () =>
+      marketRows
+        .filter((row) => isFiniteNumber(row.distance_m))
+        .sort((a, b) => (a.distance_m ?? 0) - (b.distance_m ?? 0)),
+    [marketRows]
+  );
+
+  const marketStats = useMemo(() => {
+    const ratings = marketRows
+      .map((row) => row.rating)
+      .filter((value): value is number => isFiniteNumber(value));
+    const reviews = marketRows
+      .map((row) => row.user_ratings_total)
+      .filter((value): value is number => isFiniteNumber(value));
+    return {
+      total: marketRows.length,
+      medianRating: ratings.length > 0 ? median(ratings) : null,
+      medianReviews: reviews.length > 0 ? median(reviews) : null,
+      bestRating: ratings.length > 0 ? Math.max(...ratings) : null,
+      closestCompetitor: distanceRankedMarket[0] ?? null,
+      leader: rankedMarket[0] ?? null
+    };
+  }, [distanceRankedMarket, marketRows, rankedMarket]);
+
+  const marketKpis = useMemo(() => {
+    const cards: DisplayKpi[] = [];
+    if (marketStats.total > 0) {
+      cards.push({
+        label: "Concurrents observés",
+        value: formatInteger(marketStats.total),
+        detail:
+          sortedFollowed.length > 0
+            ? `${formatInteger(sortedFollowed.length)} suivis`
+            : undefined,
+        Icon: Users,
+        tone: "bg-blue-50 text-blue-700"
+      });
+    }
+    if (marketStats.medianRating !== null) {
+      cards.push({
+        label: "Note médiane",
+        value: formatRating(marketStats.medianRating),
+        Icon: Star,
+        tone: "bg-amber-50 text-amber-700"
+      });
+    }
+    if (marketStats.medianReviews !== null) {
+      cards.push({
+        label: "Médiane avis",
+        value: formatInteger(marketStats.medianReviews),
+        Icon: Trophy,
+        tone: "bg-slate-100 text-slate-700"
+      });
+    }
+    if (marketStats.bestRating !== null) {
+      cards.push({
+        label: "Meilleure note",
+        value: formatRating(marketStats.bestRating),
+        Icon: Crown,
+        tone: "bg-emerald-50 text-emerald-700"
+      });
+    }
+    const closestDistance = formatDistance(marketStats.closestCompetitor?.distance_m);
+    if (closestDistance && marketStats.closestCompetitor) {
+      cards.push({
+        label: "Concurrent le plus proche",
+        value: closestDistance,
+        detail: marketStats.closestCompetitor.name,
+        Icon: MapPin,
+        tone: "bg-sky-50 text-sky-700"
+      });
+    }
+    return cards;
+  }, [marketStats, sortedFollowed.length]);
+
+  const topRankByPlaceId = useMemo(() => {
+    const ranks = new Map<string, number>();
+    rankedMarket.forEach((row, index) => {
+      ranks.set(row.place_id || row.id, index + 1);
+    });
+    return ranks;
+  }, [rankedMarket]);
+
+  const getCompetitorBadges = (row: CompetitorRow) => {
+    const badges: string[] = [];
+    const rank = topRankByPlaceId.get(row.place_id || row.id);
+    const distanceLabel = formatDistance(row.distance_m);
+    if (rank === 1) badges.push("Leader");
+    if (distanceLabel && (row.distance_m ?? 0) <= 1000) badges.push("Très proche");
+    if (
+      isFiniteNumber(row.user_ratings_total) &&
+      marketStats.medianReviews !== null &&
+      row.user_ratings_total >= marketStats.medianReviews * 1.4
+    ) {
+      badges.push("Fort volume");
+    }
+    if (
+      isFiniteNumber(row.rating) &&
+      displaySelfAvg !== null &&
+      row.rating >= displaySelfAvg
+    ) {
+      badges.push("À surveiller");
+    }
+    return Array.from(new Set(badges)).slice(0, 3);
+  };
+
+  const threatRows = useMemo(() => {
+    const top3 = new Set(rankedMarket.slice(0, 3).map((row) => row.place_id || row.id));
+    return rankedMarket
+      .map((row) => {
+        const key = row.place_id || row.id;
+        const isTop3 = top3.has(key);
+        const isNear = isFiniteNumber(row.distance_m) && row.distance_m <= 1000;
+        const isClose =
+          isFiniteNumber(row.distance_m) &&
+          row.distance_m <= Math.max(1200, radiusKm * 1000 * 0.35);
+        const hasBetterRating =
+          displaySelfAvg !== null &&
+          isFiniteNumber(row.rating) &&
+          row.rating >= displaySelfAvg;
+        const hasHigherVolume =
+          displaySelfCount !== null &&
+          isFiniteNumber(row.user_ratings_total) &&
+          row.user_ratings_total > displaySelfCount;
+        const aboveMedianRating =
+          marketStats.medianRating !== null &&
+          isFiniteNumber(row.rating) &&
+          row.rating >= marketStats.medianRating;
+        const aboveMedianVolume =
+          marketStats.medianReviews !== null &&
+          isFiniteNumber(row.user_ratings_total) &&
+          row.user_ratings_total >= marketStats.medianReviews;
+        const pressureSignals = [
+          hasBetterRating,
+          hasHigherVolume,
+          isNear,
+          isTop3,
+          aboveMedianRating && aboveMedianVolume
+        ].filter(Boolean).length;
+        const level =
+          pressureSignals >= 3 || (isTop3 && (hasBetterRating || hasHigherVolume || isNear))
+            ? "Menace forte"
+            : pressureSignals >= 1 || isClose
+              ? "À surveiller"
+              : "Faible menace";
+        const reason =
+          isNear && hasHigherVolume
+            ? "Très proche et volume d'avis supérieur."
+            : isNear && hasBetterRating
+              ? "Très proche avec une note au moins équivalente."
+              : hasBetterRating && hasHigherVolume
+                ? "Note et volume d'avis supérieurs."
+                : isTop3
+                  ? "Présent dans le top 3 local."
+                  : hasHigherVolume
+                    ? "Volume d'avis supérieur."
+                    : hasBetterRating
+                      ? "Note au moins équivalente à la vôtre."
+                      : isClose
+                        ? "Concurrent proche dans le rayon étudié."
+                        : "Signal concurrentiel limité.";
+        return {
+          row,
+          level,
+          reason,
+          rank: topRankByPlaceId.get(key) ?? null
+        };
+      })
+      .slice(0, 9);
+  }, [
+    displaySelfAvg,
+    displaySelfCount,
+    marketStats.medianRating,
+    marketStats.medianReviews,
+    radiusKm,
+    rankedMarket,
+    topRankByPlaceId
+  ]);
+
+  const podiumCards = useMemo(() => {
+    const used = new Set<string>();
+    const cards: DisplayCompetitor[] = [];
+    const addCard = (
+      competitor: CompetitorRow | null,
+      label: string,
+      badge: string,
+      tone: string
+    ) => {
+      if (!competitor) return;
+      const key = competitor.place_id || competitor.id;
+      if (used.has(key)) return;
+      used.add(key);
+      cards.push({
+        competitor,
+        label,
+        badge,
+        rank: topRankByPlaceId.get(key) ?? cards.length + 1,
+        tone
+      });
+    };
+    addCard(rankedMarket[0] ?? null, "Leader local", "Leader", "bg-slate-950 text-white");
+    addCard(rankedMarket[1] ?? null, "Challenger", "À surveiller", "bg-white text-slate-950");
+    addCard(
+      distanceRankedMarket[0] ?? null,
+      "Concurrent proche",
+      "Très proche",
+      "bg-white text-slate-950"
+    );
+    return cards.slice(0, 3);
+  }, [distanceRankedMarket, rankedMarket, topRankByPlaceId]);
+
+  const gapCards = useMemo(() => {
+    const cards: Array<{ label: string; value: string; detail?: string }> = [];
+    if (displaySelfAvg === null && displaySelfCount === null) return cards;
+    if (displaySelfAvg !== null && marketStats.medianRating !== null) {
+      const delta = displaySelfAvg - marketStats.medianRating;
+      cards.push({
+        label: "Écart note vs médiane",
+        value: Math.abs(delta) < 0.05 ? "Aligné" : formatDelta(delta),
+        detail: `${formatRating(displaySelfAvg)} vs ${formatRating(marketStats.medianRating)}`
+      });
+    }
+    if (displaySelfCount !== null && marketStats.medianReviews !== null) {
+      const delta = displaySelfCount - marketStats.medianReviews;
+      cards.push({
+        label: "Écart avis vs médiane",
+        value: Math.abs(delta) < 1 ? "Aligné" : `${delta >= 0 ? "+" : ""}${formatInteger(delta)}`,
+        detail: `${formatInteger(displaySelfCount)} vs ${formatInteger(
+          marketStats.medianReviews
+        )}`
+      });
+    }
+    if (displaySelfAvg !== null && marketStats.bestRating !== null) {
+      const delta = displaySelfAvg - marketStats.bestRating;
+      cards.push({
+        label: "Écart face au leader",
+        value: Math.abs(delta) < 0.05 ? "Aligné" : formatDelta(delta),
+        detail: marketStats.leader?.name
+      });
+    }
+    const closestDistance = formatDistance(marketStats.closestCompetitor?.distance_m);
+    if (closestDistance && marketStats.closestCompetitor) {
+      cards.push({
+        label: "Distance du plus proche",
+        value: closestDistance,
+        detail: marketStats.closestCompetitor.name
+      });
+    }
+    return cards;
+  }, [displaySelfAvg, displaySelfCount, marketStats]);
+
+  const priorityActions = useMemo(() => {
+    const actions: string[] = [];
+    if (
+      displaySelfCount !== null &&
+      marketStats.medianReviews !== null &&
+      marketStats.medianReviews > displaySelfCount
+    ) {
+      const missingReviews = Math.ceil(marketStats.medianReviews - displaySelfCount);
+      actions.push(
+        `Obtenir ${formatInteger(
+          missingReviews
+        )} nouveaux avis pour se rapprocher de la médiane locale.`
+      );
+    }
+    if (
+      marketStats.closestCompetitor &&
+      isFiniteNumber(marketStats.closestCompetitor.distance_m) &&
+      marketStats.closestCompetitor.distance_m <= 1000
+    ) {
+      actions.push("Renforcer la différenciation locale face au concurrent le plus proche.");
+    }
+    if (
+      displaySelfAvg !== null &&
+      marketStats.bestRating !== null &&
+      marketStats.bestRating > displaySelfAvg
+    ) {
+      actions.push("Répondre aux avis et valoriser les points forts pour réduire l'écart de note.");
+    }
+    swotBullets.actions.forEach((item) => {
+      if (!actions.includes(item)) actions.push(item);
+    });
+    const labels = ["Semaine 1", "Semaine 2", "Ce mois-ci"];
+    return actions.slice(0, 3).map((action, index) => ({
+      label: labels[index],
+      action
+    }));
+  }, [
+    displaySelfAvg,
+    displaySelfCount,
+    marketStats.bestRating,
+    marketStats.closestCompetitor,
+    marketStats.medianReviews,
+    swotBullets.actions
+  ]);
+
+  const swotSections = useMemo(
+    () =>
+      [
+        {
+          title: "Forces",
+          Icon: Sparkles,
+          items: swotBullets.forces,
+          tone: "border-emerald-100 bg-emerald-50/70 text-emerald-800"
+        },
+        {
+          title: "Faiblesses",
+          Icon: TrendingDown,
+          items: swotBullets.weaknesses,
+          tone: "border-rose-100 bg-rose-50/70 text-rose-800"
+        },
+        {
+          title: "Opportunités",
+          Icon: TrendingUp,
+          items: swotBullets.opportunities,
+          tone: "border-sky-100 bg-sky-50/70 text-sky-800"
+        },
+        {
+          title: "Menaces",
+          Icon: ShieldAlert,
+          items: swotBullets.threats,
+          tone: "border-slate-200 bg-slate-50 text-slate-700"
+        }
+      ].filter((section) => section.items.length > 0),
+    [swotBullets]
+  );
+
+  const benchmarkTimeline = useMemo(() => {
+    return (benchmarkHistoryQuery.data ?? [])
+      .map((report) => {
+        const payload = report.payload ?? null;
+        const stats = payload?.stats ?? {};
+        const total = isFiniteNumber(stats.total) ? stats.total : null;
+        const medianRating = isFiniteNumber(stats.median_rating)
+          ? stats.median_rating
+          : null;
+        const bestCompetitor =
+          payload?.top_competitors?.find((item) => item.name?.trim()) ?? null;
+        return {
+          id: report.id,
+          month: formatMonthLabel(report.created_at),
+          date: formatDateLabel(report.created_at),
+          total,
+          medianRating,
+          bestCompetitor: bestCompetitor?.name?.trim() ?? null
+        };
+      })
+      .filter((item) => item.month || item.total !== null || item.medianRating !== null)
+      .slice(0, 6);
+  }, [benchmarkHistoryQuery.data]);
+
+  const latestAnalysisDate =
+    formatDateLabel(lastScanAt) ?? formatDateLabel(scanHistory[0]?.ts ?? null);
+
+  const heroSignal = useMemo(() => {
+    if (marketStats.leader?.name && marketStats.bestRating !== null) {
+      return `${marketStats.leader.name} mène le marché local avec ${formatRating(
+        marketStats.bestRating
+      )}.`;
+    }
+    if (marketStats.total > 0 && marketStats.medianRating !== null) {
+      return `${formatInteger(marketStats.total)} concurrents observés avec une note médiane de ${formatRating(
+        marketStats.medianRating
+      )}.`;
+    }
+    if (selectedLocationLabel) {
+      return `Analyse prête pour ${selectedLocationLabel}.`;
+    }
+    return null;
+  }, [
+    marketStats.bestRating,
+    marketStats.leader,
+    marketStats.medianRating,
+    marketStats.total,
+    selectedLocationLabel
+  ]);
+
+  const runCurrentScan = () => {
+    if (!sectorLabel) {
+      setScanError("Définis la catégorie de l’établissement avant de scanner.");
+      setScanErrorHint("Renseigne-la dans Paramètres > Établissements.");
+      setScanMessage(null);
+      return;
+    }
+    scanMutation.mutate({ keyword: sectorLabel, radiusKm });
+  };
+
+  const relaunchLastScan = () => {
+    const lastScan = scanHistory[0] ?? null;
+    const fallbackRadius =
+      lastScan?.radiusKm ??
+      radiusKm ??
+      settingsRow?.competitive_monitoring_radius_km ??
+      0;
+    if (!selectedLocationId) return;
+    if (!enabled || !lastScan?.keyword || !fallbackRadius || !lastScan) {
+      setScanError("Relance indisponible sans analyse précédente.");
+      setScanErrorHint("Lance d’abord une analyse depuis le panneau.");
+      setScanMessage(null);
+      return;
+    }
+    setRadiusKm(fallbackRadius);
+    if (lastScan.zoneLabel) {
+      setZoneInput(lastScan.zoneLabel);
+    }
+    if (lastScan.locationId && lastScan.locationId !== selectedLocationId) {
+      setSelectedLocationId(lastScan.locationId);
+      setTimeout(() => {
+        scanMutation.mutate({
+          keyword: lastScan.keyword,
+          radiusKm: fallbackRadius
+        });
+      }, 0);
+      return;
+    }
+    scanMutation.mutate({
+      keyword: lastScan.keyword,
+      radiusKm: fallbackRadius
+    });
+  };
+
+  return (
+    <div className="min-w-0 space-y-5 overflow-x-hidden pb-8 md:space-y-6">
       <style>{`
         @keyframes radar-pulse {
           0% { transform: scale(0.4); opacity: 0.4; }
@@ -1310,25 +1651,27 @@ const formatCountDelta = (delta: number | null) => {
       `}</style>
 
       {isScanning && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
-          <div className="relative flex h-56 w-56 items-center justify-center">
-            <div className="absolute inset-0 rounded-full border border-emerald-300/40" />
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-6 backdrop-blur-sm">
+          <div className="relative flex h-60 w-60 items-center justify-center rounded-full">
+            <div className="absolute inset-0 rounded-full border border-blue-200/30" />
             <div
-              className="absolute inset-0 rounded-full border border-emerald-300/60"
+              className="absolute inset-0 rounded-full border border-blue-200/60"
               style={{ animation: "radar-pulse 2.6s ease-out infinite" }}
             />
             <div
               className="absolute inset-0 rounded-full"
               style={{
                 background:
-                  "conic-gradient(rgba(16,185,129,0.25), rgba(16,185,129,0.0) 60%)",
+                  "conic-gradient(rgba(96,165,250,0.28), rgba(96,165,250,0) 62%)",
                 animation: "radar-sweep 2.2s linear infinite"
               }}
             />
-            <div className="relative z-10 text-center text-sm font-semibold text-emerald-200">
-              Géolocalisation du secteur…
-              <div className="mt-2 text-xs font-normal text-emerald-100">
-                Analyse du marché en temps réel…
+            <div className="relative z-10 rounded-2xl bg-slate-950/70 px-5 py-4 text-center shadow-2xl">
+              <div className="text-sm font-semibold text-white">
+                Analyse du marché local...
+              </div>
+              <div className="mt-1 text-xs text-blue-100">
+                Lecture des concurrents autour de votre établissement.
               </div>
             </div>
           </div>
@@ -1338,11 +1681,12 @@ const formatCountDelta = (delta: number | null) => {
       {toast && (
         <div className="sticky top-4 z-20 flex justify-end pointer-events-none">
           <div
-            className={`pointer-events-auto flex items-start gap-2 rounded-xl border px-3 py-2 text-xs shadow-sm ${
+            className={cn(
+              "pointer-events-auto flex items-start gap-2 rounded-2xl border px-3 py-2 text-xs shadow-[0_18px_45px_rgba(15,23,42,0.10)]",
               toast.type === "success"
                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                 : "border-rose-200 bg-rose-50 text-rose-600"
-            }`}
+            )}
           >
             <span>{toast.message}</span>
             <button
@@ -1351,42 +1695,166 @@ const formatCountDelta = (delta: number | null) => {
               className="text-[11px] font-semibold text-slate-500 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
               onClick={() => setToast(null)}
             >
-              ×
+              x
             </button>
           </div>
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
-        <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
-          <Card className="relative z-30 overflow-visible">
-            <CardHeader>
-              <CardTitle className="text-base text-slate-600">Nouvelle analyse</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {locationsEmpty ? (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                  <p className="text-sm font-semibold text-slate-800">
-                    Aucun établissement sélectionné
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Ajoutez un lieu pour lancer la veille concurrentielle.
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mt-3"
-                    onClick={() => navigate("/settings?tab=locations")}
+      <section className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_24px_80px_rgba(15,23,42,0.08)] md:p-6 lg:p-8">
+        <div className="flex min-w-0 flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={googleConnected ? "success" : "neutral"}>
+                {googleConnected ? "Google connecté" : "Google à connecter"}
+              </Badge>
+              <Badge variant={enabled ? "success" : "neutral"}>
+                {enabled ? "Veille activée" : "Veille à activer"}
+              </Badge>
+              {latestAnalysisDate && (
+                <Badge variant="neutral">Dernière analyse: {latestAnalysisDate}</Badge>
+              )}
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">
+                Lecture du marché local
+              </p>
+              <h1 className="mt-2 text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">
+                Veille concurrentielle
+              </h1>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 md:text-base">
+                Comprendre votre position locale et les écarts à combler.
+              </p>
+              {heroSignal && (
+                <p className="mt-4 max-w-2xl rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm font-medium leading-6 text-slate-800">
+                  {heroSignal}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+              {selectedLocationLabel && (
+                <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 font-medium">
+                  <MapPin size={13} />
+                  {selectedLocationLabel}
+                </span>
+              )}
+              {zoneLabel && zoneLabel !== selectedLocationLabel && (
+                <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 font-medium">
+                  Zone: {zoneLabel}
+                </span>
+              )}
+              <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 font-medium">
+                Rayon: {radiusKm || statusRadius} km
+              </span>
+              {sectorLabel && (
+                <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 font-medium">
+                  Secteur: {sectorLabel}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row lg:flex-col xl:flex-row">
+            <Button
+              className="w-full bg-ink text-white shadow-[0_16px_36px_rgba(15,23,42,0.18)] hover:bg-ink/90 sm:w-auto"
+              onClick={runCurrentScan}
+              disabled={sectorMissing || scanMutation.isPending || !selectedLocationId}
+            >
+              <span className="flex items-center justify-center gap-2">
+                {scanMutation.isPending ? (
+                  <span className="h-3 w-3 animate-spin rounded-full border border-white/70 border-t-white" />
+                ) : (
+                  <RefreshCw size={15} />
+                )}
+                {scanMutation.isPending ? "Analyse..." : "Relancer l'analyse"}
+              </span>
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full border-slate-200 bg-white sm:w-auto"
+              onClick={handleGenerateBenchmark}
+              disabled={benchmarkLoading || !selectedLocationId}
+            >
+              <span className="flex items-center justify-center gap-2">
+                {benchmarkLoading ? (
+                  <span className="h-3 w-3 animate-spin rounded-full border border-slate-400 border-t-slate-700" />
+                ) : (
+                  <Download size={15} />
+                )}
+                {benchmarkLoading ? "Génération..." : "Télécharger le benchmark"}
+              </span>
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          {marketKpis.length > 0 ? (
+            marketKpis.map(({ label, value, detail, Icon, tone }) => (
+              <div
+                key={label}
+                className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold text-slate-500">{label}</span>
+                  <span
+                    className={cn(
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl",
+                      tone
+                    )}
                   >
-                    Choisir un établissement
-                  </Button>
+                    <Icon size={16} />
+                  </span>
                 </div>
-              ) : (
-                <>
+                <div className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
+                  {value}
+                </div>
+                {detail && (
+                  <p className="mt-1 truncate text-xs font-medium text-slate-500">
+                    {detail}
+                  </p>
+                )}
+              </div>
+            ))
+          ) : (
+            <div className="col-span-full rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">
+              Lancez une analyse pour afficher les indicateurs du marché local.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <Card className="rounded-[24px] shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
+          <CardHeader className="p-4 pb-0 md:p-5 md:pb-0">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Target size={18} />
+              Paramètres d'analyse
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 p-4 md:p-5">
+            {locationsEmpty ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                <p className="font-semibold text-slate-900">
+                  Aucun établissement sélectionné
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  Ajoutez un lieu pour lancer la veille concurrentielle.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => navigate("/settings?tab=locations")}
+                >
+                  Choisir un établissement
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                   <label className="text-xs font-semibold text-slate-600">
                     Établissement
                     <select
-                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
                       value={selectedLocationId ?? ""}
                       onChange={(event) =>
                         setSelectedLocationId(event.target.value || null)
@@ -1401,66 +1869,12 @@ const formatCountDelta = (delta: number | null) => {
                         ))}
                     </select>
                   </label>
-                  <div className="text-xs font-semibold text-slate-600">
-                    Secteur d’activité
-                    <div className="mt-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                      {sectorLabel ? (
-                        <Badge variant="neutral" className="text-xs">
-                          Secteur: {sectorLabel}
-                        </Badge>
-                      ) : (
-                        <span className="text-xs text-slate-400">Non défini</span>
-                      )}
-                    </div>
-                  </div>
-                  {sectorMissing && (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold">Secteur non défini</span>
-                        <Badge variant="warning">À compléter</Badge>
-                      </div>
-                      <p className="mt-1 text-[11px] text-amber-700/90">
-                        Complète la catégorie de l’établissement dans Paramètres.
-                      </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="mt-2"
-                        onClick={() => navigate("/settings?tab=locations")}
-                      >
-                        Compléter l’établissement
-                      </Button>
-                    </div>
-                  )}
                   <label className="text-xs font-semibold text-slate-600">
-                    Zone géographique
-                    <input
-                      className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
-                      value={zoneInput}
-                      onChange={(event) => {
-                        const nextValue = event.target.value.slice(0, 40);
-                        setZoneInput(nextValue);
-                        if (typeof window !== "undefined") {
-                          window.localStorage.setItem(
-                            "competitors_zone_label",
-                            nextValue
-                          );
-                        }
-                      }}
-                      placeholder="ex: ecully, lyon 9…"
-                    />
-                    <p className="mt-1 text-[11px] text-slate-400">
-                      Libellé de zone pour vos analyses (max 40 caractères).
-                    </p>
-                  </label>
-                  <label className="text-xs font-semibold text-slate-600">
-                    Zone géographique / Rayon
+                    Rayon
                     <select
-                      className="relative z-40 mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
                       value={radiusKm}
-                      onChange={(event) =>
-                        setRadiusKm(Number(event.target.value))
-                      }
+                      onChange={(event) => setRadiusKm(Number(event.target.value))}
                     >
                       <option value={1}>1 km</option>
                       <option value={5}>5 km</option>
@@ -1468,118 +1882,144 @@ const formatCountDelta = (delta: number | null) => {
                       <option value={20}>20 km</option>
                     </select>
                   </label>
-                  <Button
-                    className="w-full bg-ink text-white hover:bg-ink/90"
-                    onClick={() => {
-                      if (!sectorLabel) {
-                        setScanError(
-                          "Définis la catégorie de l’établissement avant de scanner."
-                        );
-                        setScanErrorHint(
-                          "Renseigne-la dans Paramètres > Établissements."
-                        );
-                        setScanMessage(null);
-                        return;
+                </div>
+                <label className="block text-xs font-semibold text-slate-600">
+                  Zone géographique
+                  <input
+                    className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
+                    value={zoneInput}
+                    onChange={(event) => {
+                      const nextValue = event.target.value.slice(0, 40);
+                      setZoneInput(nextValue);
+                      if (typeof window !== "undefined") {
+                        window.localStorage.setItem("competitors_zone_label", nextValue);
                       }
-                      scanMutation.mutate({ keyword: sectorLabel, radiusKm });
                     }}
-                    disabled={
-                      sectorMissing || scanMutation.isPending || !selectedLocationId
-                    }
+                    placeholder="ex: ecully, lyon 9"
+                  />
+                </label>
+                {sectorMissing && (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold">Secteur à compléter</span>
+                      <Badge variant="warning">Action requise</Badge>
+                    </div>
+                    <p className="mt-1 leading-5">
+                      Complétez la catégorie de l'établissement avant de relancer l'analyse.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-2"
+                      onClick={() => navigate("/settings?tab=locations")}
+                    >
+                      Compléter l'établissement
+                    </Button>
+                  </div>
+                )}
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    className="flex-1 bg-ink text-white hover:bg-ink/90"
+                    onClick={runCurrentScan}
+                    disabled={sectorMissing || scanMutation.isPending || !selectedLocationId}
                   >
                     <span className="flex items-center justify-center gap-2">
-                      {scanMutation.isPending && (
-                        <span className="h-3 w-3 animate-spin rounded-full border border-white/70 border-t-white" />
-                      )}
-                      {scanMutation.isPending ? "Analyse..." : "▶ Lancer l'IA"}
+                      <RefreshCw size={14} />
+                      Lancer l'analyse
                     </span>
                   </Button>
                   <Button
                     variant="outline"
-                    className="w-full"
-                    onClick={() => {
-                      const lastScan = scanHistory[0] ?? null;
-                      const fallbackRadius =
-                        lastScan?.radiusKm ??
-                        radiusKm ??
-                        settingsRow?.competitive_monitoring_radius_km ??
-                        0;
-                      if (!selectedLocationId) return;
-                      if (!enabled || !lastScan?.keyword || !fallbackRadius || !lastScan) {
-                        setScanError(
-                          "Relance indisponible sans analyse précédente."
-                        );
-                        setScanErrorHint(
-                          "Lance d’abord une analyse depuis le panneau."
-                        );
-                        setScanMessage(null);
-                        return;
-                      }
-                      setRadiusKm(fallbackRadius);
-                      if (lastScan?.zoneLabel) {
-                        setZoneInput(lastScan.zoneLabel);
-                      }
-                      if (
-                        lastScan?.locationId &&
-                        lastScan.locationId !== selectedLocationId
-                      ) {
-                        setSelectedLocationId(lastScan.locationId);
-                        setTimeout(() => {
-                          scanMutation.mutate({
-                            keyword: lastScan.keyword,
-                            radiusKm: fallbackRadius
-                          });
-                        }, 0);
-                        return;
-                      }
-                      scanMutation.mutate({
-                        keyword: lastScan.keyword,
-                        radiusKm: fallbackRadius
-                      });
-                    }}
-                    disabled={
-                      !selectedLocationId ||
-                      scanMutation.isPending ||
-                      !scanHistory[0]
-                    }
-                    title={
-                      scanHistory[0]
-                        ? "Relance la dernière analyse"
-                        : "Lance une analyse d’abord"
-                    }
+                    className="flex-1"
+                    onClick={relaunchLastScan}
+                    disabled={!selectedLocationId || scanMutation.isPending || !scanHistory[0]}
                   >
                     Relancer
                   </Button>
-                </>
-              )}
-              {scanMutation.isPending && (
-                <p className="text-xs text-slate-500">Analyse en cours…</p>
-              )}
-              {scanMessage && (
-                <p className="text-xs text-emerald-600">
-                  {scanMessage}
-                </p>
-              )}
-              {scanError && (
-                <div className="text-xs text-rose-600">
-                  <p>{scanError}</p>
-                  {scanErrorHint && (
-                    <p className="text-rose-500">{scanErrorHint}</p>
+                </div>
+              </>
+            )}
+            {scanMutation.isPending && (
+              <p className="text-xs text-slate-500">Analyse du marché local en cours...</p>
+            )}
+            {scanMessage && <p className="text-xs text-emerald-600">{scanMessage}</p>}
+            {scanError && (
+              <div className="text-xs text-rose-600">
+                <p>{scanError}</p>
+                {scanErrorHint && <p className="text-rose-500">{scanErrorHint}</p>}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-[24px] shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
+          <CardHeader className="p-4 pb-0 md:p-5 md:pb-0">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CalendarDays size={18} />
+              Historique benchmark
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 md:p-5">
+            {benchmarkHistoryQuery.isLoading ? (
+              <div className="flex gap-3 overflow-hidden">
+                <Skeleton className="h-24 min-w-48 rounded-2xl" />
+                <Skeleton className="h-24 min-w-48 rounded-2xl" />
+              </div>
+            ) : benchmarkTimeline.length > 1 ? (
+              <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+                {benchmarkTimeline.map((item, index) => (
+                  <div
+                    key={item.id}
+                    className="min-w-[210px] rounded-2xl border border-slate-200 bg-slate-50/80 p-4"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-900">
+                        {item.month ?? item.date}
+                      </p>
+                      <span className="h-2 w-2 rounded-full bg-blue-600" />
+                    </div>
+                    <div className="mt-3 space-y-1 text-xs text-slate-600">
+                      {item.total !== null && (
+                        <p>{formatInteger(item.total)} concurrents</p>
+                      )}
+                      {item.medianRating !== null && (
+                        <p>Note médiane {formatRating(item.medianRating)}</p>
+                      )}
+                      {item.bestCompetitor && (
+                        <p className="truncate">Leader: {item.bestCompetitor}</p>
+                      )}
+                    </div>
+                    {index === 0 && (
+                      <Badge variant="success" className="mt-3">
+                        Dernier
+                      </Badge>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : benchmarkTimeline.length === 1 ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">
+                <p className="font-semibold text-slate-900">Première analyse disponible.</p>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                  {benchmarkTimeline[0].total !== null && (
+                    <span>{formatInteger(benchmarkTimeline[0].total)} concurrents</span>
+                  )}
+                  {benchmarkTimeline[0].medianRating !== null && (
+                    <span>Note médiane {formatRating(benchmarkTimeline[0].medianRating)}</span>
+                  )}
+                  {benchmarkTimeline[0].bestCompetitor && (
+                    <span className="truncate">Leader: {benchmarkTimeline[0].bestCompetitor}</span>
                   )}
                 </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base text-slate-600">HISTORIQUE</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-xs text-slate-500">
-              {scanHistory.length === 0 ? (
-                <p>Aucune analyse récente.</p>
-              ) : (
-                scanHistory.map((item) => (
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">
+                Aucun benchmark généré pour cette veille.
+              </div>
+            )}
+            {scanHistory.length > 0 && (
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {scanHistory.slice(0, 2).map((item) => (
                   <button
                     key={`${item.keyword}-${item.ts}`}
                     type="button"
@@ -1590,197 +2030,387 @@ const formatCountDelta = (delta: number | null) => {
                         setSelectedLocationId(item.locationId);
                       }
                     }}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50"
+                    className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-slate-700">
-                        {item.keyword} • {item.radiusKm} km
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        {new Date(item.ts).toLocaleDateString("fr-FR")}
-                      </span>
-                    </div>
-                    <div className="mt-1 text-[11px] text-slate-500">
+                    <span className="block truncate font-semibold text-slate-800">
+                      {item.keyword} - {item.radiusKm} km
+                    </span>
+                    <span className="mt-1 block truncate text-slate-500">
                       {item.zoneLabel ??
                         (item.locationId
                           ? locationLabelById.get(item.locationId) ?? "Établissement"
-                          : "Établissement")}
-                    </div>
+                          : "Établissement")}{" "}
+                      {formatDateLabel(item.ts) ? `- ${formatDateLabel(item.ts)}` : ""}
+                    </span>
                   </button>
-                ))
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      {podiumCards.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+                Podium local
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Les acteurs qui structurent votre marché immédiat.
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {podiumCards.map(({ competitor, label, badge, rank, tone }) => {
+              const distance = formatDistance(competitor.distance_m);
+              const tags = getCompetitorBadges(competitor);
+              return (
+                <article
+                  key={`${label}-${competitor.place_id}`}
+                  className={cn(
+                    "rounded-[24px] border border-slate-200 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.06)]",
+                    tone
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] opacity-70">
+                      {label}
+                    </p>
+                    <Badge variant={rank === 1 ? "success" : "neutral"}>{badge}</Badge>
+                  </div>
+                  <div className="mt-5 flex items-start gap-4">
+                    <div
+                      className={cn(
+                        "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-xl font-semibold",
+                        rank === 1 ? "bg-white text-slate-950" : "bg-slate-100 text-slate-900"
+                      )}
+                    >
+                      {rank}
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="truncate text-lg font-semibold">{competitor.name}</h3>
+                      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm opacity-75">
+                        {isFiniteNumber(competitor.rating) && (
+                          <span>{formatRating(competitor.rating)}</span>
+                        )}
+                        {isFiniteNumber(competitor.user_ratings_total) && (
+                          <span>{formatInteger(competitor.user_ratings_total)} avis</span>
+                        )}
+                        {distance && <span>{distance}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  {tags.length > 0 && (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded-full border border-current/10 bg-white/70 px-3 py-1 text-xs font-semibold text-slate-700"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+        {threatRows.length > 0 && (
+          <Card className="rounded-[24px] shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
+            <CardHeader className="p-4 pb-0 md:p-5 md:pb-0">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ShieldAlert size={18} />
+                Menaces locales
+              </CardTitle>
+              <p className="text-sm text-slate-500">
+                Classification UI basée sur note, avis, distance et rang local.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-3 p-4 md:p-5">
+              {(["Menace forte", "À surveiller", "Faible menace"] as const).map(
+                (level) => {
+                  const rows = threatRows.filter((item) => item.level === level).slice(0, 3);
+                  if (rows.length === 0) return null;
+                  return (
+                    <div key={level} className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "h-2 w-2 rounded-full",
+                            level === "Menace forte"
+                              ? "bg-rose-500"
+                              : level === "À surveiller"
+                                ? "bg-amber-500"
+                                : "bg-slate-300"
+                          )}
+                        />
+                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                          {level}
+                        </p>
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+                        {rows.map(({ row, reason, rank }) => (
+                          <article
+                            key={`${level}-${row.place_id}`}
+                            className="rounded-2xl border border-slate-200 bg-white p-4"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-slate-950">
+                                  {row.name}
+                                </p>
+                                <p className="mt-1 text-xs leading-5 text-slate-500">
+                                  {reason}
+                                </p>
+                              </div>
+                              {rank && <Badge variant="neutral">#{rank}</Badge>}
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium text-slate-600">
+                              {isFiniteNumber(row.rating) && (
+                                <span>{formatRating(row.rating)}</span>
+                              )}
+                              {isFiniteNumber(row.user_ratings_total) && (
+                                <span>{formatInteger(row.user_ratings_total)} avis</span>
+                              )}
+                              {formatDistance(row.distance_m) && (
+                                <span>{formatDistance(row.distance_m)}</span>
+                              )}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
               )}
             </CardContent>
           </Card>
+        )}
+
+        {gapCards.length > 0 && (
+          <Card className="rounded-[24px] shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
+            <CardHeader className="p-4 pb-0 md:p-5 md:pb-0">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Target size={18} />
+                Écarts à combler
+              </CardTitle>
+              <p className="text-sm text-slate-500">
+                Comparaison avec les médianes et le leader local.
+              </p>
+            </CardHeader>
+            <CardContent className="grid gap-3 p-4 sm:grid-cols-2 md:p-5">
+              {gapCards.map((card) => (
+                <div
+                  key={card.label}
+                  className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4"
+                >
+                  <p className="text-xs font-semibold text-slate-500">{card.label}</p>
+                  <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+                    {card.value}
+                  </p>
+                  {card.detail && (
+                    <p className="mt-1 truncate text-xs text-slate-500">{card.detail}</p>
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+      </section>
+
+      {priorityActions.length > 0 && (
+        <section className="rounded-[24px] border border-slate-200 bg-slate-950 p-4 text-white shadow-[0_24px_80px_rgba(15,23,42,0.16)] md:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-200">
+                Actions prioritaires
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight">
+                Que faire cette semaine
+              </h2>
+            </div>
+            <Badge variant="neutral">Plan court</Badge>
+          </div>
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            {priorityActions.map((item) => (
+              <article
+                key={item.label}
+                className="rounded-2xl border border-white/10 bg-white/[0.06] p-4"
+              >
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-200">
+                  {item.label}
+                </p>
+                <p className="mt-3 text-sm font-medium leading-6 text-slate-100">
+                  {item.action}
+                </p>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {swotSections.length > 0 && (
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+              Analyse SWOT
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Lecture synthétique des forces, faiblesses, opportunités et menaces.
+            </p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {swotSections.map(({ title, Icon, items, tone }) => (
+              <article key={title} className={cn("rounded-[24px] border p-4", tone)}>
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <Icon size={16} />
+                  {title}
+                </div>
+                <ul className="mt-3 space-y-2 text-sm leading-6">
+                  {items.slice(0, 3).map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="space-y-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+              Concurrents
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Table responsive des acteurs observés et des actions disponibles.
+            </p>
+          </div>
+          <div className="text-xs font-medium text-slate-500">
+            {visibleRadar.length} affichés / {filteredRadar.length} total
+          </div>
         </div>
 
-        <div className="space-y-6">
-          <div className="text-xs text-slate-500">
-            Rapport généré le{" "}
-            {lastScanAt
-              ? lastScanAt.toLocaleDateString("fr-FR", {
-                  day: "2-digit",
-                  month: "short",
-                  year: "numeric"
-                })
-              : "—"}
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-2xl font-semibold text-slate-900">
-              Analyse: {sectorLabel || "—"} - {zoneLabel}
-            </h2>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleGenerateBenchmark}
-              disabled={benchmarkLoading || !selectedLocationId}
-              title="Bientôt disponible"
-            >
-              <span className="flex items-center gap-2">
-                <Download size={14} />
-                PDF
-              </span>
-            </Button>
-          </div>
-
-          <Card>
-            <CardHeader className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <CardTitle className="text-lg">Podium</CardTitle>
-                <p className="text-xs text-slate-500">
-                  Comparaison rapide avec les acteurs les plus impactants.
-                </p>
+        <Card className="rounded-[24px] shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
+          <CardContent className="space-y-4 p-4 md:p-5">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
+              <div className="grid gap-2 md:grid-cols-[minmax(0,1.4fr)_minmax(130px,0.8fr)_minmax(120px,0.7fr)_minmax(120px,0.8fr)]">
+                <label className="text-xs font-semibold text-slate-600">
+                  Rechercher
+                  <div className="mt-2 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                    <Search size={14} className="text-slate-400" />
+                    <input
+                      className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+                      value={radarSearch}
+                      onChange={(event) => setRadarSearch(event.target.value)}
+                      placeholder="Nom du concurrent"
+                    />
+                  </div>
+                </label>
+                <label className="text-xs font-semibold text-slate-600">
+                  Tri
+                  <select
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                    value={radarSort}
+                    onChange={(event) =>
+                      setRadarSort(
+                        event.target.value as "distance" | "rating" | "reviews"
+                      )
+                    }
+                  >
+                    <option value="distance">Distance</option>
+                    <option value="rating">Note</option>
+                    <option value="reviews">Avis</option>
+                  </select>
+                </label>
+                {topLimitOptions.length > 0 && (
+                  <label className="text-xs font-semibold text-slate-600">
+                    Top
+                    <select
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                      value={radarTopLimit ?? ""}
+                      onChange={(event) => setRadarTopLimit(Number(event.target.value))}
+                    >
+                      {topLimitOptions.map((value) => (
+                        <option key={value} value={value}>
+                          Top {value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-600 md:self-end">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-slate-300"
+                    checked={radarFollowedOnly}
+                    onChange={(event) => setRadarFollowedOnly(event.target.checked)}
+                  />
+                  Suivis uniquement
+                </label>
               </div>
-              {isTop10 && <Badge variant="success">Top 10% du radar</Badge>}
-            </CardHeader>
-            <CardContent>
-              {displaySelfAvg === null && displaySelfCount === null ? (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
-                  <p className="text-base font-semibold text-slate-800">À configurer</p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Synchronise tes avis Google pour afficher ta note et tes comparaisons.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid gap-4 md:grid-cols-3">
-                  <Card className="h-full">
-                    <CardContent className="space-y-2 pt-6 text-sm text-slate-600">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-slate-900">Vous</p>
-                        <Badge variant="neutral">Vous</Badge>
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        Note: {selfScoreLabel} / Avis: {selfReviewsLabel}
-                      </div>
-                    </CardContent>
-                  </Card>
-                  <Card className="h-full">
-                    <CardContent className="space-y-2 pt-6 text-sm text-slate-600">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-slate-900">
-                          {swotReport.leader?.name ?? "Leader"}
-                        </p>
-                        <Badge variant="success">Leader</Badge>
-                      </div>
-                      {swotReport.leader ? (
-                        <>
-                          <div className="text-xs text-slate-500">
-                            Note: {swotReport.leader.rating ?? "n.c."} / Avis:{" "}
-                            {swotReport.leader.user_ratings_total ?? "n.c."}
-                          </div>
-                          <div className="text-xs text-slate-500">
-                            Delta:{" "}
-                            {displaySelfAvg !== null && swotReport.leader.rating !== null
-                              ? formatVsDelta(
-                                  swotReport.leader.rating - displaySelfAvg
-                                ) ?? "—"
-                              : "—"}
-                          </div>
-                          <div className="text-xs text-slate-500">
-                            Distance: {formatDistance(swotReport.leader.distance_m)}
-                          </div>
-                        </>
-                      ) : (
-                        <p className="text-xs text-slate-500">
-                          Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir l’analyse.
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-                  <Card className="h-full">
-                    <CardContent className="space-y-2 pt-6 text-sm text-slate-600">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-slate-900">
-                          {swotReport.challenger?.name ?? "Challenger"}
-                        </p>
-                        <Badge variant="warning">Challenger</Badge>
-                      </div>
-                      {swotReport.challenger ? (
-                        <>
-                          <div className="text-xs text-slate-500">
-                            Note: {swotReport.challenger.rating ?? "n.c."} / Avis:{" "}
-                            {swotReport.challenger.user_ratings_total ?? "n.c."}
-                          </div>
-                          <div className="text-xs text-slate-500">
-                            Delta:{" "}
-                            {displaySelfAvg !== null && swotReport.challenger.rating !== null
-                              ? formatVsDelta(
-                                  swotReport.challenger.rating - displaySelfAvg
-                                ) ?? "—"
-                              : "—"}
-                          </div>
-                          <div className="text-xs text-slate-500">
-                            Distance: {formatDistance(swotReport.challenger.distance_m)}
-                          </div>
-                        </>
-                      ) : (
-                        <p className="text-xs text-slate-500">
-                          Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir l’analyse.
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(["all", "top3", "high", "low"] as const).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setRadarFilter(filter)}
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                      radarFilter === filter
+                        ? "border-ink bg-ink text-white"
+                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    )}
+                  >
+                    {filter === "all" && "Tout"}
+                    {filter === "top3" && "Top 3"}
+                    {filter === "high" && "> 4.5"}
+                    {filter === "low" && "< 3.5"}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-      {activeTab === "selection" && (
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2">
-                <Trophy size={18} />
-                Ma sélection
-              </CardTitle>
-            </CardHeader>
-          <CardContent className="space-y-4">
-            {followedQuery.isLoading ? (
-              <div className="grid gap-4 md:grid-cols-2">{skeletonCards}</div>
-            ) : sortedFollowed.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm text-slate-500">
-                <p className="text-base font-semibold text-slate-800">🧭 Aucune veille active</p>
-                <p className="mt-1 text-sm text-slate-500">
-                  Votre liste de veille est vide. Lancez une analyse puis ajoutez les concurrents à suivre.
+            {radarQuery.isLoading || followedQuery.isLoading ? (
+              <div className="grid gap-3 md:grid-cols-2">{skeletonCards}</div>
+            ) : radarItems.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-600">
+                <p className="font-semibold text-slate-900">Aucun concurrent analysé</p>
+                <p className="mt-1 leading-6 text-slate-500">
+                  Lancez une analyse pour identifier les acteurs de votre zone.
                 </p>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="mt-3"
-                  onClick={() => setActiveTab("radar")}
+                  className="mt-4"
+                  onClick={runCurrentScan}
+                  disabled={scanMutation.isPending || !selectedLocationId || sectorMissing}
                 >
-                  Aller au Radar
+                  Lancer l'analyse
                 </Button>
               </div>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2">
-                {sortedFollowed.map((competitor) => {
-                  const tier = getSelectionTier(competitor);
-                  const insights = getCompetitorInsights(competitor);
+              <div className="space-y-3">
+                {visibleRadar.map((competitor) => {
+                  const rank = topRankByPlaceId.get(competitor.place_id || competitor.id);
+                  const tier = getRadarTier(competitor);
+                  const isPending = pendingPlaceIds.includes(competitor.place_id);
+                  const isFollowed = competitor.is_followed;
                   const strategicTags = getStrategicTags(competitor, {
                     selfAvg: displaySelfAvg,
                     radiusKm
                   });
-                  const opportunities = getOpportunitiesToCheck(competitor);
-                  const rationale = getWatchlistRationale(competitor, displaySelfAvg);
+                  const insights = getCompetitorInsights(competitor);
+                  const chips =
+                    strategicTags.length > 0 ? strategicTags : insights.length > 0 ? insights : [];
                   const ratingDeltaLabel = formatVsDelta(
                     displaySelfAvg !== null && competitor.rating !== null
                       ? competitor.rating - displaySelfAvg
@@ -1792,671 +2422,158 @@ const formatCountDelta = (delta: number | null) => {
                       ? competitor.user_ratings_total - displaySelfCount
                       : null
                   );
+                  const distance = formatDistance(competitor.distance_m);
+                  const risk =
+                    threatRows.find((item) => item.row.place_id === competitor.place_id)
+                      ?.level ?? tier.label;
+                  const action = getMajorWeakPoint(competitor, radiusKm);
                   return (
-                    <Card key={competitor.id} className="h-full">
-                      <CardContent className="flex h-full flex-col gap-3 pt-6">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="text-sm font-semibold text-slate-900">
-                                {competitor.name}
-                              </p>
-                              <Badge variant={tier.variant}>{tier.label}</Badge>
-                              <Badge variant="neutral">Suivi</Badge>
-                            </div>
-                            <p className="text-xs text-slate-500">
-                              {competitor.address ?? "Adresse indisponible"}
-                            </p>
-                          </div>
-                          <div className="text-xs text-slate-500">
-                            {competitor.distance_m === null
-                              ? "n.c."
-                              : formatDistance(competitor.distance_m)}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-4 text-xs text-slate-500">
-                          <span>Note: {competitor.rating ?? "n.c."}</span>
-                          <span>Avis: {competitor.user_ratings_total ?? "n.c."}</span>
-                        </div>
-                        <div className="flex flex-wrap gap-2 text-xs text-slate-500">
-                          {strategicTags.length > 0 ? (
-                            renderChipList(strategicTags)
-                          ) : insights.length > 0 ? (
-                            renderChipList(insights)
-                          ) : (
-                            <span>Aucun signal distinctif détecté.</span>
-                          )}
-                        </div>
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                          <div className="font-semibold text-slate-700">Comparaison</div>
-                          <ul className="mt-1 space-y-1 text-xs text-slate-500">
-                            <li>
-                              Note: {competitor.rating ?? "n.c."}
-                              {ratingDeltaLabel ? ` (${ratingDeltaLabel} vs vous)` : ""}
-                            </li>
-                            <li>
-                              Avis: {competitor.user_ratings_total ?? "n.c."}
-                              {reviewsDeltaLabel ? ` (${reviewsDeltaLabel} vs vous)` : ""}
-                            </li>
-                            <li>
-                              Distance:{" "}
-                              {competitor.distance_m === null
-                                ? "n.c."
-                                : formatDistance(competitor.distance_m)}
-                            </li>
-                          </ul>
-                        </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                          <div className="font-semibold text-slate-700">
-                            Pourquoi ce concurrent compte
-                          </div>
-                          <div className="mt-1">{rationale}</div>
-                        </div>
-                        {opportunities.length > 1 && (
-                          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                            <div className="font-semibold text-slate-700">
-                              Opportunités à vérifier
-                            </div>
-                            <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-slate-500">
-                              {opportunities.slice(0, 2).map((item) => (
-                                <li key={item}>{item}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        <div className="mt-auto flex flex-wrap items-center justify-between gap-3">
-                          {confirmRemoveId === competitor.id ? (
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  followMutation.mutate({
-                                    placeId: competitor.place_id,
-                                    isFollowed: false
-                                  });
-                                  setConfirmRemoveId(null);
-                                }}
-                                disabled={pendingPlaceIds.includes(competitor.place_id)}
-                              >
-                                {pendingPlaceIds.includes(competitor.place_id) ? "..." : "Confirmer"}
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setConfirmRemoveId(null)}
-                              >
-                                Annuler
-                              </Button>
-                            </div>
-                          ) : (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setConfirmRemoveId(competitor.id)}
-                              disabled={pendingPlaceIds.includes(competitor.place_id)}
-                            >
-                              <span className="flex items-center gap-2">
-                                {pendingPlaceIds.includes(competitor.place_id) ? (
-                                  <span className="h-3 w-3 animate-spin rounded-full border border-slate-400 border-t-slate-600" />
-                                ) : (
-                                  <BookmarkX size={14} />
-                                )}
-                                Retirer
-                              </span>
-                            </Button>
-                          )}
-                          <a
-                            className="text-xs font-semibold text-slate-500 hover:text-slate-800 underline-offset-2 hover:underline"
-                            href={buildGoogleLink(competitor.place_id)}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Voir sur Google
-                          </a>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {activeTab === "radar" && (
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <CardTitle>Radar</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="sticky top-4 z-10 rounded-2xl border border-slate-200 bg-white/95 p-3 backdrop-blur">
-                <div className="grid gap-2 md:grid-cols-[1.5fr_1fr_1fr_1fr]">
-                  <label className="text-xs font-semibold text-slate-600">
-                    Rechercher
-                    <input
-                      className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                      value={radarSearch}
-                      onChange={(event) => setRadarSearch(event.target.value)}
-                      placeholder="Nom du concurrent"
-                    />
-                  </label>
-                  <label className="text-xs font-semibold text-slate-600">
-                    Tri
-                    <select
-                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                      value={radarSort}
-                      onChange={(event) =>
-                        setRadarSort(
-                          event.target.value as "distance" | "rating" | "reviews"
-                        )
-                      }
-                    >
-                      <option value="distance">Distance</option>
-                      <option value="rating">Note</option>
-                      <option value="reviews">Avis</option>
-                    </select>
-                  </label>
-                  {topLimitOptions.length > 0 && (
-                    <label className="text-xs font-semibold text-slate-600">
-                      Top
-                      <select
-                        className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                        value={radarTopLimit ?? ""}
-                        onChange={(event) =>
-                          setRadarTopLimit(Number(event.target.value))
-                        }
-                      >
-                        {topLimitOptions.map((value) => (
-                          <option key={value} value={value}>
-                            Top {value}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-slate-300"
-                      checked={radarFollowedOnly}
-                      onChange={(event) => setRadarFollowedOnly(event.target.checked)}
-                    />
-                    Suivis uniquement
-                  </label>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                  {(["all", "top3", "high", "low"] as const).map((filter) => (
-                    <button
-                      key={filter}
-                      type="button"
-                      onClick={() => setRadarFilter(filter)}
-                      className={`rounded-full border px-3 py-2 text-xs font-semibold ${
-                        radarFilter === filter
-                          ? "border-ink bg-ink text-white"
-                          : "border-slate-200 bg-white text-slate-600"
-                      }`}
-                    >
-                      {filter === "all" && "Tout"}
-                      {filter === "top3" && "Top 3"}
-                      {filter === "high" && ">4.5"}
-                      {filter === "low" && "<3.5"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {radarQuery.isLoading ? (
-                <div className="grid gap-4 md:grid-cols-2">{skeletonCards}</div>
-              ) : radarItems.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-sm text-slate-500">
-                  <p className="text-base font-semibold text-slate-800">📡 Aucun résultat</p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Aucun concurrent n’a été trouvé pour cette zone. Essayez un rayon plus large ou un mot‑clé différent.
-                  </p>
-                  <ul className="mt-4 list-disc space-y-1 pl-5 text-xs text-slate-500">
-                    <li>Choisir un établissement</li>
-                    <li>Vérifier le secteur et le rayon</li>
-                    <li>Lancer l’analyse</li>
-                  </ul>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mt-4"
-                    onClick={() => {
-                      if (!sectorLabel) {
-                        setScanError(
-                          "Définis la catégorie de l’établissement avant de scanner."
-                        );
-                        setScanErrorHint(
-                          "Renseigne-la dans Paramètres > Établissements."
-                        );
-                        setScanMessage(null);
-                        return;
-                      }
-                      scanMutation.mutate({ keyword: sectorLabel, radiusKm });
-                    }}
-                    disabled={scanMutation.isPending || !selectedLocationId || sectorMissing}
-                  >
-                    Lancer l’analyse
-                  </Button>
-                </div>
-              ) : (
-                <div className="relative space-y-4">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                        <span className="font-semibold text-slate-700">
-                          {[
-                            `${radarSummary.total} concurrents`,
-                            radarSummary.higherThanSelf !== null
-                              ? `${radarSummary.higherThanSelf} mieux notés que vous`
-                              : null,
-                            radarSummary.closestDistance !== null
-                              ? `Plus proche : ${formatDistance(
-                                  radarSummary.closestDistance
-                                )}`
-                              : null,
-                            radarSummary.bestRating !== null
-                              ? `Meilleure note : ${radarSummary.bestRating.toFixed(1)}`
-                              : null
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </span>
-                      </div>
-                      <span
-                        className="cursor-help rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-500"
-                        title="Le résumé met en avant les concurrents les plus influents localement."
-                      >
-                        i
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="mb-3 flex items-center justify-between text-xs text-slate-500">
-                      <span className="font-semibold text-slate-700">
-                        Détail par concurrent
-                      </span>
-                      <span>
-                        {visibleRadar.length} affichés / {filteredRadar.length} total
-                      </span>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {visibleRadar.map((competitor) => {
-                    const tier = getRadarTier(competitor);
-                    const isPending = pendingPlaceIds.includes(competitor.place_id);
-                    const isFollowed = competitor.is_followed;
-                    const insights = getCompetitorInsights(competitor);
-                    const selfAvg = displaySelfAvg;
-                    const strategicTags = getStrategicTags(competitor, {
-                      selfAvg,
-                      radiusKm
-                    });
-                    const opportunities = getOpportunitiesToCheck(competitor);
-                    const ratingDeltaLabel = formatVsDelta(
-                      selfAvg !== null && competitor.rating !== null
-                        ? competitor.rating - selfAvg
-                        : null
-                    );
-                    const reviewsDeltaLabel = formatCountDelta(
-                      displaySelfCount !== null &&
-                        competitor.user_ratings_total !== null
-                        ? competitor.user_ratings_total - displaySelfCount
-                        : null
-                    );
-                    const dangerRadius =
-                      typeof radiusKm === "number" ? radiusKm * 1000 * 0.5 : null;
-                    const isDangerous =
-                      typeof competitor.rating === "number" &&
-                      typeof competitor.distance_m === "number" &&
-                      competitor.rating >= 4.8 &&
-                      dangerRadius !== null &&
-                      competitor.distance_m <= dangerRadius;
-                    const weakPoint = getMajorWeakPoint(competitor, radiusKm);
-                    const growthProxy =
-                      radarSummary.medianRating !== null &&
-                      competitor.rating !== null
-                        ? Math.round(
-                            (competitor.rating - radarSummary.medianRating) * 10
-                          )
-                        : null;
-                    const growthLabel =
-                      growthProxy === null
-                        ? "n.c."
-                        : `${growthProxy >= 0 ? "+" : ""}${growthProxy}%`;
-                    return (
-                    <Card
+                    <article
                       key={competitor.id}
-                      className={isDangerous ? "border-rose-200 bg-rose-50" : undefined}
+                      className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_12px_36px_rgba(15,23,42,0.04)]"
                     >
-                      <CardContent className="flex h-full flex-col gap-4 pt-6">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="text-sm font-semibold text-slate-900">
-                                {competitor.name}
-                              </p>
-                              <Badge variant={tier.variant}>{tier.label}</Badge>
-                              {isFollowed && <Badge variant="neutral">Suivi</Badge>}
-                              {isDangerous && <Badge variant="warning">Impact fort</Badge>}
-                            </div>
-                            <p className="text-xs text-slate-500">
-                              {competitor.address ?? "Adresse indisponible"}
-                            </p>
+                      <div className="grid gap-4 lg:grid-cols-[56px_minmax(0,1.4fr)_86px_86px_92px_110px_120px_minmax(140px,0.8fr)] lg:items-center">
+                        <div className="flex items-center gap-2 lg:block">
+                          <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-sm font-semibold text-slate-900">
+                            {rank ?? ""}
+                          </span>
+                          <span className="text-xs font-semibold text-slate-500 lg:hidden">
+                            Rang
+                          </span>
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="min-w-0 truncate text-sm font-semibold text-slate-950">
+                              {competitor.name}
+                            </h3>
+                            <Badge variant={tier.variant}>{tier.label}</Badge>
+                            {isFollowed && <Badge variant="neutral">Suivi</Badge>}
                           </div>
-                          <Badge variant="neutral">
-                            {competitor.distance_m === null
-                              ? "n.c."
-                              : formatDistance(competitor.distance_m)}
+                          {competitor.address && (
+                            <p className="mt-1 truncate text-xs text-slate-500">
+                              {competitor.address}
+                            </p>
+                          )}
+                          {chips.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {renderChipList(chips)}
+                            </div>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-sm lg:block">
+                          <span className="text-xs font-semibold text-slate-400 lg:hidden">
+                            Note
+                          </span>
+                          <span className="font-semibold text-slate-900">
+                            {isFiniteNumber(competitor.rating)
+                              ? formatRating(competitor.rating)
+                              : ""}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-sm lg:block">
+                          <span className="text-xs font-semibold text-slate-400 lg:hidden">
+                            Avis
+                          </span>
+                          <span className="font-semibold text-slate-900">
+                            {isFiniteNumber(competitor.user_ratings_total)
+                              ? formatInteger(competitor.user_ratings_total)
+                              : ""}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-sm lg:block">
+                          <span className="text-xs font-semibold text-slate-400 lg:hidden">
+                            Distance
+                          </span>
+                          <span className="font-medium text-slate-700">{distance ?? ""}</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-sm lg:block">
+                          <span className="text-xs font-semibold text-slate-400 lg:hidden">
+                            Écart
+                          </span>
+                          <span className="font-medium text-slate-700">
+                            {ratingDeltaLabel ?? reviewsDeltaLabel ?? ""}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-sm lg:block">
+                          <span className="text-xs font-semibold text-slate-400 lg:hidden">
+                            Risque
+                          </span>
+                          <Badge
+                            variant={risk === "Menace forte" ? "warning" : "neutral"}
+                            className="w-fit"
+                          >
+                            {risk}
                           </Badge>
                         </div>
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                          <span>Note: {competitor.rating ?? "n.c."}</span>
-                          <span>Avis: {competitor.user_ratings_total ?? "n.c."}</span>
-                          <span>Croissance: {growthLabel}</span>
-                        </div>
-                        <div className="flex flex-wrap gap-2 text-xs text-slate-500">
-                          {strategicTags.length > 0 ? (
-                            renderChipList(strategicTags)
-                          ) : insights.length > 0 ? (
-                            renderChipList(insights)
-                          ) : (
-                            <span>Lecture limitée : peu de signaux fiables.</span>
-                          )}
-                        </div>
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                          <div className="font-semibold text-slate-700">Comparaison</div>
-                          <ul className="mt-1 space-y-1 text-xs text-slate-500">
-                            <li>
-                              Note: {competitor.rating ?? "n.c."}
-                              {ratingDeltaLabel ? ` (${ratingDeltaLabel} vs vous)` : ""}
-                            </li>
-                            <li>
-                              Avis: {competitor.user_ratings_total ?? "n.c."}
-                              {reviewsDeltaLabel ? ` (${reviewsDeltaLabel} vs vous)` : ""}
-                            </li>
-                            <li>
-                              Distance:{" "}
-                              {competitor.distance_m === null
-                                ? "n.c."
-                                : formatDistance(competitor.distance_m)}
-                            </li>
-                          </ul>
-                        </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                          <div className="text-[10px] font-semibold tracking-[0.2em] text-slate-500">
-                            POINT FAIBLE MAJEUR
-                          </div>
-                          <div className="text-sm font-semibold text-slate-700">
-                            {weakPoint}
-                          </div>
-                        </div>
-                        {opportunities.length > 1 && (
-                          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                            <div className="font-semibold text-slate-700">
-                              Opportunités à vérifier
-                            </div>
-                            <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-slate-500">
-                              {opportunities.slice(0, 2).map((item) => (
-                                <li key={item}>{item}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        <div className="mt-auto flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex flex-wrap items-center gap-2">
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() =>
                               followMutation.mutate({
                                 placeId: competitor.place_id,
-                                isFollowed: true
+                                isFollowed: !isFollowed
                               })
                             }
-                            disabled={isPending || isFollowed}
+                            disabled={isPending}
                           >
                             <span className="flex items-center gap-2">
                               {isPending ? (
                                 <span className="h-3 w-3 animate-spin rounded-full border border-slate-400 border-t-slate-600" />
+                              ) : isFollowed ? (
+                                <BookmarkX size={14} />
                               ) : (
                                 <BookmarkPlus size={14} />
                               )}
-                              {isFollowed ? "Suivi" : "Suivre"}
+                              {isFollowed ? "Retirer" : "Suivre"}
                             </span>
                           </Button>
                           <a
-                            className="text-xs font-semibold text-slate-500 hover:text-slate-800 underline-offset-2 hover:underline"
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline"
                             href={buildGoogleLink(competitor.place_id)}
                             target="_blank"
                             rel="noreferrer"
                           >
-                            Voir sur Google
+                            Google
+                            <ArrowUpRight size={12} />
                           </a>
+                          <span className="hidden text-xs text-slate-400 xl:inline">
+                            {action}
+                          </span>
                         </div>
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </article>
                   );
-                  })}
-                  </div>
-                  </div>
-                </div>
-              )}
-              {radarItems.length > 0 && (
-                <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-                  <span>
-                    {visibleRadar.length} affichés / {filteredRadar.length} total
-                  </span>
-                  {canLoadMore && (
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        const currentScroll = window.scrollY;
-                        setRadarPageSize((prev) => prev + 6);
-                        requestAnimationFrame(() => {
-                          window.scrollTo({ top: currentScroll });
-                        });
-                      }}
-                    >
-                      Charger plus
-                    </Button>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {activeTab === "swot" && (
-        <div className="space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <Eye size={18} />
-              Analyse SWOT
-            </div>
-            {isAdmin && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleGenerateBenchmark}
-                disabled={benchmarkLoading || !selectedLocationId}
-              >
-                {benchmarkLoading ? "Génération..." : "Générer un rapport"}
-              </Button>
-            )}
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-            <div className="rounded-3xl bg-slate-900 p-6 text-white shadow-sm">
-              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
-                Synthèse du marché
+                })}
               </div>
-              <p className="mt-3 text-sm text-emerald-100">
-                {radarSummary.total > 0
-                  ? "Les signaux ci-dessous résument l’état du marché local."
-                  : "Analyse en attente de données exploitables."}
-              </p>
-              <ul className="mt-4 space-y-2 text-sm text-emerald-100">
-                {radarSummary.total > 0 ? (
-                  <>
-                    <li>
-                      {radarSummary.total} établissements observés sur {radiusKm} km.
-                    </li>
-                    <li>
-                      Plus proche:{" "}
-                      {radarSummary.closestDistance !== null
-                        ? formatDistance(radarSummary.closestDistance)
-                        : "—"}
-                    </li>
-                    <li>
-                      Meilleure note:{" "}
-                      {radarSummary.bestRating !== null
-                        ? radarSummary.bestRating.toFixed(1)
-                        : "—"}
-                    </li>
-                  </>
-                ) : (
-                  <li>Ajoutez des concurrents ou relancez l’analyse.</li>
-                )}
-              </ul>
-            </div>
-            <div className="grid gap-4">
-              <Card className="border-emerald-200 bg-emerald-50/40">
-                <CardContent className="space-y-2 pt-6 text-sm text-slate-700">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
-                    <Sparkles size={14} />
-                    Forces du marché
-                  </div>
-                  {swotBullets.forces.length === 0 ? (
-                    <p className="text-sm text-emerald-700/70">
-                      Données insuffisantes pour qualifier les forces du marché.
-                    </p>
-                  ) : (
-                    <ul className="list-disc space-y-1 pl-4 text-sm">
-                      {swotBullets.forces.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  )}
-                  <p className="text-xs text-emerald-700/70">
-                    Prochaine action : renforcer ce qui surperforme déjà le marché.
-                  </p>
-                </CardContent>
-              </Card>
-              <Card className="border-rose-200 bg-rose-50/40">
-                <CardContent className="space-y-2 pt-6 text-sm text-slate-700">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-rose-700">
-                    <TrendingDown size={14} />
-                    Faiblesses
-                  </div>
-                  {swotBullets.weaknesses.length === 0 ? (
-                    <p className="text-sm text-rose-700/70">
-                      Pas assez de données pour isoler les faiblesses.
-                    </p>
-                  ) : (
-                    <ul className="list-disc space-y-1 pl-4 text-sm">
-                      {swotBullets.weaknesses.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  )}
-                  <p className="text-xs text-rose-700/70">
-                    Prochaine action : corriger le signal le plus faible.
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
+            )}
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card className="border-sky-200 bg-sky-50/40">
-              <CardContent className="space-y-2 pt-6 text-sm text-slate-700">
-                <div className="flex items-center gap-2 text-xs font-semibold text-sky-700">
-                  <TrendingUp size={14} />
-                  Opportunités
-                </div>
-                {swotBullets.opportunities.length === 0 ? (
-                  <p className="text-sm text-sky-700/70">
-                    Élargis le rayon ou suis des concurrents pour révéler des opportunités.
-                  </p>
-                ) : (
-                    <ul className="list-disc space-y-1 pl-4 text-sm">
-                      {swotBullets.opportunities.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
+            {radarItems.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+                <span>
+                  {visibleRadar.length} affichés / {filteredRadar.length} total
+                </span>
+                {canLoadMore && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      const currentScroll = window.scrollY;
+                      setRadarPageSize((prev) => prev + 6);
+                      requestAnimationFrame(() => {
+                        window.scrollTo({ top: currentScroll });
+                      });
+                    }}
+                  >
+                    Charger plus
+                  </Button>
                 )}
-                <p className="text-xs text-sky-700/70">
-                  Prochaine action : viser les gains rapides sur les points faibles.
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border-slate-200 bg-slate-50/50">
-              <CardContent className="space-y-2 pt-6 text-sm text-slate-700">
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-                  <ShieldAlert size={14} />
-                  Menaces
-                </div>
-                {swotBullets.threats.length === 0 ? (
-                  <p className="text-sm text-slate-500">
-                    Impossible d’isoler des menaces sans davantage de données.
-                  </p>
-                ) : (
-                    <ul className="list-disc space-y-1 pl-4 text-sm">
-                      {swotBullets.threats.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                )}
-                <p className="text-xs text-slate-500">
-                  Prochaine action : surveiller ces rivaux chaque semaine.
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Actions recommandées</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {swotBullets.actions.length === 0 ? (
-                <p className="text-sm text-slate-500">
-                  Ajoutez des concurrents suivis ou élargissez le rayon pour enrichir
-                  l’analyse.
-                </p>
-              ) : (
-                <ul className="list-disc space-y-2 pl-4 text-sm text-slate-700">
-                  {swotBullets.actions.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
-        </div>
-      </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </section>
     </div>
   );
 };
 
 export { Competitors };
-
-// Manual test plan:
-// 1) Header + onglets visibles, panneau "Nouvelle analyse" sticky en desktop.
-// 2) Rayon 5 km cliquable et met à jour le select.
-// 3) Lancer l'analyse -> overlay sonar visible puis disparition + message "Scan terminé".
-// 4) Historique: un scan ajoute une entrée, clic restaure mot-clé/rayon/zone.
-// 5) Radar: cartes "Détail par concurrent", suivre/unfollow OK, pagination client.
-// 6) SWOT: synthèse sombre + 4 cartes SWOT + actions recommandées.
-// 7) Mobile/tablette: colonnes empilées, pas d'overflow.
-//
-// Data audit (non disponible dans le payload actuel):
-// - opening_date, business_status, price_level, services/attributes, horaires,
-//   site web, telephone, categories, photos, statut d'ouverture.
