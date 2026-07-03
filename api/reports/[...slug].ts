@@ -27,6 +27,44 @@ type CenterResult = {
 const parseBody = (req: VercelRequest) =>
   typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
 
+const safeDecodeRoutePart = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+const splitRouteParts = (value: unknown): string[] => {
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+
+  return values
+    .map(String)
+    .flatMap((part) => part.split("/"))
+    .map((part) => safeDecodeRoutePart(part).trim())
+    .filter((part) => part.length > 0 && part !== "[...slug]");
+};
+
+const getRouteParts = (req: VercelRequest) => {
+  const query = req.query as Record<string, unknown>;
+  const parts = [
+    ...splitRouteParts(query?.slug),
+    ...splitRouteParts(query?.["...slug"]),
+    ...splitRouteParts(query?.["slug[]"])
+  ];
+
+  if (parts.length > 0) {
+    return parts;
+  }
+
+  const pathname = new URL(req.url ?? "/api/reports", "http://localhost").pathname;
+  return pathname
+    .replace(/^\/api\/reports\/?/, "")
+    .split("/")
+    .map((part) => safeDecodeRoutePart(part).trim())
+    .filter((part) => part.length > 0);
+};
+
 const createSupabaseAdmin = () => {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -2013,14 +2051,12 @@ const handleAutomationsRun = async (
 // 2) If coords missing, error message is actionable and no 500.
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const query = req.query as Record<string, unknown>;
-  const slugParam = query?.slug ?? query?.["...slug"] ?? query?.["slug[]"];
-  const parts = Array.isArray(slugParam) ? slugParam : [slugParam];
-  const route = parts.filter(Boolean).join("/");
+  const parts = getRouteParts(req);
+  const route = parts.join("/");
   if (route === "generate") {
     return handleGenerateClassic(req, res);
   }
-  if (route === "generate_html") {
+  if (route === "generate_html" || route === "generate-html") {
     return handleGeneratePremium(req, res);
   }
   if (route === "competitors") {
