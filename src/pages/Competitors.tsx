@@ -67,6 +67,7 @@ type BenchmarkHistoryRow = {
 
 type BenchmarkPayload = {
   stats?: Record<string, number | null | undefined>;
+  keyword?: string | null;
   top_competitors?: Array<{
     name?: string | null;
     rating?: number | null;
@@ -78,6 +79,18 @@ type BenchmarkPayload = {
   plan_14_days?: string[];
   radius_km?: number | null;
   location_id?: string | null;
+};
+
+type BenchmarkTimelineItem = {
+  id: string;
+  groupKey: string;
+  createdAtTs: number;
+  month: string | null;
+  date: string | null;
+  total: number | null;
+  medianRating: number | null;
+  bestCompetitor: string | null;
+  versionCount: number;
 };
 
 type DisplayKpi = {
@@ -142,6 +155,19 @@ const formatMonthLabel = (value: string | null | undefined) => {
     year: "numeric"
   });
   return label.charAt(0).toUpperCase() + label.slice(1);
+};
+
+const formatMonthKey = (value: string | null | undefined) => {
+  if (!value) return "unknown-period";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "unknown-period";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+};
+
+const getTimestamp = (value: string | null | undefined) => {
+  if (!value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? 0 : time;
 };
 
 const formatRating = (value: number) => `${decimalFormatter.format(value)}/5`;
@@ -323,6 +349,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [lastScanAt, setLastScanAt] = useState<Date | null>(null);
   const [benchmarkLoading, setBenchmarkLoading] = useState(false);
+  const [downloadingBenchmarkId, setDownloadingBenchmarkId] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [zoneInput, setZoneInput] = useState("");
   const [scanHistory, setScanHistory] = useState<
@@ -728,6 +755,43 @@ const Competitors = ({ session }: CompetitorsProps) => {
       setToast({ type: "error", message });
     } finally {
       setBenchmarkLoading(false);
+    }
+  };
+
+  const downloadBenchmarkReport = async (reportId: string) => {
+    if (!token) {
+      setToast({ type: "error", message: "Connectez-vous pour télécharger." });
+      return;
+    }
+    setDownloadingBenchmarkId(reportId);
+    try {
+      const pdfRes = await fetch(
+        `/api/reports/competitors-benchmark/pdf?report_id=${reportId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+      if (!pdfRes.ok) {
+        throw new Error("Téléchargement indisponible.");
+      }
+      const blob = await pdfRes.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `benchmark-${reportId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+      setToast({ type: "success", message: "PDF téléchargé." });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Téléchargement impossible.";
+      setToast({ type: "error", message });
+    } finally {
+      setDownloadingBenchmarkId(null);
     }
   };
 
@@ -1687,28 +1751,80 @@ const Competitors = ({ session }: CompetitorsProps) => {
   );
 
   const benchmarkTimeline = useMemo(() => {
-    return (benchmarkHistoryQuery.data ?? [])
-      .map((report) => {
-        const payload = report.payload ?? null;
-        const stats = payload?.stats ?? {};
-        const total = isFiniteNumber(stats.total) ? stats.total : null;
-        const medianRating = isFiniteNumber(stats.median_rating)
-          ? stats.median_rating
-          : null;
-        const bestCompetitor =
-          payload?.top_competitors?.find((item) => item.name?.trim()) ?? null;
-        return {
-          id: report.id,
-          month: formatMonthLabel(report.created_at),
-          date: formatDateLabel(report.created_at),
-          total,
-          medianRating,
-          bestCompetitor: bestCompetitor?.name?.trim() ?? null
-        };
-      })
+    const grouped = new Map<
+      string,
+      { latest: BenchmarkTimelineItem; latestTs: number; versionCount: number }
+    >();
+
+    (benchmarkHistoryQuery.data ?? []).forEach((report) => {
+      const payload = report.payload ?? null;
+      const stats = payload?.stats ?? {};
+      const locationKey = payload?.location_id ?? selectedLocationId ?? "all-locations";
+      const keywordKey = (payload?.keyword ?? "benchmark").trim().toLowerCase();
+      const radiusKey =
+        typeof payload?.radius_km === "number" ? `${payload.radius_km}` : "all-radius";
+      const monthKey = formatMonthKey(report.created_at);
+      const groupKey = [
+        "competitors_benchmark",
+        locationKey,
+        keywordKey,
+        radiusKey,
+        monthKey
+      ].join("|");
+      const total = isFiniteNumber(stats.total) ? stats.total : null;
+      const medianRating = isFiniteNumber(stats.median_rating)
+        ? stats.median_rating
+        : null;
+      const bestCompetitor =
+        payload?.top_competitors?.find((item) => item.name?.trim()) ?? null;
+      const timestamp = getTimestamp(report.created_at);
+      const item: BenchmarkTimelineItem = {
+        id: report.id,
+        groupKey,
+        createdAtTs: timestamp,
+        month: formatMonthLabel(report.created_at),
+        date: formatDateLabel(report.created_at),
+        total,
+        medianRating,
+        bestCompetitor: bestCompetitor?.name?.trim() ?? null,
+        versionCount: 1
+      };
+      const existing = grouped.get(groupKey);
+      if (!existing) {
+        grouped.set(groupKey, { latest: item, latestTs: timestamp, versionCount: 1 });
+        return;
+      }
+      existing.versionCount += 1;
+      if (timestamp >= existing.latestTs) {
+        existing.latest = item;
+        existing.latestTs = timestamp;
+      }
+    });
+
+    return Array.from(grouped.values())
+      .map((group) => ({
+        ...group.latest,
+        versionCount: group.versionCount
+      }))
       .filter((item) => item.month || item.total !== null || item.medianRating !== null)
+      .sort((a, b) => b.createdAtTs - a.createdAtTs)
       .slice(0, 6);
-  }, [benchmarkHistoryQuery.data]);
+  }, [benchmarkHistoryQuery.data, selectedLocationId]);
+
+  const dedupedScanHistory = useMemo(() => {
+    const seen = new Set<string>();
+    return scanHistory.filter((item) => {
+      const key = [
+        item.locationId ?? "all-locations",
+        item.keyword.trim().toLowerCase(),
+        item.radiusKm,
+        item.zoneLabel?.trim().toLowerCase() ?? "all-zones"
+      ].join("|");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [scanHistory]);
 
   const latestAnalysisDate =
     formatDateLabel(lastScanAt) ?? formatDateLabel(scanHistory[0]?.ts ?? null);
@@ -2387,11 +2503,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
               <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
                 {benchmarkTimeline.map((item, index) => (
                   <div
-                    key={item.id}
-                    className="min-w-[210px] rounded-2xl border border-slate-200 bg-slate-50/80 p-4"
+                    key={item.groupKey}
+                    className="min-w-[230px] max-w-[260px] rounded-2xl border border-slate-200 bg-slate-50/80 p-4"
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-slate-900">
+                      <p className="min-w-0 truncate text-sm font-semibold text-slate-900">
                         {item.month ?? item.date}
                       </p>
                       <span className="h-2 w-2 rounded-full bg-blue-600" />
@@ -2407,11 +2523,33 @@ const Competitors = ({ session }: CompetitorsProps) => {
                         <p className="truncate">Leader: {item.bestCompetitor}</p>
                       )}
                     </div>
-                    {index === 0 && (
-                      <Badge variant="success" className="mt-3">
-                        Dernier
-                      </Badge>
-                    )}
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {index === 0 && <Badge variant="success">Dernier</Badge>}
+                      {item.versionCount > 1 && (
+                        <Badge variant="neutral">{item.versionCount} versions</Badge>
+                      )}
+                      {item.versionCount === 1 && index === 0 && (
+                        <Badge variant="neutral">Dernière version</Badge>
+                      )}
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <Button
+                        size="sm"
+                        className="h-8 flex-1 bg-ink text-white hover:bg-ink/90"
+                        onClick={() => navigate(`/reports?report_id=${item.id}`)}
+                      >
+                        Voir
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 flex-1 bg-white"
+                        onClick={() => void downloadBenchmarkReport(item.id)}
+                        disabled={downloadingBenchmarkId === item.id}
+                      >
+                        {downloadingBenchmarkId === item.id ? "..." : "PDF"}
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -2428,16 +2566,38 @@ const Competitors = ({ session }: CompetitorsProps) => {
                   {benchmarkTimeline[0].bestCompetitor && (
                     <span className="truncate">Leader: {benchmarkTimeline[0].bestCompetitor}</span>
                   )}
+                  {benchmarkTimeline[0].versionCount > 1 && (
+                    <span>{benchmarkTimeline[0].versionCount} versions</span>
+                  )}
+                </div>
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    size="sm"
+                    className="bg-ink text-white hover:bg-ink/90"
+                    onClick={() => navigate(`/reports?report_id=${benchmarkTimeline[0].id}`)}
+                  >
+                    Voir
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void downloadBenchmarkReport(benchmarkTimeline[0].id)}
+                    disabled={downloadingBenchmarkId === benchmarkTimeline[0].id}
+                  >
+                    {downloadingBenchmarkId === benchmarkTimeline[0].id
+                      ? "Téléchargement..."
+                      : "Télécharger"}
+                  </Button>
                 </div>
               </div>
             ) : (
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">
-                Aucun benchmark généré pour cette veille.
+                Aucun benchmark généré.
               </div>
             )}
-            {scanHistory.length > 0 && (
+            {dedupedScanHistory.length > 0 && (
               <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                {scanHistory.slice(0, 2).map((item) => (
+                {dedupedScanHistory.slice(0, 2).map((item) => (
                   <button
                     key={`${item.keyword}-${item.ts}`}
                     type="button"
