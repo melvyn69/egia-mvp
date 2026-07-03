@@ -579,7 +579,7 @@ const buildHtml = (params: PremiumReportPayload) => {
     };
   };
   const insightSlots = selectInsightSlots();
-  const compactInsight = (value: string, maxLength = 92) => {
+  const compactInsight = (value: string, maxLength = 84) => {
     const normalized = value.replace(/\s+/g, " ").trim();
     const firstSentence = normalized.split(/(?<=[.!?])\s+/)[0] ?? normalized;
     const clean = firstSentence.replace(/\s*[;:]\s*$/, "").trim();
@@ -588,7 +588,7 @@ const buildHtml = (params: PremiumReportPayload) => {
   };
   const renderActionItems = (items: string[]) =>
     items
-      .map((item) => compactInsight(item, 88))
+      .map((item) => compactInsight(item, 76))
       .filter(Boolean)
       .map(
         (item) =>
@@ -596,7 +596,7 @@ const buildHtml = (params: PremiumReportPayload) => {
       )
       .join("");
   const renderInsightBanner = (label: string, value: string) => {
-    const text = compactInsight(value, 118);
+    const text = compactInsight(value, 96);
     if (!text) return "";
     return `
     <div class="insight-banner">
@@ -1139,11 +1139,12 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .page {
           min-height: 250mm;
+          break-after: page;
           page-break-after: always;
           position: relative;
           display: flex;
           flex-direction: column;
-          gap: 16px;
+          gap: 14px;
           padding: 2mm 0;
           word-break: normal;
           overflow-wrap: normal;
@@ -1167,7 +1168,7 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .page-title {
           margin: 6px 0 0;
-          font-size: 32px;
+          font-size: 34px;
           line-height: 1.05;
           letter-spacing: 0;
           font-weight: 760;
@@ -1604,8 +1605,8 @@ const buildHtml = (params: PremiumReportPayload) => {
           letter-spacing: 0.08em;
         }
         .consult-page {
-          gap: 16px;
-          padding: 7mm 0;
+          gap: 14px;
+          padding: 8mm 0;
         }
         .consult-header {
           display: grid;
@@ -1617,7 +1618,7 @@ const buildHtml = (params: PremiumReportPayload) => {
           height: 2px;
           margin-top: 18px;
           border-radius: 999px;
-          background: #2563eb;
+          background: linear-gradient(90deg, #2563eb, rgba(37,99,235,0));
         }
         .consult-cover {
           gap: 20px;
@@ -1692,11 +1693,14 @@ const buildHtml = (params: PremiumReportPayload) => {
           max-width: 420px;
         }
         .board-metric {
+          break-inside: avoid;
+          page-break-inside: avoid;
           min-height: 128px;
           border-radius: 24px;
           padding: 16px;
           background: #ffffff;
-          border: 1px solid #e2e8f0;
+          border: 1px solid rgba(15,23,42,0.06);
+          box-shadow: 0 18px 46px rgba(15,23,42,0.045);
           display: flex;
           flex-direction: column;
           justify-content: space-between;
@@ -1756,13 +1760,16 @@ const buildHtml = (params: PremiumReportPayload) => {
         .visual-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
-          gap: 14px;
+          gap: 12px;
         }
         .viz-card {
+          break-inside: avoid;
+          page-break-inside: avoid;
           border-radius: 24px;
           padding: 16px;
-          background: #ffffff;
-          border: 1px solid rgba(15,23,42,0.08);
+          background: rgba(255,255,255,0.88);
+          border: 1px solid rgba(15,23,42,0.05);
+          box-shadow: 0 16px 38px rgba(15,23,42,0.035);
         }
         .viz-label {
           font-size: 11px;
@@ -1842,8 +1849,8 @@ const buildHtml = (params: PremiumReportPayload) => {
         .progress-row {
           border-radius: 24px;
           padding: 12px;
-          background: #ffffff;
-          border: 1px solid #dbeafe;
+          background: rgba(255,255,255,0.82);
+          border: 1px solid rgba(37,99,235,0.12);
         }
         .progress-top {
           display: flex;
@@ -1946,10 +1953,13 @@ const buildHtml = (params: PremiumReportPayload) => {
           font-weight: 770;
         }
         .insight-banner {
+          break-inside: avoid;
+          page-break-inside: avoid;
           border-radius: 24px;
           padding: 16px 18px;
           background: #ffffff;
-          border: 1px solid #dbeafe;
+          border: 1px solid rgba(37,99,235,0.14);
+          box-shadow: 0 14px 34px rgba(15,23,42,0.04);
         }
         .insight-banner-label {
           font-size: 11px;
@@ -2024,9 +2034,9 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .action-item {
           border-radius: 16px;
-          padding: 12px;
-          background: #ffffff;
-          border: 1px solid #e2e8f0;
+          padding: 11px 12px;
+          background: rgba(255,255,255,0.9);
+          border: 1px solid rgba(15,23,42,0.06);
           color: #334155;
           font-size: 13px;
           line-height: 1.35;
@@ -2062,9 +2072,10 @@ const buildHtml = (params: PremiumReportPayload) => {
           min-height: 150px;
         }
         .page-summary {
-          background: #f8fafc;
+          background:
+            linear-gradient(180deg, #f8fafc 0%, #ffffff 76%);
           padding: 8mm;
-          border: 1px solid rgba(15,23,42,0.06);
+          border: 0;
         }
         .page-summary .consult-header {
           grid-template-columns: minmax(0, 1fr) 180px;
@@ -2072,22 +2083,30 @@ const buildHtml = (params: PremiumReportPayload) => {
         .page-summary .hero-decision {
           background: #ffffff;
           color: #020617;
-          border: 1px solid rgba(37,99,235,0.16);
+          border: 0;
           box-shadow: 0 18px 46px rgba(15, 23, 42, 0.08);
         }
         .page-summary .hero-decision-label {
           color: #2563eb;
         }
+        .page-performance {
+          background:
+            linear-gradient(180deg, #f8fafc 0%, #f8fafc 58%, #ffffff 58%, #ffffff 100%);
+          padding: 8mm;
+          border: 0;
+        }
         .page-performance .board-grid {
           grid-template-columns: repeat(2, 1fr);
-          gap: 14px;
+          gap: 16px;
         }
         .page-performance .board-metric {
-          min-height: 154px;
-          padding: 18px;
+          min-height: 158px;
+          padding: 20px;
+          border: 0;
+          box-shadow: 0 20px 52px rgba(15,23,42,0.055);
         }
         .page-performance .board-value {
-          font-size: 54px;
+          font-size: 62px;
           line-height: 0.9;
         }
         .page-performance .consult-panel {
@@ -2096,10 +2115,18 @@ const buildHtml = (params: PremiumReportPayload) => {
         .page-performance .consult-panel-value {
           font-size: 54px;
         }
+        .page-reputation {
+          background: #ffffff;
+          padding: 8mm;
+          border: 0;
+        }
+        .page-reputation .reputation-body {
+          margin-top: 2px;
+        }
         .reputation-timeline {
           position: relative;
           display: grid;
-          gap: 10px;
+          gap: 12px;
           padding-left: 26px;
         }
         .reputation-timeline::before {
@@ -2121,7 +2148,8 @@ const buildHtml = (params: PremiumReportPayload) => {
           border-radius: 24px;
           padding: 12px 14px;
           background: #ffffff;
-          border: 1px solid #e2e8f0;
+          border: 1px solid rgba(15,23,42,0.06);
+          box-shadow: 0 14px 32px rgba(15,23,42,0.035);
         }
         .timeline-index {
           width: 36px;
@@ -2174,16 +2202,20 @@ const buildHtml = (params: PremiumReportPayload) => {
           border: 1px solid #e2e8f0;
         }
         .page-voice {
-          background: #f8fafc;
+          background:
+            linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
           padding: 8mm;
-          border: 1px solid rgba(15,23,42,0.06);
+          border: 0;
         }
         .theme-cloud {
-          min-height: 250px;
+          break-inside: avoid;
+          page-break-inside: avoid;
+          min-height: 238px;
           border-radius: 24px;
           padding: 22px;
           background: #ffffff;
-          border: 1px solid rgba(15,23,42,0.08);
+          border: 0;
+          box-shadow: inset 0 0 0 1px rgba(15,23,42,0.04);
           display: flex;
           flex-wrap: wrap;
           align-content: center;
@@ -2236,8 +2268,15 @@ const buildHtml = (params: PremiumReportPayload) => {
           display: grid;
           gap: 12px;
         }
+        .page-action {
+          background: #ffffff;
+          padding: 8mm;
+          border: 0;
+        }
         .action-lane-card {
-          min-height: 112px;
+          break-inside: avoid;
+          page-break-inside: avoid;
+          min-height: 104px;
           border-radius: 24px;
           padding: 16px;
           display: grid;
@@ -2245,7 +2284,8 @@ const buildHtml = (params: PremiumReportPayload) => {
           gap: 14px;
           align-items: start;
           background: #f8fafc;
-          border: 1px solid #e2e8f0;
+          border: 0;
+          box-shadow: 0 16px 38px rgba(15,23,42,0.045);
         }
         .action-lane-featured {
           background: #020617;
@@ -2273,6 +2313,89 @@ const buildHtml = (params: PremiumReportPayload) => {
         }
         .conclusion-board-grid {
           grid-template-columns: repeat(2, 1fr);
+        }
+        .page-conclusion {
+          background:
+            linear-gradient(135deg, #020617 0%, #0f172a 72%, #1d4ed8 155%);
+          color: #ffffff;
+          padding: 8mm;
+          border: 0;
+        }
+        .page-conclusion .page-title,
+        .page-conclusion .page-kicker {
+          color: #ffffff;
+        }
+        .page-conclusion .header-rule {
+          background: linear-gradient(90deg, #60a5fa, rgba(96,165,250,0));
+        }
+        .projection-roadmap {
+          break-inside: avoid;
+          page-break-inside: avoid;
+          position: relative;
+          margin-top: auto;
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 14px;
+          align-items: stretch;
+        }
+        .projection-roadmap::before {
+          content: "";
+          position: absolute;
+          left: 7%;
+          right: 7%;
+          top: 28px;
+          height: 2px;
+          border-radius: 999px;
+          background: rgba(147,197,253,0.42);
+        }
+        .projection-roadmap .board-metric {
+          position: relative;
+          z-index: 1;
+          min-height: 164px;
+          background: rgba(255,255,255,0.08);
+          color: #ffffff;
+          border: 1px solid rgba(255,255,255,0.14);
+          box-shadow: none;
+        }
+        .projection-roadmap .board-label {
+          color: #bfdbfe;
+        }
+        .projection-roadmap .board-detail {
+          color: #cbd5e1;
+        }
+        .projection-roadmap .metric-index {
+          background: #ffffff;
+          color: #020617;
+          border-color: #ffffff;
+        }
+        .page-conclusion .page-number {
+          color: #cbd5e1;
+        }
+        @media print {
+          .page,
+          .consult-page {
+            gap: 12px;
+          }
+          .visual-grid,
+          .board-grid,
+          .action-stack,
+          .reputation-timeline {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+          .page-voice,
+          .page-action,
+          .page-reputation,
+          .page-performance {
+            padding-top: 7mm;
+            padding-bottom: 7mm;
+          }
+          .theme-cloud {
+            min-height: 220px;
+          }
+          .action-lane-card {
+            min-height: 96px;
+          }
         }
       </style>
     </head>
@@ -2341,13 +2464,13 @@ const buildHtml = (params: PremiumReportPayload) => {
       </section>
 
       <section class="page consult-page page-summary">
-        ${renderConsultHeader("Résumé exécutif", "Ce qu'il faut retenir")}
+        ${renderConsultHeader("Décision", "Executive Summary")}
         ${
           insightSlots.summary
             ? `
         <div class="hero-decision">
           <div class="hero-decision-label">Ce que l'IA retient</div>
-          <div class="hero-decision-text">${escapeHtml(compactInsight(insightSlots.summary, 110))}</div>
+          <div class="hero-decision-text">${escapeHtml(compactInsight(insightSlots.summary, 96))}</div>
         </div>
         `
             : ""
@@ -2362,7 +2485,7 @@ const buildHtml = (params: PremiumReportPayload) => {
       </section>
 
       <section class="page consult-page page-performance">
-        ${renderConsultHeader("Ce qui s'est passé", "Performance observée")}
+        ${renderConsultHeader("Mesure", "Performance")}
         <div class="board-grid">
           ${performanceBoardMetrics.join("")}
         </div>
@@ -2375,7 +2498,7 @@ const buildHtml = (params: PremiumReportPayload) => {
       </section>
 
       <section class="page consult-page page-reputation">
-        ${renderConsultHeader("Pourquoi", "Signaux d'explication")}
+        ${renderConsultHeader("Diagnostic", "Réputation")}
         ${riskInsightBanner}
         ${
           reputationVisuals
@@ -2397,7 +2520,7 @@ const buildHtml = (params: PremiumReportPayload) => {
       </section>
 
       <section class="page consult-page page-voice">
-        ${renderConsultHeader("Ce que disent les clients", "Thèmes dominants")}
+        ${renderConsultHeader("Signal client", "Voix des clients")}
         ${themeCloud ? `<div class="theme-cloud">${themeCloud}</div>` : ""}
         ${
           voiceVisuals
@@ -2409,16 +2532,16 @@ const buildHtml = (params: PremiumReportPayload) => {
       </section>
 
       <section class="page consult-page page-action">
-        ${renderConsultHeader("Plan d'action", "Priorités à engager")}
+        ${renderConsultHeader("Exécution", "Plan d'action")}
         ${actionCards ? `<div class="action-stack">${actionCards}</div>` : ""}
         <div class="page-number">Page 6</div>
       </section>
 
       <section class="page consult-page page-conclusion">
-        ${renderConsultHeader("Projection", "Prochain niveau")}
+        ${renderConsultHeader("Suite", "Projection")}
         ${
           conclusionBoardMetrics
-            ? `<div class="board-grid conclusion-board-grid">${conclusionBoardMetrics}</div>`
+            ? `<div class="projection-roadmap">${conclusionBoardMetrics}</div>`
             : ""
         }
         <div class="page-number">Page 7</div>

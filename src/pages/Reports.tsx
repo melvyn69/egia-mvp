@@ -574,7 +574,7 @@ const ReportReadyModal = ({
       aria-modal="true"
       aria-labelledby="report-ready-title"
     >
-      <div className="report-ready-modal relative max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-[24px] border border-white/80 bg-white shadow-[0_34px_110px_rgba(2,6,23,0.32)]">
+      <div className="report-ready-modal relative max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[22px] border border-white/80 bg-white shadow-[0_34px_110px_rgba(2,6,23,0.32)] md:rounded-[24px]">
         <button
           type="button"
           className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-500 shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition hover:bg-slate-100 hover:text-slate-900"
@@ -584,7 +584,7 @@ const ReportReadyModal = ({
           <X className="h-4 w-4" />
         </button>
 
-        <div className="p-5 md:p-7">
+        <div className="p-4 md:p-7">
           <div className="flex flex-col gap-4 pr-10 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-3">
               {branding.logoUrl && (
@@ -612,14 +612,14 @@ const ReportReadyModal = ({
             )}
           </div>
 
-          <div className="mt-6 rounded-[28px] bg-[#020617] p-6 text-white shadow-[0_24px_70px_rgba(2,6,23,0.20)] md:p-8">
+          <div className="mt-5 rounded-[24px] bg-[#020617] p-5 text-white shadow-[0_24px_70px_rgba(2,6,23,0.20)] md:mt-6 md:rounded-[28px] md:p-8">
             <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.08] px-3 py-1 text-xs font-semibold text-blue-100">
               <CheckCircle2 className="h-3.5 w-3.5" />
               Rapport généré
             </span>
             <h3
               id="report-ready-title"
-              className="mt-5 max-w-3xl text-4xl font-semibold tracking-tight text-white md:text-6xl"
+              className="mt-4 max-w-3xl text-3xl font-semibold tracking-tight text-white md:mt-5 md:text-5xl"
             >
               Votre rapport stratégique est prêt.
             </h3>
@@ -627,7 +627,7 @@ const ReportReadyModal = ({
               L'analyse de votre réputation est terminée.
             </p>
             {briefSignal && (
-              <p className="mt-5 max-w-2xl text-xl font-semibold leading-8 text-white md:text-2xl md:leading-9">
+              <p className="mt-4 max-w-2xl text-lg font-semibold leading-7 text-white md:mt-5 md:text-2xl md:leading-9">
                 {briefSignal}
               </p>
             )}
@@ -670,7 +670,7 @@ const ReportReadyModal = ({
             </div>
           </div>
 
-          <div className="mt-5 flex flex-col gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-end">
+          <div className="sticky bottom-0 -mx-4 mt-5 flex flex-col gap-2 border-t border-slate-100 bg-white/95 px-4 pt-4 pb-1 backdrop-blur sm:flex-row sm:items-center sm:justify-end md:-mx-7 md:px-7">
             <Button
               size="lg"
               className="w-full bg-blue-600 px-7 shadow-[0_18px_38px_rgba(37,99,235,0.24)] hover:bg-blue-700 sm:w-auto"
@@ -719,6 +719,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedBenchmarkId, setSelectedBenchmarkId] = useState<string | null>(null);
+  const [downloadingBenchmarkId, setDownloadingBenchmarkId] = useState<string | null>(null);
   const [reportFilter, setReportFilter] = useState<ReportFilter>("all");
   const [reportSearch, setReportSearch] = useState("");
   const [generatedReportModal, setGeneratedReportModal] =
@@ -949,25 +950,36 @@ const Reports = ({ session, locations }: ReportsProps) => {
       return;
     }
     setError(null);
-    const res = await fetch(
-      `/api/reports/competitors-benchmark/pdf?report_id=${reportId}`,
-      {
-        headers: { Authorization: `Bearer ${session.access_token}` }
+    setDownloadingBenchmarkId(reportId);
+    try {
+      const res = await fetch(
+        `/api/reports/competitors-benchmark/pdf?report_id=${reportId}`,
+        {
+          headers: { Authorization: `Bearer ${session.access_token}` }
+        }
+      );
+      if (!res.ok) {
+        setError("Impossible de télécharger le PDF benchmark.");
+        return;
       }
-    );
-    if (!res.ok) {
+      const blob = await res.blob();
+      if (!blob.size) {
+        setError("PDF benchmark bientôt disponible.");
+        return;
+      }
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `benchmark-${reportId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+    } catch {
       setError("Impossible de télécharger le PDF.");
-      return;
+    } finally {
+      setDownloadingBenchmarkId(null);
     }
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `benchmark-${reportId}.pdf`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => window.URL.revokeObjectURL(url), 1000);
   };
 
   const reports = useMemo(() => reportsQuery.data ?? [], [reportsQuery.data]);
@@ -1046,7 +1058,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="min-w-0 space-y-5 overflow-x-hidden md:space-y-8">
       <style>{`
         @keyframes reportReadyFade {
           from { opacity: 0; }
@@ -1059,6 +1071,20 @@ const Reports = ({ session, locations }: ReportsProps) => {
         @media (prefers-reduced-motion: no-preference) {
           .report-ready-backdrop { animation: reportReadyFade 180ms ease-out both; }
           .report-ready-modal { animation: reportReadyScale 220ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+        }
+        @media print {
+          .reports-print-avoid {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+          .reports-print-section {
+            break-inside: avoid;
+            page-break-inside: avoid;
+            box-shadow: none !important;
+          }
+          .reports-scroll-x {
+            overflow: visible !important;
+          }
         }
       `}</style>
       {generatedReportModal && (
@@ -1610,8 +1636,8 @@ const Reports = ({ session, locations }: ReportsProps) => {
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
-        <CardContent className="p-5 md:p-6">
+      <Card className="reports-print-section overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
+        <CardContent className="p-4 md:p-6">
           {benchmarkQuery.isLoading ? (
             <div className="grid gap-4 lg:grid-cols-2">
               <Skeleton className="h-56 w-full rounded-[24px]" />
@@ -1685,9 +1711,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
                 activePayload?.swot?.opportunities?.slice(0, 2) ?? [];
 
               return (
-                <div className="space-y-5">
-                  <div className="rounded-[28px] bg-[#020617] p-5 text-white shadow-[0_24px_70px_rgba(2,6,23,0.18)] md:p-7">
-                    <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                <div className="min-w-0 space-y-4 md:space-y-5">
+                  <div className="reports-print-avoid rounded-[24px] bg-[#020617] p-4 text-white shadow-[0_24px_70px_rgba(2,6,23,0.18)] md:rounded-[28px] md:p-7">
+                    <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                       <div className="max-w-3xl">
                         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-200">
                           Benchmark concurrentiel
@@ -1696,39 +1722,45 @@ const Reports = ({ session, locations }: ReportsProps) => {
                           Lecture du marché local
                         </h3>
                         {marketPhrase && (
-                          <p className="mt-4 max-w-2xl text-base font-medium leading-7 text-slate-300">
+                          <p className="mt-3 max-w-2xl text-sm font-medium leading-6 text-slate-300 md:mt-4 md:text-base md:leading-7">
                             {marketPhrase}
                           </p>
                         )}
                       </div>
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
                         {formatDateLabel(activeBenchmark.created_at ?? null) && (
-                          <span className="rounded-full border border-white/10 bg-white/[0.08] px-3 py-1.5 text-xs font-semibold text-slate-200">
+                          <span className="w-full rounded-full border border-white/10 bg-white/[0.08] px-3 py-1.5 text-center text-xs font-semibold text-slate-200 sm:w-auto">
                             {formatDateLabel(activeBenchmark.created_at ?? null)}
                           </span>
                         )}
                         <Button
                           variant="secondary"
                           size="sm"
+                          className="w-full sm:w-auto"
+                          disabled={!session?.access_token || downloadingBenchmarkId === activeBenchmark.id}
                           onClick={() => handleDownloadBenchmark(activeBenchmark.id)}
                         >
                           <Download className="h-4 w-4" />
-                          Télécharger
+                          {!session?.access_token
+                            ? "Connexion requise"
+                            : downloadingBenchmarkId === activeBenchmark.id
+                              ? "Téléchargement..."
+                              : "Télécharger"}
                         </Button>
                       </div>
                     </div>
 
                     {benchmarkHeroMetrics.length > 0 && (
-                      <div className="mt-6 grid gap-3 md:grid-cols-3">
+                      <div className="mt-4 grid gap-2 sm:grid-cols-3 md:mt-6 md:gap-3">
                         {benchmarkHeroMetrics.map((metric) => (
                           <div
                             key={metric.label}
-                            className="rounded-[22px] border border-white/10 bg-white/[0.08] px-4 py-4"
+                            className="rounded-[18px] border border-white/10 bg-white/[0.08] px-3 py-3 md:rounded-[22px] md:px-4 md:py-4"
                           >
                             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">
                               {metric.label}
                             </p>
-                            <p className="mt-3 text-3xl font-semibold leading-none">
+                            <p className="mt-2 text-2xl font-semibold leading-none md:mt-3 md:text-3xl">
                               {metric.value}
                             </p>
                           </div>
@@ -1738,7 +1770,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                   </div>
 
                   {(competitors.length > 0 || bestRating || opportunities.length > 0) && (
-                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+                    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
                       {competitors.length > 0 && (
                         <div>
                           <div className="flex items-center justify-between gap-3">
@@ -1751,7 +1783,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                               </h4>
                             </div>
                           </div>
-                          <div className="mt-4 grid gap-3 md:grid-cols-2">
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
                             {competitors.map((item, index) => {
                               const gapRaw =
                                 item.gap ??
@@ -1775,7 +1807,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                               return (
                                 <article
                                   key={`${item.name}-${index}`}
-                                  className="rounded-[24px] border border-slate-200/70 bg-white p-5 shadow-[0_18px_48px_rgba(15,23,42,0.045)]"
+                                  className="reports-print-avoid rounded-[22px] border border-slate-200/70 bg-white p-4 shadow-[0_18px_48px_rgba(15,23,42,0.045)] md:rounded-[24px]"
                                 >
                                   <div className="flex items-start justify-between gap-4">
                                     <div className="min-w-0">
@@ -1791,9 +1823,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                     </div>
                                   </div>
 
-                                  <div className="mt-5 grid grid-cols-3 gap-2">
+                                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
                                     {typeof item.rating === "number" && (
-                                      <div className="rounded-[18px] bg-slate-50 px-3 py-3">
+                                      <div className="rounded-[16px] bg-slate-50 px-3 py-2.5">
                                         <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
                                           Note
                                         </p>
@@ -1803,7 +1835,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                       </div>
                                     )}
                                     {typeof item.reviews === "number" && (
-                                      <div className="rounded-[18px] bg-slate-50 px-3 py-3">
+                                      <div className="rounded-[16px] bg-slate-50 px-3 py-2.5">
                                         <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
                                           Avis
                                         </p>
@@ -1813,7 +1845,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                       </div>
                                     )}
                                     {gapValue && (
-                                      <div className="rounded-[18px] bg-blue-50 px-3 py-3">
+                                      <div className="rounded-[16px] bg-blue-50 px-3 py-2.5">
                                         <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-blue-600">
                                           {gapLabel}
                                         </p>
@@ -1844,7 +1876,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                       )}
 
                       {(bestRating || opportunities.length > 0) && (
-                        <aside className="rounded-[24px] border border-slate-200/70 bg-slate-50 p-5">
+                        <aside className="reports-print-avoid rounded-[22px] border border-slate-200/70 bg-slate-50 p-4 md:rounded-[24px] md:p-5">
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
                             Lecture Gartner
                           </p>
@@ -1876,7 +1908,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                   )}
 
                   {benchmarkQuery.data.length > 1 && (
-                    <div className="rounded-[24px] border border-slate-200/70 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.035)]">
+                    <div className="reports-print-avoid rounded-[22px] border border-slate-200/70 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.035)] md:rounded-[24px]">
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
                           Timeline
@@ -1885,7 +1917,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                           {benchmarkQuery.data.length} benchmarks
                         </p>
                       </div>
-                      <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+                      <div className="reports-scroll-x mt-4 flex max-w-full gap-2 overflow-x-auto pb-1">
                         {benchmarkQuery.data.map((report) => {
                           const date = report.created_at
                             ? new Date(report.created_at)
