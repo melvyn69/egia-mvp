@@ -19,7 +19,7 @@ const items = [
 ] as const;
 
 const MobileBottomNav = () => (
-  <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-12px_30px_-24px_rgba(15,23,42,0.45)] backdrop-blur lg:hidden">
+  <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-12px_30px_-24px_rgba(15,23,42,0.45)] backdrop-blur print:hidden lg:hidden">
     <div className="mx-auto grid h-16 max-w-lg grid-cols-6 items-center gap-1">
       {items.map(({ to, label, Icon, end }) => (
         <NavLink

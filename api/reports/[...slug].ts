@@ -203,11 +203,21 @@ const buildCompetitorsBenchmark = (
   }
 
   const plan14Days: string[] = [
-    "Semaine 1 : sécuriser 5 nouveaux avis pour dépasser la médiane locale.",
-    "Semaine 1 : répondre aux avis récents pour renforcer la confiance.",
-    "Semaine 2 : mettre en avant un avantage clair face aux concurrents proches.",
-    "Semaine 2 : suivre de près les 2 leaders les mieux notés."
-  ];
+    medianReviews !== null
+      ? `Semaine 1 : rapprocher le volume d'avis de la médiane locale (${Math.round(
+          medianReviews
+        )}).`
+      : null,
+    closest !== null
+      ? `Semaine 1 : renforcer la différenciation face au concurrent le plus proche (${closest < 1000 ? `${closest} m` : `${(closest / 1000).toFixed(1)} km`}).`
+      : null,
+    bestRating !== null
+      ? `Semaine 2 : suivre le leader local noté ${bestRating.toFixed(1)}/5.`
+      : null,
+    riskyCount > 0
+      ? `Ce mois-ci : surveiller les ${riskyCount} concurrent(s) à fort impact local.`
+      : null
+  ].filter((item): item is string => item !== null);
 
   const summaryParts = [
     `Total: ${competitors.length}`,
@@ -247,6 +257,14 @@ const formatPdfDate = (value: string | null) => {
     year: "numeric"
   });
 };
+
+const escapeHtml = (value: string | number | null | undefined) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 
 const getSignedBrandLogoUrl = async (
   supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
@@ -341,13 +359,25 @@ const buildBenchmarkHtml = (input: {
 }) => {
   const risks = input.swot.threats?.slice(0, 3) ?? [];
   const opportunities = input.swot.opportunities?.slice(0, 3) ?? [];
-  const force = input.swot.forces?.[0] ?? null;
-  const weakness = input.swot.weaknesses?.[0] ?? null;
-  const opportunity = input.swot.opportunities?.[0] ?? null;
-  const threat = input.swot.threats?.[0] ?? null;
+  const forces = input.swot.forces?.slice(0, 3) ?? [];
+  const weaknesses = input.swot.weaknesses?.slice(0, 3) ?? [];
   const bestRating =
     typeof input.stats.best_rating === "number"
       ? input.stats.best_rating.toFixed(1)
+      : null;
+  const medianRating =
+    typeof input.stats.median_rating === "number"
+      ? input.stats.median_rating.toFixed(1)
+      : null;
+  const medianReviews =
+    typeof input.stats.median_reviews === "number"
+      ? `${Math.round(input.stats.median_reviews)}`
+      : null;
+  const medianDistance =
+    typeof input.stats.median_distance_m === "number"
+      ? input.stats.median_distance_m < 1000
+        ? `${input.stats.median_distance_m} m`
+        : `${(input.stats.median_distance_m / 1000).toFixed(1)} km`
       : null;
   const closest =
     typeof input.stats.closest_m === "number"
@@ -360,7 +390,7 @@ const buildBenchmarkHtml = (input: {
     typeof input.stats.high_risk_count === "number"
       ? input.stats.high_risk_count
       : null;
-  const actions = input.actions.slice(0, 3);
+  const actions = input.actions.slice(0, 4);
   const brandName = input.branding.companyName ?? input.locationLabel;
   const createdAtLabel = formatPdfDate(input.createdAt);
   const coverMeta = [
@@ -368,31 +398,17 @@ const buildBenchmarkHtml = (input: {
     input.zoneLabel ? `Zone analysée : ${input.zoneLabel}` : null,
     input.radiusLabel ? `Rayon : ${input.radiusLabel}` : null
   ].filter(Boolean);
-  const marketMetrics = [
-    total !== null ? `${total} concurrents` : null,
-    riskCount !== null ? `${riskCount} à risque élevé` : null
-  ].filter(Boolean);
-  const radarItems = [
-    closest ? `Concurrent le plus proche : ${closest}` : null,
-    bestRating ? `Meilleure note du marché : ${bestRating}` : null,
-    total !== null ? `Concurrents observés : ${total}` : null
-  ].filter(Boolean);
-  const interpretation = [
-    bestRating ? `concurrence jusqu'à ${bestRating}/5` : null,
-    closest ? `acteur très proche à ${closest}` : null
-  ].filter(Boolean);
-  const swotCards = [
-    force ? { title: "Force", value: force, className: "success" } : null,
-    weakness ? { title: "Faiblesse", value: weakness, className: "danger" } : null,
-    opportunity ? { title: "Opportunité", value: opportunity, className: "info" } : null,
-    threat ? { title: "Menace", value: threat, className: "soft" } : null
-  ].filter(
-    (item): item is { title: string; value: string; className: string } =>
-      item !== null
-  );
+  const kpis = [
+    total !== null ? { label: "Concurrents", value: `${total}` } : null,
+    medianRating ? { label: "Note médiane", value: `${medianRating}/5` } : null,
+    medianReviews ? { label: "Médiane avis", value: medianReviews } : null,
+    bestRating ? { label: "Meilleure note", value: `${bestRating}/5` } : null,
+    closest ? { label: "Plus proche", value: closest } : null,
+    riskCount !== null ? { label: "Menaces", value: `${riskCount}` } : null
+  ].filter((item): item is { label: string; value: string } => item !== null);
   const competitorCards = input.topCompetitors
-    .slice(0, 2)
-    .map((item) => {
+    .slice(0, 6)
+    .map((item, index) => {
       const distance =
         typeof item.distance_m === "number"
           ? item.distance_m < 1000
@@ -400,16 +416,65 @@ const buildBenchmarkHtml = (input: {
             : `${(item.distance_m / 1000).toFixed(1)} km`
           : null;
       const details = [
-        typeof item.rating === "number" ? `Note: ${item.rating}` : null,
-        typeof item.reviews === "number" ? `Avis: ${item.reviews}` : null,
+        typeof item.rating === "number" ? `${item.rating.toFixed(1)}/5` : null,
+        typeof item.reviews === "number" ? `${item.reviews} avis` : null,
         distance ? `Distance: ${distance}` : null
       ].filter(Boolean);
       return {
+        rank: index + 1,
         name: item.name ?? "Concurrent",
         details
       };
     })
     .filter((item) => item.details.length > 0);
+  const podiumCards = competitorCards.slice(0, 3);
+  const swotCards = [
+    forces.length ? { title: "Forces", items: forces, className: "success" } : null,
+    weaknesses.length
+      ? { title: "Faiblesses", items: weaknesses, className: "danger" }
+      : null,
+    opportunities.length
+      ? { title: "Opportunités", items: opportunities, className: "info" }
+      : null,
+    risks.length ? { title: "Menaces", items: risks, className: "soft" } : null
+  ].filter(
+    (item): item is { title: string; items: string[]; className: string } =>
+      item !== null
+  );
+  const positioningCards = [
+    bestRating ? { label: "Leader marché", value: `${bestRating}/5` } : null,
+    medianRating ? { label: "Référence marché", value: `${medianRating}/5` } : null,
+    medianDistance ? { label: "Distance médiane", value: medianDistance } : null,
+    closest ? { label: "Pression proximité", value: closest } : null
+  ].filter((item): item is { label: string; value: string } => item !== null);
+  const marketSummary =
+    input.summary ??
+    [
+      total !== null ? `${total} concurrents observés` : null,
+      medianRating ? `note médiane ${medianRating}/5` : null,
+      closest ? `plus proche à ${closest}` : null
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  const renderKpis = (items: Array<{ label: string; value: string }>) =>
+    items.length
+      ? `<div class="kpi-grid">${items
+          .map(
+            (item) => `
+          <div class="metric-card">
+            <div class="metric-label">${escapeHtml(item.label)}</div>
+            <div class="metric-value">${escapeHtml(item.value)}</div>
+          </div>`
+          )
+          .join("")}</div>`
+      : "";
+  const renderList = (items: string[], className = "list") =>
+    items.length
+      ? `<ul class="${className}">${items
+          .map((item) => `<li>${escapeHtml(item)}</li>`)
+          .join("")}</ul>`
+      : "";
+  const renderFooter = () => `<div class="footer">Powered by EGIA</div>`;
 
   return `<!doctype html>
   <html lang="fr">
@@ -417,209 +482,204 @@ const buildBenchmarkHtml = (input: {
       <meta charset="utf-8" />
       <style>
         * { box-sizing: border-box; }
-        body { font-family: "Inter", Arial, sans-serif; color: #111827; margin: 0; background: #f8fafc; }
-        .page { background: #ffffff; border-radius: 18px; padding: 32px; margin: 24px auto; width: 100%; }
-        .cover { background: #0f172a; color: #ffffff; border-radius: 20px; padding: 36px; }
-        .brand-row { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
-        .brand-logo { width: 48px; height: 48px; border-radius: 16px; object-fit: cover; background: #ffffff; }
-        .brand-name { font-size: 16px; font-weight: 800; }
-        .brand-legal { color: #cbd5e1; font-size: 12px; margin-top: 3px; }
-        .badge { display: inline-block; padding: 6px 12px; border-radius: 999px; font-size: 12px; background: rgba(255,255,255,0.15); }
-        .muted { color: #64748b; font-size: 13px; }
-        .footer { color: #94a3b8; font-size: 11px; text-align: center; margin: 18px auto 0; }
-        h1 { margin: 12px 0 4px; font-size: 28px; }
-        h2 { margin: 0; font-size: 18px; }
-        .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-        .card { border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; background: #ffffff; }
-        .section-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
-        ul { margin: 8px 0 0 18px; padding: 0; }
-        li { font-size: 13px; margin-bottom: 6px; color: #334155; }
-        .metric { font-size: 13px; color: #475569; }
-        .kpi { font-size: 14px; font-weight: 600; }
-        .soft { background: #f1f5f9; }
-        .success { background: #ecfdf3; border-color: #bbf7d0; }
-        .warn { background: #fef3c7; border-color: #fde68a; }
+        body { font-family: Inter, Arial, sans-serif; color: #0f172a; margin: 0; background: #ffffff; }
+        .page { min-height: 246mm; break-after: page; page-break-after: always; display: flex; flex-direction: column; gap: 18px; }
+        .page:last-child { break-after: auto; page-break-after: auto; }
+        .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; border-bottom: 1px solid #e2e8f0; padding-bottom: 14px; }
+        .brand-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+        .brand-logo { width: 42px; height: 42px; border-radius: 14px; object-fit: contain; border: 1px solid #e2e8f0; background: #ffffff; }
+        .brand-mark { width: 42px; height: 42px; border-radius: 14px; background: #0f172a; color: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 800; }
+        .brand-name { font-size: 15px; font-weight: 800; color: #0f172a; }
+        .brand-legal { color: #64748b; font-size: 11px; margin-top: 2px; }
+        .eyebrow { color: #2563eb; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 800; }
+        h1 { margin: 12px 0 0; font-size: 42px; line-height: 0.98; letter-spacing: -0.04em; }
+        h2 { margin: 0; font-size: 28px; line-height: 1.05; letter-spacing: -0.03em; }
+        h3 { margin: 0; font-size: 15px; }
+        .subtle { color: #64748b; font-size: 12px; line-height: 1.55; }
+        .summary { max-width: 560px; color: #334155; font-size: 15px; line-height: 1.65; margin-top: 14px; }
+        .meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+        .pill { border: 1px solid #dbeafe; background: #eff6ff; color: #1e40af; border-radius: 999px; padding: 7px 10px; font-size: 11px; font-weight: 700; }
+        .hero-panel { margin-top: auto; border-radius: 28px; background: #0f172a; color: #ffffff; padding: 28px; }
+        .hero-panel .subtle { color: #cbd5e1; }
+        .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .metric-card { border: 1px solid #e2e8f0; border-radius: 20px; padding: 16px; background: #f8fafc; min-height: 86px; }
+        .hero-panel .metric-card { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.12); }
+        .metric-label { color: #64748b; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }
+        .hero-panel .metric-label { color: #cbd5e1; }
+        .metric-value { margin-top: 9px; font-size: 30px; line-height: 1; font-weight: 850; letter-spacing: -0.04em; }
+        .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+        .card { border: 1px solid #e2e8f0; border-radius: 22px; padding: 16px; background: #ffffff; break-inside: avoid; page-break-inside: avoid; }
+        .dark-card { background: #0f172a; color: #ffffff; border-color: #0f172a; }
+        .rank { width: 36px; height: 36px; border-radius: 14px; display: flex; align-items: center; justify-content: center; background: #eff6ff; color: #1d4ed8; font-weight: 850; }
+        .competitor { display: flex; gap: 12px; align-items: flex-start; }
+        .competitor-name { font-weight: 850; font-size: 14px; line-height: 1.25; }
+        .detail-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+        .detail { border-radius: 999px; background: #f1f5f9; color: #334155; padding: 5px 8px; font-size: 11px; font-weight: 700; }
+        .section-note { color: #475569; font-size: 13px; line-height: 1.6; margin-top: 10px; }
+        .list { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+        .list li { color: #334155; font-size: 12px; line-height: 1.45; border-left: 3px solid #dbeafe; padding-left: 10px; }
+        .success { background: #f0fdf4; border-color: #bbf7d0; }
+        .danger { background: #fff1f2; border-color: #fecdd3; }
         .info { background: #eff6ff; border-color: #bfdbfe; }
-        .danger { background: #fef2f2; border-color: #fecaca; }
+        .soft { background: #f8fafc; border-color: #e2e8f0; }
+        .footer { margin-top: auto; padding-top: 10px; color: #94a3b8; font-size: 10px; text-align: right; border-top: 1px solid #e2e8f0; }
       </style>
     </head>
     <body>
-      <div class="page cover">
-        <div class="brand-row">
+      <section class="page">
+        <div class="page-head">
+          <div class="brand-row">
+            ${
+              input.branding.logoUrl
+                ? `<img class="brand-logo" src="${escapeHtml(input.branding.logoUrl)}" alt="${escapeHtml(brandName)}" />`
+                : `<div class="brand-mark">${escapeHtml(brandName.slice(0, 2).toUpperCase())}</div>`
+            }
+            <div>
+              <div class="brand-name">${escapeHtml(brandName)}</div>
+              ${
+                input.branding.legalName
+                  ? `<div class="brand-legal">${escapeHtml(input.branding.legalName)}</div>`
+                  : ""
+              }
+            </div>
+          </div>
+          <div class="subtle">${createdAtLabel ? `Généré le ${escapeHtml(createdAtLabel)}` : ""}</div>
+        </div>
+        <div>
+          <div class="eyebrow">Benchmark concurrentiel</div>
+          <h1>${escapeHtml(input.title || "Lecture du marché local")}</h1>
           ${
-            input.branding.logoUrl
-              ? `<img class="brand-logo" src="${input.branding.logoUrl}" alt="${brandName}" />`
+            coverMeta.length
+              ? `<div class="meta-row">${coverMeta
+                  .map((item) => `<span class="pill">${escapeHtml(item)}</span>`)
+                  .join("")}</div>`
               : ""
           }
-          <div>
-            <div class="brand-name">${brandName}</div>
-            ${
-              input.branding.legalName
-                ? `<div class="brand-legal">${input.branding.legalName}</div>`
-                : ""
-            }
-          </div>
+          ${marketSummary ? `<p class="summary">${escapeHtml(marketSummary)}</p>` : ""}
         </div>
-        <div class="badge">Veille concurrentielle</div>
-        <h1>${input.title}</h1>
-        ${
-          coverMeta.length
-            ? `<div class="muted" style="color:#e2e8f0;">${coverMeta.join(" · ")}</div>`
-            : ""
-        }
-        ${
-          createdAtLabel
-            ? `<div class="muted" style="color:#e2e8f0; margin-top: 8px;">Généré le ${createdAtLabel}</div>`
-            : ""
-        }
-      </div>
+        <div class="hero-panel">
+          <div class="eyebrow">Résumé marché</div>
+          ${renderKpis(kpis.slice(0, 6))}
+        </div>
+        ${renderFooter()}
+      </section>
 
-      <div class="page">
-        <div class="section-title">Résumé exécutif</div>
+      <section class="page">
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">Page 2</div>
+            <h2>Positionnement local</h2>
+          </div>
+          <div class="subtle">${escapeHtml(input.locationLabel)}</div>
+        </div>
+        ${renderKpis(positioningCards)}
+        <div class="grid-3">
+          ${podiumCards
+            .map(
+              (item) => `
+            <div class="card">
+              <div class="competitor">
+                <div class="rank">${item.rank}</div>
+                <div>
+                  <div class="competitor-name">${escapeHtml(item.name)}</div>
+                  <div class="detail-row">
+                    ${item.details.map((detail) => `<span class="detail">${escapeHtml(detail)}</span>`).join("")}
+                  </div>
+                </div>
+              </div>
+            </div>`
+            )
+            .join("")}
+        </div>
+        ${renderFooter()}
+      </section>
+
+      <section class="page">
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">Page 3</div>
+            <h2>Concurrents clés et menaces</h2>
+          </div>
+          <div class="subtle">${input.radiusLabel ? `Rayon ${escapeHtml(input.radiusLabel)}` : ""}</div>
+        </div>
+        <div class="grid-2">
+          ${competitorCards
+            .slice(0, 4)
+            .map(
+              (item) => `
+            <div class="card">
+              <div class="competitor">
+                <div class="rank">${item.rank}</div>
+                <div>
+                  <div class="competitor-name">${escapeHtml(item.name)}</div>
+                  <div class="detail-row">
+                    ${item.details.map((detail) => `<span class="detail">${escapeHtml(detail)}</span>`).join("")}
+                  </div>
+                </div>
+              </div>
+            </div>
+          `
+            )
+            .join("")}
+        </div>
         <div class="grid-2">
           ${
-            input.summary
-              ? `<div class="card soft">
-                  <div class="kpi">Positionnement global</div>
-                  <p class="metric">${input.summary}</p>
-                </div>`
-              : ""
-          }
-          ${
-            marketMetrics.length
-              ? `<div class="card soft">
-                  <div class="kpi">Marché observé</div>
-                  <p class="metric">${marketMetrics.join(" · ")}</p>
-                </div>`
-              : ""
-          }
-        </div>
-        ${
-          risks.length || opportunities.length
-            ? `<div class="grid-2" style="margin-top: 12px;">
-          ${
             risks.length
-              ? `
-          <div class="card">
-            <div class="section-title">Top 3 risques</div>
-            <ul>${risks
-              .slice(0, 3)
-              .map((item) => `<li>${item}</li>`)
-              .join("")}</ul>
-          </div>
-          `
+              ? `<div class="card danger">
+                  <h3>Menaces à surveiller</h3>
+                  ${renderList(risks)}
+                </div>`
               : ""
           }
           ${
             opportunities.length
-              ? `
-          <div class="card">
-            <div class="section-title">Top 3 opportunités</div>
-            <ul>${opportunities
-              .slice(0, 3)
-              .map((item) => `<li>${item}</li>`)
-              .join("")}</ul>
-          </div>
-          `
-              : ""
-          }
-        </div>`
-            : ""
-        }
-      </div>
-
-      ${
-        competitorCards.length
-          ? `
-      <div class="page">
-        <div class="section-title">Podium concurrentiel</div>
-        <div class="grid-3">
-          ${competitorCards.map((item) => `
-            <div class="card">
-              <div class="kpi">${item.name}</div>
-              ${item.details.map((detail) => `<div class="metric">${detail}</div>`).join("")}
-            </div>
-          `).join("")}
-        </div>
-      </div>
-      `
-          : ""
-      }
-
-      ${
-        radarItems.length
-          ? `
-      <div class="page">
-        <div class="section-title">Analyse radar</div>
-        <div class="grid-2">
-          <div class="card soft">
-            <div class="kpi">Statistiques clés</div>
-            <ul>
-              ${radarItems.map((item) => `<li>${item}</li>`).join("")}
-            </ul>
-          </div>
-          ${
-            interpretation.length
-              ? `
-          <div class="card">
-            <div class="kpi">Interprétation</div>
-            <p class="metric">
-              Le marché local montre une ${interpretation.join(" avec un ")}.
-            </p>
-          </div>
-          `
+              ? `<div class="card info">
+                  <h3>Opportunités détectées</h3>
+                  ${renderList(opportunities)}
+                </div>`
               : ""
           }
         </div>
-      </div>
-      `
-          : ""
-      }
+        ${renderFooter()}
+      </section>
 
-      ${
-        swotCards.length
-          ? `
-      <div class="page">
-        <div class="section-title">Analyse SWOT</div>
+      <section class="page">
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">Page 4</div>
+            <h2>SWOT et actions recommandées</h2>
+          </div>
+          <div class="subtle">Plan d'action</div>
+        </div>
         <div class="grid-2">
           ${swotCards
             .map(
               (item) => `
-          <div class="card ${item.className}">
-            <div class="kpi">${item.title}</div>
-            <p class="metric">${item.value}</p>
-          </div>`
+            <div class="card ${item.className}">
+              <h3>${escapeHtml(item.title)}</h3>
+              ${renderList(item.items)}
+            </div>`
             )
             .join("")}
         </div>
-      </div>
-      `
-          : ""
-      }
-
-      ${
-        actions.length
-          ? `
-      <div class="page">
-        <div class="section-title">Actions recommandées</div>
-        <div class="grid-2">
+        ${
+          actions.length
+            ? `<div class="grid-2">
           ${actions
-            .map((action) => `
+              .map(
+                (action, index) => `
               <div class="card">
-                <div class="kpi">Action</div>
-                <p class="metric">${action}</p>
-                <p class="metric"><strong>Pourquoi :</strong> renforcer votre position locale.</p>
-                <p class="metric"><strong>Impact attendu :</strong> amélioration de la préférence client.</p>
+                <div class="eyebrow">Action ${index + 1}</div>
+                <p class="section-note">${escapeHtml(action)}</p>
               </div>
             `)
-            .join("")}
-        </div>
-      </div>
-      `
-          : ""
-      }
-      <div class="footer">Powered by EGIA</div>
+              .join("")}
+        </div>`
+            : ""
+        }
+        ${renderFooter()}
+      </section>
     </body>
   </html>`;
 };

@@ -78,7 +78,7 @@ const Topbar = ({
   };
 
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-white/70 px-4 py-4 backdrop-blur md:px-6 md:py-5 lg:items-center">
+    <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-white/70 px-4 py-4 backdrop-blur print:hidden md:px-6 md:py-5 lg:items-center">
       <div className="flex min-w-0 flex-1 items-start gap-3">
         {onToggleMenu && (
           <Button

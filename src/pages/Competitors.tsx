@@ -1637,7 +1637,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
   };
 
   return (
-    <div className="min-w-0 space-y-5 overflow-x-hidden pb-8 md:space-y-6">
+    <div className="competitors-report min-w-0 space-y-4 overflow-x-hidden pb-8 md:space-y-5">
       <style>{`
         @keyframes radar-pulse {
           0% { transform: scale(0.4); opacity: 0.4; }
@@ -1648,10 +1648,70 @@ const Competitors = ({ session }: CompetitorsProps) => {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
         }
+        @media print {
+          @page { size: A4; margin: 12mm; }
+          html, body { background: #ffffff !important; }
+          main {
+            padding: 0 !important;
+            background: #ffffff !important;
+          }
+          .competitors-report {
+            color: #0f172a !important;
+            background: #ffffff !important;
+            padding: 0 !important;
+            gap: 10px !important;
+            overflow: visible !important;
+          }
+          .competitors-print-hidden,
+          .competitors-report button,
+          .competitors-report input,
+          .competitors-report select,
+          .competitors-report textarea,
+          .competitors-report a,
+          .competitors-report [role="button"] {
+            display: none !important;
+          }
+          .competitors-report section,
+          .competitors-report article,
+          .competitors-report .competitors-print-card {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          .competitors-report section,
+          .competitors-report article,
+          .competitors-report div {
+            box-shadow: none !important;
+          }
+          .competitors-report section,
+          .competitors-report article,
+          .competitors-report [class*="bg-slate-950"],
+          .competitors-report [class*="bg-slate-50"],
+          .competitors-report [class*="bg-blue-50"] {
+            background: #ffffff !important;
+            color: #0f172a !important;
+          }
+          .competitors-report [class*="rounded-"] {
+            border-radius: 12px !important;
+          }
+          .competitors-report h1 {
+            font-size: 30px !important;
+            line-height: 1.1 !important;
+          }
+          .competitors-report h2 {
+            font-size: 18px !important;
+            margin: 0 !important;
+          }
+          .competitors-report p,
+          .competitors-report span,
+          .competitors-report li {
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+          }
+        }
       `}</style>
 
       {isScanning && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-6 backdrop-blur-sm">
+        <div className="competitors-print-hidden fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-6 backdrop-blur-sm">
           <div className="relative flex h-60 w-60 items-center justify-center rounded-full">
             <div className="absolute inset-0 rounded-full border border-blue-200/30" />
             <div
@@ -1679,7 +1739,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
       )}
 
       {toast && (
-        <div className="sticky top-4 z-20 flex justify-end pointer-events-none">
+        <div className="competitors-print-hidden sticky top-4 z-20 flex justify-end pointer-events-none">
           <div
             className={cn(
               "pointer-events-auto flex items-start gap-2 rounded-2xl border px-3 py-2 text-xs shadow-[0_18px_45px_rgba(15,23,42,0.10)]",
@@ -1701,9 +1761,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
         </div>
       )}
 
-      <section className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_24px_80px_rgba(15,23,42,0.08)] md:p-6 lg:p-8">
-        <div className="flex min-w-0 flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0 space-y-4">
+      <section className="competitors-print-card rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_18px_50px_rgba(15,23,42,0.07)] md:p-5 lg:p-6">
+        <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={googleConnected ? "success" : "neutral"}>
                 {googleConnected ? "Google connecté" : "Google à connecter"}
@@ -1719,14 +1779,14 @@ const Competitors = ({ session }: CompetitorsProps) => {
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">
                 Lecture du marché local
               </p>
-              <h1 className="mt-2 text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">
                 Veille concurrentielle
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 md:text-base">
                 Comprendre votre position locale et les écarts à combler.
               </p>
               {heroSignal && (
-                <p className="mt-4 max-w-2xl rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm font-medium leading-6 text-slate-800">
+                <p className="mt-3 max-w-2xl rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-2.5 text-sm font-medium leading-6 text-slate-800">
                   {heroSignal}
                 </p>
               )}
@@ -1753,7 +1813,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
               )}
             </div>
           </div>
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row lg:flex-col xl:flex-row">
+          <div className="competitors-print-hidden flex w-full flex-col gap-2 sm:w-auto sm:flex-row lg:flex-col xl:flex-row">
             <Button
               className="w-full bg-ink text-white shadow-[0_16px_36px_rgba(15,23,42,0.18)] hover:bg-ink/90 sm:w-auto"
               onClick={runCurrentScan}
@@ -1786,12 +1846,12 @@ const Competitors = ({ session }: CompetitorsProps) => {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
           {marketKpis.length > 0 ? (
             marketKpis.map(({ label, value, detail, Icon, tone }) => (
               <div
                 key={label}
-                className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4"
+                className="competitors-print-card rounded-2xl border border-slate-200 bg-slate-50/70 p-3"
               >
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-xs font-semibold text-slate-500">{label}</span>
@@ -1804,7 +1864,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     <Icon size={16} />
                   </span>
                 </div>
-                <div className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
+                <div className="mt-2 text-xl font-semibold tracking-tight text-slate-950 md:text-2xl">
                   {value}
                 </div>
                 {detail && (
@@ -1822,7 +1882,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <section className="competitors-print-hidden grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <Card className="rounded-[24px] shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
           <CardHeader className="p-4 pb-0 md:p-5 md:pb-0">
             <CardTitle className="flex items-center gap-2 text-base">
@@ -2070,7 +2130,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 <article
                   key={`${label}-${competitor.place_id}`}
                   className={cn(
-                    "rounded-[24px] border border-slate-200 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.06)]",
+                    "competitors-print-card rounded-[22px] border border-slate-200 p-4 shadow-[0_14px_40px_rgba(15,23,42,0.05)]",
                     tone
                   )}
                 >
@@ -2080,10 +2140,10 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     </p>
                     <Badge variant={rank === 1 ? "success" : "neutral"}>{badge}</Badge>
                   </div>
-                  <div className="mt-5 flex items-start gap-4">
+                  <div className="mt-4 flex items-start gap-3">
                     <div
                       className={cn(
-                        "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-xl font-semibold",
+                        "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-lg font-semibold",
                         rank === 1 ? "bg-white text-slate-950" : "bg-slate-100 text-slate-900"
                       )}
                     >
@@ -2121,9 +2181,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
         </section>
       )}
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+      <section className="grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
         {threatRows.length > 0 && (
-          <Card className="rounded-[24px] shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
+          <Card className="competitors-print-card rounded-[22px] shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
             <CardHeader className="p-4 pb-0 md:p-5 md:pb-0">
               <CardTitle className="flex items-center gap-2 text-base">
                 <ShieldAlert size={18} />
@@ -2133,7 +2193,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 Classification UI basée sur note, avis, distance et rang local.
               </p>
             </CardHeader>
-            <CardContent className="space-y-3 p-4 md:p-5">
+            <CardContent className="space-y-3 p-4">
               {(["Menace forte", "À surveiller", "Faible menace"] as const).map(
                 (level) => {
                   const rows = threatRows.filter((item) => item.level === level).slice(0, 3);
@@ -2159,7 +2219,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                         {rows.map(({ row, reason, rank }) => (
                           <article
                             key={`${level}-${row.place_id}`}
-                            className="rounded-2xl border border-slate-200 bg-white p-4"
+                            className="competitors-print-card rounded-2xl border border-slate-200 bg-white p-3"
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
@@ -2195,7 +2255,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
         )}
 
         {gapCards.length > 0 && (
-          <Card className="rounded-[24px] shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
+          <Card className="competitors-print-card rounded-[22px] shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
             <CardHeader className="p-4 pb-0 md:p-5 md:pb-0">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Target size={18} />
@@ -2205,11 +2265,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 Comparaison avec les médianes et le leader local.
               </p>
             </CardHeader>
-            <CardContent className="grid gap-3 p-4 sm:grid-cols-2 md:p-5">
+            <CardContent className="grid gap-2 p-4 sm:grid-cols-2">
               {gapCards.map((card) => (
                 <div
                   key={card.label}
-                  className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4"
+                  className="competitors-print-card rounded-2xl border border-slate-200 bg-slate-50/70 p-3"
                 >
                   <p className="text-xs font-semibold text-slate-500">{card.label}</p>
                   <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
@@ -2226,7 +2286,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
       </section>
 
       {priorityActions.length > 0 && (
-        <section className="rounded-[24px] border border-slate-200 bg-slate-950 p-4 text-white shadow-[0_24px_80px_rgba(15,23,42,0.16)] md:p-6">
+        <section className="competitors-print-card rounded-[22px] border border-slate-200 bg-slate-950 p-4 text-white shadow-[0_18px_50px_rgba(15,23,42,0.12)] md:p-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-200">
@@ -2238,11 +2298,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
             </div>
             <Badge variant="neutral">Plan court</Badge>
           </div>
-          <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
             {priorityActions.map((item) => (
               <article
                 key={item.label}
-                className="rounded-2xl border border-white/10 bg-white/[0.06] p-4"
+                className="competitors-print-card rounded-2xl border border-white/10 bg-white/[0.06] p-3"
               >
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-200">
                   {item.label}
@@ -2268,7 +2328,10 @@ const Competitors = ({ session }: CompetitorsProps) => {
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             {swotSections.map(({ title, Icon, items, tone }) => (
-              <article key={title} className={cn("rounded-[24px] border p-4", tone)}>
+              <article
+                key={title}
+                className={cn("competitors-print-card rounded-[22px] border p-3", tone)}
+              >
                 <div className="flex items-center gap-2 text-sm font-semibold">
                   <Icon size={16} />
                   {title}
@@ -2299,9 +2362,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
           </div>
         </div>
 
-        <Card className="rounded-[24px] shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
-          <CardContent className="space-y-4 p-4 md:p-5">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
+        <Card className="competitors-print-card rounded-[22px] shadow-[0_14px_40px_rgba(15,23,42,0.05)]">
+          <CardContent className="space-y-3 p-4">
+            <div className="competitors-print-hidden rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
               <div className="grid gap-2 md:grid-cols-[minmax(0,1.4fr)_minmax(130px,0.8fr)_minmax(120px,0.7fr)_minmax(120px,0.8fr)]">
                 <label className="text-xs font-semibold text-slate-600">
                   Rechercher
@@ -2430,7 +2493,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                   return (
                     <article
                       key={competitor.id}
-                      className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_12px_36px_rgba(15,23,42,0.04)]"
+                      className="competitors-print-card rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_10px_28px_rgba(15,23,42,0.035)]"
                     >
                       <div className="grid gap-4 lg:grid-cols-[56px_minmax(0,1.4fr)_86px_86px_92px_110px_120px_minmax(140px,0.8fr)] lg:items-center">
                         <div className="flex items-center gap-2 lg:block">

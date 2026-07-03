@@ -78,8 +78,8 @@ const Sidebar = ({
 
   const baseClasses =
     variant === "mobile"
-      ? "flex h-full w-[min(20rem,calc(100vw-2rem))] flex-col justify-between overflow-y-auto border-r border-slate-200 bg-white/90 px-4 py-6 shadow-soft backdrop-blur-lg"
-      : "sticky top-0 hidden h-screen w-64 flex-col justify-between border-r border-slate-200 bg-white/80 px-4 py-6 shadow-soft backdrop-blur-lg lg:flex";
+      ? "flex h-full w-[min(20rem,calc(100vw-2rem))] flex-col justify-between overflow-y-auto border-r border-slate-200 bg-white/90 px-4 py-6 shadow-soft backdrop-blur-lg print:hidden"
+      : "sticky top-0 hidden h-screen w-64 flex-col justify-between border-r border-slate-200 bg-white/80 px-4 py-6 shadow-soft backdrop-blur-lg print:hidden lg:flex";
 
   return (
     <aside className={cn(baseClasses, className)}>
