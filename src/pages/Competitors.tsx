@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowUpRight,
@@ -24,61 +24,22 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
+import {
+  type CompetitorRow,
+  competitorsFollowedQueryKey,
+  competitorsRadarQueryKey,
+  useCompetitorBenchmarkHistory,
+  useCompetitorLocations,
+  useCompetitorRadar,
+  useCompetitorSelfStats,
+  useCompetitorSettings,
+  useFollowedCompetitors
+} from "../hooks/useCompetitorQueries";
 import { cn } from "../lib/utils";
-import { supabase } from "../lib/supabase";
 
 type CompetitorsProps = {
   session: Session | null;
   isAdmin?: boolean;
-};
-
-type LocationOption = {
-  id: string;
-  location_title: string | null;
-  location_resource_name: string;
-  address_json?: unknown | null;
-};
-
-type CompetitorRow = {
-  id: string;
-  place_id: string;
-  name: string;
-  address: string | null;
-  distance_m: number | null;
-  rating: number | null;
-  user_ratings_total: number | null;
-  is_followed: boolean;
-  location_id: string | null;
-  years_active?: number | null;
-};
-
-type SettingsRow = {
-  competitive_monitoring_enabled?: boolean | null;
-  competitive_monitoring_keyword?: string | null;
-  competitive_monitoring_radius_km?: number | null;
-};
-
-type BenchmarkHistoryRow = {
-  id: string;
-  created_at: string | null;
-  summary?: string | null;
-  payload?: BenchmarkPayload | null;
-};
-
-type BenchmarkPayload = {
-  stats?: Record<string, number | null | undefined>;
-  keyword?: string | null;
-  top_competitors?: Array<{
-    name?: string | null;
-    rating?: number | null;
-    reviews?: number | null;
-    user_ratings_total?: number | null;
-    distance_m?: number | null;
-  }>;
-  swot?: Record<string, string[] | undefined>;
-  plan_14_days?: string[];
-  radius_km?: number | null;
-  location_id?: string | null;
 };
 
 type BenchmarkTimelineItem = {
@@ -321,12 +282,6 @@ const renderChipList = (items: string[]) => {
   );
 };
 
-const passiveQueryOptions = {
-  staleTime: 5 * 60 * 1000,
-  refetchOnMount: false,
-  refetchOnWindowFocus: false
-} as const;
-
 const Competitors = ({ session }: CompetitorsProps) => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -364,40 +319,10 @@ const Competitors = ({ session }: CompetitorsProps) => {
 
   const token = session?.access_token ?? null;
   const userId = session?.user?.id ?? null;
+  const workspaceId = userId;
 
-  const locationsQuery = useQuery({
-    queryKey: ["competitors-locations", userId],
-    queryFn: async () => {
-      if (!supabase || !userId) return [] as LocationOption[];
-      const { data, error } = await supabase
-        .from("google_locations")
-        .select("id, location_title, location_resource_name, address_json")
-        .eq("user_id", userId)
-        .order("location_title", { ascending: true });
-      if (error) throw error;
-      return (data ?? []) as LocationOption[];
-    },
-    enabled: Boolean(userId),
-    ...passiveQueryOptions
-  });
-
-  const settingsQuery = useQuery({
-    queryKey: ["competitors-settings", userId],
-    queryFn: async () => {
-      if (!supabase || !userId) return null as SettingsRow | null;
-      const { data, error } = await supabase
-        .from("business_settings")
-        .select(
-          "competitive_monitoring_enabled, competitive_monitoring_keyword, competitive_monitoring_radius_km"
-        )
-        .eq("user_id", userId)
-        .maybeSingle();
-      if (error) throw error;
-      return (data ?? null) as SettingsRow | null;
-    },
-    enabled: Boolean(userId),
-    ...passiveQueryOptions
-  });
+  const locationsQuery = useCompetitorLocations({ workspaceId, userId });
+  const settingsQuery = useCompetitorSettings({ workspaceId, userId });
 
   useEffect(() => {
     const list = locationsQuery.data ?? [];
@@ -435,101 +360,27 @@ const Competitors = ({ session }: CompetitorsProps) => {
     }
   }, []);
 
-  const radarQuery = useQuery({
-    queryKey: ["competitors-radar", userId, selectedLocationId],
-    queryFn: async () => {
-      if (!token || !selectedLocationId) return [] as CompetitorRow[];
-      const response = await fetch("/api/reports/competitors", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          action: "list",
-          location_id: selectedLocationId,
-          mode: "radar"
-        })
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.items) {
-        throw new Error("Failed to load competitors");
-      }
-      return payload.items as CompetitorRow[];
-    },
-    enabled: Boolean(token && selectedLocationId),
-    ...passiveQueryOptions
+  const radarQuery = useCompetitorRadar({
+    workspaceId,
+    userId,
+    token,
+    locationId: selectedLocationId
   });
-
-  const followedQuery = useQuery({
-    queryKey: ["competitors-followed", userId, selectedLocationId],
-    queryFn: async () => {
-      if (!token || !selectedLocationId) return [] as CompetitorRow[];
-      const response = await fetch("/api/reports/competitors", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          action: "list",
-          location_id: selectedLocationId,
-          mode: "followed"
-        })
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.items) {
-        throw new Error("Failed to load competitors");
-      }
-      return payload.items as CompetitorRow[];
-    },
-    enabled: Boolean(token && selectedLocationId),
-    ...passiveQueryOptions
+  const followedQuery = useFollowedCompetitors({
+    workspaceId,
+    userId,
+    token,
+    locationId: selectedLocationId
   });
-
-  const selfStatsQuery = useQuery({
-    queryKey: ["competitors-self", userId, selectedLocationId],
-    queryFn: async () => {
-      if (!token || !selectedLocationId) return null;
-      const response = await fetch("/api/reports/competitors", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ action: "self", location_id: selectedLocationId })
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.self) {
-        return { avg: null, count: null };
-      }
-      const rating =
-        typeof payload.self.rating === "number" ? payload.self.rating : null;
-      const reviewCount =
-        typeof payload.self.review_count === "number"
-          ? payload.self.review_count
-          : null;
-      return { avg: rating, count: reviewCount };
-    },
-    enabled: Boolean(token && selectedLocationId),
-    ...passiveQueryOptions
+  const selfStatsQuery = useCompetitorSelfStats({
+    workspaceId,
+    userId,
+    token,
+    locationId: selectedLocationId
   });
-
-  const benchmarkHistoryQuery = useQuery({
-    queryKey: ["competitors-benchmark-history", userId],
-    queryFn: async () => {
-      if (!supabase || !userId) return [] as BenchmarkHistoryRow[];
-      const { data, error } = await supabase
-        .from("generated_reports")
-        .select("id, created_at, summary, payload")
-        .eq("report_type", "competitors_benchmark")
-        .order("created_at", { ascending: false })
-        .limit(8);
-      if (error) throw error;
-      return (data ?? []) as BenchmarkHistoryRow[];
-    },
-    enabled: Boolean(supabase && userId),
-    ...passiveQueryOptions
+  const benchmarkHistoryQuery = useCompetitorBenchmarkHistory({
+    workspaceId,
+    userId
   });
 
   const scanMutation = useMutation({
@@ -616,14 +467,25 @@ const Competitors = ({ session }: CompetitorsProps) => {
         });
       }
       queryClient.invalidateQueries({
-        queryKey: ["competitors-radar", userId, selectedLocationId]
+        queryKey: competitorsRadarQueryKey({
+          workspaceId,
+          userId,
+          locationId: selectedLocationId
+        }),
+        exact: true
       });
       queryClient.invalidateQueries({
-        queryKey: ["competitors-followed", userId, selectedLocationId]
+        queryKey: competitorsFollowedQueryKey({
+          workspaceId,
+          userId,
+          locationId: selectedLocationId
+        }),
+        exact: true
       });
       queryClient.setQueryData(["coach-competitor-watch", userId], true);
       void queryClient.invalidateQueries({
-        queryKey: ["coach-competitor-watch", userId]
+        queryKey: ["coach-competitor-watch", userId],
+        exact: true
       });
     },
     onError: (error: unknown) => {
@@ -703,7 +565,8 @@ const Competitors = ({ session }: CompetitorsProps) => {
           message: "Rapport généré. Téléchargement en cours."
         });
         void queryClient.invalidateQueries({
-          queryKey: ["coach-reports-count", userId]
+          queryKey: ["coach-reports-count", userId],
+          exact: true
         });
         return;
       }
@@ -731,7 +594,8 @@ const Competitors = ({ session }: CompetitorsProps) => {
             message: "PDF téléchargé."
           });
           void queryClient.invalidateQueries({
-            queryKey: ["coach-reports-count", userId]
+            queryKey: ["coach-reports-count", userId],
+            exact: true
           });
           return;
         }
@@ -741,13 +605,15 @@ const Competitors = ({ session }: CompetitorsProps) => {
           message: "Rapport généré. Téléchargez-le depuis Rapports."
         });
         void queryClient.invalidateQueries({
-          queryKey: ["coach-reports-count", userId]
+          queryKey: ["coach-reports-count", userId],
+          exact: true
         });
         return;
       }
       navigate("/reports");
       void queryClient.invalidateQueries({
-        queryKey: ["coach-reports-count", userId]
+        queryKey: ["coach-reports-count", userId],
+        exact: true
       });
     } catch (error) {
       const message =
@@ -825,8 +691,16 @@ const Competitors = ({ session }: CompetitorsProps) => {
       setPendingPlaceIds((prev) =>
         prev.includes(placeId) ? prev : [...prev, placeId]
       );
-      const radarKey = ["competitors-radar", userId, selectedLocationId];
-      const followedKey = ["competitors-followed", userId, selectedLocationId];
+      const radarKey = competitorsRadarQueryKey({
+        workspaceId,
+        userId,
+        locationId: selectedLocationId
+      });
+      const followedKey = competitorsFollowedQueryKey({
+        workspaceId,
+        userId,
+        locationId: selectedLocationId
+      });
       const previousRadar =
         queryClient.getQueryData<CompetitorRow[]>(radarKey) ?? [];
       const previousFollowed =
@@ -852,13 +726,21 @@ const Competitors = ({ session }: CompetitorsProps) => {
     onError: (_error, _payload, context) => {
       if (context?.previousRadar) {
         queryClient.setQueryData(
-          ["competitors-radar", userId, selectedLocationId],
+          competitorsRadarQueryKey({
+            workspaceId,
+            userId,
+            locationId: selectedLocationId
+          }),
           context.previousRadar
         );
       }
       if (context?.previousFollowed) {
         queryClient.setQueryData(
-          ["competitors-followed", userId, selectedLocationId],
+          competitorsFollowedQueryKey({
+            workspaceId,
+            userId,
+            locationId: selectedLocationId
+          }),
           context.previousFollowed
         );
       }
@@ -872,14 +754,25 @@ const Competitors = ({ session }: CompetitorsProps) => {
           : "Concurrent retire."
       });
       queryClient.invalidateQueries({
-        queryKey: ["competitors-radar", userId, selectedLocationId]
+        queryKey: competitorsRadarQueryKey({
+          workspaceId,
+          userId,
+          locationId: selectedLocationId
+        }),
+        exact: true
       });
       queryClient.invalidateQueries({
-        queryKey: ["competitors-followed", userId, selectedLocationId]
+        queryKey: competitorsFollowedQueryKey({
+          workspaceId,
+          userId,
+          locationId: selectedLocationId
+        }),
+        exact: true
       });
       queryClient.setQueryData(["coach-competitor-watch", userId], true);
       void queryClient.invalidateQueries({
-        queryKey: ["coach-competitor-watch", userId]
+        queryKey: ["coach-competitor-watch", userId],
+        exact: true
       });
     },
     onSettled: (_data, _error, payload) => {
@@ -894,12 +787,21 @@ const Competitors = ({ session }: CompetitorsProps) => {
     () => followedQuery.data ?? [],
     [followedQuery.data]
   );
+  const locationsFirstLoad = locationsQuery.isLoading && !locationsQuery.data;
+  const radarFirstLoad = radarQuery.isLoading && !radarQuery.data;
+  const benchmarkHistoryFirstLoad =
+    benchmarkHistoryQuery.isLoading && !benchmarkHistoryQuery.data;
+  const competitorsRefreshing =
+    (radarQuery.isFetching && Boolean(radarQuery.data)) ||
+    (followedQuery.isFetching && Boolean(followedQuery.data));
+  const benchmarkHistoryRefreshing =
+    benchmarkHistoryQuery.isFetching && Boolean(benchmarkHistoryQuery.data);
   const settingsRow = settingsQuery.data;
   const enabled = Boolean(settingsRow?.competitive_monitoring_enabled);
   const googleConnected = (locationsQuery.data ?? []).length > 0;
   const statusRadius = settingsRow?.competitive_monitoring_radius_km ?? radiusKm;
   const locationsEmpty =
-    !locationsQuery.isLoading && (locationsQuery.data ?? []).length === 0;
+    !locationsFirstLoad && (locationsQuery.data ?? []).length === 0;
   const locationLabelById = useMemo(() => {
     const map = new Map<string, string>();
     (locationsQuery.data ?? []).forEach((location) => {
@@ -2416,8 +2318,8 @@ const Competitors = ({ session }: CompetitorsProps) => {
                         setSelectedLocationId(event.target.value || null)
                       }
                     >
-                      {locationsQuery.isLoading && <option>Chargement...</option>}
-                      {!locationsQuery.isLoading &&
+                      {locationsFirstLoad && <option>Chargement...</option>}
+                      {!locationsFirstLoad &&
                         (locationsQuery.data ?? []).map((location) => (
                           <option key={location.id} value={location.id}>
                             {location.location_title || location.location_resource_name}
@@ -2514,9 +2416,14 @@ const Competitors = ({ session }: CompetitorsProps) => {
               <CalendarDays size={18} />
               Historique benchmark
             </CardTitle>
+            {benchmarkHistoryRefreshing && (
+              <p className="mt-1 text-xs font-medium text-slate-400">
+                Actualisation...
+              </p>
+            )}
           </CardHeader>
           <CardContent className="p-4 md:p-5">
-            {benchmarkHistoryQuery.isLoading ? (
+            {benchmarkHistoryFirstLoad ? (
               <div className="flex gap-3 overflow-hidden">
                 <Skeleton className="h-24 min-w-48 rounded-2xl" />
                 <Skeleton className="h-24 min-w-48 rounded-2xl" />
@@ -2962,6 +2869,11 @@ const Competitors = ({ session }: CompetitorsProps) => {
             <p className="mt-1 text-sm text-slate-500">
               Table responsive des acteurs observés et des actions disponibles.
             </p>
+            {competitorsRefreshing && (
+              <p className="mt-1 text-xs font-medium text-slate-400">
+                Actualisation...
+              </p>
+            )}
           </div>
           <div className="text-xs font-medium text-slate-500">
             {visibleRadar.length} affichés / {filteredRadar.length} total
@@ -3048,7 +2960,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
               </div>
             </div>
 
-            {radarQuery.isLoading || followedQuery.isLoading ? (
+            {radarFirstLoad ? (
               <div className="grid gap-3 md:grid-cols-2">{skeletonCards}</div>
             ) : radarItems.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-600">

@@ -33,6 +33,9 @@ type LoyaltySupabaseClient = {
 
 const sb = supabase as unknown as LoyaltySupabaseClient;
 
+const LOYALTY_PROGRAM_SELECT =
+  "id, user_id, location_id, is_enabled, name, points_per_visit, reward_threshold_points, reward_label, public_token, created_at, updated_at" as const;
+
 export type LoyaltyProgram = {
   id: string;
   user_id: string;
@@ -184,7 +187,7 @@ export const fetchLoyaltyProgram = async (
 ): Promise<LoyaltyProgram | null> => {
   const { data, error } = await sb
     .from("loyalty_programs")
-    .select("*")
+    .select(LOYALTY_PROGRAM_SELECT)
     .eq("user_id", userId)
     .eq("location_id", locationId)
     .maybeSingle();
@@ -214,7 +217,7 @@ export const saveLoyaltyProgram = async (params: {
   const { data, error } = await sb
     .from("loyalty_programs")
     .upsert(payload, { onConflict: "user_id,location_id" })
-    .select("*")
+    .select(LOYALTY_PROGRAM_SELECT)
     .single();
   if (error) throw error;
   return data as LoyaltyProgram;

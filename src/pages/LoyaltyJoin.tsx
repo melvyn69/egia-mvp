@@ -8,6 +8,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
+import { instrumentQueryFetch } from "../lib/fetchInstrumentation";
 import {
   getAppleWalletPassUrl,
   getAppleWalletStatus,
@@ -44,15 +45,27 @@ const LoyaltyJoin = () => {
 
   const programQuery = useQuery({
     queryKey: ["public-loyalty-program", publicToken],
-    queryFn: () =>
-      publicToken ? getPublicLoyaltyProgram(publicToken) : Promise.resolve(null),
+    queryFn: ({ queryKey }) =>
+      instrumentQueryFetch({
+        page: "LoyaltyJoin",
+        queryKey,
+        queryFn: () =>
+          publicToken ? getPublicLoyaltyProgram(publicToken) : Promise.resolve(null),
+        getRowCount: (data) => (data ? 1 : 0)
+      }),
     enabled: Boolean(publicToken),
+    placeholderData: (prev) => prev,
     retry: false
   });
 
   const appleWalletQuery = useQuery({
     queryKey: ["apple-wallet-status", member?.wallet_public_token ?? null],
-    queryFn: () => getAppleWalletStatus(member?.wallet_public_token),
+    queryFn: ({ queryKey }) =>
+      instrumentQueryFetch({
+        page: "LoyaltyJoin",
+        queryKey,
+        queryFn: () => getAppleWalletStatus(member?.wallet_public_token)
+      }),
     enabled: Boolean(member?.wallet_public_token),
     retry: false
   });
@@ -91,9 +104,13 @@ const LoyaltyJoin = () => {
   };
 
   const program = programQuery.data;
+  const programFirstLoad = programQuery.isLoading && !programQuery.data;
+  const programRefreshing = programQuery.isFetching && Boolean(programQuery.data);
   const appleWalletConfigured = Boolean(appleWalletQuery.data?.configured);
   const appleWalletLoading = Boolean(
-    member?.wallet_public_token && appleWalletQuery.isLoading
+    member?.wallet_public_token &&
+      appleWalletQuery.isLoading &&
+      !appleWalletQuery.data
   );
 
   return (
@@ -115,7 +132,7 @@ const LoyaltyJoin = () => {
 
         <Card>
           <CardHeader>
-            {programQuery.isLoading ? (
+            {programFirstLoad ? (
               <div className="space-y-3">
                 <Skeleton className="h-6 w-48" />
                 <Skeleton className="h-4 w-64" />
@@ -129,13 +146,18 @@ const LoyaltyJoin = () => {
                 <p className="text-sm text-slate-500">
                   {program.location_name}
                 </p>
+                {programRefreshing && (
+                  <p className="text-xs font-medium text-slate-400">
+                    Actualisation...
+                  </p>
+                )}
               </>
             ) : (
               <CardTitle>Programme indisponible</CardTitle>
             )}
           </CardHeader>
           <CardContent className="space-y-5">
-            {programQuery.isLoading ? (
+            {programFirstLoad ? (
               <Skeleton className="h-44 w-full" />
             ) : !program ? (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">

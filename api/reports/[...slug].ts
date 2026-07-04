@@ -103,6 +103,12 @@ type BenchmarkBranding = {
   logoUrl: string | null;
 };
 
+const COMPETITORS_LIST_SELECT =
+  "id, location_id, place_id, name, address, distance_m, rating, user_ratings_total, is_followed" as const;
+
+const GENERATED_REPORTS_SELECT =
+  "id, user_id, report_type, location_id, title, summary, payload, created_at" as const;
+
 const median = (values: number[]) => {
   if (values.length === 0) return 0;
   const sorted = values.slice().sort((a, b) => a - b);
@@ -1244,7 +1250,10 @@ const handleCompetitors = async (req: VercelRequest, res: VercelResponse) => {
       null;
     const mode = String(payload?.mode ?? getParam(params, "mode") ?? "radar");
 
-    let query = supabaseAdmin.from("competitors").select("*").eq("user_id", userId);
+    let query = supabaseAdmin
+      .from("competitors")
+      .select(COMPETITORS_LIST_SELECT)
+      .eq("user_id", userId);
     if (locationId) {
       query = query.eq("location_id", locationId);
     }
@@ -1555,7 +1564,7 @@ const handleCompetitorsBenchmark = async (
       summary: benchmark.summary || null,
       payload: reportPayload
     })
-    .select("*")
+    .select(GENERATED_REPORTS_SELECT)
     .maybeSingle();
 
   if (error || !report) {
@@ -1604,7 +1613,7 @@ const handleCompetitorsBenchmarkPdf = async (
 
   const { data: report, error } = await supabaseAdmin
     .from("generated_reports")
-    .select("*")
+    .select(GENERATED_REPORTS_SELECT)
     .eq("id", reportId)
     .eq("user_id", userId)
     .eq("report_type", "competitors_benchmark")

@@ -16,6 +16,7 @@ import { useSearchParams } from "react-router-dom";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { instrumentQueryFetch } from "../lib/fetchInstrumentation";
 import {
   fetchLoyaltyProgram,
   recordLoyaltyVisit,
@@ -139,11 +140,18 @@ const LoyaltyScanner = ({
 
   const programQuery = useQuery({
     queryKey: ["loyalty-program", session?.user.id ?? null, selectedLocationId],
-    queryFn: () => {
-      if (!session?.user.id || !selectedLocationId) return null;
-      return fetchLoyaltyProgram(session.user.id, selectedLocationId);
-    },
-    enabled: Boolean(session?.user.id && selectedLocationId)
+    queryFn: ({ queryKey }) =>
+      instrumentQueryFetch({
+        page: "LoyaltyScanner",
+        queryKey,
+        queryFn: () => {
+          if (!session?.user.id || !selectedLocationId) return null;
+          return fetchLoyaltyProgram(session.user.id, selectedLocationId);
+        },
+        getRowCount: (data) => (data ? 1 : 0)
+      }),
+    enabled: Boolean(session?.user.id && selectedLocationId),
+    placeholderData: (prev) => prev
   });
 
   const rewardThreshold = programQuery.data?.reward_threshold_points ?? 100;
@@ -201,13 +209,21 @@ const LoyaltyScanner = ({
       const userId = session?.user.id ?? null;
       if (userId) {
         void queryClient.invalidateQueries({
-          queryKey: ["loyalty-stats", userId]
+          queryKey: ["loyalty-stats", userId, selectedLocationId],
+          exact: true
         });
         void queryClient.invalidateQueries({
-          queryKey: ["loyalty-members-recent", userId]
+          queryKey: ["loyalty-members-recent", userId, selectedLocationId],
+          exact: true
         });
         void queryClient.invalidateQueries({
-          queryKey: ["loyalty-highlights", userId]
+          queryKey: [
+            "loyalty-highlights",
+            userId,
+            selectedLocationId,
+            rewardThreshold
+          ],
+          exact: true
         });
       }
     } catch (err) {
@@ -271,7 +287,7 @@ const LoyaltyScanner = ({
               Établissement au comptoir
               <select
                 value={selectedLocationId}
-                disabled={locationsLoading}
+                disabled={locationsLoading && locations.length === 0}
                 onChange={(event) => setSelectedLocationId(event.target.value)}
                 className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-ink/60 focus:ring-2 focus:ring-ink/10"
               >

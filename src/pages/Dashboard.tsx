@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import {
   AlertTriangle,
@@ -28,7 +28,15 @@ import {
   dispatchNotificationsUpdated
 } from "../lib/notifications";
 import type { GoogleConnectionStatus } from "../hooks/useGoogleConnectionStatus";
-import { supabase } from "../lib/supabase";
+import {
+  type DashboardKpiPreset,
+  dashboardAiKpisQueryKey,
+  dashboardKpiSummaryQueryKey,
+  useDashboardActiveLocationSettings,
+  useDashboardAiKpis,
+  useDashboardKpiSummary,
+  useSaveDashboardActiveLocations
+} from "../hooks/useDashboardQueries";
 import { useCoachResult } from "../services/coach";
 
 type DashboardProps = {
@@ -48,81 +56,6 @@ type DashboardProps = {
   locationsLoading: boolean;
   locationsError: string | null;
   syncing: boolean;
-};
-
-type KpiSummary = {
-  period: { preset: string; from: string | null; to: string | null; tz: string };
-  scope: { locationId?: string | null; locationsCount: number };
-  counts: {
-    reviews_total: number;
-    reviews_with_text: number;
-    reviews_replied: number;
-    reviews_replyable: number;
-  };
-  ratings: {
-    avg_rating: number | null;
-  };
-  response: {
-    response_rate_pct: number | null;
-  };
-  sentiment: {
-    sentiment_positive_pct: number | null;
-    sentiment_samples: number;
-  };
-  nps: {
-    nps_score: number | null;
-    nps_samples: number;
-  };
-  meta: {
-    data_status: "ok" | "no_data" | "collecting";
-    reasons: string[];
-  };
-  top_tags?: Array<{ tag: string; count: number }>;
-};
-
-type AiKpiData = {
-  sentiment: {
-    positivePct: number | null;
-    neutralPct: number | null;
-    negativePct: number | null;
-    mixedPct: number | null;
-    samples: number;
-  };
-  avgScore: number | null;
-  topTags: Array<{ tag: string; count: number }>;
-  trend: Array<{
-    date: string;
-    avgScore: number | null;
-    samples: number;
-    criticalCount: number;
-  }>;
-  priorityCount: number;
-};
-
-type AiInsightRow = {
-  id: string;
-  create_time: string | null;
-  location_id: string | null;
-  review_ai_insights?:
-    | {
-        sentiment?: string | null;
-        sentiment_score?: number | null;
-      }
-    | Array<{
-        sentiment?: string | null;
-        sentiment_score?: number | null;
-      }>
-    | null;
-  review_ai_tags?:
-    | Array<{
-        ai_tags?: { tag?: string | null } | null;
-      }>
-    | null;
-};
-
-type AiTagRow = {
-  tag?: string | null;
-  category?: string | null;
 };
 
 const getGreeting = (): string => {
@@ -358,106 +291,6 @@ const getPresetLabel = (preset: string): string => {
   }
 };
 
-const startOfDay = (date: Date) =>
-  new Date(date.getFullYear(), date.getMonth(), date.getDate());
-
-const endOfDay = (date: Date) =>
-  new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
-
-const getPresetRange = (
-  preset: string,
-  from: string,
-  to: string
-): { start: Date | null; end: Date | null } => {
-  const now = new Date();
-  switch (preset) {
-    case "this_week": {
-      const day = now.getDay();
-      const diff = (day + 6) % 7;
-      const start = startOfDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - diff));
-      return { start, end: endOfDay(now) };
-    }
-    case "this_month": {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      return { start, end: endOfDay(now) };
-    }
-    case "this_quarter": {
-      const quarter = Math.floor(now.getMonth() / 3);
-      const start = new Date(now.getFullYear(), quarter * 3, 1);
-      return { start, end: endOfDay(now) };
-    }
-    case "last_quarter": {
-      const quarter = Math.floor(now.getMonth() / 3);
-      const lastQuarter = quarter === 0 ? 3 : quarter - 1;
-      const year = quarter === 0 ? now.getFullYear() - 1 : now.getFullYear();
-      const start = new Date(year, lastQuarter * 3, 1);
-      const end = endOfDay(new Date(year, lastQuarter * 3 + 3, 0));
-      return { start, end };
-    }
-    case "this_year": {
-      const start = new Date(now.getFullYear(), 0, 1);
-      return { start, end: endOfDay(now) };
-    }
-    case "last_year": {
-      const start = new Date(now.getFullYear() - 1, 0, 1);
-      const end = endOfDay(new Date(now.getFullYear() - 1, 11, 31));
-      return { start, end };
-    }
-    case "custom": {
-      const start = from ? startOfDay(new Date(from)) : null;
-      const end = to ? endOfDay(new Date(to)) : null;
-      return { start, end };
-    }
-    case "all_time":
-    default:
-      return { start: null, end: null };
-  }
-};
-
-const normalizeSentiment = (value: unknown): "positive" | "neutral" | "negative" | null => {
-  if (value === "positive" || value === "neutral" || value === "negative") {
-    return value;
-  }
-  return null;
-};
-
-const asOne = <T,>(value: T | T[] | null | undefined): T | null => {
-  if (Array.isArray(value)) {
-    return value[0] ?? null;
-  }
-  return value ?? null;
-};
-
-const getInsight = (record: AiInsightRow) => {
-  const insight = asOne(record.review_ai_insights);
-  if (!insight) {
-    return null;
-  }
-  return {
-    sentiment: normalizeSentiment(insight.sentiment),
-    score:
-      typeof insight.sentiment_score === "number"
-        ? insight.sentiment_score
-        : null
-  };
-};
-
-const getTags = (record: AiInsightRow) => {
-  if (!Array.isArray(record.review_ai_tags)) {
-    return [];
-  }
-  return record.review_ai_tags
-    .map((tagRow) => {
-      const tagRecord = tagRow?.ai_tags as AiTagRow | null | undefined;
-      return {
-        tag: typeof tagRecord?.tag === "string" ? tagRecord.tag : null,
-        category:
-          typeof tagRecord?.category === "string" ? tagRecord.category : null
-      };
-    })
-    .filter((tag): tag is { tag: string; category: string | null } => !!tag.tag);
-};
-
 const getSeverityOrder = (severity: NotificationSeverity): number => {
   const order: Record<NotificationSeverity, number> = {
     critical: 0,
@@ -576,22 +409,16 @@ const Dashboard = ({
   const [readNotificationIds] = useState<Set<string>>(
     getReadNotificationIds
   );
-  const [kpiPreset, setKpiPreset] = useState<
-    | "this_week"
-    | "this_month"
-    | "this_quarter"
-    | "last_quarter"
-    | "this_year"
-    | "last_year"
-    | "all_time"
-    | "custom"
-  >("all_time");
+  const [kpiPreset, setKpiPreset] =
+    useState<DashboardKpiPreset>("all_time");
   const [kpiFrom, setKpiFrom] = useState("");
   const [kpiTo, setKpiTo] = useState("");
   const [kpiLocationId, setKpiLocationId] = useState("");
   const queryClient = useQueryClient();
+  const userId = session?.user?.id ?? null;
+  const workspaceId = userId;
+  const accountId = userId;
   const [selectedActiveIds, setSelectedActiveIds] = useState<string[]>([]);
-  const [activeLocationsSaving, setActiveLocationsSaving] = useState(false);
 
   useEffect(() => {
     try {
@@ -612,309 +439,92 @@ const Dashboard = ({
     }
   }, [kpiLocationId]);
 
-  const canQueryKpi =
-    !!session?.access_token && (kpiPreset !== "custom" || !!(kpiFrom && kpiTo));
-
-  const kpiQuery = useQuery<KpiSummary>({
-    queryKey: [
-      "kpi-summary",
-      session?.user?.id ?? null,
-      kpiLocationId,
-      kpiPreset,
-      kpiFrom,
-      kpiTo,
-      timeZone
-    ],
-    queryFn: async () => {
-      const token = session?.access_token;
-      if (!token) {
-        throw new Error("Missing session");
-      }
-      const params = new URLSearchParams();
-      if (kpiLocationId && kpiLocationId !== "all") {
-        params.set("location_id", kpiLocationId);
-      }
-      params.set("preset", kpiPreset);
-      params.set("tz", timeZone);
-      if (kpiPreset === "custom") {
-        if (kpiFrom) {
-          params.set("from", kpiFrom);
-        }
-        if (kpiTo) {
-          params.set("to", kpiTo);
-        }
-      }
-      const response = await fetch(`/api/kpi/summary?${params.toString()}`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload) {
-        throw new Error("Failed to load KPIs");
-      }
-      return payload as KpiSummary;
-    },
-    enabled: canQueryKpi,
-    placeholderData: (prev: KpiSummary | undefined) => prev
+  const kpiQuery = useDashboardKpiSummary({
+    accessToken: session?.access_token ?? null,
+    workspaceId,
+    accountId,
+    userId,
+    locationId: kpiLocationId,
+    preset: kpiPreset,
+    from: kpiFrom,
+    to: kpiTo,
+    timeZone
   });
 
-  const aiKpiQuery = useQuery({
-    queryKey: [
-      "ai-kpis",
-      session?.user?.id ?? null,
-      kpiLocationId,
-      kpiPreset,
-      kpiFrom,
-      kpiTo,
-      timeZone
-    ],
-    queryFn: async () => {
-      if (!supabase || !session?.user) {
-        throw new Error("Missing session");
-      }
-      const { start, end } = getPresetRange(kpiPreset, kpiFrom, kpiTo);
-
-      let query = supabase
-        .from("google_reviews")
-        .select(
-          "id, create_time, location_id, review_ai_insights(sentiment, sentiment_score), review_ai_tags(ai_tags(tag, category))"
-        )
-        .eq("user_id", session.user.id);
-      if (kpiLocationId && kpiLocationId !== "all") {
-        query = query.eq("location_id", kpiLocationId);
-      }
-      if (start) {
-        query = query.gte("create_time", start.toISOString());
-      }
-      if (end) {
-        query = query.lte("create_time", end.toISOString());
-      }
-
-      const { data, error } = await query;
-      if (error) {
-        throw error;
-      }
-
-      const rows = (data ?? []) as AiInsightRow[];
-      const sentimentCounts = {
-        positive: 0,
-        neutral: 0,
-        negative: 0,
-        mixed: 0,
-        total: 0
-      };
-      let scoreSum = 0;
-      let scoreCount = 0;
-      const tagCounts = new Map<string, { tag: string; count: number }>();
-      let priorityCount = 0;
-
-      rows.forEach((row) => {
-        const insight = getInsight(row);
-        if (insight) {
-          if (insight.sentiment) {
-            sentimentCounts[insight.sentiment] += 1;
-          } else {
-            sentimentCounts.mixed += 1;
-          }
-          sentimentCounts.total += 1;
-        }
-        if (typeof insight?.score === "number") {
-          scoreSum += insight.score;
-          scoreCount += 1;
-        }
-        let hasNegativeTag = false;
-        const tags = getTags(row);
-        tags.forEach((tag) => {
-          const normalizedTag = tag.tag.toLowerCase();
-          const existing = tagCounts.get(normalizedTag);
-          if (existing) {
-            existing.count += 1;
-          } else {
-            tagCounts.set(normalizedTag, { tag: tag.tag, count: 1 });
-          }
-          if (tag.category === "negative") {
-            hasNegativeTag = true;
-          }
-        });
-        if (
-          insight?.sentiment === "negative" ||
-          (typeof insight?.score === "number" && insight.score < 0.4) ||
-          hasNegativeTag
-        ) {
-          priorityCount += 1;
-        }
-      });
-
-      const topTags = Array.from(tagCounts.values())
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 5)
-        .map(({ tag, count }) => ({ tag, count }));
-
-      const totalSamples = sentimentCounts.total;
-      const sentiment = {
-        positivePct: totalSamples
-          ? (sentimentCounts.positive / totalSamples) * 100
-          : null,
-        neutralPct: totalSamples
-          ? (sentimentCounts.neutral / totalSamples) * 100
-          : null,
-        negativePct: totalSamples
-          ? (sentimentCounts.negative / totalSamples) * 100
-          : null,
-        mixedPct: totalSamples ? (sentimentCounts.mixed / totalSamples) * 100 : null,
-        samples: totalSamples
-      };
-
-      const avgScore = scoreCount ? scoreSum / scoreCount : null;
-
-      const trendStart = startOfDay(new Date());
-      trendStart.setDate(trendStart.getDate() - 29);
-      const trendEnd = endOfDay(new Date());
-      let trendQuery = supabase
-        .from("google_reviews")
-        .select("id, create_time, location_id, review_ai_insights(sentiment_score)")
-        .eq("user_id", session.user.id)
-        .gte("create_time", trendStart.toISOString())
-        .lte("create_time", trendEnd.toISOString());
-      if (kpiLocationId && kpiLocationId !== "all") {
-        trendQuery = trendQuery.eq("location_id", kpiLocationId);
-      }
-      const { data: trendData, error: trendError } = await trendQuery;
-      if (trendError) {
-        throw trendError;
-      }
-
-      const buckets = new Map<
-        string,
-        { sum: number; analysedCount: number; criticalCount: number }
-      >();
-      for (let i = 0; i < 30; i += 1) {
-        const day = new Date(trendStart);
-        day.setDate(trendStart.getDate() + i);
-        const key = day.toISOString().slice(0, 10);
-        buckets.set(key, { sum: 0, analysedCount: 0, criticalCount: 0 });
-      }
-
-      (trendData ?? []).forEach((row) => {
-        const record = row as AiInsightRow;
-        if (!record.create_time) {
-          return;
-        }
-        const dateKey = new Date(record.create_time).toISOString().slice(0, 10);
-        const bucket = buckets.get(dateKey);
-        if (!bucket) {
-          return;
-        }
-        const insight = getInsight(record);
-        if (insight) {
-          bucket.analysedCount += 1;
-          if (typeof insight.score === "number") {
-            bucket.sum += insight.score;
-          }
-        }
-        const hasNegativeTag = getTags(record).some(
-          (tag) => tag.category === "negative"
-        );
-        if (
-          insight?.sentiment === "negative" ||
-          (typeof insight?.score === "number" && insight.score < 0.4) ||
-          hasNegativeTag
-        ) {
-          bucket.criticalCount += 1;
-        }
-      });
-
-      const trend = Array.from(buckets.entries()).map(([date, bucket]) => ({
-        date,
-        avgScore: bucket.analysedCount ? bucket.sum / bucket.analysedCount : null,
-        samples: bucket.analysedCount,
-        criticalCount: bucket.criticalCount
-      }));
-
-      return {
-        sentiment,
-        avgScore,
-        topTags,
-        trend,
-        priorityCount
-      } satisfies AiKpiData;
-    },
-    enabled: Boolean(supabase) && Boolean(session?.user),
-    placeholderData: (prev) => prev
+  const aiKpiQuery = useDashboardAiKpis({
+    workspaceId,
+    accountId,
+    userId,
+    locationId: kpiLocationId,
+    preset: kpiPreset,
+    from: kpiFrom,
+    to: kpiTo,
+    timeZone
   });
+
+  const activeLocationSettingsQuery = useDashboardActiveLocationSettings({
+    workspaceId,
+    accountId,
+    userId
+  });
+  const saveActiveLocationsMutation = useSaveDashboardActiveLocations();
 
   const kpiData = kpiQuery.data ?? null;
-  const kpiLoading = kpiQuery.isLoading;
+  const kpiLoading = kpiQuery.isLoading && !kpiQuery.data;
+  const kpiRefreshing = kpiQuery.isFetching && Boolean(kpiQuery.data);
   const kpiError = kpiQuery.isError ? "Impossible de charger les KPIs." : null;
 
   const aiKpiData = aiKpiQuery.data ?? null;
-  const aiKpiLoading = aiKpiQuery.isLoading;
+  const aiKpiLoading = aiKpiQuery.isLoading && !aiKpiQuery.data;
+  const aiKpiRefreshing = aiKpiQuery.isFetching && Boolean(aiKpiQuery.data);
   const aiKpiError = aiKpiQuery.isError ? "Impossible de charger l'analyse IA." : null;
 
   useEffect(() => {
-    const supabaseClient = supabase;
-    if (!supabaseClient || !session) {
+    if (!session) {
       setSelectedActiveIds([]);
       return;
     }
-    let cancelled = false;
-    const load = async () => {
-      const { data, error } = await supabaseClient
-        .from("business_settings")
-        .select("active_location_ids")
-        .eq("user_id", session.user.id)
-        .maybeSingle();
-      if (cancelled) {
-        return;
-      }
-      if (error) {
-        console.error("business_settings load error:", error);
-        setSelectedActiveIds(locations.map((location) => location.id));
-        return;
-      }
-      const ids = Array.isArray(data?.active_location_ids)
-        ? data.active_location_ids.filter(Boolean)
-        : null;
-      const resolved =
-        ids && ids.length > 0 ? ids : locations.map((location) => location.id);
-      setSelectedActiveIds(resolved);
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [session, locations]);
-
-  const saveActiveLocations = async () => {
-    if (!supabase || !session) {
+    if (activeLocationSettingsQuery.isError) {
+      console.error("business_settings load error:", activeLocationSettingsQuery.error);
+      setSelectedActiveIds(locations.map((location) => location.id));
       return;
     }
-    setActiveLocationsSaving(true);
-    const allIds = locations.map((location) => location.id);
-    const nextActive =
-      selectedActiveIds.length === 0 || selectedActiveIds.length === allIds.length
-        ? null
-        : selectedActiveIds;
-    const payload = {
-      user_id: session.user.id,
-      business_id: session.user.id,
-      business_name: session.user.email ?? "Business",
-      active_location_ids: nextActive,
-      updated_at: new Date().toISOString()
-    };
-    const { error } = await supabase
-      .from("business_settings")
-      .upsert(payload, { onConflict: "business_id" });
-    if (error) {
-      console.error("business_settings save error:", error);
-    } else {
-      setSelectedActiveIds(
-        nextActive ?? locations.map((location) => location.id)
-      );
+    if (!activeLocationSettingsQuery.isSuccess) {
+      return;
     }
-    setActiveLocationsSaving(false);
+    const ids = activeLocationSettingsQuery.data.active_location_ids;
+    const resolved =
+      ids && ids.length > 0 ? ids : locations.map((location) => location.id);
+    setSelectedActiveIds(resolved);
+  }, [
+    activeLocationSettingsQuery.data,
+    activeLocationSettingsQuery.error,
+    activeLocationSettingsQuery.isError,
+    activeLocationSettingsQuery.isSuccess,
+    locations,
+    session
+  ]);
+
+  const saveActiveLocations = async () => {
+    if (!session || !userId || !accountId) {
+      return;
+    }
+    const allIds = locations.map((location) => location.id);
+    try {
+      const saved = await saveActiveLocationsMutation.mutateAsync({
+        workspaceId,
+        accountId,
+        userId,
+        businessName: session.user.email ?? "Business",
+        selectedActiveIds,
+        allLocationIds: allIds
+      });
+      setSelectedActiveIds(saved.activeLocationIds ?? allIds);
+    } catch (error) {
+      console.error("business_settings save error:", error);
+    }
   };
+  const activeLocationsSaving = saveActiveLocationsMutation.isPending;
 
   useEffect(() => {
     const prevSyncing = prevSyncingRef.current;
@@ -1261,7 +871,7 @@ const Dashboard = ({
             <span className="mb-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-500">
               {getPresetLabel(kpiPreset)}
             </span>
-            {kpiLoading && (
+            {(kpiRefreshing || aiKpiRefreshing) && (
               <span className="mb-2 text-xs font-medium text-slate-400">
                 Actualisation...
               </span>
@@ -1272,8 +882,32 @@ const Dashboard = ({
             size="sm"
             className="h-8 rounded-full px-3 text-xs font-semibold"
             onClick={() => {
-              void queryClient.invalidateQueries({ queryKey: ["kpi-summary"] });
-              void queryClient.invalidateQueries({ queryKey: ["ai-kpis"] });
+              void queryClient.invalidateQueries({
+                queryKey: dashboardKpiSummaryQueryKey({
+                  workspaceId,
+                  accountId,
+                  userId,
+                  locationId: kpiLocationId,
+                  preset: kpiPreset,
+                  from: kpiFrom,
+                  to: kpiTo,
+                  timeZone
+                }),
+                exact: true
+              });
+              void queryClient.invalidateQueries({
+                queryKey: dashboardAiKpisQueryKey({
+                  workspaceId,
+                  accountId,
+                  userId,
+                  locationId: kpiLocationId,
+                  preset: kpiPreset,
+                  from: kpiFrom,
+                  to: kpiTo,
+                  timeZone
+                }),
+                exact: true
+              });
             }}
           >
             Rafraîchir
@@ -1610,7 +1244,10 @@ const Dashboard = ({
               size="sm"
               className="h-8 rounded-full px-3 text-xs font-semibold"
               onClick={saveActiveLocations}
-              disabled={activeLocationsSaving || locationsLoading}
+              disabled={
+                activeLocationsSaving ||
+                (locationsLoading && locations.length === 0)
+              }
             >
               {activeLocationsSaving ? "Enregistrement..." : "Enregistrer"}
             </Button>
@@ -1622,7 +1259,7 @@ const Dashboard = ({
           </div>
         )}
         <div className="grid gap-2 p-4 md:grid-cols-2">
-          {locationsLoading &&
+          {locationsLoading && locations.length === 0 &&
             Array.from({ length: 2 }).map((_, index) => (
               <Card
                 key={`skeleton-${index}`}
@@ -1646,8 +1283,7 @@ const Dashboard = ({
               </CardContent>
             </Card>
           )}
-          {!locationsLoading &&
-            locations.map((location) => {
+          {locations.map((location) => {
               const isActive = selectedActiveIds.includes(location.id);
               const displayUrl = formatDisplayUrl(location.website_uri);
               return (

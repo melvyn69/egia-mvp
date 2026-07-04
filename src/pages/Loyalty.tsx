@@ -15,6 +15,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
+import { instrumentQueryFetch } from "../lib/fetchInstrumentation";
 import {
   fetchLoyaltyHighlights,
   fetchLoyaltyProgram,
@@ -126,36 +127,56 @@ const Loyalty = ({
 
   const programQuery = useQuery({
     queryKey: ["loyalty-program", userId, selectedLocationId],
-    queryFn: () => {
-      if (!userId || !selectedLocationId) return null;
-      return fetchLoyaltyProgram(userId, selectedLocationId);
-    },
-    enabled: Boolean(userId && selectedLocationId)
+    queryFn: ({ queryKey }) =>
+      instrumentQueryFetch({
+        page: "Loyalty",
+        queryKey,
+        queryFn: () => {
+          if (!userId || !selectedLocationId) return null;
+          return fetchLoyaltyProgram(userId, selectedLocationId);
+        },
+        getRowCount: (data) => (data ? 1 : 0)
+      }),
+    enabled: Boolean(userId && selectedLocationId),
+    placeholderData: (prev) => prev
   });
 
   const statsQuery = useQuery({
     queryKey: ["loyalty-stats", userId, selectedLocationId],
-    queryFn: () => {
-      if (!userId) {
-        return {
-          membersCount: 0,
-          visitsCount: 0,
-          pointsDistributed: 0,
-          rewardsAvailable: 0
-        };
-      }
-      return fetchLoyaltyStats(userId, selectedLocationId || null);
-    },
-    enabled: Boolean(userId)
+    queryFn: ({ queryKey }) =>
+      instrumentQueryFetch({
+        page: "Loyalty",
+        queryKey,
+        queryFn: () => {
+          if (!userId) {
+            return {
+              membersCount: 0,
+              visitsCount: 0,
+              pointsDistributed: 0,
+              rewardsAvailable: 0
+            };
+          }
+          return fetchLoyaltyStats(userId, selectedLocationId || null);
+        },
+        getRowCount: (data) => data.membersCount
+      }),
+    enabled: Boolean(userId),
+    placeholderData: (prev) => prev
   });
 
   const membersQuery = useQuery({
     queryKey: ["loyalty-members-recent", userId, selectedLocationId],
-    queryFn: () => {
-      if (!userId) return [];
-      return fetchRecentLoyaltyMembers(userId, selectedLocationId || null);
-    },
-    enabled: Boolean(userId)
+    queryFn: ({ queryKey }) =>
+      instrumentQueryFetch({
+        page: "Loyalty",
+        queryKey,
+        queryFn: () => {
+          if (!userId) return [];
+          return fetchRecentLoyaltyMembers(userId, selectedLocationId || null);
+        }
+      }),
+    enabled: Boolean(userId),
+    placeholderData: (prev) => prev
   });
 
   const rewardThreshold =
@@ -168,22 +189,35 @@ const Loyalty = ({
       selectedLocationId,
       rewardThreshold
     ],
-    queryFn: () => {
-      if (!userId) {
-        return { nearRewardMembers: [], availableRewards: [] };
-      }
-      return fetchLoyaltyHighlights({
-        userId,
-        locationId: selectedLocationId || null,
-        rewardThresholdPoints: rewardThreshold
-      });
-    },
-    enabled: Boolean(userId)
+    queryFn: ({ queryKey }) =>
+      instrumentQueryFetch({
+        page: "Loyalty",
+        queryKey,
+        queryFn: () => {
+          if (!userId) {
+            return { nearRewardMembers: [], availableRewards: [] };
+          }
+          return fetchLoyaltyHighlights({
+            userId,
+            locationId: selectedLocationId || null,
+            rewardThresholdPoints: rewardThreshold
+          });
+        },
+        getRowCount: (data) =>
+          data.nearRewardMembers.length + data.availableRewards.length
+      }),
+    enabled: Boolean(userId),
+    placeholderData: (prev) => prev
   });
 
   const appleWalletQuery = useQuery({
     queryKey: ["apple-wallet-status"],
-    queryFn: () => getAppleWalletStatus(),
+    queryFn: ({ queryKey }) =>
+      instrumentQueryFetch({
+        page: "Loyalty",
+        queryKey,
+        queryFn: () => getAppleWalletStatus()
+      }),
     retry: false
   });
 
@@ -209,6 +243,7 @@ const Loyalty = ({
 
   const handleSave = async () => {
     if (!userId || !selectedLocationId) return;
+    const previousRewardThreshold = rewardThreshold;
     setSaving(true);
     setNotice(null);
     setError(null);
@@ -223,11 +258,29 @@ const Loyalty = ({
         saved
       );
       await queryClient.invalidateQueries({
-        queryKey: ["loyalty-program", userId, selectedLocationId]
+        queryKey: ["loyalty-program", userId, selectedLocationId],
+        exact: true
       });
       await queryClient.invalidateQueries({
-        queryKey: ["loyalty-highlights", userId]
+        queryKey: [
+          "loyalty-highlights",
+          userId,
+          selectedLocationId,
+          previousRewardThreshold
+        ],
+        exact: true
       });
+      if (saved.reward_threshold_points !== previousRewardThreshold) {
+        await queryClient.invalidateQueries({
+          queryKey: [
+            "loyalty-highlights",
+            userId,
+            selectedLocationId,
+            saved.reward_threshold_points
+          ],
+          exact: true
+        });
+      }
       setNotice("Programme fidélité enregistré.");
     } catch (err) {
       console.error("loyalty save error:", err);
@@ -244,6 +297,15 @@ const Loyalty = ({
   };
 
   const stats = statsQuery.data;
+  const locationsFirstLoad = locationsLoading && locations.length === 0;
+  const statsFirstLoad = statsQuery.isLoading && !statsQuery.data;
+  const highlightsFirstLoad = highlightsQuery.isLoading && !highlightsQuery.data;
+  const membersFirstLoad = membersQuery.isLoading && !membersQuery.data;
+  const loyaltyRefreshing =
+    (programQuery.isFetching && Boolean(programQuery.data)) ||
+    (statsQuery.isFetching && Boolean(statsQuery.data)) ||
+    (highlightsQuery.isFetching && Boolean(highlightsQuery.data)) ||
+    (membersQuery.isFetching && Boolean(membersQuery.data));
 
   if (!session) {
     return (
@@ -267,6 +329,11 @@ const Loyalty = ({
                   Programme fidélité proposé après votre retour. Vos points sont
                   liés à vos visites.
                 </p>
+                {loyaltyRefreshing && (
+                  <p className="mt-1 text-xs font-medium text-slate-400">
+                    Actualisation...
+                  </p>
+                )}
               </div>
               <Button
                 onClick={() =>
@@ -320,7 +387,7 @@ const Loyalty = ({
               </div>
             )}
 
-            {locationsLoading ? (
+            {locationsFirstLoad ? (
               <Skeleton className="h-24 w-full" />
             ) : locations.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-sm text-slate-500">
@@ -519,7 +586,7 @@ const Loyalty = ({
                   {label}
                 </p>
                 <p className="mt-2 text-2xl font-semibold text-slate-900">
-                  {statsQuery.isLoading ? "—" : stats?.[key] ?? 0}
+                  {statsFirstLoad ? "—" : stats?.[key] ?? 0}
                 </p>
               </div>
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-700">
@@ -539,7 +606,7 @@ const Loyalty = ({
             </p>
           </CardHeader>
           <CardContent>
-            {highlightsQuery.isLoading ? (
+            {highlightsFirstLoad ? (
               <div className="space-y-3">
                 <Skeleton className="h-16 w-full" />
                 <Skeleton className="h-16 w-full" />
@@ -595,7 +662,7 @@ const Loyalty = ({
             </p>
           </CardHeader>
           <CardContent>
-            {highlightsQuery.isLoading ? (
+            {highlightsFirstLoad ? (
               <div className="space-y-3">
                 <Skeleton className="h-16 w-full" />
                 <Skeleton className="h-16 w-full" />
@@ -650,7 +717,7 @@ const Loyalty = ({
           </div>
         </CardHeader>
         <CardContent>
-          {membersQuery.isLoading ? (
+          {membersFirstLoad ? (
             <div className="space-y-3">
               <Skeleton className="h-16 w-full" />
               <Skeleton className="h-16 w-full" />

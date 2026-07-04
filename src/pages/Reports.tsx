@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   CalendarDays,
   CheckCircle2,
@@ -18,9 +18,16 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
 import { supabase } from "../lib/supabase";
-import { getActiveLegalEntityLogo } from "../lib/businessBranding";
 import { cn } from "../lib/utils";
-import type { Database } from "../database.types";
+import {
+  type GeneratedReportRow,
+  type ReportRow,
+  type ReportsBranding,
+  reportsQueryKey,
+  useCompetitorBenchmarkReports,
+  useReports,
+  useReportsBranding
+} from "../hooks/useReportsQueries";
 
 type ReportsProps = {
   session: Session | null;
@@ -30,9 +37,6 @@ type ReportsProps = {
     location_resource_name: string;
   }>;
 };
-
-type ReportRow = Database["public"]["Tables"]["reports"]["Row"];
-type GeneratedReportRow = Database["public"]["Tables"]["generated_reports"]["Row"];
 
 type Preset =
   | "last_7_days"
@@ -78,11 +82,6 @@ type GeneratedReportModalState = {
   storagePath: string | null;
   pageCount: number | null;
   pdfSize: string | null;
-};
-type ReportsBranding = {
-  logoUrl: string | null;
-  companyName: string | null;
-  legalName: string | null;
 };
 type BenchmarkPayload = {
   stats?: Record<string, number | null>;
@@ -770,26 +769,11 @@ const Reports = ({ session, locations }: ReportsProps) => {
   const [generatedReportModal, setGeneratedReportModal] =
     useState<GeneratedReportModalState | null>(null);
   const userId = session?.user?.id ?? null;
+  const workspaceId = userId;
+  const accountId = userId;
 
-  const brandingQuery = useQuery({
-    queryKey: ["report-branding", userId],
-    queryFn: async () => {
-      if (!userId) {
-        return {
-          logoUrl: null,
-          companyName: null,
-          legalName: null
-        } satisfies ReportsBranding;
-      }
-      const branding = await getActiveLegalEntityLogo(userId);
-      return {
-        logoUrl: branding.logoUrl,
-        companyName: branding.companyName,
-        legalName: branding.legalName
-      } satisfies ReportsBranding;
-    },
-    enabled: Boolean(userId)
-  });
+  const reportsCacheKey = reportsQueryKey({ workspaceId, accountId, userId });
+  const brandingQuery = useReportsBranding({ workspaceId, accountId, userId });
   const reportBranding: ReportsBranding = brandingQuery.data ?? {
     logoUrl: null,
     companyName: null,
@@ -803,42 +787,22 @@ const Reports = ({ session, locations }: ReportsProps) => {
     [locations]
   );
 
-  const reportsQuery = useQuery({
-    queryKey: ["reports", userId],
-    queryFn: async () => {
-      if (!supabaseClient || !userId) {
-        return [] as ReportRow[];
-      }
-      const { data, error: queryError } = await supabaseClient
-        .from("reports")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (queryError) {
-        throw queryError;
-      }
-      return (data ?? []) as ReportRow[];
-    },
-    enabled: Boolean(supabaseClient) && Boolean(userId)
+  const reportsQuery = useReports({
+    workspaceId,
+    accountId,
+    userId
   });
+  const reportsFirstLoad = reportsQuery.isLoading && !reportsQuery.data;
+  const reportsRefreshing = reportsQuery.isFetching && Boolean(reportsQuery.data);
 
-  const benchmarkQuery = useQuery({
-    queryKey: ["generated-reports", userId],
-    queryFn: async () => {
-      if (!supabaseClient || !userId) {
-        return [] as GeneratedReportRow[];
-      }
-      const { data, error: queryError } = await supabaseClient
-        .from("generated_reports")
-        .select("*")
-        .eq("report_type", "competitors_benchmark")
-        .order("created_at", { ascending: false });
-      if (queryError) {
-        throw queryError;
-      }
-      return (data ?? []) as GeneratedReportRow[];
-    },
-    enabled: Boolean(supabaseClient) && Boolean(userId)
+  const benchmarkQuery = useCompetitorBenchmarkReports({
+    workspaceId,
+    accountId,
+    userId
   });
+  const benchmarkFirstLoad = benchmarkQuery.isLoading && !benchmarkQuery.data;
+  const benchmarkRefreshing =
+    benchmarkQuery.isFetching && Boolean(benchmarkQuery.data);
 
   const locationOptions = useMemo(
     () =>
@@ -903,14 +867,15 @@ const Reports = ({ session, locations }: ReportsProps) => {
     };
     const { error: saveError } = await supabaseClient
       .from("reports")
-      .upsert(payload)
-      .select()
-      .single();
+      .upsert(payload);
     if (saveError) {
       setError("Impossible de sauvegarder le rapport.");
     } else {
       resetForm();
-      void queryClient.invalidateQueries({ queryKey: ["reports"] });
+      void queryClient.invalidateQueries({
+        queryKey: reportsCacheKey,
+        exact: true
+      });
     }
     setSaving(false);
   };
@@ -951,9 +916,13 @@ const Reports = ({ session, locations }: ReportsProps) => {
       pageCount: getGeneratedPageCount(data),
       pdfSize: getGeneratedPdfSize(data)
     });
-    void queryClient.invalidateQueries({ queryKey: ["reports"] });
     void queryClient.invalidateQueries({
-      queryKey: ["coach-reports-count", session?.user.id ?? null]
+      queryKey: reportsCacheKey,
+      exact: true
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ["coach-reports-count", userId],
+      exact: true
     });
   };
 
@@ -983,9 +952,13 @@ const Reports = ({ session, locations }: ReportsProps) => {
       setError("Impossible de supprimer le rapport.");
       return;
     }
-    void queryClient.invalidateQueries({ queryKey: ["reports"] });
     void queryClient.invalidateQueries({
-      queryKey: ["coach-reports-count", session?.user.id ?? null]
+      queryKey: reportsCacheKey,
+      exact: true
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ["coach-reports-count", userId],
+      exact: true
     });
   };
 
@@ -1489,6 +1462,11 @@ const Reports = ({ session, locations }: ReportsProps) => {
               <p className="mt-1 text-sm text-slate-500">
                 Une timeline claire de vos rapports et de leur aperçu.
               </p>
+              {reportsRefreshing && (
+                <p className="mt-1 text-xs font-medium text-slate-400">
+                  Actualisation...
+                </p>
+              )}
             </div>
             <div className="reports-print-hidden flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
               <div className="flex max-w-full overflow-x-auto rounded-full border border-slate-200 bg-slate-50 p-1">
@@ -1521,7 +1499,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
           </div>
         </CardHeader>
         <CardContent className="p-5 md:p-6">
-          {reportsQuery.isLoading ? (
+          {reportsFirstLoad ? (
             <div className="space-y-4">
               <Skeleton className="h-40 w-full rounded-[24px]" />
               <Skeleton className="h-40 w-full rounded-[24px]" />
@@ -1798,7 +1776,12 @@ const Reports = ({ session, locations }: ReportsProps) => {
 
       <Card className="reports-print-section min-w-0 overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
         <CardContent className="p-4 md:p-6">
-          {benchmarkQuery.isLoading ? (
+          {benchmarkRefreshing && (
+            <p className="mb-3 text-xs font-medium text-slate-400">
+              Actualisation...
+            </p>
+          )}
+          {benchmarkFirstLoad ? (
             <div className="grid gap-4 lg:grid-cols-2">
               <Skeleton className="h-56 w-full rounded-[24px]" />
               <Skeleton className="h-56 w-full rounded-[24px]" />
