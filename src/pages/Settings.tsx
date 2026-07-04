@@ -743,7 +743,23 @@ const Settings = ({ session }: SettingsProps) => {
   const tabContent = (() => {
     if (activeTab === "team") {
       return (
-        <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
+        <div className="space-y-6">
+          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-card sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">
+                Reconnaissance client
+              </p>
+              <p className="text-xs text-slate-500">
+                Consultez le podium, les mentions et l'employé du mois depuis la
+                page Équipe.
+              </p>
+            </div>
+            <Button variant="outline" onClick={() => navigate("/team")}>
+              Voir le classement
+            </Button>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
           <Card>
             <CardHeader>
               <CardTitle>Collaborateurs actifs</CardTitle>
@@ -935,6 +951,7 @@ const Settings = ({ session }: SettingsProps) => {
               </Button>
             </CardContent>
           </Card>
+          </div>
         </div>
       );
     }
