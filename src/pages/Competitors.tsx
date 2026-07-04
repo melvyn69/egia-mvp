@@ -2076,6 +2076,8 @@ const Competitors = ({ session }: CompetitorsProps) => {
             padding: 0 !important;
             gap: 10px !important;
             overflow: visible !important;
+            width: 100% !important;
+            max-width: 100% !important;
           }
           .competitors-print-hidden,
           .competitors-report button,
@@ -2091,6 +2093,17 @@ const Competitors = ({ session }: CompetitorsProps) => {
           .competitors-report .competitors-print-card {
             break-inside: avoid !important;
             page-break-inside: avoid !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+            width: 100% !important;
+          }
+          .competitors-report .competitors-list-section,
+          .competitors-report .competitors-list-section article,
+          .competitors-report .competitors-list-section [class*="grid"] {
+            display: block !important;
+            width: 100% !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
           }
           .competitors-report section,
           .competitors-report article,
@@ -2116,9 +2129,18 @@ const Competitors = ({ session }: CompetitorsProps) => {
             font-size: 18px !important;
             margin: 0 !important;
           }
+          .competitors-report h1,
+          .competitors-report h2,
+          .competitors-report h3,
+          .competitors-report h4,
+          .competitors-report h5,
           .competitors-report p,
           .competitors-report span,
           .competitors-report li {
+            writing-mode: horizontal-tb !important;
+            white-space: normal !important;
+            word-break: normal !important;
+            overflow-wrap: normal !important;
             print-color-adjust: exact;
             -webkit-print-color-adjust: exact;
           }
@@ -2931,7 +2953,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
         </section>
       )}
 
-      <section className="space-y-3">
+      <section className="competitors-list-section space-y-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h2 className="text-xl font-semibold tracking-tight text-slate-950">

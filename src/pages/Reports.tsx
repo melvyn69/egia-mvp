@@ -84,6 +84,33 @@ type ReportsBranding = {
   companyName: string | null;
   legalName: string | null;
 };
+type BenchmarkPayload = {
+  stats?: Record<string, number | null>;
+  swot?: Record<string, string[]>;
+  plan_14_days?: string[];
+  top_competitors?: Array<{
+    name?: string;
+    rating?: number | null;
+    reviews?: number | null;
+    distance_m?: number | null;
+    gap?: string | number | null;
+    gap_to_leader?: string | number | null;
+    leader_gap?: string | number | null;
+    rating_gap?: string | number | null;
+  }>;
+  radius_km?: number | null;
+  location_id?: string | null;
+  keyword?: string | null;
+};
+type BenchmarkGroup = {
+  key: string;
+  report: GeneratedReportRow;
+  payload: BenchmarkPayload | null;
+  monthLabel: string;
+  monthKey: string;
+  versionCount: number;
+  latestTs: number;
+};
 
 const reportFilterOptions: Array<{ value: ReportFilter; label: string }> = [
   { value: "all", label: "Tous" },
@@ -138,6 +165,24 @@ const formatMonthSection = (value: string | null) => {
   });
   return label.charAt(0).toUpperCase() + label.slice(1);
 };
+
+const formatMonthKey = (value: string | null) => {
+  if (!value) return "unknown-period";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "unknown-period";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+};
+
+const getDateTimestamp = (value: string | null | undefined) => {
+  if (!value) return 0;
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+};
+
+const readBenchmarkPayload = (report: GeneratedReportRow) =>
+  report.payload && typeof report.payload === "object"
+    ? (report.payload as BenchmarkPayload)
+    : null;
 
 const formatReportPeriod = (report: ReportRow) => {
   if (report.period_preset === "custom") {
@@ -424,7 +469,7 @@ const ReportHeroMetric = ({
 }) => (
   <div
     className={cn(
-      "rounded-[24px] border p-5 shadow-[0_18px_42px_rgba(15,23,42,0.045)]",
+      "min-w-0 overflow-hidden rounded-[20px] border p-4 shadow-[0_18px_42px_rgba(15,23,42,0.045)] md:rounded-[24px]",
       highlight
         ? "border-[#020617] bg-[#020617] text-white"
         : "border-slate-200/70 bg-white text-slate-950"
@@ -433,7 +478,7 @@ const ReportHeroMetric = ({
     <p className={cn("text-xs font-semibold uppercase tracking-[0.08em]", highlight ? "text-blue-200" : "text-slate-500")}>
       {label}
     </p>
-    <div className="mt-2 text-3xl font-semibold leading-none">{value}</div>
+    <div className="mt-2 truncate text-2xl font-semibold leading-none md:text-3xl">{value}</div>
     {detail && (
       <p className={cn("mt-2 text-xs leading-5", highlight ? "text-slate-300" : "text-slate-500")}>
         {detail}
@@ -451,9 +496,9 @@ const ReportDataPoint = ({
   value: ReactNode;
   detail?: ReactNode;
 }) => (
-  <div className="rounded-[24px] border border-slate-200/70 bg-white px-4 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.035)]">
+  <div className="reports-print-card min-w-0 overflow-hidden rounded-[20px] border border-slate-200/70 bg-white px-3 py-2.5 shadow-[0_12px_30px_rgba(15,23,42,0.035)] md:rounded-[24px] md:px-4 md:py-3">
     <p className="text-xs font-medium text-slate-500">{label}</p>
-    <div className="mt-1 text-lg font-semibold text-slate-950">{value}</div>
+    <div className="mt-1 truncate text-base font-semibold text-slate-950 md:text-lg">{value}</div>
     {detail && <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>}
   </div>
 );
@@ -1025,6 +1070,63 @@ const Reports = ({ session, locations }: ReportsProps) => {
     });
     return Array.from(groups.values());
   }, [filteredReports]);
+  const benchmarkGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      { latest: BenchmarkGroup; versionCount: number }
+    >();
+
+    (benchmarkQuery.data ?? []).forEach((report) => {
+      const payload = readBenchmarkPayload(report);
+      const locationKey =
+        payload?.location_id ?? report.location_id ?? "all-locations";
+      const keywordKey = (payload?.keyword ?? "benchmark").trim().toLowerCase();
+      const radiusKey =
+        typeof payload?.radius_km === "number" ? `${payload.radius_km}` : "all-radius";
+      const monthKey = formatMonthKey(report.created_at ?? null);
+      const key = [
+        report.report_type,
+        locationKey,
+        keywordKey,
+        radiusKey,
+        monthKey
+      ].join("|");
+      const latestTs = getDateTimestamp(report.created_at);
+      const monthLabel = formatMonthSection(report.created_at ?? null) || "Benchmark";
+      const groupItem: BenchmarkGroup = {
+        key,
+        report,
+        payload,
+        monthLabel,
+        monthKey,
+        versionCount: 1,
+        latestTs
+      };
+      const existing = groups.get(key);
+      if (!existing) {
+        groups.set(key, { latest: groupItem, versionCount: 1 });
+        return;
+      }
+      existing.versionCount += 1;
+      if (latestTs >= existing.latest.latestTs) {
+        existing.latest = groupItem;
+      }
+    });
+
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group.latest,
+        versionCount: group.versionCount
+      }))
+      .sort((a, b) => b.latestTs - a.latestTs);
+  }, [benchmarkQuery.data]);
+  const activeBenchmarkGroup = useMemo(() => {
+    if (benchmarkGroups.length === 0) return null;
+    return (
+      benchmarkGroups.find((group) => group.report.id === selectedBenchmarkId) ??
+      benchmarkGroups[0]
+    );
+  }, [benchmarkGroups, selectedBenchmarkId]);
   const latestHealthScore = getReportHealthScoreState(latestReport);
   const latestReportDate = latestReport ? formatDateLabel(getReportDateValue(latestReport)) : null;
   const generatedReportLocationNames = generatedReportModal
@@ -1058,7 +1160,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
   };
 
   return (
-    <div className="min-w-0 space-y-5 overflow-x-hidden md:space-y-8">
+    <div className="reports-page min-w-0 max-w-full space-y-4 overflow-x-hidden pb-4 md:space-y-6">
       <style>{`
         @keyframes reportReadyFade {
           from { opacity: 0; }
@@ -1073,6 +1175,29 @@ const Reports = ({ session, locations }: ReportsProps) => {
           .report-ready-modal { animation: reportReadyScale 220ms cubic-bezier(0.16, 1, 0.3, 1) both; }
         }
         @media print {
+          @page { size: A4; margin: 12mm; }
+          html, body {
+            background: #ffffff !important;
+          }
+          main {
+            padding: 0 !important;
+            background: #ffffff !important;
+          }
+          .reports-page {
+            color: #0f172a !important;
+            background: #ffffff !important;
+            padding: 0 !important;
+            overflow: visible !important;
+          }
+          .report-ready-backdrop,
+          .reports-print-hidden,
+          .reports-page button,
+          .reports-page input,
+          .reports-page select,
+          .reports-page textarea,
+          .reports-page [role="button"] {
+            display: none !important;
+          }
           .reports-print-avoid {
             break-inside: avoid;
             page-break-inside: avoid;
@@ -1082,8 +1207,43 @@ const Reports = ({ session, locations }: ReportsProps) => {
             page-break-inside: avoid;
             box-shadow: none !important;
           }
+          .reports-page section,
+          .reports-page article,
+          .reports-page .reports-print-card,
+          .reports-page .reports-print-avoid {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            width: 100% !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+          }
+          .reports-page div,
+          .reports-page section,
+          .reports-page article {
+            box-shadow: none !important;
+          }
+          .reports-page [class*="bg-slate-50"],
+          .reports-page [class*="bg-[#020617]"],
+          .reports-page [class*="bg-white"] {
+            background: #ffffff !important;
+            color: #0f172a !important;
+          }
           .reports-scroll-x {
             overflow: visible !important;
+          }
+          .reports-page h2 {
+            font-size: 28px !important;
+            line-height: 1.1 !important;
+          }
+          .reports-page h3,
+          .reports-page h4,
+          .reports-page h5,
+          .reports-page p,
+          .reports-page span {
+            writing-mode: horizontal-tb !important;
+            white-space: normal !important;
+            word-break: normal !important;
+            overflow-wrap: anywhere !important;
           }
         }
       `}</style>
@@ -1098,9 +1258,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
         />
       )}
 
-      <section className="overflow-hidden rounded-[24px] border border-slate-200/80 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.06)]">
-        <div className="grid gap-8 p-6 md:p-8 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.9fr)]">
-          <div className="flex min-h-[190px] flex-col justify-between">
+      <section className="reports-print-section min-w-0 overflow-hidden rounded-[24px] border border-slate-200/80 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.06)]">
+        <div className="grid min-w-0 gap-5 p-4 md:p-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.82fr)] xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
+          <div className="flex min-h-[150px] min-w-0 flex-col justify-between">
             <div>
               {(reportBranding.companyName || reportBranding.logoUrl) ? (
                 <div className="mb-5">
@@ -1114,7 +1274,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                   <FileText className="h-5 w-5" />
                 </div>
               )}
-              <h2 className="text-5xl font-semibold tracking-tight text-slate-950">
+              <h2 className="text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">
                 Rapports
               </h2>
               <p className="mt-3 max-w-xl text-base leading-7 text-slate-500">
@@ -1136,7 +1296,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+          <div className="grid min-w-0 gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
             <ReportHeroMetric
               label="Total rapports"
               value={reports.length}
@@ -1165,7 +1325,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
         </div>
       </section>
 
-      <Card className="overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
+      <Card className="reports-print-hidden min-w-0 overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
         <CardHeader className="p-5 pb-0 md:p-6 md:pb-0">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -1177,7 +1337,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
             <Badge variant="neutral">{renderMode === "premium" ? "Premium" : "Classique"}</Badge>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-5 p-5 md:p-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.55fr)]">
+        <CardContent className="grid min-w-0 gap-4 p-4 md:p-5 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.48fr)]">
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <label className="text-xs font-semibold text-slate-500">
@@ -1321,17 +1481,17 @@ const Reports = ({ session, locations }: ReportsProps) => {
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
+      <Card className="reports-print-section min-w-0 overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
         <CardHeader className="p-5 pb-0 md:p-6 md:pb-0">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
+          <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="min-w-0">
               <CardTitle>Historique</CardTitle>
               <p className="mt-1 text-sm text-slate-500">
                 Une timeline claire de vos rapports et de leur aperçu.
               </p>
             </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <div className="flex rounded-full border border-slate-200 bg-slate-50 p-1">
+            <div className="reports-print-hidden flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="flex max-w-full overflow-x-auto rounded-full border border-slate-200 bg-slate-50 p-1">
                 {reportFilterOptions.map((option) => (
                   <button
                     key={option.value}
@@ -1351,7 +1511,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
               <label className="relative block">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
-                  className="h-10 w-full rounded-full border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 sm:w-64"
+                  className="h-10 w-full min-w-0 rounded-full border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 sm:w-56 xl:w-64"
                   value={reportSearch}
                   onChange={(event) => setReportSearch(event.target.value)}
                   placeholder="Rechercher"
@@ -1391,9 +1551,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
               </p>
             </div>
           ) : (
-            <div className="space-y-8">
+            <div className="space-y-6">
               {reportGroups.map((group) => (
-                <section key={group.label} className="relative pl-7 md:pl-9">
+                <section key={group.label} className="reports-print-card relative min-w-0 pl-5 md:pl-7">
                   <div className="absolute left-2 top-9 h-[calc(100%-1rem)] w-px bg-blue-100 md:left-3" />
                   <div className="mb-4 flex items-center gap-3">
                     <span className="absolute left-0 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 ring-4 ring-white md:left-1">
@@ -1459,9 +1619,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
                       return (
                         <article
                           key={report.id}
-                          className="rounded-[24px] border border-slate-200/80 bg-white p-5 shadow-[0_18px_48px_rgba(15,23,42,0.045)] transition hover:-translate-y-0.5 hover:border-blue-100 hover:shadow-[0_24px_64px_rgba(15,23,42,0.07)] md:p-6"
+                          className="reports-print-card min-w-0 overflow-hidden rounded-[22px] border border-slate-200/80 bg-white p-4 shadow-[0_18px_48px_rgba(15,23,42,0.045)] transition hover:-translate-y-0.5 hover:border-blue-100 hover:shadow-[0_24px_64px_rgba(15,23,42,0.07)] md:rounded-[24px] md:p-5"
                         >
-                          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                          <div className="flex min-w-0 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                             <div className="min-w-0">
                               {(reportBranding.companyName || reportBranding.logoUrl) && (
                                 <div className="mb-3">
@@ -1472,7 +1632,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                   />
                                 </div>
                               )}
-                              <div className="flex flex-wrap items-center gap-2">
+                              <div className="flex min-w-0 flex-wrap items-center gap-2">
                                 <h4 className="truncate text-lg font-semibold text-slate-950">
                                   {report.name}
                                 </h4>
@@ -1496,7 +1656,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                 </p>
                               )}
                             </div>
-                            <div className="flex flex-wrap items-center gap-2">
+                            <div className="reports-print-hidden flex shrink-0 flex-wrap items-center gap-2 xl:justify-end">
                               <Button size="sm" onClick={() => handleEdit(report)}>
                                 <Eye className="h-4 w-4" />
                                 Voir
@@ -1530,7 +1690,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                             </div>
                           </div>
 
-                          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                          <div className="mt-4 grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                             {periodLabel && (
                               <ReportDataPoint
                                 label="Période"
@@ -1566,9 +1726,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
                           </div>
 
                           {(healthScore.value || evolution || themes.length > 0) && (
-                          <div className="mt-4 grid gap-3 lg:grid-cols-[0.9fr_0.8fr_1.2fr]">
+                          <div className="mt-3 grid min-w-0 gap-3 lg:grid-cols-[0.9fr_0.8fr_1.2fr]">
                             {healthScore.value && (
-                            <div className="rounded-[24px] border border-[#020617] bg-[#020617] p-5 text-white shadow-[0_18px_42px_rgba(2,6,23,0.18)]">
+                            <div className="reports-print-card min-w-0 overflow-hidden rounded-[22px] border border-[#020617] bg-[#020617] p-4 text-white shadow-[0_18px_42px_rgba(2,6,23,0.18)] md:rounded-[24px]">
                               <div className="flex items-center justify-between gap-3">
                                 <div>
                                   <p className="text-xs font-semibold uppercase tracking-[0.08em] text-blue-200">
@@ -1596,7 +1756,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                             </div>
                             )}
                             {evolution && (
-                              <div className="rounded-[24px] border border-slate-200/70 bg-slate-50/70 p-5">
+                              <div className="reports-print-card min-w-0 overflow-hidden rounded-[22px] border border-slate-200/70 bg-slate-50/70 p-4 md:rounded-[24px]">
                                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                                   <CalendarDays className="h-4 w-4" />
                                   Evolution
@@ -1607,7 +1767,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                               </div>
                             )}
                             {themes.length > 0 && (
-                              <div className="rounded-[24px] border border-slate-200/70 bg-slate-50/70 p-5">
+                              <div className="reports-print-card min-w-0 overflow-hidden rounded-[22px] border border-slate-200/70 bg-slate-50/70 p-4 md:rounded-[24px]">
                                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                                   Top thèmes
                                 </p>
@@ -1636,38 +1796,17 @@ const Reports = ({ session, locations }: ReportsProps) => {
         </CardContent>
       </Card>
 
-      <Card className="reports-print-section overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
+      <Card className="reports-print-section min-w-0 overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
         <CardContent className="p-4 md:p-6">
           {benchmarkQuery.isLoading ? (
             <div className="grid gap-4 lg:grid-cols-2">
               <Skeleton className="h-56 w-full rounded-[24px]" />
               <Skeleton className="h-56 w-full rounded-[24px]" />
             </div>
-          ) : benchmarkQuery.data && benchmarkQuery.data.length > 0 ? (
+          ) : benchmarkGroups.length > 0 && activeBenchmarkGroup ? (
             (() => {
-              type BenchmarkPayload = {
-                stats?: Record<string, number | null>;
-                swot?: Record<string, string[]>;
-                plan_14_days?: string[];
-                top_competitors?: Array<{
-                  name?: string;
-                  rating?: number | null;
-                  reviews?: number | null;
-                  distance_m?: number | null;
-                  gap?: string | number | null;
-                  gap_to_leader?: string | number | null;
-                  leader_gap?: string | number | null;
-                  rating_gap?: string | number | null;
-                }>;
-                radius_km?: number | null;
-              };
-              const readPayload = (report: GeneratedReportRow) =>
-                report.payload as BenchmarkPayload | null;
-              const latestBenchmark = benchmarkQuery.data[0];
-              const activeBenchmark =
-                benchmarkQuery.data.find((report) => report.id === selectedBenchmarkId) ??
-                latestBenchmark;
-              const activePayload = readPayload(activeBenchmark);
+              const activeBenchmark = activeBenchmarkGroup.report;
+              const activePayload = activeBenchmarkGroup.payload;
               const activeStats = activePayload?.stats ?? {};
               const radiusLabel =
                 typeof activePayload?.radius_km === "number"
@@ -1712,9 +1851,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
 
               return (
                 <div className="min-w-0 space-y-4 md:space-y-5">
-                  <div className="reports-print-avoid rounded-[24px] bg-[#020617] p-4 text-white shadow-[0_24px_70px_rgba(2,6,23,0.18)] md:rounded-[28px] md:p-7">
+                  <div className="reports-print-card rounded-[24px] bg-[#020617] p-4 text-white shadow-[0_24px_70px_rgba(2,6,23,0.18)] md:rounded-[28px] md:p-5">
                     <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                      <div className="max-w-3xl">
+                      <div className="min-w-0 max-w-3xl">
                         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-200">
                           Benchmark concurrentiel
                         </p>
@@ -1727,7 +1866,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                           </p>
                         )}
                       </div>
-                      <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+                      <div className="reports-print-hidden flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
                         {formatDateLabel(activeBenchmark.created_at ?? null) && (
                           <span className="w-full rounded-full border border-white/10 bg-white/[0.08] px-3 py-1.5 text-center text-xs font-semibold text-slate-200 sm:w-auto">
                             {formatDateLabel(activeBenchmark.created_at ?? null)}
@@ -1770,7 +1909,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                   </div>
 
                   {(competitors.length > 0 || bestRating || opportunities.length > 0) && (
-                    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+                    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_240px] xl:grid-cols-[minmax(0,1fr)_260px]">
                       {competitors.length > 0 && (
                         <div>
                           <div className="flex items-center justify-between gap-3">
@@ -1807,7 +1946,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                               return (
                                 <article
                                   key={`${item.name}-${index}`}
-                                  className="reports-print-avoid rounded-[22px] border border-slate-200/70 bg-white p-4 shadow-[0_18px_48px_rgba(15,23,42,0.045)] md:rounded-[24px]"
+                                  className="reports-print-card min-w-0 overflow-hidden rounded-[22px] border border-slate-200/70 bg-white p-4 shadow-[0_18px_48px_rgba(15,23,42,0.045)] md:rounded-[24px]"
                                 >
                                   <div className="flex items-start justify-between gap-4">
                                     <div className="min-w-0">
@@ -1876,7 +2015,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                       )}
 
                       {(bestRating || opportunities.length > 0) && (
-                        <aside className="reports-print-avoid rounded-[22px] border border-slate-200/70 bg-slate-50 p-4 md:rounded-[24px] md:p-5">
+                        <aside className="reports-print-card min-w-0 overflow-hidden rounded-[22px] border border-slate-200/70 bg-slate-50 p-4 md:rounded-[24px] md:p-5">
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
                             Lecture Gartner
                           </p>
@@ -1907,51 +2046,43 @@ const Reports = ({ session, locations }: ReportsProps) => {
                     </div>
                   )}
 
-                  {benchmarkQuery.data.length > 1 && (
-                    <div className="reports-print-avoid rounded-[22px] border border-slate-200/70 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.035)] md:rounded-[24px]">
+                  {benchmarkGroups.length > 1 && (
+                    <div className="reports-print-hidden rounded-[22px] border border-slate-200/70 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.035)] md:rounded-[24px]">
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
                           Timeline
                         </p>
                         <p className="text-xs font-medium text-slate-400">
-                          {benchmarkQuery.data.length} benchmarks
+                          {benchmarkGroups.length} périodes
                         </p>
                       </div>
                       <div className="reports-scroll-x mt-4 flex max-w-full gap-2 overflow-x-auto pb-1">
-                        {benchmarkQuery.data.map((report) => {
-                          const date = report.created_at
-                            ? new Date(report.created_at)
-                            : null;
-                          const rawMonth = date
-                            ? date.toLocaleDateString("fr-FR", { month: "long" })
-                            : "Benchmark";
-                          const monthLabel =
-                            rawMonth.charAt(0).toUpperCase() + rawMonth.slice(1);
-                          const isActive = report.id === activeBenchmark.id;
+                        {benchmarkGroups.map((group) => {
+                          const isActive = group.report.id === activeBenchmark.id;
 
                           return (
                             <button
-                              key={report.id}
+                              key={group.key}
                               type="button"
-                              onClick={() => setSelectedBenchmarkId(report.id)}
+                              onClick={() => setSelectedBenchmarkId(group.report.id)}
                               className={cn(
-                                "min-w-[118px] rounded-[18px] border px-4 py-3 text-left transition",
+                                "min-w-[132px] rounded-[18px] border px-4 py-3 text-left transition",
                                 isActive
                                   ? "border-[#020617] bg-[#020617] text-white shadow-[0_14px_34px_rgba(2,6,23,0.16)]"
                                   : "border-slate-200 bg-slate-50 text-slate-600 hover:border-blue-200 hover:bg-white"
                               )}
                             >
                               <span className="block text-sm font-semibold">
-                                {monthLabel}
+                                {group.monthLabel}
                               </span>
-                              {date && (
+                              {group.versionCount > 1 && (
                                 <span
                                   className={cn(
                                     "mt-1 block text-xs",
                                     isActive ? "text-slate-300" : "text-slate-400"
                                   )}
                                 >
-                                  {date.getFullYear()}
+                                  {group.versionCount} versions
                                 </span>
                               )}
                             </button>
