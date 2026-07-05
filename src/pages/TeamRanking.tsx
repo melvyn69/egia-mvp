@@ -7,13 +7,21 @@ import {
   CalendarDays,
   CheckCircle2,
   Copy,
+  Crown,
   ExternalLink,
+  Gem,
+  Gift,
   Mail,
   Medal,
+  Minus,
   PartyPopper,
+  Quote,
   Settings,
   Sparkles,
+  Sprout,
   Star,
+  TrendingDown,
+  TrendingUp,
   Trophy,
   UserPlus,
   Users
@@ -56,6 +64,7 @@ type MemberStat = {
   first_name: string;
   role: string | null;
   email?: string | null;
+  imageUrl?: string | null;
   is_active: boolean;
   mentions: number;
   positiveCount: number;
@@ -64,7 +73,25 @@ type MemberStat = {
   avgRating: number | null;
   positiveRate: number | null;
   qualities: QualityStat[];
+  clientQuotes: string[];
   badges: string[];
+};
+
+type HallOfFameEntry = {
+  monthKey: string;
+  monthLabel: string;
+  memberId: string;
+  firstName: string;
+  role: string | null;
+  positiveCount: number;
+  avgRating: number | null;
+};
+
+type QualityTrend = {
+  label: string;
+  current: number;
+  previous: number;
+  delta: number;
 };
 
 type MonthlyTeamStats = {
@@ -78,6 +105,7 @@ type MonthlyTeamStats = {
   citedMembers: number;
   bestScore: number;
   mostMentionedMemberId: string | null;
+  qualityTrends: QualityTrend[];
 };
 
 const POSITIVE_RATING_THRESHOLD = 4;
@@ -96,6 +124,53 @@ const QUALITY_TERMS: Array<{ label: string; keywords: string[] }> = [
   { label: "qualité", keywords: ["qualite", "excellent", "excellente"] },
   { label: "patience", keywords: ["patience", "patient", "patiente"] },
   { label: "ambiance", keywords: ["ambiance", "chaleureux", "chaleureuse"] }
+];
+
+const REWARD_SUGGESTIONS = [
+  "Carte cadeau",
+  "Repas d'équipe",
+  "Prime",
+  "Après-midi libre",
+  "Place de cinéma"
+];
+
+const RECOGNITION_LEVELS = [
+  {
+    label: "Premières mentions",
+    min: 1,
+    Icon: Sprout,
+    className: "border-emerald-200 bg-emerald-50 text-emerald-700"
+  },
+  {
+    label: "Bronze",
+    min: 10,
+    Icon: Medal,
+    className: "border-orange-200 bg-orange-50 text-orange-700"
+  },
+  {
+    label: "Argent",
+    min: 25,
+    Icon: Award,
+    className: "border-slate-200 bg-slate-50 text-slate-700"
+  },
+  {
+    label: "Or",
+    min: 50,
+    Icon: Trophy,
+    className: "border-amber-200 bg-amber-50 text-amber-700"
+  },
+  {
+    label: "Diamant",
+    min: 75,
+    Icon: Gem,
+    className: "border-sky-200 bg-sky-50 text-sky-700"
+  },
+  {
+    label: "Légende",
+    min: 100,
+    Icon: Crown,
+    className: "border-violet-200 bg-violet-50 text-violet-700"
+  }
 ];
 
 const normalizeName = (value: string) =>
@@ -201,6 +276,9 @@ const getMonthLabel = (value: string) => {
   });
 };
 
+const getMonthKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
 const getMonthRange = (value: string) => {
   const [year, monthValue] = value.split("-").map(Number);
   const safeDate =
@@ -220,7 +298,12 @@ const getMonthRange = (value: string) => {
     safeDate.getMonth() - 1,
     1
   );
-  return { start, end, previousStart };
+  const historyStart = new Date(
+    safeDate.getFullYear(),
+    safeDate.getMonth() - 6,
+    1
+  );
+  return { start, end, previousStart, historyStart };
 };
 
 const isWithinRange = (review: ReviewRow, start: Date, end: Date) => {
@@ -240,6 +323,206 @@ const initialsFromName = (value: string) => {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 };
 
+const truncateText = (value: string, maxLength = 130) => {
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  if (trimmed.length <= maxLength) return trimmed;
+  return `${trimmed.slice(0, maxLength - 1).trim()}…`;
+};
+
+const extractClientQuotes = (comments: string[]) => {
+  const seen = new Set<string>();
+  const quotes: string[] = [];
+
+  comments.forEach((comment) => {
+    const sentences = comment
+      .split(/(?<=[.!?])\s+|\n+/)
+      .map((part) => truncateText(part.replace(/^["'“”«»\s]+|["'“”«»\s]+$/g, "")))
+      .filter((part) => part.length >= 8);
+
+    const candidates = sentences.length > 0 ? sentences : [truncateText(comment)];
+    candidates.forEach((candidate) => {
+      const key = normalizeForMatching(candidate);
+      if (!key || seen.has(key) || quotes.length >= 3) return;
+      seen.add(key);
+      quotes.push(candidate);
+    });
+  });
+
+  return quotes.slice(0, 3);
+};
+
+const countQualityTerms = (comments: string[]) => {
+  const counts = new Map<string, number>();
+
+  comments.forEach((comment) => {
+    const tokens = tokenize(comment);
+    QUALITY_TERMS.forEach((term) => {
+      const detected = term.keywords.some((keyword) =>
+        hasTokenSequence(tokens, tokenize(keyword))
+      );
+      if (detected) {
+        counts.set(term.label, (counts.get(term.label) ?? 0) + 1);
+      }
+    });
+  });
+
+  return counts;
+};
+
+const getQualityTrends = (
+  currentComments: string[],
+  previousComments: string[]
+) => {
+  if (currentComments.length === 0 || previousComments.length === 0) {
+    return [] as QualityTrend[];
+  }
+
+  const currentCounts = countQualityTerms(currentComments);
+  const previousCounts = countQualityTerms(previousComments);
+
+  return QUALITY_TERMS.map((term) => {
+    const current = currentCounts.get(term.label) ?? 0;
+    const previous = previousCounts.get(term.label) ?? 0;
+    return {
+      label: term.label,
+      current,
+      previous,
+      delta: current - previous
+    };
+  })
+    .filter((trend) => trend.delta > 0)
+    .sort((a, b) => {
+      if (b.delta !== a.delta) return b.delta - a.delta;
+      return b.current - a.current;
+    })
+    .slice(0, 3);
+};
+
+const getRecognitionLevel = (count: number) => {
+  if (count <= 0) {
+    return {
+      label: "À révéler",
+      min: 0,
+      Icon: Sparkles,
+      className: "border-slate-200 bg-slate-50 text-slate-600"
+    };
+  }
+
+  return [...RECOGNITION_LEVELS]
+    .reverse()
+    .find((level) => count >= level.min) ?? RECOGNITION_LEVELS[0];
+};
+
+const getNextRecognitionLevel = (count: number) =>
+  RECOGNITION_LEVELS.find((level) => count < level.min) ?? null;
+
+const getRecognitionProgress = (count: number) => {
+  const currentLevel = getRecognitionLevel(count);
+  const nextLevel = getNextRecognitionLevel(count);
+  if (!nextLevel) return 100;
+  const currentMin = currentLevel.min;
+  const span = Math.max(1, nextLevel.min - currentMin);
+  return Math.min(100, Math.max(0, ((count - currentMin) / span) * 100));
+};
+
+const getRewardSuggestion = (memberId: string | null, month: string) => {
+  if (!memberId) return REWARD_SUGGESTIONS[0];
+  const seed = `${memberId}-${month}`.split("").reduce((acc, char) => {
+    return acc + char.charCodeAt(0);
+  }, 0);
+  return REWARD_SUGGESTIONS[seed % REWARD_SUGGESTIONS.length];
+};
+
+const getEvolutionMeta = (current: number, previous: number) => {
+  const delta = current - previous;
+  const direction = delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+  const percent =
+    previous > 0 ? Math.round((delta / previous) * 100) : null;
+  const display =
+    percent !== null && delta !== 0
+      ? `${percent > 0 ? "+" : ""}${percent}%`
+      : delta === 0
+        ? "Stable"
+        : `${delta > 0 ? "+" : ""}${delta} mention${Math.abs(delta) > 1 ? "s" : ""}`;
+  const details =
+    delta === 0
+      ? "Même niveau que le mois précédent"
+      : `${delta > 0 ? "+" : ""}${delta} mention${
+          Math.abs(delta) > 1 ? "s" : ""
+        } positive${Math.abs(delta) > 1 ? "s" : ""}`;
+
+  return { delta, direction, display, details };
+};
+
+const buildRecognitionSummary = (member: MemberStat) => {
+  const qualities = member.qualities.map((quality) => quality.label).slice(0, 3);
+  if (qualities.length === 0) {
+    return `Les clients ont cité ${member.first_name} positivement ce mois-ci, avec ${formatCount(
+      member.positiveCount,
+      "mention",
+      "mentions"
+    )} associée${member.positiveCount > 1 ? "s" : ""}.`;
+  }
+  if (qualities.length === 1) {
+    return `Les clients ont particulièrement apprécié ${member.first_name} ce mois-ci pour une qualité souvent mentionnée : ${qualities[0]}.`;
+  }
+  const lastQuality = qualities[qualities.length - 1];
+  const firstQualities = qualities.slice(0, -1).join(", ");
+  return `Les clients ont particulièrement apprécié ${member.first_name} ce mois-ci pour ${firstQualities} et ${lastQuality}.`;
+};
+
+type MemberAvatarProps = {
+  name: string;
+  imageUrl?: string | null;
+  size?: "sm" | "md" | "lg";
+  className?: string;
+};
+
+const MemberAvatar = ({
+  name,
+  imageUrl,
+  size = "md",
+  className
+}: MemberAvatarProps) => {
+  const sizeClass =
+    size === "lg"
+      ? "h-16 w-16 rounded-2xl text-lg"
+      : size === "sm"
+        ? "h-10 w-10 rounded-full text-xs"
+        : "h-11 w-11 rounded-full text-sm";
+
+  if (imageUrl) {
+    return (
+      <img
+        src={imageUrl}
+        alt={name}
+        className={cn("shrink-0 object-cover", sizeClass, className)}
+      />
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        "flex shrink-0 items-center justify-center bg-slate-950 font-semibold text-white",
+        sizeClass,
+        className
+      )}
+    >
+      {initialsFromName(name)}
+    </div>
+  );
+};
+
+const getMemberImageUrl = (member: MemberRow) => {
+  const row = member as MemberRow & {
+    avatar_url?: string | null;
+    image_url?: string | null;
+    photo_url?: string | null;
+  };
+  return row.avatar_url ?? row.image_url ?? row.photo_url ?? null;
+};
+
 const getMonthlyTeamStats = (
   members: MemberRow[],
   currentReviews: ReviewRow[],
@@ -249,6 +532,8 @@ const getMonthlyTeamStats = (
   const stats = new Map<string, MemberStat>();
   const ratingSums = new Map<string, { sum: number; count: number }>();
   const qualityComments = new Map<string, string[]>();
+  const currentQualityComments: string[] = [];
+  const previousQualityComments: string[] = [];
 
   members.forEach((member) => {
     stats.set(member.id, {
@@ -256,6 +541,7 @@ const getMonthlyTeamStats = (
       first_name: member.first_name,
       role: member.role,
       email: member.email,
+      imageUrl: getMemberImageUrl(member),
       is_active: member.is_active ?? true,
       mentions: 0,
       positiveCount: 0,
@@ -264,6 +550,7 @@ const getMonthlyTeamStats = (
       avgRating: null,
       positiveRate: null,
       qualities: [],
+      clientQuotes: [],
       badges: []
     });
   });
@@ -294,11 +581,18 @@ const getMonthlyTeamStats = (
         }
       }
     });
+
+    if (isPositiveReview(review) && review.comment?.trim()) {
+      currentQualityComments.push(review.comment);
+    }
   });
 
   previousReviews.forEach((review) => {
     if (!isPositiveReview(review)) return;
     const mentionedMemberIds = countMentions(review.comment, activeMembers);
+    if (mentionedMemberIds.length > 0 && review.comment?.trim()) {
+      previousQualityComments.push(review.comment);
+    }
     mentionedMemberIds.forEach((memberId) => {
       const stat = stats.get(memberId);
       if (!stat) return;
@@ -315,6 +609,7 @@ const getMonthlyTeamStats = (
       stat.mentions > 0 ? stat.positiveCount / stat.mentions : null;
     stat.progression = stat.positiveCount - stat.previousPositiveCount;
     stat.qualities = extractPositiveQualities(qualityComments.get(memberId) ?? []);
+    stat.clientQuotes = extractClientQuotes(qualityComments.get(memberId) ?? []);
   });
 
   const mostMentionedMember = Array.from(stats.values())
@@ -381,8 +676,62 @@ const getMonthlyTeamStats = (
     positiveAssociatedMentions,
     citedMembers: memberStats.filter((stat) => stat.mentions > 0).length,
     bestScore: rankedMembers[0]?.positiveCount ?? 0,
-    mostMentionedMemberId
+    mostMentionedMemberId,
+    qualityTrends: getQualityTrends(currentQualityComments, previousQualityComments)
   };
+};
+
+const getHallOfFameEntries = (
+  members: MemberRow[],
+  reviews: ReviewRow[],
+  currentMonthStart: Date,
+  historyStart: Date
+) => {
+  const monthStarts: Date[] = [];
+  const cursor = new Date(
+    currentMonthStart.getFullYear(),
+    currentMonthStart.getMonth() - 1,
+    1
+  );
+
+  while (
+    cursor.getTime() >= historyStart.getTime() &&
+    monthStarts.length < 6
+  ) {
+    monthStarts.push(new Date(cursor));
+    cursor.setMonth(cursor.getMonth() - 1);
+  }
+
+  return monthStarts
+    .map((monthStart): HallOfFameEntry | null => {
+      const monthEnd = new Date(
+        monthStart.getFullYear(),
+        monthStart.getMonth() + 1,
+        0,
+        23,
+        59,
+        59,
+        999
+      );
+      const monthReviews = reviews.filter((review) =>
+        isWithinRange(review, monthStart, monthEnd)
+      );
+      const stats = getMonthlyTeamStats(members, monthReviews, []);
+      const winner = stats.employeeOfMonth;
+      if (!winner || winner.positiveCount <= 0) return null;
+
+      return {
+        monthKey: getMonthKey(monthStart),
+        monthLabel: getMonthLabel(getMonthKey(monthStart)),
+        memberId: winner.id,
+        firstName: winner.first_name,
+        role: winner.role,
+        positiveCount: winner.positiveCount,
+        avgRating: winner.avgRating
+      };
+    })
+    .filter((entry): entry is HallOfFameEntry => Boolean(entry))
+    .reverse();
 };
 
 const podiumMeta = [
@@ -471,7 +820,7 @@ const TeamRanking = ({ session }: TeamRankingProps) => {
       "team-reviews",
       session?.user?.id ?? null,
       month,
-      monthRange.previousStart.toISOString(),
+      monthRange.historyStart.toISOString(),
       monthRange.end.toISOString()
     ],
     queryFn: async () => {
@@ -482,7 +831,7 @@ const TeamRanking = ({ session }: TeamRankingProps) => {
         .from("google_reviews")
         .select("id, rating, comment, create_time, location_id, author_name")
         .eq("user_id", session.user.id)
-        .gte("create_time", monthRange.previousStart.toISOString())
+        .gte("create_time", monthRange.historyStart.toISOString())
         .lte("create_time", monthRange.end.toISOString());
       if (queryError) {
         throw queryError;
@@ -493,28 +842,42 @@ const TeamRanking = ({ session }: TeamRankingProps) => {
   });
 
   const members = useMemo(() => membersQuery.data ?? [], [membersQuery.data]);
+  const allReviews = useMemo(
+    () => reviewsQuery.data ?? [],
+    [reviewsQuery.data]
+  );
   const currentReviews = useMemo(
     () =>
-      (reviewsQuery.data ?? []).filter((review) =>
+      allReviews.filter((review) =>
         isWithinRange(review, monthRange.start, monthRange.end)
       ),
-    [monthRange.end, monthRange.start, reviewsQuery.data]
+    [allReviews, monthRange.end, monthRange.start]
   );
   const previousReviews = useMemo(
     () =>
-      (reviewsQuery.data ?? []).filter((review) =>
+      allReviews.filter((review) =>
         isWithinRange(
           review,
           monthRange.previousStart,
           new Date(monthRange.start.getTime() - 1)
         )
       ),
-    [monthRange.previousStart, monthRange.start, reviewsQuery.data]
+    [allReviews, monthRange.previousStart, monthRange.start]
   );
 
   const monthlyStats = useMemo(
     () => getMonthlyTeamStats(members, currentReviews, previousReviews),
     [members, currentReviews, previousReviews]
+  );
+  const hallOfFameEntries = useMemo(
+    () =>
+      getHallOfFameEntries(
+        members,
+        allReviews,
+        monthRange.start,
+        monthRange.historyStart
+      ),
+    [allReviews, members, monthRange.historyStart, monthRange.start]
   );
 
   const activeMembers = useMemo(
@@ -639,6 +1002,21 @@ ${emailDraft.body}`;
 
   const settingsEnabled =
     teamSettingsQuery.data?.enabled ?? teamEnabled ?? true;
+  const settingsLoaded = teamSettingsQuery.isFetched || !session?.user?.id;
+  const hasCelebration = settingsLoaded && settingsEnabled && hasRealWinner;
+  const employeeLevel = employeeOfMonth
+    ? getRecognitionLevel(employeeOfMonth.positiveCount)
+    : null;
+  const employeeNextLevel = employeeOfMonth
+    ? getNextRecognitionLevel(employeeOfMonth.positiveCount)
+    : null;
+  const employeeRecognitionProgress = employeeOfMonth
+    ? getRecognitionProgress(employeeOfMonth.positiveCount)
+    : 0;
+  const employeeSummary = employeeOfMonth
+    ? buildRecognitionSummary(employeeOfMonth)
+    : null;
+  const rewardSuggestion = getRewardSuggestion(employeeOfMonth?.id ?? null, month);
 
   const recognitionEmptyTitle =
     activeMembers.length === 0
@@ -659,9 +1037,15 @@ ${emailDraft.body}`;
 
   return (
     <div className="space-y-6">
+      <style>
+        {`@keyframes teamPodiumIn {
+          from { opacity: 0; transform: translateY(14px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }`}
+      </style>
       <section className="relative overflow-hidden rounded-2xl bg-slate-950 p-5 text-white shadow-[0_24px_70px_rgba(2,6,23,0.20)] sm:p-6 lg:p-8">
         <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-amber-400 via-emerald-400 to-sky-400" />
-        {hasRealWinner && (
+        {hasCelebration && (
           <div className="pointer-events-none absolute right-5 top-5 hidden h-24 w-32 sm:block">
             {["bg-amber-300", "bg-emerald-300", "bg-sky-300", "bg-rose-300"].map(
               (color, index) => (
@@ -863,8 +1247,12 @@ ${emailDraft.body}`;
                           "relative rounded-2xl border p-5 text-center transition",
                           meta.className
                         )}
+                        style={{
+                          animation: "teamPodiumIn 520ms ease-out both",
+                          animationDelay: `${meta.rank * 90}ms`
+                        }}
                       >
-                        {meta.rank === 1 && hasRealWinner && (
+                        {meta.rank === 1 && hasCelebration && (
                           <div className="absolute -top-3 left-1/2 flex -translate-x-1/2 gap-1">
                             <span className="h-2 w-6 rotate-12 rounded-full bg-amber-300" />
                             <span className="h-2 w-6 -rotate-12 rounded-full bg-emerald-300" />
@@ -921,118 +1309,252 @@ ${emailDraft.body}`;
               </CardContent>
             </Card>
 
-            <Card className="overflow-hidden">
-              <CardHeader className="border-b border-slate-100 bg-slate-950 text-white">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <CardTitle className="text-white">Employé du mois</CardTitle>
-                    <p className="text-sm text-slate-300">
-                      Félicitation prête à personnaliser.
-                    </p>
-                  </div>
-                  <Star className="h-5 w-5 text-amber-300" />
-                </div>
-              </CardHeader>
-              <CardContent className="pt-6">
-                {employeeOfMonth ? (
-                  <div className="space-y-5">
-                    <div className="flex items-center gap-4">
-                      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-ink text-lg font-semibold text-white shadow-card">
-                        {initialsFromName(employeeOfMonth.first_name)}
-                      </div>
-                      <div>
-                        <Badge className="border-amber-200 bg-amber-50 text-amber-700">
-                          <Trophy className="mr-1 h-3.5 w-3.5" />
-                          Mise à l’honneur
-                        </Badge>
-                        <p className="mt-2 text-xl font-semibold text-slate-950">
-                          {employeeOfMonth.first_name}
-                        </p>
-                        <p className="text-sm text-slate-500">
-                          {employeeOfMonth.role ?? "Collaborateur"}
-                        </p>
-                      </div>
-                    </div>
-
-                    <p className="text-sm leading-6 text-slate-600">
-                      {employeeOfMonth.first_name} ressort dans les avis clients
-                      positifs de {monthLabel}. La mise en avant reste collective :
-                      elle sert à nourrir la motivation et les bonnes pratiques
-                      de l'équipe.
-                    </p>
-
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="rounded-xl bg-slate-50 p-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                          Mentions
-                        </p>
-                        <p className="mt-1 text-lg font-semibold text-slate-900">
-                          {employeeOfMonth.positiveCount}
-                        </p>
-                      </div>
-                      <div className="rounded-xl bg-slate-50 p-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                          Note
-                        </p>
-                        <p className="mt-1 text-lg font-semibold text-slate-900">
-                          {formatRating(employeeOfMonth.avgRating)}
-                        </p>
-                      </div>
-                      <div className="rounded-xl bg-slate-50 p-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                          Qualités
-                        </p>
-                        <p className="mt-1 text-lg font-semibold text-slate-900">
-                          {employeeOfMonth.qualities.length}
-                        </p>
-                      </div>
-                    </div>
-
-                    {employeeOfMonth.qualities.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {employeeOfMonth.qualities.map((quality) => (
-                          <Badge
-                            key={quality.label}
-                            className="border-emerald-200 bg-emerald-50 text-emerald-700"
-                          >
-                            {quality.label}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-
-                    <Button
-                      onClick={handlePrepareEmail}
-                      disabled={!employeeOfMonth.email?.trim()}
-                      className="w-full"
-                    >
-                      <Mail className="h-4 w-4" />
-                      Préparer l’email de félicitations
-                    </Button>
-                    {!employeeOfMonth.email?.trim() && (
-                      <p className="text-sm text-amber-700">
-                        Email non configuré — ajoutez-le depuis{" "}
-                        <Link
-                          to="/settings?tab=team"
-                          className="font-semibold underline underline-offset-4"
-                        >
-                          Paramètres &gt; Équipe
-                        </Link>
-                        .
+            <div className="space-y-6">
+              <Card className="overflow-hidden">
+                <CardHeader className="border-b border-slate-100 bg-slate-950 text-white">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <CardTitle className="text-white">Employé du mois</CardTitle>
+                      <p className="text-sm text-slate-300">
+                        Félicitation prête à personnaliser.
                       </p>
-                    )}
-                    {message && (
-                      <p className="text-sm text-emerald-700">{message}</p>
-                    )}
+                    </div>
+                    <Star className="h-5 w-5 text-amber-300" />
                   </div>
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm leading-6 text-slate-500">
-                    Aucun employé du mois n'est désigné tant qu'un avis positif
-                    ne cite pas explicitement un collaborateur actif.
+                </CardHeader>
+                <CardContent className="pt-6">
+                  {employeeOfMonth ? (
+                    <div className="space-y-5">
+                      <div className="flex items-center gap-4">
+                        <MemberAvatar
+                          name={employeeOfMonth.first_name}
+                          imageUrl={employeeOfMonth.imageUrl}
+                          size="lg"
+                          className="shadow-card"
+                        />
+                        <div>
+                          <div className="flex flex-wrap gap-2">
+                            <Badge className="border-amber-200 bg-amber-50 text-amber-700">
+                              <Trophy className="mr-1 h-3.5 w-3.5" />
+                              Mise à l’honneur
+                            </Badge>
+                            {employeeLevel && (
+                              <Badge className={employeeLevel.className}>
+                                <employeeLevel.Icon className="mr-1 h-3.5 w-3.5" />
+                                {employeeLevel.label}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="mt-2 text-xl font-semibold text-slate-950">
+                            {employeeOfMonth.first_name}
+                          </p>
+                          <p className="text-sm text-slate-500">
+                            {employeeOfMonth.role ?? "Collaborateur"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <p className="rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+                        {employeeSummary}
+                      </p>
+
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="rounded-xl bg-slate-50 p-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                            Mentions
+                          </p>
+                          <p className="mt-1 text-lg font-semibold text-slate-900">
+                            {employeeOfMonth.positiveCount}
+                          </p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 p-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                            Note
+                          </p>
+                          <p className="mt-1 text-lg font-semibold text-slate-900">
+                            {formatRating(employeeOfMonth.avgRating)}
+                          </p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 p-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                            Qualités
+                          </p>
+                          <p className="mt-1 text-lg font-semibold text-slate-900">
+                            {employeeOfMonth.qualities.length}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.035)]">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">
+                              Reconnaissance client
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              Progression visuelle selon les mentions positives.
+                            </p>
+                          </div>
+                          <Badge variant="neutral">
+                            {employeeNextLevel
+                              ? `Prochain : ${employeeNextLevel.label}`
+                              : "Niveau max"}
+                          </Badge>
+                        </div>
+                        <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-amber-300 to-sky-400 transition-all duration-700 ease-out"
+                            style={{ width: `${employeeRecognitionProgress}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {employeeOfMonth.qualities.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {employeeOfMonth.qualities.map((quality) => (
+                            <Badge
+                              key={quality.label}
+                              className="border-emerald-200 bg-emerald-50 text-emerald-700"
+                            >
+                              {quality.label}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+                        <div className="flex items-center gap-2">
+                          <Quote className="h-4 w-4 text-slate-500" />
+                          <p className="text-sm font-semibold text-slate-900">
+                            Vraies citations clients
+                          </p>
+                        </div>
+                        {employeeOfMonth.clientQuotes.length > 0 ? (
+                          <div className="mt-3 space-y-2">
+                            {employeeOfMonth.clientQuotes.map((quote) => (
+                              <blockquote
+                                key={quote}
+                                className="rounded-xl bg-white px-3 py-2 text-sm leading-6 text-slate-600"
+                              >
+                                “{quote}”
+                              </blockquote>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-3 text-sm text-slate-500">
+                            Aucune citation disponible.
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
+                        <div className="flex items-center gap-2">
+                          <Gift className="h-4 w-4 text-amber-700" />
+                          <p className="text-sm font-semibold text-slate-900">
+                            Suggestion de récompense
+                          </p>
+                        </div>
+                        <p className="mt-2 text-lg font-semibold text-slate-950">
+                          {rewardSuggestion}
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {REWARD_SUGGESTIONS.map((reward) => (
+                            <span
+                              key={reward}
+                              className={cn(
+                                "rounded-full px-2.5 py-1 text-xs font-medium",
+                                reward === rewardSuggestion
+                                  ? "bg-white text-amber-800 shadow-sm"
+                                  : "bg-amber-100/70 text-amber-700"
+                              )}
+                            >
+                              {reward}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <Button
+                        onClick={handlePrepareEmail}
+                        disabled={!employeeOfMonth.email?.trim()}
+                        className="w-full"
+                      >
+                        <Mail className="h-4 w-4" />
+                        Préparer l’email de félicitations
+                      </Button>
+                      {!employeeOfMonth.email?.trim() && (
+                        <p className="text-sm text-amber-700">
+                          Email non configuré — ajoutez-le depuis{" "}
+                          <Link
+                            to="/settings?tab=team"
+                            className="font-semibold underline underline-offset-4"
+                          >
+                            Paramètres &gt; Équipe
+                          </Link>
+                          .
+                        </p>
+                      )}
+                      {message && (
+                        <p className="text-sm text-emerald-700">{message}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm leading-6 text-slate-500">
+                      Aucun employé du mois n'est désigné tant qu'un avis positif
+                      ne cite pas explicitement un collaborateur actif.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <CardTitle>Hall of Fame</CardTitle>
+                      <p className="text-sm text-slate-500">
+                        Précédents employés du mois calculés à partir des avis.
+                      </p>
+                    </div>
+                    <Trophy className="h-5 w-5 text-amber-600" />
                   </div>
-                )}
-              </CardContent>
-            </Card>
+                </CardHeader>
+                <CardContent>
+                  {hallOfFameEntries.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
+                      Le premier employé du mois apparaîtra ici.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {hallOfFameEntries.map((entry) => (
+                        <div
+                          key={entry.monthKey}
+                          className="flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-white p-3"
+                        >
+                          <div className="flex items-center gap-3">
+                            <MemberAvatar name={entry.firstName} size="sm" />
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                {entry.monthLabel}
+                              </p>
+                              <p className="text-sm font-semibold text-slate-900">
+                                {entry.firstName}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {entry.role ?? "Collaborateur"}
+                              </p>
+                            </div>
+                          </div>
+                          <Badge className="border-amber-200 bg-amber-50 text-amber-700">
+                            {entry.positiveCount}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </section>
 
           <section className="grid gap-6 xl:grid-cols-[1fr_0.8fr]">
@@ -1103,6 +1625,43 @@ ${emailDraft.body}`;
               </CardContent>
             </Card>
 
+            <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Tendances clients</CardTitle>
+                <p className="text-sm text-slate-500">
+                  Ce que les clients apprécient de plus en plus par rapport au
+                  mois précédent.
+                </p>
+              </CardHeader>
+              <CardContent>
+                {monthlyStats.qualityTrends.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-5 text-sm text-slate-500">
+                    Données insuffisantes.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {monthlyStats.qualityTrends.map((trend) => (
+                      <div
+                        key={trend.label}
+                        className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3"
+                      >
+                        <div className="flex items-center gap-2">
+                          <TrendingUp className="h-4 w-4 text-emerald-700" />
+                          <p className="text-sm font-semibold capitalize text-slate-900">
+                            {trend.label}
+                          </p>
+                        </div>
+                        <Badge className="border-emerald-200 bg-white text-emerald-700">
+                          +{trend.delta}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle>Badges positifs</CardTitle>
@@ -1141,6 +1700,7 @@ ${emailDraft.body}`;
                 ))}
               </CardContent>
             </Card>
+            </div>
           </section>
 
           <Card>
@@ -1175,7 +1735,20 @@ ${emailDraft.body}`;
                 </div>
               ) : (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {monthlyStats.memberStats.map((member) => (
+                  {monthlyStats.memberStats.map((member) => {
+                    const evolution = getEvolutionMeta(
+                      member.positiveCount,
+                      member.previousPositiveCount
+                    );
+                    const memberLevel = getRecognitionLevel(member.positiveCount);
+                    const EvolutionIcon =
+                      evolution.direction === "up"
+                        ? TrendingUp
+                        : evolution.direction === "down"
+                          ? TrendingDown
+                          : Minus;
+
+                    return (
                     <article
                       key={member.id}
                       className={cn(
@@ -1187,9 +1760,10 @@ ${emailDraft.body}`;
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3">
-                          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-950 text-sm font-semibold text-white">
-                            {initialsFromName(member.first_name)}
-                          </div>
+                          <MemberAvatar
+                            name={member.first_name}
+                            imageUrl={member.imageUrl}
+                          />
                           <div>
                             <p className="font-semibold text-slate-900">
                               {member.first_name}
@@ -1199,9 +1773,15 @@ ${emailDraft.body}`;
                             </p>
                           </div>
                         </div>
-                        <Badge variant={member.is_active ? "success" : "neutral"}>
-                          {member.is_active ? "Actif" : "Inactif"}
-                        </Badge>
+                        <div className="flex flex-col items-end gap-2">
+                          <Badge variant={member.is_active ? "success" : "neutral"}>
+                            {member.is_active ? "Actif" : "Inactif"}
+                          </Badge>
+                          <Badge className={memberLevel.className}>
+                            <memberLevel.Icon className="mr-1 h-3.5 w-3.5" />
+                            {memberLevel.label}
+                          </Badge>
+                        </div>
                       </div>
 
                       <div className="mt-4 grid grid-cols-3 gap-2">
@@ -1229,6 +1809,25 @@ ${emailDraft.body}`;
                             {formatRating(member.avgRating)}
                           </p>
                         </div>
+                      </div>
+
+                      <div
+                        className={cn(
+                          "mt-3 flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-sm",
+                          evolution.direction === "up"
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : evolution.direction === "down"
+                              ? "border-rose-200 bg-rose-50 text-rose-700"
+                              : "border-slate-200 bg-slate-50 text-slate-600"
+                        )}
+                      >
+                        <div className="flex items-center gap-2 font-semibold">
+                          <EvolutionIcon className="h-4 w-4" />
+                          {evolution.display}
+                        </div>
+                        <span className="text-xs opacity-80">
+                          {evolution.details}
+                        </span>
                       </div>
 
                       <div className="mt-4 flex flex-wrap gap-2">
@@ -1271,7 +1870,8 @@ ${emailDraft.body}`;
                         Taux positif associé : {formatRatio(member.positiveRate)}
                       </p>
                     </article>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
@@ -1355,9 +1955,12 @@ ${emailDraft.body}`;
                       className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 text-sm"
                     >
                       <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-700">
-                          {initialsFromName(member.first_name)}
-                        </div>
+                        <MemberAvatar
+                          name={member.first_name}
+                          imageUrl={getMemberImageUrl(member)}
+                          size="sm"
+                          className="bg-slate-100 text-slate-700"
+                        />
                         <div>
                           <p className="font-semibold text-slate-900">
                             {member.first_name}
