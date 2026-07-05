@@ -792,6 +792,10 @@ const Dashboard = ({
   const activeLocationsCount = locations.filter((location) =>
     selectedActiveIds.includes(location.id)
   ).length;
+  const mobilePrimaryAction = notificationsWithStatus.find(
+    (notification) => notification.requiresAction === true
+  );
+  const mobileKpiCards = kpiCards.slice(0, 4);
 
   return (
     <div className="space-y-4">
@@ -799,13 +803,246 @@ const Dashboard = ({
         <h2 className="text-sm font-medium text-slate-500">{greetingText}</h2>
       </div>
 
-      <BusinessHealthScoreCard
-        model={healthModel}
-        variant="dashboard"
-        loading={kpiLoading || aiKpiLoading || coach.isLoading}
-      />
+      <div className="space-y-3 lg:hidden">
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_14px_34px_rgba(15,23,42,0.06)]">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                Action prioritaire
+              </p>
+              <h3 className="mt-1 line-clamp-2 text-lg font-semibold leading-tight text-slate-950">
+                {urgentActionsCount > 0
+                  ? mobilePrimaryAction?.title ?? "Répondre aux avis prioritaires"
+                  : "Tout est sous contrôle"}
+              </h3>
+              <p className="mt-1 line-clamp-2 text-sm leading-5 text-slate-500">
+                {urgentActionsCount > 0
+                  ? mobilePrimaryAction?.message ??
+                    "Traitez les avis et alertes qui demandent une réponse."
+                  : "Aucun avis urgent ni alerte client ne demande d’action."}
+              </p>
+            </div>
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-ink text-white">
+              <Bell size={18} />
+            </span>
+          </div>
+          <Button
+            size="sm"
+            className="mt-3 min-h-11 w-full"
+            onClick={handleOpenInbox}
+          >
+            Ouvrir la boîte de réception
+          </Button>
+        </section>
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.045)]">
+        <section className="grid grid-cols-2 gap-2">
+          <div className="rounded-2xl border border-rose-100 bg-rose-50 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-rose-600">
+              Critiques
+            </p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-rose-700">
+              {formatCount(aiPriorityCount)}
+            </p>
+            <p className="mt-1 line-clamp-2 text-xs leading-4 text-rose-700/80">
+              Avis IA à surveiller en priorité.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+              Actions
+            </p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-slate-950">
+              {urgentActionsCount}
+            </p>
+            <p className="mt-1 line-clamp-2 text-xs leading-4 text-slate-500">
+              Points à traiter maintenant.
+            </p>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-900 bg-slate-950 p-3 text-white shadow-[0_18px_48px_-28px_rgba(15,23,42,0.9)]">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-300">
+                Business Health
+              </p>
+              <div className="mt-1 flex items-end gap-2">
+                <span className="text-4xl font-semibold leading-none">
+                  {healthModel.score}
+                </span>
+                <span className="pb-1 text-sm font-semibold text-slate-400">
+                  /100
+                </span>
+              </div>
+            </div>
+            <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold text-emerald-100">
+              {healthModel.level.label}
+            </span>
+          </div>
+          <div className="mt-3">
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
+              <span>Progression</span>
+              <span>
+                {healthModel.completedChecklistCount}/{healthModel.checklist.length}
+              </span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800">
+              <div
+                className={`h-full rounded-full ${healthModel.level.progressClass}`}
+                style={{ width: `${healthModel.score}%` }}
+              />
+            </div>
+          </div>
+          <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.06] p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+              Prochaine action
+            </p>
+            <p className="mt-1 line-clamp-2 text-sm font-semibold leading-5 text-white">
+              {healthModel.nextBestAction.label}
+            </p>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Button
+              size="sm"
+              className="min-h-11 bg-white text-slate-950 hover:bg-slate-100"
+              onClick={() => {
+                window.location.href = healthModel.nextBestAction.href;
+              }}
+            >
+              Agir
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="min-h-11 border-white/20 bg-transparent text-white hover:bg-white/10"
+              onClick={() => {
+                window.location.href = "/coach";
+              }}
+            >
+              Voir détail
+            </Button>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_14px_34px_rgba(15,23,42,0.045)]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+            Coach IA
+          </p>
+          <p className="mt-1 line-clamp-3 text-base font-semibold leading-6 text-slate-950">
+            {aiSummarySentence}
+          </p>
+          {aiPrimaryTag && (
+            <span className="mt-3 inline-flex max-w-full rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
+              <span className="truncate">{aiPrimaryTag.tag}</span>
+            </span>
+          )}
+        </section>
+
+        <section className="grid grid-cols-2 gap-2">
+          {mobileKpiCards.map((kpi) => (
+            <article
+              key={kpi.id}
+              className="min-h-[118px] rounded-2xl border border-slate-200 bg-white p-3"
+            >
+              <p className="truncate text-2xl font-semibold tracking-tight text-slate-950">
+                {formatKpiValue(kpi.value)}
+              </p>
+              <p className="mt-2 line-clamp-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                {kpi.label}
+              </p>
+              <p className="mt-1 line-clamp-2 text-xs leading-4 text-slate-500">
+                {formatKpiValue(kpi.variation)}
+              </p>
+            </article>
+          ))}
+        </section>
+
+        <details className="group rounded-2xl border border-slate-200 bg-white p-3">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 [&::-webkit-details-marker]:hidden">
+            <span className="text-sm font-semibold text-slate-950">
+              Analyse détaillée
+            </span>
+            <ChevronRight className="h-4 w-4 text-slate-400 transition group-open:rotate-90" />
+          </summary>
+          <div className="mt-3 space-y-3">
+            <div className="grid gap-2">
+              {aiSentimentBreakdown.map((sentiment) => (
+                <div
+                  key={sentiment.label}
+                  className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs font-semibold ${sentiment.className}`}
+                >
+                  <span>{sentiment.label}</span>
+                  <span>{formatPercent(sentiment.value)}</span>
+                </div>
+              ))}
+            </div>
+            {aiTopTags.length > 0 && (
+              <div className="grid gap-2">
+                {aiTopTags.slice(0, 5).map((tag) => (
+                  <div
+                    key={tag.tag}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
+                  >
+                    <span className="min-w-0 truncate font-semibold text-slate-700">
+                      {tag.tag}
+                    </span>
+                    <span className="shrink-0 text-slate-500">
+                      {tag.count}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </details>
+
+        <details className="group rounded-2xl border border-slate-200 bg-white p-3">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 [&::-webkit-details-marker]:hidden">
+            <span className="text-sm font-semibold text-slate-950">
+              Établissements actifs
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-500">
+                {activeLocationsCount}/{locations.length}
+              </span>
+              <ChevronRight className="h-4 w-4 text-slate-400 transition group-open:rotate-90" />
+            </span>
+          </summary>
+          <div className="mt-3 space-y-2">
+            {locations.slice(0, 4).map((location) => {
+              const isActive = selectedActiveIds.includes(location.id);
+              return (
+                <div
+                  key={location.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+                >
+                  <span className="min-w-0 truncate text-sm font-semibold text-slate-800">
+                    {location.location_title ?? location.location_resource_name}
+                  </span>
+                  <span className="shrink-0 text-xs font-semibold text-slate-500">
+                    {isActive ? "Actif" : "Inactif"}
+                  </span>
+                </div>
+              );
+            })}
+            {locations.length === 0 && (
+              <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-500">
+                Aucune fiche connectée.
+              </p>
+            )}
+          </div>
+        </details>
+      </div>
+
+      <div className="hidden lg:block">
+        <BusinessHealthScoreCard
+          model={healthModel}
+          variant="dashboard"
+          loading={kpiLoading || aiKpiLoading || coach.isLoading}
+        />
+      </div>
+
+      <section className="hidden overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.045)] lg:block">
         <div className="flex flex-wrap items-end justify-between gap-2 border-b border-slate-100/70 bg-white px-4 py-3">
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-[12rem]">
@@ -935,7 +1172,7 @@ const Dashboard = ({
         </div>
       </section>
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.045)]">
+      <section className="hidden overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.045)] lg:block">
         <div className="flex items-center justify-between border-b border-slate-100/70 bg-slate-50/20 px-4 py-3">
           <h3 className="text-sm font-semibold text-slate-700">Analyse IA</h3>
           {aiKpiError && (
@@ -1212,7 +1449,7 @@ const Dashboard = ({
 
       <section
         id="locations-section"
-        className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.045)]"
+        className="hidden overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.045)] lg:block"
       >
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100/70 bg-slate-50/20 px-4 py-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -1346,7 +1583,7 @@ const Dashboard = ({
         </div>
       </section>
 
-      <section>
+      <section className="hidden lg:block">
         <Card className="overflow-hidden border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.045)]">
           <CardContent className="grid gap-4 p-4 lg:grid-cols-[minmax(220px,0.42fr)_minmax(0,1fr)]">
             <div className="space-y-3">

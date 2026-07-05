@@ -23,8 +23,10 @@ import { supabase } from "../../lib/supabase";
 import { analyticsQueryKey, fetchAnalyticsBundle } from "../../queries/analytics";
 import { InstallAppCTA } from "../InstallAppCTA";
 
-const navLinkBase =
+const desktopNavLinkBase =
   "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition";
+const mobileNavLinkBase =
+  "flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition";
 
 const SHOW_AUTOMATION_NAV = false;
 
@@ -78,12 +80,13 @@ const Sidebar = ({
 
   const baseClasses =
     variant === "mobile"
-      ? "flex h-full w-[min(20rem,calc(100vw-2rem))] flex-col justify-between overflow-y-auto border-r border-slate-200 bg-white/90 px-4 py-6 shadow-soft backdrop-blur-lg print:hidden"
+      ? "flex h-full w-[min(19rem,calc(100vw-2rem))] flex-col justify-between overflow-y-auto border-r border-slate-200 bg-white/95 px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-[calc(1rem+env(safe-area-inset-top))] shadow-soft backdrop-blur-lg print:hidden"
       : "sticky top-0 hidden h-screen w-64 flex-col justify-between border-r border-slate-200 bg-white/80 px-4 py-6 shadow-soft backdrop-blur-lg print:hidden lg:flex";
+  const navLinkBase = variant === "mobile" ? mobileNavLinkBase : desktopNavLinkBase;
 
   return (
     <aside className={cn(baseClasses, className)}>
-      <div className="space-y-6">
+      <div className={variant === "mobile" ? "space-y-4" : "space-y-6"}>
         <div className="flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-ink text-white shadow-lg">
             <Building2 size={20} />
@@ -96,7 +99,7 @@ const Sidebar = ({
           </div>
         </div>
 
-      <nav className="space-y-2" onClick={() => onNavigate?.()}>
+      <nav className={variant === "mobile" ? "space-y-1.5" : "space-y-2"} onClick={() => onNavigate?.()}>
         <NavLink
           to="/"
           end
@@ -336,13 +339,17 @@ const Sidebar = ({
       </nav>
     </div>
 
-    <div className="mt-auto space-y-4">
-      <div className="px-3 pb-4">
+    <div className={variant === "mobile" ? "mt-auto space-y-3" : "mt-auto space-y-4"}>
+      <div className={variant === "mobile" ? "px-1 pb-1" : "px-3 pb-4"}>
         <InstallAppCTA
+          hideManualInstall={variant === "mobile"}
           onFallback={() => navigate("/settings?tab=mobile")}
         />
       </div>
-      <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-[#f7f3ec] via-white to-[#f3efe7] p-4">
+      <div className={cn(
+        "rounded-2xl border border-slate-200 bg-gradient-to-br from-[#f7f3ec] via-white to-[#f3efe7]",
+        variant === "mobile" ? "p-3" : "p-4"
+      )}>
         <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
           Statut
         </p>

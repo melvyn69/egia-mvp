@@ -46,13 +46,13 @@ const InstallPwaPrompt = ({ className }: InstallPwaPromptProps) => {
   return (
     <div
       className={cn(
-        "rounded-2xl border border-slate-200 bg-white p-5 shadow-card",
+        "rounded-2xl border border-slate-200 bg-white p-3 shadow-card sm:p-5",
         className
       )}
     >
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="flex gap-3">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-ink text-white">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-ink text-white sm:h-11 sm:w-11">
             <Download size={18} />
           </span>
           <div className="space-y-1">
@@ -66,13 +66,17 @@ const InstallPwaPrompt = ({ className }: InstallPwaPromptProps) => {
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          <Button onClick={handleInstall} disabled={isInstalling}>
-            {isInstalling ? "Installation..." : "Installer"}
+          <Button className="min-h-11 flex-1 sm:flex-none" onClick={handleInstall} disabled={isInstalling}>
+            {isIos
+              ? "Voir les instructions"
+              : isInstalling
+                ? "Installation..."
+                : "Installer"}
           </Button>
           <button
             type="button"
             onClick={dismissPrompt}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30 sm:h-10 sm:w-10"
             aria-label="Masquer la proposition d’installation"
           >
             <X size={16} />
@@ -83,7 +87,7 @@ const InstallPwaPrompt = ({ className }: InstallPwaPromptProps) => {
       {isIos && (
         <div
           className={cn(
-            "mt-4 flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm transition",
+            "mt-3 flex items-start gap-3 rounded-2xl border px-3 py-2.5 text-sm transition sm:mt-4 sm:px-4 sm:py-3",
             isIosInstructionHighlighted
               ? "border-ink/30 bg-clay text-slate-900"
               : "border-slate-200 bg-sand text-slate-700"

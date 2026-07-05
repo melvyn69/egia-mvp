@@ -7,6 +7,7 @@ import {
   BookmarkPlus,
   BookmarkX,
   CalendarDays,
+  ChevronRight,
   Download,
   MapPin,
   RefreshCw,
@@ -1954,7 +1955,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
   };
 
   return (
-    <div className="competitors-report min-w-0 space-y-4 overflow-x-hidden pb-8 md:space-y-5">
+    <div className="competitors-report min-w-0 space-y-3 overflow-x-hidden pb-8 md:space-y-5">
       <style>{`
         @keyframes radar-pulse {
           0% { transform: scale(0.4); opacity: 0.4; }
@@ -2100,9 +2101,9 @@ const Competitors = ({ session }: CompetitorsProps) => {
         </div>
       )}
 
-      <section className="competitors-print-card rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_18px_50px_rgba(15,23,42,0.07)] md:p-5 lg:p-6">
-        <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0 space-y-3">
+      <section className="competitors-print-card rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_18px_50px_rgba(15,23,42,0.07)] md:p-5 lg:rounded-[24px] lg:p-6">
+        <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
+          <div className="min-w-0 space-y-2 lg:space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={googleConnected ? "success" : "neutral"}>
                 {googleConnected ? "Google connecté" : "Google à connecter"}
@@ -2118,14 +2119,14 @@ const Competitors = ({ session }: CompetitorsProps) => {
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">
                 Lecture du marché local
               </p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">
+              <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950 md:text-4xl">
                 Veille concurrentielle
               </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 md:text-base">
+              <p className="mt-2 max-w-2xl text-sm leading-5 text-slate-600 md:text-base md:leading-6">
                 Comprendre votre position locale et les écarts à combler.
               </p>
               {marketNarrative.length > 0 && (
-                <div className="mt-3 grid max-w-3xl gap-2 sm:grid-cols-2">
+                <div className="mt-3 hidden max-w-3xl gap-2 sm:grid sm:grid-cols-2">
                   {marketNarrative.map((item) => (
                     <p
                       key={item}
@@ -2137,7 +2138,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 </div>
               )}
             </div>
-            <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+            <div className="flex flex-wrap gap-1.5 text-xs text-slate-600 sm:gap-2">
               {selectedLocationLabel && (
                 <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 font-medium">
                   <MapPin size={13} />
@@ -2166,7 +2167,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
           </div>
           <div className="competitors-print-hidden flex w-full flex-col gap-2 sm:w-auto sm:flex-row lg:flex-col xl:flex-row">
             <Button
-              className="w-full bg-ink text-white shadow-[0_16px_36px_rgba(15,23,42,0.18)] hover:bg-ink/90 sm:w-auto"
+              className="min-h-11 w-full bg-ink text-white shadow-[0_16px_36px_rgba(15,23,42,0.18)] hover:bg-ink/90 sm:w-auto"
               onClick={runCurrentScan}
               disabled={sectorMissing || scanMutation.isPending || !selectedLocationId}
             >
@@ -2176,12 +2177,12 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 ) : (
                   <RefreshCw size={15} />
                 )}
-                {scanMutation.isPending ? "Analyse..." : "Relancer l'analyse"}
+                {scanMutation.isPending ? "Analyse..." : "Relancer"}
               </span>
             </Button>
             <Button
               variant="outline"
-              className="w-full border-slate-200 bg-white sm:w-auto"
+              className="min-h-11 w-full border-slate-200 bg-white sm:w-auto"
               onClick={handleGenerateBenchmark}
               disabled={benchmarkLoading || !selectedLocationId}
             >
@@ -2191,18 +2192,23 @@ const Competitors = ({ session }: CompetitorsProps) => {
                 ) : (
                   <Download size={15} />
                 )}
-                {benchmarkLoading ? "Génération..." : "Télécharger le benchmark"}
+                <span className="sm:hidden">
+                  {benchmarkLoading ? "Génération..." : "Benchmark"}
+                </span>
+                <span className="hidden sm:inline">
+                  {benchmarkLoading ? "Génération..." : "Télécharger le benchmark"}
+                </span>
               </span>
             </Button>
           </div>
         </div>
 
-        <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-2 lg:mt-5 lg:grid-cols-5">
           {marketKpis.length > 0 ? (
             marketKpis.map(({ label, value, detail, Icon, tone }) => (
               <div
                 key={label}
-                className="competitors-print-card rounded-2xl border border-slate-200 bg-slate-50/70 p-3"
+                className="competitors-print-card min-h-[118px] rounded-2xl border border-slate-200 bg-slate-50/70 p-2.5 lg:p-3"
               >
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-xs font-semibold text-slate-500">{label}</span>
@@ -2215,7 +2221,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
                     <Icon size={16} />
                   </span>
                 </div>
-                <div className="mt-2 text-xl font-semibold tracking-tight text-slate-950 md:text-2xl">
+                <div className="mt-2 text-lg font-semibold tracking-tight text-slate-950 md:text-2xl">
                   {value}
                 </div>
                 {detail && (
@@ -2281,7 +2287,192 @@ const Competitors = ({ session }: CompetitorsProps) => {
       )}
 
       <section className="competitors-print-hidden grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        <Card className="rounded-[24px] shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
+        <details className="group rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_14px_34px_rgba(15,23,42,0.05)] lg:hidden">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-ink/20 [&::-webkit-details-marker]:hidden">
+            <span className="flex items-center gap-2 text-sm font-semibold text-slate-950">
+              <Target size={17} />
+              Paramètres d’analyse
+            </span>
+            <ChevronRight className="h-4 w-4 text-slate-400 transition group-open:rotate-90" />
+          </summary>
+          <div className="mt-3 space-y-3">
+            {locationsEmpty ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                <p className="font-semibold text-slate-900">
+                  Aucun établissement sélectionné
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  Ajoutez un lieu pour lancer la veille concurrentielle.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 min-h-11 w-full"
+                  onClick={() => navigate("/settings?tab=locations")}
+                >
+                  Choisir un établissement
+                </Button>
+              </div>
+            ) : (
+              <>
+                <label className="block text-xs font-semibold text-slate-600">
+                  Établissement
+                  <select
+                    className="mt-2 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
+                    value={selectedLocationId ?? ""}
+                    onChange={(event) =>
+                      setSelectedLocationId(event.target.value || null)
+                    }
+                  >
+                    {locationsFirstLoad && <option>Chargement...</option>}
+                    {!locationsFirstLoad &&
+                      (locationsQuery.data ?? []).map((location) => (
+                        <option key={location.id} value={location.id}>
+                          {location.location_title || location.location_resource_name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="text-xs font-semibold text-slate-600">
+                    Rayon
+                    <select
+                      className="mt-2 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
+                      value={radiusKm}
+                      onChange={(event) => setRadiusKm(Number(event.target.value))}
+                    >
+                      <option value={1}>1 km</option>
+                      <option value={5}>5 km</option>
+                      <option value={10}>10 km</option>
+                      <option value={20}>20 km</option>
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold text-slate-600">
+                    Zone
+                    <input
+                      className="mt-2 min-h-11 w-full rounded-2xl border border-slate-200 px-3 py-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
+                      value={zoneInput}
+                      onChange={(event) => {
+                        const nextValue = event.target.value.slice(0, 40);
+                        setZoneInput(nextValue);
+                        if (typeof window !== "undefined") {
+                          window.localStorage.setItem("competitors_zone_label", nextValue);
+                        }
+                      }}
+                      placeholder="ex: ecully"
+                    />
+                  </label>
+                </div>
+                {sectorMissing && (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold">Secteur à compléter</span>
+                      <Badge variant="warning">Action requise</Badge>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-2 min-h-11 w-full bg-white"
+                      onClick={() => navigate("/settings?tab=locations")}
+                    >
+                      Compléter l’établissement
+                    </Button>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    className="min-h-11 bg-ink text-white hover:bg-ink/90"
+                    onClick={runCurrentScan}
+                    disabled={sectorMissing || scanMutation.isPending || !selectedLocationId}
+                  >
+                    Lancer
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="min-h-11"
+                    onClick={relaunchLastScan}
+                    disabled={!selectedLocationId || scanMutation.isPending || !scanHistory[0]}
+                  >
+                    Relancer
+                  </Button>
+                </div>
+              </>
+            )}
+            {scanMutation.isPending && (
+              <p className="text-xs text-slate-500">Analyse du marché local en cours...</p>
+            )}
+            {scanMessage && <p className="text-xs text-emerald-600">{scanMessage}</p>}
+            {scanError && (
+              <div className="text-xs text-rose-600">
+                <p>{scanError}</p>
+                {scanErrorHint && <p className="text-rose-500">{scanErrorHint}</p>}
+              </div>
+            )}
+          </div>
+        </details>
+
+        <details className="group rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_14px_34px_rgba(15,23,42,0.05)] lg:hidden">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-ink/20 [&::-webkit-details-marker]:hidden">
+            <span className="flex items-center gap-2 text-sm font-semibold text-slate-950">
+              <CalendarDays size={17} />
+              Historique benchmark
+            </span>
+            <ChevronRight className="h-4 w-4 text-slate-400 transition group-open:rotate-90" />
+          </summary>
+          <div className="mt-3">
+            {benchmarkHistoryFirstLoad ? (
+              <Skeleton className="h-20 w-full rounded-2xl" />
+            ) : benchmarkTimeline.length > 0 ? (
+              <div className="space-y-2">
+                {benchmarkTimeline.slice(0, 3).map((item, index) => (
+                  <div
+                    key={item.groupKey}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="min-w-0 truncate text-sm font-semibold text-slate-900">
+                        {item.month ?? item.date}
+                      </p>
+                      {index === 0 && <Badge variant="success">Dernier</Badge>}
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                      {item.total !== null && (
+                        <span>{formatInteger(item.total)} concurrents</span>
+                      )}
+                      {item.medianRating !== null && (
+                        <span>Note {formatRating(item.medianRating)}</span>
+                      )}
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <Button
+                        size="sm"
+                        className="min-h-11 bg-ink text-white hover:bg-ink/90"
+                        onClick={() => navigate(`/reports?report_id=${item.id}`)}
+                      >
+                        Voir
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="min-h-11 bg-white"
+                        onClick={() => void downloadBenchmarkReport(item.id)}
+                        disabled={downloadingBenchmarkId === item.id}
+                      >
+                        {downloadingBenchmarkId === item.id ? "..." : "PDF"}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-600">
+                Aucun benchmark généré.
+              </div>
+            )}
+          </div>
+        </details>
+
+        <Card className="hidden rounded-[24px] shadow-[0_18px_50px_rgba(15,23,42,0.06)] lg:block">
           <CardHeader className="p-4 pb-0 md:p-5 md:pb-0">
             <CardTitle className="flex items-center gap-2 text-base">
               <Target size={18} />
@@ -2410,7 +2601,7 @@ const Competitors = ({ session }: CompetitorsProps) => {
           </CardContent>
         </Card>
 
-        <Card className="rounded-[24px] shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
+        <Card className="hidden rounded-[24px] shadow-[0_18px_50px_rgba(15,23,42,0.06)] lg:block">
           <CardHeader className="p-4 pb-0 md:p-5 md:pb-0">
             <CardTitle className="flex items-center gap-2 text-base">
               <CalendarDays size={18} />

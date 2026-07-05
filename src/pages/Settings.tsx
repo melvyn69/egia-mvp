@@ -1419,11 +1419,11 @@ const Settings = ({ session }: SettingsProps) => {
             : "Utilisez Safari sur iPhone ou Chrome sur Android pour installer EGIA.";
 
       return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           <InstallPwaPrompt />
 
           <Card>
-            <CardHeader>
+            <CardHeader className="p-4 pb-2 sm:p-6 sm:pb-4">
               <CardTitle className="flex flex-wrap items-center justify-between gap-3">
                 <span className="flex items-center gap-2">
                   <span className="flex h-9 w-9 items-center justify-center rounded-full bg-ink/10 text-ink">
@@ -1434,7 +1434,7 @@ const Settings = ({ session }: SettingsProps) => {
                 <Badge variant={statusVariant}>{statusLabel}</Badge>
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4 text-sm text-slate-600">
+            <CardContent className="space-y-3 px-4 pb-4 text-sm text-slate-600 sm:space-y-4 sm:px-6 sm:pb-6">
               <p>
                 Accédez à EGIA en plein écran depuis votre écran d’accueil,
                 sans passer par une boutique d’applications.
@@ -1451,12 +1451,12 @@ const Settings = ({ session }: SettingsProps) => {
           </Card>
 
           <Card>
-            <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+            <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <p className="text-sm text-slate-600">
                 Lancez EGIA depuis votre écran d’accueil pour une expérience
                 pleine page.
               </p>
-              <Button variant="outline" size="sm" onClick={handleOpenApp}>
+              <Button className="min-h-11 sm:min-h-0" variant="outline" size="sm" onClick={handleOpenApp}>
                 Ouvrir l’application
               </Button>
             </CardContent>
@@ -1488,8 +1488,8 @@ const Settings = ({ session }: SettingsProps) => {
   })();
 
   return (
-    <div className="space-y-6">
-      <div>
+    <div className="space-y-4 sm:space-y-6">
+      <div className="hidden sm:block">
         <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
           Paramètres
         </p>
@@ -1514,7 +1514,7 @@ const Settings = ({ session }: SettingsProps) => {
         ))}
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 text-xs text-slate-500">
+      <div className="rounded-2xl border border-slate-200 bg-white/70 p-3 text-xs text-slate-500 sm:p-4">
         {tabs.find((tab) => tab.id === activeTab)?.description}
       </div>
 

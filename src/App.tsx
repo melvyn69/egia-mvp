@@ -1003,8 +1003,8 @@ const App = () => {
           <main
             className={
               usesAppShell
-                ? "flex-1 space-y-6 bg-gradient-to-br from-sand via-white to-clay px-4 py-6 pb-24 md:px-6 md:py-8 lg:pb-8"
-                : "min-h-screen bg-gradient-to-br from-sand via-white to-clay"
+                ? "min-w-0 flex-1 space-y-4 overflow-x-hidden bg-gradient-to-br from-sand via-white to-clay px-3 py-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:px-6 md:py-8 lg:space-y-6 lg:pb-8"
+                : "min-h-screen min-w-0 overflow-x-hidden bg-gradient-to-br from-sand via-white to-clay"
             }
           >
             {envMissing && (
@@ -1194,7 +1194,7 @@ const App = () => {
             onClick={() => setMobileMenuOpen(false)}
             aria-label="Fermer le menu"
           />
-          <div className="absolute left-0 top-0 h-full">
+          <div className="absolute left-0 top-0 h-full max-w-full">
             <Sidebar
               variant="mobile"
               className="h-full"

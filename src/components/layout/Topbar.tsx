@@ -78,36 +78,36 @@ const Topbar = ({
   };
 
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-white/70 px-4 py-4 backdrop-blur print:hidden md:px-6 md:py-5 lg:items-center">
-      <div className="flex min-w-0 flex-1 items-start gap-3">
+    <div className="sticky top-0 z-30 flex min-h-[72px] items-center justify-between gap-2 border-b border-slate-200 bg-white/85 px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] backdrop-blur print:hidden md:px-6 md:py-5 lg:static lg:min-h-0 lg:items-center lg:gap-3">
+      <div className="flex min-w-0 flex-1 items-center gap-2 lg:items-start lg:gap-3">
         {onToggleMenu && (
           <Button
             variant="ghost"
             size="sm"
-            className="mt-0.5 shrink-0 rounded-xl lg:hidden"
+            className="h-11 w-11 shrink-0 rounded-2xl p-0 lg:hidden"
             onClick={onToggleMenu}
             aria-label={isMenuOpen ? "Fermer le menu" : "Ouvrir le menu"}
           >
-            <Menu size={18} />
+            <Menu size={20} />
           </Button>
         )}
         <div className="min-w-0">
-          <p className="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-slate-400">
-            <Sparkles size={14} />
+          <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400 md:text-xs md:tracking-[0.3em]">
+            <Sparkles size={12} />
             EGIA LIVE
           </p>
-          <h1 className="truncate text-xl font-semibold text-slate-900 md:text-3xl">
+          <h1 className="truncate text-lg font-semibold leading-tight text-slate-900 md:text-3xl">
             {title}
           </h1>
           {subtitle && (
-            <p className="mt-1 line-clamp-2 text-sm text-slate-500">
+            <p className="mt-1 hidden line-clamp-2 text-sm text-slate-500 sm:block">
               {subtitle}
             </p>
           )}
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-2 md:gap-3">
+      <div className="flex shrink-0 items-center gap-1.5 md:gap-3">
         {userEmail && (
           <div className="hidden h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm sm:flex">
             {brandingQuery.isLoading ? (
@@ -129,10 +129,11 @@ const Topbar = ({
           <Button
             variant="ghost"
             size="sm"
-            className="relative rounded-full"
+            className="relative h-11 w-11 rounded-2xl p-0 md:h-9 md:w-auto md:px-3"
             onClick={handleNotificationClick}
+            aria-label="Voir les notifications"
           >
-            <Bell size={16} />
+            <Bell size={18} />
             {unreadCount > 0 && (
               <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-semibold text-white">
                 {unreadCount > 9 ? "9+" : unreadCount}

@@ -5,13 +5,18 @@ import { usePwaInstall } from "../hooks/usePwaInstall";
 type InstallAppCTAProps = {
   onFallback: () => void;
   className?: string;
+  hideManualInstall?: boolean;
 };
 
-const InstallAppCTA = ({ onFallback, className }: InstallAppCTAProps) => {
+const InstallAppCTA = ({
+  onFallback,
+  className,
+  hideManualInstall = false
+}: InstallAppCTAProps) => {
   const { canInstall, isDismissed, isInstalled, install, platform } =
     usePwaInstall();
 
-  if (isInstalled || isDismissed || !canInstall) {
+  if (isInstalled || isDismissed || !canInstall || (hideManualInstall && platform === "ios")) {
     return null;
   }
 
@@ -34,11 +39,11 @@ const InstallAppCTA = ({ onFallback, className }: InstallAppCTAProps) => {
       type="button"
       onClick={handleClick}
       className={cn(
-        "flex w-full items-center gap-3 rounded-2xl bg-ink px-4 py-3 text-left text-white shadow-lg transition hover:bg-ink/90",
+        "flex w-full min-h-11 items-center gap-3 rounded-2xl bg-ink px-3 py-2.5 text-left text-white shadow-lg transition hover:bg-ink/90",
         className
       )}
     >
-      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10">
         <Download size={18} />
       </span>
       <span className="flex flex-col leading-tight">
