@@ -8,6 +8,9 @@ import "./index.css";
 import { queryClient } from "./lib/queryClient";
 import { PWAInstallProvider } from "./components/pwa/PWAInstallProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { registerServiceWorker } from "./lib/registerServiceWorker";
+
+registerServiceWorker();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

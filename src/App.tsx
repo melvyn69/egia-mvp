@@ -31,6 +31,7 @@ import { SyncStatus } from "./pages/SyncStatus";
 import AIJobHealth from "./pages/AIJobHealth";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
+import { OfflineBanner } from "./components/pwa/OfflineBanner";
 import { useGoogleConnectionStatus } from "./hooks/useGoogleConnectionStatus";
 import { isAdminUser } from "./lib/admin";
 import { Button } from "./components/ui/button";
@@ -1204,6 +1205,7 @@ const App = () => {
         </div>
       )}
       {session && usesAppShell && <MobileBottomNav />}
+      <OfflineBanner />
       {errorToast && (
         <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 shadow-lg">
           <div className="flex items-start justify-between gap-3">

@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { detectPlatform } from "./pwaInstall.utils";
+import {
+  clearPwaInstallDismiss,
+  detectPlatform,
+  dismissPwaInstallPrompt,
+  isIosSafari,
+  isPwaInstallDismissed,
+  isStandaloneMode
+} from "./pwaInstall.utils";
 import {
   type BeforeInstallPromptEvent,
   type PWAInstallContextValue,
@@ -9,20 +16,16 @@ import {
 const PWAInstallProvider = ({ children }: { children: React.ReactNode }) => {
   const [deferredPrompt, setDeferredPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
-  const [isInstalled, setIsInstalled] = useState(false);
+  const [isInstalled, setIsInstalled] = useState(() => isStandaloneMode());
+  const [isDismissed, setIsDismissed] = useState(() =>
+    isPwaInstallDismissed()
+  );
 
   const platform = useMemo(() => detectPlatform(), []);
+  const supportsManualInstall = platform === "ios" && isIosSafari();
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const checkInstalled = () => {
-      const standalone =
-        window.matchMedia?.("(display-mode: standalone)").matches ||
-        (navigator as { standalone?: boolean }).standalone === true;
-      setIsInstalled(Boolean(standalone));
-    };
-    checkInstalled();
-
     const handleBeforeInstall = (event: Event) => {
       event.preventDefault();
       setDeferredPrompt(event as BeforeInstallPromptEvent);
@@ -33,6 +36,8 @@ const PWAInstallProvider = ({ children }: { children: React.ReactNode }) => {
     const handleInstalled = () => {
       setIsInstalled(true);
       setDeferredPrompt(null);
+      setIsDismissed(false);
+      clearPwaInstallDismiss();
     };
     window.addEventListener("beforeinstallprompt", handleBeforeInstall);
     window.addEventListener("appinstalled", handleInstalled);
@@ -51,16 +56,37 @@ const PWAInstallProvider = ({ children }: { children: React.ReactNode }) => {
       return "unavailable";
     }
     await deferredPrompt.prompt();
-    await deferredPrompt.userChoice;
+    const choice = await deferredPrompt.userChoice;
     setDeferredPrompt(null);
+    if (choice.outcome === "dismissed") {
+      dismissPwaInstallPrompt();
+      setIsDismissed(true);
+      return "dismissed";
+    }
     return "prompted";
   };
+
+  const dismissPrompt = () => {
+    dismissPwaInstallPrompt();
+    setIsDismissed(true);
+  };
+
+  const canInstall = !isInstalled && (Boolean(deferredPrompt) || supportsManualInstall);
+  const installStatus = isInstalled
+    ? "installed"
+    : canInstall
+      ? "available"
+      : "unavailable";
 
   const value: PWAInstallContextValue = {
     isInstalled,
     isInstallable: Boolean(deferredPrompt),
+    canInstall,
+    isDismissed,
+    installStatus,
     platform,
-    install
+    install,
+    dismissPrompt
   };
 
   return (

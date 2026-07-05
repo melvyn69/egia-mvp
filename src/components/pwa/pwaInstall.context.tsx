@@ -3,7 +3,8 @@
 import { createContext, useContext } from "react";
 import type { PlatformType } from "./pwaInstall.utils";
 
-type InstallResult = "prompted" | "unavailable" | "installed";
+type InstallResult = "prompted" | "dismissed" | "unavailable" | "installed";
+type InstallStatus = "installed" | "available" | "unavailable";
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -13,8 +14,12 @@ type BeforeInstallPromptEvent = Event & {
 type PWAInstallContextValue = {
   isInstalled: boolean;
   isInstallable: boolean;
+  canInstall: boolean;
+  isDismissed: boolean;
+  installStatus: InstallStatus;
   platform: PlatformType;
   install: () => Promise<InstallResult>;
+  dismissPrompt: () => void;
 };
 
 const PWAInstallContext = createContext<PWAInstallContextValue | null>(null);
@@ -31,5 +36,7 @@ export {
   PWAInstallContext,
   usePWAInstall,
   type BeforeInstallPromptEvent,
+  type InstallResult,
+  type InstallStatus,
   type PWAInstallContextValue
 };

@@ -1,6 +1,6 @@
 import { Download } from "lucide-react";
 import { cn } from "../lib/utils";
-import { usePWAInstall } from "./pwa/pwaInstall.context";
+import { usePwaInstall } from "../hooks/usePwaInstall";
 
 type InstallAppCTAProps = {
   onFallback: () => void;
@@ -8,9 +8,10 @@ type InstallAppCTAProps = {
 };
 
 const InstallAppCTA = ({ onFallback, className }: InstallAppCTAProps) => {
-  const { isInstalled, install, platform } = usePWAInstall();
+  const { canInstall, isDismissed, isInstalled, install, platform } =
+    usePwaInstall();
 
-  if (isInstalled) {
+  if (isInstalled || isDismissed || !canInstall) {
     return null;
   }
 

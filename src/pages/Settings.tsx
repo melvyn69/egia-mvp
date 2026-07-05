@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -7,6 +7,8 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
+import { InstallPwaPrompt } from "../components/pwa/InstallPwaPrompt";
+import { usePwaInstall } from "../hooks/usePwaInstall";
 import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
 import { startGoogleConnection } from "../lib/googleAuth";
@@ -241,17 +243,7 @@ const Settings = ({ session }: SettingsProps) => {
   const [syncingLocations, setSyncingLocations] = useState(false);
   const [selectedActiveIds, setSelectedActiveIds] = useState<string[]>([]);
   const [activeLocationsSaving, setActiveLocationsSaving] = useState(false);
-  const deviceHint = useMemo(() => {
-    if (typeof navigator === "undefined") return "desktop";
-    const ua = navigator.userAgent.toLowerCase();
-    if (ua.includes("iphone") || ua.includes("ipad") || ua.includes("ipod")) {
-      return "ios";
-    }
-    if (ua.includes("android")) {
-      return "android";
-    }
-    return "desktop";
-  }, []);
+  const pwaInstall = usePwaInstall();
   const appBaseUrl =
     typeof window === "undefined"
       ? ""
@@ -1405,86 +1397,58 @@ const Settings = ({ session }: SettingsProps) => {
     }
 
     if (activeTab === "mobile") {
-      const iosHighlight = deviceHint === "ios";
-      const androidHighlight = deviceHint === "android";
+      const statusLabel =
+        pwaInstall.installStatus === "installed"
+          ? "Installée"
+          : pwaInstall.installStatus === "available"
+            ? "Disponible"
+            : "Non disponible sur ce navigateur";
+      const statusVariant =
+        pwaInstall.installStatus === "installed"
+          ? "success"
+          : pwaInstall.installStatus === "available"
+            ? "warning"
+            : "neutral";
+      const statusDescription =
+        pwaInstall.installStatus === "installed"
+          ? "EGIA est lancée en mode application sur cet appareil."
+          : pwaInstall.installStatus === "available"
+            ? pwaInstall.isDismissed
+              ? "La proposition d’installation est masquée temporairement."
+              : "Vous pouvez ajouter EGIA à l’écran d’accueil de cet appareil."
+            : "Utilisez Safari sur iPhone ou Chrome sur Android pour installer EGIA.";
+
       return (
         <div className="space-y-6">
+          <InstallPwaPrompt />
+
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-ink/10 text-ink">
-                  <Smartphone size={18} />
+              <CardTitle className="flex flex-wrap items-center justify-between gap-3">
+                <span className="flex items-center gap-2">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-ink/10 text-ink">
+                    <Smartphone size={18} />
+                  </span>
+                  Application mobile
                 </span>
-                Installez EGIA sur votre mobile
+                <Badge variant={statusVariant}>{statusLabel}</Badge>
               </CardTitle>
             </CardHeader>
-            <CardContent className="text-sm text-slate-600">
-              Gérez vos avis et recevez des notifications où que vous soyez,
-              sans passer par l’App Store.
+            <CardContent className="space-y-4 text-sm text-slate-600">
+              <p>
+                Accédez à EGIA en plein écran depuis votre écran d’accueil,
+                sans passer par une boutique d’applications.
+              </p>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  Statut
+                </p>
+                <p className="mt-1 text-sm text-slate-700">
+                  {statusDescription}
+                </p>
+              </div>
             </CardContent>
           </Card>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card
-              className={
-                iosHighlight ? "border-2 border-ink/40 shadow-sm" : ""
-              }
-            >
-              <CardHeader>
-                <CardTitle>Sur iPhone (iOS)</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm text-slate-700">
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
-                    1
-                  </span>
-                  <p>Ouvrez EGIA dans Safari.</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
-                    2
-                  </span>
-                  <p>Appuyez sur “Partager”.</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
-                    3
-                  </span>
-                  <p>Choisissez “Sur l’écran d’accueil”.</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card
-              className={
-                androidHighlight ? "border-2 border-ink/40 shadow-sm" : ""
-              }
-            >
-              <CardHeader>
-                <CardTitle>Sur Android</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm text-slate-700">
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
-                    1
-                  </span>
-                  <p>Ouvrez EGIA dans Chrome.</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
-                    2
-                  </span>
-                  <p>Appuyez sur le menu ⋮.</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
-                    3
-                  </span>
-                  <p>Sélectionnez “Installer l’application”.</p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
 
           <Card>
             <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
