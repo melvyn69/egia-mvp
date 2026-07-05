@@ -9,18 +9,21 @@ import {
   Copy,
   Crown,
   ExternalLink,
+  Flame,
   Gem,
   Gift,
+  Heart,
   Mail,
+  MessageCircle,
   Medal,
   Minus,
   PartyPopper,
   Quote,
+  Search,
   Settings,
   Sparkles,
   Sprout,
   Star,
-  TrendingDown,
   TrendingUp,
   Trophy,
   UserPlus,
@@ -106,6 +109,37 @@ type MonthlyTeamStats = {
   bestScore: number;
   mostMentionedMemberId: string | null;
   qualityTrends: QualityTrend[];
+};
+
+type ComplimentSort = "recent" | "popular" | "rating";
+
+type ClientCompliment = {
+  id: string;
+  reviewId: string;
+  memberId: string;
+  memberName: string;
+  memberRole: string | null;
+  quote: string;
+  rating: number | null;
+  date: string | null;
+  qualities: QualityStat[];
+  popularity: number;
+};
+
+type CareerMentionEntry = {
+  memberId: string;
+  firstName: string;
+  role: string | null;
+  imageUrl?: string | null;
+  mentions: number;
+  latestDate: string | null;
+};
+
+type RecognitionRecord = {
+  label: string;
+  value: string;
+  memberName: string;
+  detail: string;
 };
 
 const POSITIVE_RATING_THRESHOLD = 4;
@@ -267,6 +301,23 @@ const formatRating = (value: number | null) =>
 const formatCount = (value: number, singular: string, plural: string) =>
   `${value} ${value > 1 ? plural : singular}`;
 
+const getTimestamp = (value: string | null) => {
+  if (!value) return 0;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const formatClientDate = (value: string | null) => {
+  if (!value) return "Date non disponible";
+  const timestamp = getTimestamp(value);
+  if (!timestamp) return "Date non disponible";
+  return new Date(timestamp).toLocaleDateString("fr-FR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
+  });
+};
+
 const getMonthLabel = (value: string) => {
   const [year, month] = value.split("-").map(Number);
   if (!year || !month) return "Mois en cours";
@@ -351,6 +402,9 @@ const extractClientQuotes = (comments: string[]) => {
   return quotes.slice(0, 3);
 };
 
+const extractPrimaryQuote = (comment: string) =>
+  extractClientQuotes([comment])[0] ?? truncateText(comment, 180);
+
 const countQualityTerms = (comments: string[]) => {
   const counts = new Map<string, number>();
 
@@ -368,6 +422,9 @@ const countQualityTerms = (comments: string[]) => {
 
   return counts;
 };
+
+const sumQualityCounts = (qualities: QualityStat[]) =>
+  qualities.reduce((acc, quality) => acc + quality.count, 0);
 
 const getQualityTrends = (
   currentComments: string[],
@@ -396,6 +453,290 @@ const getQualityTrends = (
       return b.current - a.current;
     })
     .slice(0, 3);
+};
+
+const getClientCompliments = (
+  members: MemberRow[],
+  reviews: ReviewRow[]
+): ClientCompliment[] => {
+  const activeMembers = members.filter((member) => member.is_active ?? true);
+  const membersById = new Map(activeMembers.map((member) => [member.id, member]));
+  const seen = new Set<string>();
+  const compliments: ClientCompliment[] = [];
+
+  reviews.forEach((review) => {
+    if (!isPositiveReview(review) || !review.comment?.trim()) return;
+    const mentionedMemberIds = countMentions(review.comment, activeMembers);
+    if (mentionedMemberIds.length === 0) return;
+
+    const quote = extractPrimaryQuote(review.comment);
+    const qualities = extractPositiveQualities([review.comment]);
+    const rating = getNumericRating(review.rating);
+
+    mentionedMemberIds.forEach((memberId) => {
+      const member = membersById.get(memberId);
+      if (!member) return;
+      const key = `${review.id}-${member.id}-${normalizeForMatching(quote)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      compliments.push({
+        id: key,
+        reviewId: review.id,
+        memberId: member.id,
+        memberName: member.first_name,
+        memberRole: member.role,
+        quote,
+        rating,
+        date: review.create_time,
+        qualities,
+        popularity: (rating ?? 0) * 10 + sumQualityCounts(qualities)
+      });
+    });
+  });
+
+  return compliments.sort((a, b) => getTimestamp(b.date) - getTimestamp(a.date));
+};
+
+const getCareerMentionLeaders = (
+  members: MemberRow[],
+  reviews: ReviewRow[]
+): CareerMentionEntry[] => {
+  const activeMembers = members.filter((member) => member.is_active ?? true);
+  const counts = new Map<string, { mentions: number; latestDate: string | null }>();
+
+  reviews.forEach((review) => {
+    if (!isPositiveReview(review) || !review.comment?.trim()) return;
+    const mentionedMemberIds = countMentions(review.comment, activeMembers);
+    mentionedMemberIds.forEach((memberId) => {
+      const current = counts.get(memberId) ?? { mentions: 0, latestDate: null };
+      const latestDate =
+        getTimestamp(review.create_time) > getTimestamp(current.latestDate)
+          ? review.create_time
+          : current.latestDate;
+      counts.set(memberId, {
+        mentions: current.mentions + 1,
+        latestDate
+      });
+    });
+  });
+
+  return activeMembers
+    .map((member) => {
+      const count = counts.get(member.id);
+      return {
+        memberId: member.id,
+        firstName: member.first_name,
+        role: member.role,
+        imageUrl: getMemberImageUrl(member),
+        mentions: count?.mentions ?? 0,
+        latestDate: count?.latestDate ?? null
+      };
+    })
+    .filter((entry) => entry.mentions > 0)
+    .sort((a, b) => {
+      if (b.mentions !== a.mentions) return b.mentions - a.mentions;
+      return a.firstName.localeCompare(b.firstName, "fr");
+    });
+};
+
+const getMemberMonthlyMentionCounts = (
+  members: MemberRow[],
+  reviews: ReviewRow[]
+) => {
+  const activeMembers = members.filter((member) => member.is_active ?? true);
+  const counts = new Map<string, Map<string, number>>();
+
+  activeMembers.forEach((member) => counts.set(member.id, new Map()));
+
+  reviews.forEach((review) => {
+    if (!isPositiveReview(review) || !review.comment?.trim() || !review.create_time) {
+      return;
+    }
+    const monthKey = getMonthKey(new Date(review.create_time));
+    countMentions(review.comment, activeMembers).forEach((memberId) => {
+      const memberCounts = counts.get(memberId);
+      if (!memberCounts) return;
+      memberCounts.set(monthKey, (memberCounts.get(monthKey) ?? 0) + 1);
+    });
+  });
+
+  return counts;
+};
+
+const getMonthIndex = (monthKey: string) => {
+  const [year, month] = monthKey.split("-").map(Number);
+  return year * 12 + month;
+};
+
+const getLongestConsecutiveStreak = (monthKeys: string[]) => {
+  if (monthKeys.length === 0) return 0;
+  const indexes = [...new Set(monthKeys.map(getMonthIndex))].sort((a, b) => a - b);
+  let longest = 1;
+  let current = 1;
+
+  for (let index = 1; index < indexes.length; index += 1) {
+    if (indexes[index] === indexes[index - 1] + 1) {
+      current += 1;
+      longest = Math.max(longest, current);
+    } else {
+      current = 1;
+    }
+  }
+
+  return longest;
+};
+
+const getHallOfFameEntries = (
+  members: MemberRow[],
+  reviews: ReviewRow[],
+  currentMonthStart: Date
+) => {
+  const reviewsByMonth = new Map<string, ReviewRow[]>();
+
+  reviews.forEach((review) => {
+    if (!review.create_time) return;
+    const reviewDate = new Date(review.create_time);
+    if (reviewDate.getTime() >= currentMonthStart.getTime()) return;
+    const monthKey = getMonthKey(reviewDate);
+    const monthReviews = reviewsByMonth.get(monthKey) ?? [];
+    monthReviews.push(review);
+    reviewsByMonth.set(monthKey, monthReviews);
+  });
+
+  return Array.from(reviewsByMonth.entries())
+    .map(([monthKey, monthReviews]): HallOfFameEntry | null => {
+      const stats = getMonthlyTeamStats(members, monthReviews, []);
+      const winner = stats.employeeOfMonth;
+      if (!winner || winner.positiveCount <= 0) return null;
+
+      return {
+        monthKey,
+        monthLabel: getMonthLabel(monthKey),
+        memberId: winner.id,
+        firstName: winner.first_name,
+        role: winner.role,
+        positiveCount: winner.positiveCount,
+        avgRating: winner.avgRating
+      };
+    })
+    .filter((entry): entry is HallOfFameEntry => Boolean(entry))
+    .sort((a, b) => b.monthKey.localeCompare(a.monthKey));
+};
+
+const groupHallOfFameByYear = (entries: HallOfFameEntry[]) => {
+  const groups = new Map<string, HallOfFameEntry[]>();
+  entries.forEach((entry) => {
+    const year = entry.monthKey.slice(0, 4);
+    const group = groups.get(year) ?? [];
+    group.push(entry);
+    groups.set(year, group);
+  });
+  return Array.from(groups.entries()).sort(([yearA], [yearB]) =>
+    yearB.localeCompare(yearA)
+  );
+};
+
+const getRecognitionRecords = (
+  members: MemberRow[],
+  reviews: ReviewRow[],
+  currentStats: MonthlyTeamStats
+): RecognitionRecord[] => {
+  const activeMembers = members.filter((member) => member.is_active ?? true);
+  if (activeMembers.length === 0) return [];
+
+  const membersById = new Map(activeMembers.map((member) => [member.id, member]));
+  const careerLeaders = getCareerMentionLeaders(activeMembers, reviews);
+  const monthlyCounts = getMemberMonthlyMentionCounts(activeMembers, reviews);
+  const records: RecognitionRecord[] = [];
+
+  const topCareer = careerLeaders[0];
+  if (topCareer) {
+    records.push({
+      label: "Plus grand nombre de mentions",
+      value: formatCount(topCareer.mentions, "mention", "mentions"),
+      memberName: topCareer.firstName,
+      detail: "Total cumulé sur les avis positifs disponibles."
+    });
+  }
+
+  const monthlyRecordCandidates: Array<{
+    memberId: string;
+    monthKey: string;
+    count: number;
+  }> = [];
+  monthlyCounts.forEach((counts, memberId) => {
+    counts.forEach((count, monthKey) => {
+      monthlyRecordCandidates.push({ memberId, monthKey, count });
+    });
+  });
+  const bestMonth = monthlyRecordCandidates.sort((a, b) => b.count - a.count)[0];
+  if (bestMonth) {
+    records.push({
+      label: "Meilleur mois",
+      value: formatCount(bestMonth.count, "mention", "mentions"),
+      memberName: membersById.get(bestMonth.memberId)?.first_name ?? "Équipe",
+      detail: getMonthLabel(bestMonth.monthKey)
+    });
+  }
+
+  const bestProgression = currentStats.memberStats
+    .filter((member) => member.is_active)
+    .sort((a, b) => {
+      if (b.progression !== a.progression) return b.progression - a.progression;
+      return b.positiveCount - a.positiveCount;
+    })[0];
+  if (bestProgression && bestProgression.progression > 0) {
+    records.push({
+      label: "Plus forte progression",
+      value: `+${bestProgression.progression}`,
+      memberName: bestProgression.first_name,
+      detail: "Comparé au mois précédent."
+    });
+  }
+
+  const streakCandidates: Array<{
+    memberId: string;
+    streak: number;
+    months: number;
+  }> = [];
+
+  monthlyCounts.forEach((counts, memberId) => {
+    const positiveMonthKeys = Array.from(counts.entries())
+      .filter(([, count]) => count > 0)
+      .map(([monthKey]) => monthKey);
+    streakCandidates.push({
+      memberId,
+      streak: getLongestConsecutiveStreak(positiveMonthKeys),
+      months: positiveMonthKeys.length
+    });
+  });
+
+  const longestStreak = [...streakCandidates].sort(
+    (a, b) => b.streak - a.streak
+  )[0];
+  const mostRegular = [...streakCandidates].sort(
+    (a, b) => b.months - a.months
+  )[0];
+
+  if (longestStreak && longestStreak.streak > 1) {
+    records.push({
+      label: "Plus longue série",
+      value: `${longestStreak.streak} mois`,
+      memberName: membersById.get(longestStreak.memberId)?.first_name ?? "Équipe",
+      detail: "Avec au moins une mention positive chaque mois."
+    });
+  }
+
+  if (mostRegular && mostRegular.months > 0) {
+    records.push({
+      label: "Collaborateur le plus régulier",
+      value: `${mostRegular.months} mois`,
+      memberName: membersById.get(mostRegular.memberId)?.first_name ?? "Équipe",
+      detail: "Présence la plus fréquente dans les avis positifs."
+    });
+  }
+
+  return records.slice(0, 5);
 };
 
 const getRecognitionLevel = (count: number) => {
@@ -439,17 +780,17 @@ const getEvolutionMeta = (current: number, previous: number) => {
   const percent =
     previous > 0 ? Math.round((delta / previous) * 100) : null;
   const display =
-    percent !== null && delta !== 0
+    percent !== null && delta > 0
       ? `${percent > 0 ? "+" : ""}${percent}%`
       : delta === 0
         ? "Stable"
-        : `${delta > 0 ? "+" : ""}${delta} mention${Math.abs(delta) > 1 ? "s" : ""}`;
+        : "À relancer";
   const details =
-    delta === 0
+    delta > 0
+      ? `+${delta} mention${delta > 1 ? "s" : ""} positive${delta > 1 ? "s" : ""}`
+      : delta === 0
       ? "Même niveau que le mois précédent"
-      : `${delta > 0 ? "+" : ""}${delta} mention${
-          Math.abs(delta) > 1 ? "s" : ""
-        } positive${Math.abs(delta) > 1 ? "s" : ""}`;
+      : "Une prochaine demande d'avis peut créer une nouvelle mention";
 
   return { delta, direction, display, details };
 };
@@ -681,59 +1022,6 @@ const getMonthlyTeamStats = (
   };
 };
 
-const getHallOfFameEntries = (
-  members: MemberRow[],
-  reviews: ReviewRow[],
-  currentMonthStart: Date,
-  historyStart: Date
-) => {
-  const monthStarts: Date[] = [];
-  const cursor = new Date(
-    currentMonthStart.getFullYear(),
-    currentMonthStart.getMonth() - 1,
-    1
-  );
-
-  while (
-    cursor.getTime() >= historyStart.getTime() &&
-    monthStarts.length < 6
-  ) {
-    monthStarts.push(new Date(cursor));
-    cursor.setMonth(cursor.getMonth() - 1);
-  }
-
-  return monthStarts
-    .map((monthStart): HallOfFameEntry | null => {
-      const monthEnd = new Date(
-        monthStart.getFullYear(),
-        monthStart.getMonth() + 1,
-        0,
-        23,
-        59,
-        59,
-        999
-      );
-      const monthReviews = reviews.filter((review) =>
-        isWithinRange(review, monthStart, monthEnd)
-      );
-      const stats = getMonthlyTeamStats(members, monthReviews, []);
-      const winner = stats.employeeOfMonth;
-      if (!winner || winner.positiveCount <= 0) return null;
-
-      return {
-        monthKey: getMonthKey(monthStart),
-        monthLabel: getMonthLabel(getMonthKey(monthStart)),
-        memberId: winner.id,
-        firstName: winner.first_name,
-        role: winner.role,
-        positiveCount: winner.positiveCount,
-        avgRating: winner.avgRating
-      };
-    })
-    .filter((entry): entry is HallOfFameEntry => Boolean(entry))
-    .reverse();
-};
-
 const podiumMeta = [
   {
     rank: 1,
@@ -760,6 +1048,23 @@ const podiumMeta = [
   }
 ];
 
+type PodiumPosition = "first" | "second" | "third";
+
+const getPodiumSlots = (podium: MemberStat[]) =>
+  [
+    { member: podium[1] ?? null, meta: podiumMeta[1], position: "second" },
+    { member: podium[0] ?? null, meta: podiumMeta[0], position: "first" },
+    { member: podium[2] ?? null, meta: podiumMeta[2], position: "third" }
+  ].filter(
+    (
+      slot
+    ): slot is {
+      member: MemberStat;
+      meta: (typeof podiumMeta)[number];
+      position: PodiumPosition;
+    } => Boolean(slot.member)
+  );
+
 const TeamRanking = ({ session }: TeamRankingProps) => {
   const supabaseClient = supabase;
   const [firstName, setFirstName] = useState("");
@@ -773,6 +1078,9 @@ const TeamRanking = ({ session }: TeamRankingProps) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [complimentFilter, setComplimentFilter] = useState("all");
+  const [complimentSearch, setComplimentSearch] = useState("");
+  const [complimentSort, setComplimentSort] = useState<ComplimentSort>("recent");
 
   const monthRange = useMemo(() => getMonthRange(month), [month]);
   const monthLabel = useMemo(() => getMonthLabel(month), [month]);
@@ -816,13 +1124,7 @@ const TeamRanking = ({ session }: TeamRankingProps) => {
   });
 
   const reviewsQuery = useQuery({
-    queryKey: [
-      "team-reviews",
-      session?.user?.id ?? null,
-      month,
-      monthRange.historyStart.toISOString(),
-      monthRange.end.toISOString()
-    ],
+    queryKey: ["team-reviews", session?.user?.id ?? null],
     queryFn: async () => {
       if (!supabaseClient || !session?.user?.id) {
         return [] as ReviewRow[];
@@ -831,8 +1133,7 @@ const TeamRanking = ({ session }: TeamRankingProps) => {
         .from("google_reviews")
         .select("id, rating, comment, create_time, location_id, author_name")
         .eq("user_id", session.user.id)
-        .gte("create_time", monthRange.historyStart.toISOString())
-        .lte("create_time", monthRange.end.toISOString());
+        .order("create_time", { ascending: false });
       if (queryError) {
         throw queryError;
       }
@@ -874,10 +1175,13 @@ const TeamRanking = ({ session }: TeamRankingProps) => {
       getHallOfFameEntries(
         members,
         allReviews,
-        monthRange.start,
-        monthRange.historyStart
+        monthRange.start
       ),
-    [allReviews, members, monthRange.historyStart, monthRange.start]
+    [allReviews, members, monthRange.start]
+  );
+  const hallOfFameByYear = useMemo(
+    () => groupHallOfFameByYear(hallOfFameEntries),
+    [hallOfFameEntries]
   );
 
   const activeMembers = useMemo(
@@ -885,14 +1189,65 @@ const TeamRanking = ({ session }: TeamRankingProps) => {
     [members]
   );
   const podium = monthlyStats.rankedMembers.slice(0, 3);
-  const podiumMembers = podium.map((member, index) => ({
-    member,
-    meta: podiumMeta[index]
-  }));
+  const podiumSlots = getPodiumSlots(podium);
   const employeeOfMonth = monthlyStats.employeeOfMonth;
   const hasRealWinner = Boolean(employeeOfMonth && employeeOfMonth.positiveCount > 0);
   const citedMemberStats = monthlyStats.memberStats.filter(
     (member) => member.is_active && member.mentions > 0
+  );
+  const positiveReviewsThisMonth = currentReviews.filter(isPositiveReview).length;
+  const employeeRecognitionShare =
+    employeeOfMonth && positiveReviewsThisMonth > 0
+      ? Math.round((employeeOfMonth.positiveCount / positiveReviewsThisMonth) * 100)
+      : 0;
+  const allCompliments = useMemo(
+    () => getClientCompliments(members, allReviews),
+    [allReviews, members]
+  );
+  const complimentFilters = useMemo(() => {
+    const uniqueMembers = new Map<string, string>();
+    allCompliments.forEach((compliment) => {
+      uniqueMembers.set(compliment.memberId, compliment.memberName);
+    });
+    return [
+      { id: "all", label: "Tous" },
+      ...Array.from(uniqueMembers.entries()).map(([id, label]) => ({
+        id,
+        label
+      }))
+    ];
+  }, [allCompliments]);
+  const visibleCompliments = useMemo(() => {
+    const search = normalizeForMatching(complimentSearch);
+    return allCompliments
+      .filter((compliment) => {
+        const matchesMember =
+          complimentFilter === "all" || compliment.memberId === complimentFilter;
+        const searchable = normalizeForMatching(
+          `${compliment.quote} ${compliment.memberName} ${compliment.qualities
+            .map((quality) => quality.label)
+            .join(" ")}`
+        );
+        const matchesSearch = !search || searchable.includes(search);
+        return matchesMember && matchesSearch;
+      })
+      .sort((a, b) => {
+        if (complimentSort === "rating") {
+          if ((b.rating ?? 0) !== (a.rating ?? 0)) {
+            return (b.rating ?? 0) - (a.rating ?? 0);
+          }
+          return getTimestamp(b.date) - getTimestamp(a.date);
+        }
+        if (complimentSort === "popular") {
+          if (b.popularity !== a.popularity) return b.popularity - a.popularity;
+          return getTimestamp(b.date) - getTimestamp(a.date);
+        }
+        return getTimestamp(b.date) - getTimestamp(a.date);
+      });
+  }, [allCompliments, complimentFilter, complimentSearch, complimentSort]);
+  const recognitionRecords = useMemo(
+    () => getRecognitionRecords(members, allReviews, monthlyStats),
+    [allReviews, members, monthlyStats]
   );
 
   const emailDraft = useMemo(() => {
@@ -914,6 +1269,9 @@ Bravo encore,
 L'équipe`;
     return { subject, body };
   }, [employeeOfMonth, monthLabel]);
+
+  const settingsEnabled =
+    teamSettingsQuery.data?.enabled ?? teamEnabled ?? true;
 
   const handleToggleTeam = async (next: boolean) => {
     if (!supabaseClient || !session?.user?.id) {
@@ -1000,10 +1358,6 @@ ${emailDraft.body}`;
     setTimeout(() => setMessage(null), 3000);
   };
 
-  const settingsEnabled =
-    teamSettingsQuery.data?.enabled ?? teamEnabled ?? true;
-  const settingsLoaded = teamSettingsQuery.isFetched || !session?.user?.id;
-  const hasCelebration = settingsLoaded && settingsEnabled && hasRealWinner;
   const employeeLevel = employeeOfMonth
     ? getRecognitionLevel(employeeOfMonth.positiveCount)
     : null;
@@ -1036,35 +1390,55 @@ ${emailDraft.body}`;
           : "Le podium se remplira dès qu'un avis positif citera précisément un membre actif de l'équipe.";
 
   return (
-    <div className="space-y-6">
+    <div className="team-page">
       <style>
         {`@keyframes teamPodiumIn {
-          from { opacity: 0; transform: translateY(14px) scale(0.98); }
+          0% { opacity: 0; transform: translateY(28px) scale(0.96); }
+          70% { opacity: 1; transform: translateY(-6px) scale(1.015); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes teamFadeUp {
+          from { opacity: 0; transform: translateY(16px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes teamCounterPop {
+          from { opacity: 0; transform: translateY(8px) scale(0.98); }
           to { opacity: 1; transform: translateY(0) scale(1); }
-        }`}
+        }
+        .team-motion-card {
+          animation: teamFadeUp 520ms ease-out both;
+          transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+        }
+        .team-motion-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 22px 55px rgba(15, 23, 42, 0.08);
+        }
+        .team-counter {
+          animation: teamCounterPop 480ms ease-out both;
+        }
+        .team-podium-stage {
+          perspective: 1000px;
+        }
+        .team-podium-block {
+          transform: rotateX(56deg) rotateZ(-1deg);
+          transform-origin: bottom center;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .team-motion-card,
+          .team-counter {
+            animation: none !important;
+            transition: none !important;
+          }
+          .team-motion-card:hover {
+            transform: none;
+          }
+        }
+        `}
       </style>
+
+      <div className="team-screen space-y-6">
       <section className="relative overflow-hidden rounded-2xl bg-slate-950 p-5 text-white shadow-[0_24px_70px_rgba(2,6,23,0.20)] sm:p-6 lg:p-8">
         <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-amber-400 via-emerald-400 to-sky-400" />
-        {hasCelebration && (
-          <div className="pointer-events-none absolute right-5 top-5 hidden h-24 w-32 sm:block">
-            {["bg-amber-300", "bg-emerald-300", "bg-sky-300", "bg-rose-300"].map(
-              (color, index) => (
-                <span
-                  key={color}
-                  className={cn(
-                    "absolute block h-2 w-7 rounded-full opacity-80 shadow-sm",
-                    color
-                  )}
-                  style={{
-                    left: `${index * 24}px`,
-                    top: `${(index % 2) * 28}px`,
-                    transform: `rotate(${index % 2 === 0 ? 18 : -24}deg)`
-                  }}
-                />
-              )
-            )}
-          </div>
-        )}
 
         <div className="relative grid gap-6 xl:grid-cols-[1fr_auto] xl:items-end">
           <div className="max-w-3xl space-y-3">
@@ -1226,7 +1600,7 @@ ${emailDraft.body}`;
                     <Skeleton className="h-64 w-full rounded-2xl" />
                     <Skeleton className="h-56 w-full rounded-2xl" />
                   </div>
-                ) : podiumMembers.length === 0 ? (
+                ) : podiumSlots.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-8 text-center">
                     <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-white text-slate-600 shadow-sm">
                       <Trophy className="h-6 w-6" />
@@ -1239,71 +1613,118 @@ ${emailDraft.body}`;
                     </p>
                   </div>
                 ) : (
-                  <div className="grid gap-4 md:grid-cols-[0.9fr_1.1fr_0.9fr] md:items-end">
-                    {podiumMembers.map(({ member, meta }) => (
-                      <article
-                        key={member.id}
-                        className={cn(
-                          "relative rounded-2xl border p-5 text-center transition",
-                          meta.className
-                        )}
-                        style={{
-                          animation: "teamPodiumIn 520ms ease-out both",
-                          animationDelay: `${meta.rank * 90}ms`
-                        }}
-                      >
-                        {meta.rank === 1 && hasCelebration && (
-                          <div className="absolute -top-3 left-1/2 flex -translate-x-1/2 gap-1">
-                            <span className="h-2 w-6 rotate-12 rounded-full bg-amber-300" />
-                            <span className="h-2 w-6 -rotate-12 rounded-full bg-emerald-300" />
-                            <span className="h-2 w-6 rotate-6 rounded-full bg-sky-300" />
-                          </div>
-                        )}
-                        <div
+                  <div className="team-podium-stage rounded-[28px] bg-gradient-to-b from-slate-50 via-white to-slate-100/70 p-4 sm:p-6">
+                    <div className="grid gap-4 md:grid-cols-[0.85fr_1.2fr_0.85fr] md:items-end">
+                      {podiumSlots.map(({ member, meta, position }, index) => (
+                        <article
+                          key={member.id}
                           className={cn(
-                            "mx-auto flex h-12 w-12 items-center justify-center rounded-full",
-                            meta.iconClassName
+                            "team-motion-card relative flex flex-col items-center text-center",
+                            position === "first" && "md:col-start-2 md:order-2",
+                            position === "second" && "md:col-start-1 md:order-1",
+                            position === "third" && "md:col-start-3 md:order-3"
                           )}
+                          style={{
+                            animation: "teamPodiumIn 640ms cubic-bezier(.2,.9,.2,1) both",
+                            animationDelay: `${index * 110}ms`
+                          }}
                         >
-                          <meta.Icon className="h-6 w-6" />
-                        </div>
-                        <Badge className="mt-4 border-white bg-white/80 text-slate-700">
-                          {meta.label}
-                        </Badge>
-                        <p className="mt-4 text-2xl font-semibold text-slate-950">
-                          {member.first_name}
-                        </p>
-                        <p className="text-sm text-slate-500">
-                          {member.role ?? "Collaborateur"}
-                        </p>
-                        <div className="mt-5 grid grid-cols-2 gap-2 text-left">
-                          <div className="rounded-xl bg-white/75 p-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                              Mentions
+                          <div
+                            className={cn(
+                              "relative z-10 rounded-[28px] border bg-white/92 p-4 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur",
+                              position === "first"
+                                ? "w-full max-w-[260px] border-amber-200"
+                                : "w-full max-w-[220px] border-slate-200"
+                            )}
+                          >
+                            <div className="absolute -top-5 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-white bg-white px-2 py-1 shadow-sm">
+                              <meta.Icon
+                                className={cn(
+                                  "h-4 w-4",
+                                  position === "first"
+                                    ? "text-amber-600"
+                                    : position === "second"
+                                      ? "text-slate-500"
+                                      : "text-orange-600"
+                                )}
+                              />
+                              <span className="text-xs font-semibold text-slate-700">
+                                {meta.label}
+                              </span>
+                            </div>
+                            <div
+                              className={cn(
+                                "mx-auto flex items-center justify-center rounded-[24px] bg-slate-950 text-white shadow-[0_16px_35px_rgba(15,23,42,0.18)]",
+                                position === "first"
+                                  ? "h-20 w-20 text-2xl"
+                                  : "h-16 w-16 text-lg"
+                              )}
+                            >
+                              {initialsFromName(member.first_name)}
+                            </div>
+                            <p
+                              className={cn(
+                                "mt-4 font-semibold tracking-normal text-slate-950",
+                                position === "first" ? "text-3xl" : "text-2xl"
+                              )}
+                            >
+                              {member.first_name}
                             </p>
-                            <p className="mt-1 text-lg font-semibold text-slate-900">
-                              {member.positiveCount}
+                            <p className="text-sm text-slate-500">
+                              {member.role ?? "Collaborateur"}
+                            </p>
+                            <div className="mt-4 grid grid-cols-2 gap-2">
+                              <div className="rounded-2xl bg-slate-50 p-3 text-left">
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                  Mentions
+                                </p>
+                                <p className="team-counter mt-1 text-2xl font-semibold text-slate-950">
+                                  {member.positiveCount}
+                                </p>
+                              </div>
+                              <div className="rounded-2xl bg-slate-50 p-3 text-left">
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                  Note
+                                </p>
+                                <p className="team-counter mt-1 text-2xl font-semibold text-slate-950">
+                                  {formatRating(member.avgRating)}
+                                </p>
+                              </div>
+                            </div>
+                            <p className="mt-4 text-sm leading-6 text-slate-600">
+                              {member.qualities.length > 0
+                                ? `Les clients associent ${member.first_name} à ${member.qualities
+                                    .map((quality) => quality.label)
+                                    .slice(0, 2)
+                                    .join(" et ")}.`
+                                : "Une mise en lumière portée par les avis clients positifs."}
                             </p>
                           </div>
-                          <div className="rounded-xl bg-white/75 p-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                              Note moy.
-                            </p>
-                            <p className="mt-1 text-lg font-semibold text-slate-900">
-                              {formatRating(member.avgRating)}
-                            </p>
+                          <div
+                            className={cn(
+                              "team-podium-block mt-2 w-full max-w-[260px] rounded-[18px] border shadow-[0_18px_45px_rgba(15,23,42,0.12)]",
+                              position === "first"
+                                ? "h-28 border-amber-200 bg-gradient-to-br from-amber-200 via-amber-100 to-white"
+                                : position === "second"
+                                  ? "h-20 border-slate-200 bg-gradient-to-br from-slate-200 via-white to-slate-100"
+                                  : "h-16 border-orange-200 bg-gradient-to-br from-orange-200 via-orange-100 to-white"
+                            )}
+                          />
+                          <div
+                            className={cn(
+                              "mt-1 rounded-full px-3 py-1 text-xs font-semibold",
+                              position === "first"
+                                ? "bg-amber-50 text-amber-700"
+                                : position === "second"
+                                  ? "bg-slate-100 text-slate-600"
+                                  : "bg-orange-50 text-orange-700"
+                            )}
+                          >
+                            #{meta.rank}
                           </div>
-                        </div>
-                        <p className="mt-4 text-sm leading-6 text-slate-600">
-                          {member.qualities.length > 0
-                            ? `Les clients remarquent surtout ${member.qualities
-                                .map((quality) => quality.label)
-                                .slice(0, 2)
-                                .join(" et ")}.`
-                            : "Une belle mise en avant portée par les retours clients positifs."}
-                        </p>
-                      </article>
-                    ))}
+                        </article>
+                      ))}
+                    </div>
                   </div>
                 )}
               </CardContent>
@@ -1358,13 +1779,19 @@ ${emailDraft.body}`;
                         {employeeSummary}
                       </p>
 
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="rounded-xl bg-slate-50 p-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                            Mentions
+                      <div className="grid gap-2 sm:grid-cols-[1.2fr_0.8fr_0.8fr]">
+                        <div className="rounded-2xl bg-slate-950 p-4 text-white">
+                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                            Score de reconnaissance
                           </p>
-                          <p className="mt-1 text-lg font-semibold text-slate-900">
-                            {employeeOfMonth.positiveCount}
+                          <p className="mt-3 text-sm leading-6 text-slate-300">
+                            Les clients parlent de {employeeOfMonth.first_name} dans
+                          </p>
+                          <p className="team-counter mt-1 text-5xl font-semibold text-white">
+                            {employeeRecognitionShare}%
+                          </p>
+                          <p className="text-sm text-slate-300">
+                            des avis positifs.
                           </p>
                         </div>
                         <div className="rounded-xl bg-slate-50 p-3">
@@ -1513,41 +1940,57 @@ ${emailDraft.body}`;
                     <div>
                       <CardTitle>Hall of Fame</CardTitle>
                       <p className="text-sm text-slate-500">
-                        Précédents employés du mois calculés à partir des avis.
+                        Frise chronologique des reconnaissances mensuelles.
                       </p>
                     </div>
                     <Trophy className="h-5 w-5 text-amber-600" />
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {hallOfFameEntries.length === 0 ? (
+                  {hallOfFameByYear.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
                       Le premier employé du mois apparaîtra ici.
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {hallOfFameEntries.map((entry) => (
-                        <div
-                          key={entry.monthKey}
-                          className="flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-white p-3"
-                        >
-                          <div className="flex items-center gap-3">
-                            <MemberAvatar name={entry.firstName} size="sm" />
-                            <div>
-                              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
-                                {entry.monthLabel}
-                              </p>
-                              <p className="text-sm font-semibold text-slate-900">
-                                {entry.firstName}
-                              </p>
-                              <p className="text-xs text-slate-500">
-                                {entry.role ?? "Collaborateur"}
-                              </p>
-                            </div>
+                    <div className="relative space-y-6">
+                      <div className="absolute bottom-2 left-[19px] top-2 w-px bg-gradient-to-b from-amber-200 via-slate-200 to-transparent" />
+                      {hallOfFameByYear.map(([year, entries]) => (
+                        <div key={year} className="relative pl-12">
+                          <div className="absolute left-0 top-0 flex h-10 w-10 items-center justify-center rounded-full bg-slate-950 text-xs font-semibold text-white shadow-sm">
+                            {year}
                           </div>
-                          <Badge className="border-amber-200 bg-amber-50 text-amber-700">
-                            {entry.positiveCount}
-                          </Badge>
+                          <div className="space-y-3">
+                            {entries.map((entry) => (
+                              <div
+                                key={entry.monthKey}
+                                className="team-motion-card rounded-2xl border border-slate-100 bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.035)]"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-3">
+                                    <MemberAvatar name={entry.firstName} size="sm" />
+                                    <div>
+                                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                        {entry.monthLabel}
+                                      </p>
+                                      <p className="text-sm font-semibold text-slate-900">
+                                        {entry.firstName}
+                                      </p>
+                                      <p className="text-xs text-slate-500">
+                                        {entry.role ?? "Collaborateur"}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <Badge className="border-amber-200 bg-amber-50 text-amber-700">
+                                    {formatCount(
+                                      entry.positiveCount,
+                                      "mention",
+                                      "mentions"
+                                    )}
+                                  </Badge>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1555,6 +1998,173 @@ ${emailDraft.body}`;
                 </CardContent>
               </Card>
             </div>
+          </section>
+
+          <section className="rounded-[28px] border border-slate-200/70 bg-white p-4 shadow-[0_18px_48px_rgba(15,23,42,0.055)] sm:p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Heart className="h-5 w-5 fill-rose-500 text-rose-500" />
+                  <h2 className="text-xl font-semibold tracking-normal text-slate-950">
+                    Mur des compliments
+                  </h2>
+                </div>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+                  Toutes les citations clients positives où un collaborateur actif
+                  est réellement mentionné.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_180px] lg:w-[480px]">
+                <label className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    className="h-10 w-full rounded-full border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:bg-white"
+                    value={complimentSearch}
+                    onChange={(event) => setComplimentSearch(event.target.value)}
+                    placeholder="Rechercher un mot, une qualité..."
+                  />
+                </label>
+                <select
+                  className="h-10 rounded-full border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-slate-400 focus:bg-white"
+                  value={complimentSort}
+                  onChange={(event) =>
+                    setComplimentSort(event.target.value as ComplimentSort)
+                  }
+                >
+                  <option value="recent">Plus récent</option>
+                  <option value="popular">Plus populaire</option>
+                  <option value="rating">Meilleure note</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+              {complimentFilters.map((filter) => (
+                <button
+                  key={filter.id}
+                  type="button"
+                  onClick={() => setComplimentFilter(filter.id)}
+                  className={cn(
+                    "shrink-0 rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                    complimentFilter === filter.id
+                      ? "border-slate-950 bg-slate-950 text-white"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                  )}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+
+            {allCompliments.length === 0 ? (
+              <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-7 text-center">
+                <MessageCircle className="mx-auto h-7 w-7 text-slate-400" />
+                <p className="mt-3 text-sm font-semibold text-slate-900">
+                  Aucun compliment exploitable pour le moment
+                </p>
+                <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">
+                  Les citations apparaîtront dès qu'un avis positif contient un
+                  texte et cite précisément un collaborateur actif.
+                </p>
+              </div>
+            ) : visibleCompliments.length === 0 ? (
+              <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-7 text-center text-sm text-slate-500">
+                Aucun compliment ne correspond à ces filtres.
+              </div>
+            ) : (
+              <div className="mt-5 columns-1 gap-4 md:columns-2 xl:columns-3">
+                {visibleCompliments.map((compliment, index) => (
+                  <article
+                    key={compliment.id}
+                    className="team-motion-card mb-4 break-inside-avoid rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50/70 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.045)]"
+                    style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+                          <Heart className="h-4 w-4 fill-rose-500" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-950">
+                            {compliment.memberName}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {compliment.memberRole ?? "Collaborateur"}
+                          </p>
+                        </div>
+                      </div>
+                      <Badge className="border-amber-200 bg-amber-50 text-amber-700">
+                        <Star className="mr-1 h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                        Google {formatRating(compliment.rating)}
+                      </Badge>
+                    </div>
+                    <blockquote className="mt-4 text-[15px] leading-7 text-slate-700">
+                      “{compliment.quote}”
+                    </blockquote>
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                      <span className="text-xs font-medium text-slate-400">
+                        {formatClientDate(compliment.date)}
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {compliment.qualities.slice(0, 2).map((quality) => (
+                          <span
+                            key={quality.label}
+                            className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
+                          >
+                            {quality.label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section>
+            <Card className="team-motion-card">
+              <CardHeader>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <CardTitle>Records EGIA</CardTitle>
+                    <p className="text-sm text-slate-500">
+                      Repères positifs calculés sans donnée inventée.
+                    </p>
+                  </div>
+                  <Flame className="h-5 w-5 text-orange-500" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                {recognitionRecords.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-5 text-sm text-slate-500">
+                    Les records apparaîtront après quelques mentions positives.
+                  </div>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                    {recognitionRecords.map((record) => (
+                      <div
+                        key={record.label}
+                        className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4"
+                      >
+                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                          {record.label}
+                        </p>
+                        <p className="mt-2 text-sm font-semibold text-slate-950">
+                          {record.memberName}
+                        </p>
+                        <Badge className="mt-3 border-slate-200 bg-white text-slate-700">
+                          {record.value}
+                        </Badge>
+                        <p className="mt-3 text-xs leading-5 text-slate-500">
+                          {record.detail}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </section>
 
           <section className="grid gap-6 xl:grid-cols-[1fr_0.8fr]">
@@ -1744,9 +2354,7 @@ ${emailDraft.body}`;
                     const EvolutionIcon =
                       evolution.direction === "up"
                         ? TrendingUp
-                        : evolution.direction === "down"
-                          ? TrendingDown
-                          : Minus;
+                        : Minus;
 
                     return (
                     <article
@@ -1817,7 +2425,7 @@ ${emailDraft.body}`;
                           evolution.direction === "up"
                             ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                             : evolution.direction === "down"
-                              ? "border-rose-200 bg-rose-50 text-rose-700"
+                              ? "border-slate-200 bg-slate-50 text-slate-600"
                               : "border-slate-200 bg-slate-50 text-slate-600"
                         )}
                       >
@@ -2020,6 +2628,7 @@ ${emailDraft.body}`;
           </div>
         </>
       )}
+      </div>
     </div>
   );
 };
