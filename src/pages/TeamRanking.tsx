@@ -27,7 +27,8 @@ import {
   TrendingUp,
   Trophy,
   UserPlus,
-  Users
+  Users,
+  X
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Badge } from "../components/ui/badge";
@@ -1081,6 +1082,8 @@ const TeamRanking = ({ session }: TeamRankingProps) => {
   const [complimentFilter, setComplimentFilter] = useState("all");
   const [complimentSearch, setComplimentSearch] = useState("");
   const [complimentSort, setComplimentSort] = useState<ComplimentSort>("recent");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [complimentsOpen, setComplimentsOpen] = useState(false);
 
   const monthRange = useMemo(() => getMonthRange(month), [month]);
   const monthLabel = useMemo(() => getMonthLabel(month), [month]);
@@ -1183,6 +1186,10 @@ const TeamRanking = ({ session }: TeamRankingProps) => {
     () => groupHallOfFameByYear(hallOfFameEntries),
     [hallOfFameEntries]
   );
+  const hallOfFamePreviewByYear = useMemo(
+    () => groupHallOfFameByYear(hallOfFameEntries.slice(0, 6)),
+    [hallOfFameEntries]
+  );
 
   const activeMembers = useMemo(
     () => members.filter((member) => member.is_active ?? true),
@@ -1203,6 +1210,10 @@ const TeamRanking = ({ session }: TeamRankingProps) => {
   const allCompliments = useMemo(
     () => getClientCompliments(members, allReviews),
     [allReviews, members]
+  );
+  const previewCompliments = useMemo(
+    () => allCompliments.slice(0, 6),
+    [allCompliments]
   );
   const complimentFilters = useMemo(() => {
     const uniqueMembers = new Map<string, string>();
@@ -1936,34 +1947,43 @@ ${emailDraft.body}`;
 
               <Card>
                 <CardHeader>
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <CardTitle>Hall of Fame</CardTitle>
                       <p className="text-sm text-slate-500">
-                        Frise chronologique des reconnaissances mensuelles.
+                        Les 6 dernières reconnaissances mensuelles.
                       </p>
                     </div>
-                    <Trophy className="h-5 w-5 text-amber-600" />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setHistoryOpen(true)}
+                      disabled={hallOfFameEntries.length === 0}
+                    >
+                      <Trophy className="h-4 w-4 text-amber-600" />
+                      Voir tout l’historique
+                    </Button>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {hallOfFameByYear.length === 0 ? (
+                  {hallOfFamePreviewByYear.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
                       Le premier employé du mois apparaîtra ici.
                     </div>
                   ) : (
-                    <div className="relative space-y-6">
+                    <div className="relative max-h-[430px] space-y-4 overflow-hidden">
                       <div className="absolute bottom-2 left-[19px] top-2 w-px bg-gradient-to-b from-amber-200 via-slate-200 to-transparent" />
-                      {hallOfFameByYear.map(([year, entries]) => (
+                      {hallOfFamePreviewByYear.map(([year, entries]) => (
                         <div key={year} className="relative pl-12">
                           <div className="absolute left-0 top-0 flex h-10 w-10 items-center justify-center rounded-full bg-slate-950 text-xs font-semibold text-white shadow-sm">
                             {year}
                           </div>
-                          <div className="space-y-3">
+                          <div className="space-y-2">
                             {entries.map((entry) => (
                               <div
                                 key={entry.monthKey}
-                                className="team-motion-card rounded-2xl border border-slate-100 bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.035)]"
+                                className="team-motion-card rounded-2xl border border-slate-100 bg-white p-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.035)]"
                               >
                                 <div className="flex items-center justify-between gap-3">
                                   <div className="flex items-center gap-3">
@@ -2010,50 +2030,19 @@ ${emailDraft.body}`;
                   </h2>
                 </div>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-                  Toutes les citations clients positives où un collaborateur actif
-                  est réellement mentionné.
+                  Aperçu des derniers compliments clients citant un collaborateur.
                 </p>
               </div>
-              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_180px] lg:w-[480px]">
-                <label className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    className="h-10 w-full rounded-full border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:bg-white"
-                    value={complimentSearch}
-                    onChange={(event) => setComplimentSearch(event.target.value)}
-                    placeholder="Rechercher un mot, une qualité..."
-                  />
-                </label>
-                <select
-                  className="h-10 rounded-full border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-slate-400 focus:bg-white"
-                  value={complimentSort}
-                  onChange={(event) =>
-                    setComplimentSort(event.target.value as ComplimentSort)
-                  }
-                >
-                  <option value="recent">Plus récent</option>
-                  <option value="popular">Plus populaire</option>
-                  <option value="rating">Meilleure note</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-              {complimentFilters.map((filter) => (
-                <button
-                  key={filter.id}
-                  type="button"
-                  onClick={() => setComplimentFilter(filter.id)}
-                  className={cn(
-                    "shrink-0 rounded-full border px-3 py-1.5 text-sm font-medium transition",
-                    complimentFilter === filter.id
-                      ? "border-slate-950 bg-slate-950 text-white"
-                      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                  )}
-                >
-                  {filter.label}
-                </button>
-              ))}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setComplimentsOpen(true)}
+                disabled={allCompliments.length === 0}
+              >
+                <MessageCircle className="h-4 w-4" />
+                Voir tous les compliments
+              </Button>
             </div>
 
             {allCompliments.length === 0 ? (
@@ -2067,16 +2056,12 @@ ${emailDraft.body}`;
                   texte et cite précisément un collaborateur actif.
                 </p>
               </div>
-            ) : visibleCompliments.length === 0 ? (
-              <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-7 text-center text-sm text-slate-500">
-                Aucun compliment ne correspond à ces filtres.
-              </div>
             ) : (
-              <div className="mt-5 columns-1 gap-4 md:columns-2 xl:columns-3">
-                {visibleCompliments.map((compliment, index) => (
+              <div className="mt-5 grid max-h-[520px] gap-3 overflow-hidden md:grid-cols-2 xl:grid-cols-3">
+                {previewCompliments.map((compliment, index) => (
                   <article
                     key={compliment.id}
-                    className="team-motion-card mb-4 break-inside-avoid rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50/70 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.045)]"
+                    className="team-motion-card rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50/70 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.045)]"
                     style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -2629,6 +2614,213 @@ ${emailDraft.body}`;
         </>
       )}
       </div>
+
+      {historyOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+          <div
+            className="w-full max-w-2xl rounded-[28px] border border-white/60 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.25)]"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Historique complet du Hall of Fame"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 p-5">
+              <div>
+                <p className="text-lg font-semibold text-slate-950">
+                  Historique Hall of Fame
+                </p>
+                <p className="mt-1 text-sm text-slate-500">
+                  Frise complète des employés du mois calculés depuis les avis.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100"
+                onClick={() => setHistoryOpen(false)}
+                aria-label="Fermer l’historique"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="max-h-[72vh] overflow-y-auto p-5">
+              {hallOfFameByYear.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
+                  Le premier employé du mois apparaîtra ici.
+                </div>
+              ) : (
+                <div className="relative space-y-4">
+                  <div className="absolute bottom-2 left-[19px] top-2 w-px bg-gradient-to-b from-amber-200 via-slate-200 to-transparent" />
+                  {hallOfFameByYear.map(([year, entries]) => (
+                    <div key={year} className="relative pl-12">
+                      <div className="absolute left-0 top-0 flex h-10 w-10 items-center justify-center rounded-full bg-slate-950 text-xs font-semibold text-white shadow-sm">
+                        {year}
+                      </div>
+                      <div className="space-y-2">
+                        {entries.map((entry) => (
+                          <div
+                            key={entry.monthKey}
+                            className="rounded-2xl border border-slate-100 bg-white p-3 shadow-[0_10px_24px_rgba(15,23,42,0.035)]"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <MemberAvatar name={entry.firstName} size="sm" />
+                                <div>
+                                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                    {entry.monthLabel}
+                                  </p>
+                                  <p className="text-sm font-semibold text-slate-900">
+                                    {entry.firstName}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    {entry.role ?? "Collaborateur"}
+                                  </p>
+                                </div>
+                              </div>
+                              <Badge className="border-amber-200 bg-amber-50 text-amber-700">
+                                {formatCount(
+                                  entry.positiveCount,
+                                  "mention",
+                                  "mentions"
+                                )}
+                              </Badge>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {complimentsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+          <div
+            className="w-full max-w-5xl rounded-[28px] border border-white/60 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.25)]"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Tous les compliments clients"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 p-5">
+              <div>
+                <p className="text-lg font-semibold text-slate-950">
+                  Tous les compliments
+                </p>
+                <p className="mt-1 text-sm text-slate-500">
+                  Recherche, filtres et tri sur toutes les citations clients.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100"
+                onClick={() => setComplimentsOpen(false)}
+                aria-label="Fermer les compliments"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="border-b border-slate-100 p-5">
+              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_190px]">
+                <label className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    className="h-10 w-full rounded-full border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:bg-white"
+                    value={complimentSearch}
+                    onChange={(event) => setComplimentSearch(event.target.value)}
+                    placeholder="Rechercher un mot, une qualité..."
+                  />
+                </label>
+                <select
+                  className="h-10 rounded-full border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-slate-400 focus:bg-white"
+                  value={complimentSort}
+                  onChange={(event) =>
+                    setComplimentSort(event.target.value as ComplimentSort)
+                  }
+                >
+                  <option value="recent">Plus récent</option>
+                  <option value="popular">Plus populaire</option>
+                  <option value="rating">Meilleure note</option>
+                </select>
+              </div>
+              <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                {complimentFilters.map((filter) => (
+                  <button
+                    key={filter.id}
+                    type="button"
+                    onClick={() => setComplimentFilter(filter.id)}
+                    className={cn(
+                      "shrink-0 rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                      complimentFilter === filter.id
+                        ? "border-slate-950 bg-slate-950 text-white"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                    )}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="max-h-[66vh] overflow-y-auto p-5">
+              {visibleCompliments.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-7 text-center text-sm text-slate-500">
+                  Aucun compliment ne correspond à ces filtres.
+                </div>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {visibleCompliments.map((compliment) => (
+                    <article
+                      key={compliment.id}
+                      className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50/70 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.045)]"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+                            <Heart className="h-4 w-4 fill-rose-500" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-950">
+                              {compliment.memberName}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {compliment.memberRole ?? "Collaborateur"}
+                            </p>
+                          </div>
+                        </div>
+                        <Badge className="border-amber-200 bg-amber-50 text-amber-700">
+                          <Star className="mr-1 h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                          Google {formatRating(compliment.rating)}
+                        </Badge>
+                      </div>
+                      <blockquote className="mt-4 text-[15px] leading-7 text-slate-700">
+                        “{compliment.quote}”
+                      </blockquote>
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                        <span className="text-xs font-medium text-slate-400">
+                          {formatClientDate(compliment.date)}
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {compliment.qualities.slice(0, 2).map((quality) => (
+                            <span
+                              key={quality.label}
+                              className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
+                            >
+                              {quality.label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
