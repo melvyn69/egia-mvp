@@ -16,7 +16,6 @@ import {
   Mail,
   MessageCircle,
   Medal,
-  Minus,
   PartyPopper,
   Quote,
   Search,
@@ -143,6 +142,14 @@ type RecognitionRecord = {
   detail: string;
 };
 
+type RecordTone = "trophy" | "progress" | "streak" | "regular" | "default";
+
+type DisplayRecord = RecognitionRecord & {
+  icon: string;
+  shortLabel: string;
+  tone: RecordTone;
+};
+
 const POSITIVE_RATING_THRESHOLD = 4;
 
 const QUALITY_TERMS: Array<{ label: string; keywords: string[] }> = [
@@ -171,7 +178,7 @@ const REWARD_SUGGESTIONS = [
 
 const RECOGNITION_LEVELS = [
   {
-    label: "Premières mentions",
+    label: "🌱 Premières mentions",
     min: 1,
     Icon: Sprout,
     className: "border-emerald-200 bg-emerald-50 text-emerald-700"
@@ -740,13 +747,54 @@ const getRecognitionRecords = (
   return records.slice(0, 5);
 };
 
+const getRecordPresentation = (record: RecognitionRecord): DisplayRecord => {
+  if (record.label.includes("Plus grand")) {
+    return {
+      ...record,
+      icon: "🏆",
+      shortLabel: "Plus cité",
+      tone: "trophy"
+    };
+  }
+  if (record.label.includes("Progression")) {
+    return {
+      ...record,
+      icon: "📈",
+      shortLabel: "Progression",
+      tone: "progress"
+    };
+  }
+  if (record.label.includes("série")) {
+    return {
+      ...record,
+      icon: "🔥",
+      shortLabel: "Série",
+      tone: "streak"
+    };
+  }
+  if (record.label.includes("régulier")) {
+    return {
+      ...record,
+      icon: "⭐",
+      shortLabel: "Régularité",
+      tone: "regular"
+    };
+  }
+  return {
+    ...record,
+    icon: "✨",
+    shortLabel: "Meilleur mois",
+    tone: "default"
+  };
+};
+
 const getRecognitionLevel = (count: number) => {
   if (count <= 0) {
     return {
-      label: "À révéler",
+      label: "💚 Membre actif",
       min: 0,
-      Icon: Sparkles,
-      className: "border-slate-200 bg-slate-50 text-slate-600"
+      Icon: Heart,
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700"
     };
   }
 
@@ -777,21 +825,21 @@ const getRewardSuggestion = (memberId: string | null, month: string) => {
 
 const getEvolutionMeta = (current: number, previous: number) => {
   const delta = current - previous;
-  const direction = delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+  const direction = delta > 0 ? "up" : "flat";
   const percent =
     previous > 0 ? Math.round((delta / previous) * 100) : null;
   const display =
     percent !== null && delta > 0
       ? `${percent > 0 ? "+" : ""}${percent}%`
-      : delta === 0
-        ? "Stable"
-        : "À relancer";
+      : current > 0
+        ? "⭐ En progression"
+        : "🤝 Présent dans l'équipe";
   const details =
     delta > 0
       ? `+${delta} mention${delta > 1 ? "s" : ""} positive${delta > 1 ? "s" : ""}`
-      : delta === 0
-      ? "Même niveau que le mois précédent"
-      : "Une prochaine demande d'avis peut créer une nouvelle mention";
+      : current > 0
+      ? "Reconnaissance active ce mois-ci"
+      : "Membre suivi dans la reconnaissance client";
 
   return { delta, direction, display, details };
 };
@@ -965,13 +1013,13 @@ const getMonthlyTeamStats = (
       badges.push("Le plus cité");
     }
     if (stat.positiveCount > 0) {
-      badges.push("Mention client positive");
+      badges.push("🌱 Premières mentions");
     }
     if (stat.progression > 0) {
-      badges.push("Progression du mois");
+      badges.push("⭐ En progression");
     }
     if (stat.is_active && stat.mentions === 0) {
-      badges.push("Esprit d’équipe");
+      badges.push("🤝 Présent dans l'équipe");
     }
     stat.badges = badges.slice(0, 3);
   });
@@ -1053,8 +1101,8 @@ type PodiumPosition = "first" | "second" | "third";
 
 const getPodiumSlots = (podium: MemberStat[]) =>
   [
-    { member: podium[1] ?? null, meta: podiumMeta[1], position: "second" },
     { member: podium[0] ?? null, meta: podiumMeta[0], position: "first" },
+    { member: podium[1] ?? null, meta: podiumMeta[1], position: "second" },
     { member: podium[2] ?? null, meta: podiumMeta[2], position: "third" }
   ].filter(
     (
@@ -1065,6 +1113,121 @@ const getPodiumSlots = (podium: MemberStat[]) =>
       position: PodiumPosition;
     } => Boolean(slot.member)
   );
+
+type HallOfFameTimelineProps = {
+  groups: Array<[string, HallOfFameEntry[]]>;
+  compact?: boolean;
+};
+
+const HallOfFameTimeline = ({
+  groups,
+  compact = false
+}: HallOfFameTimelineProps) => (
+  <div
+    className={cn(
+      "relative space-y-4",
+      compact && "max-h-[430px] overflow-hidden"
+    )}
+  >
+    <div className="absolute bottom-2 left-[19px] top-2 w-px bg-gradient-to-b from-amber-200 via-slate-200 to-transparent" />
+    {groups.map(([year, entries]) => (
+      <div key={year} className="relative pl-12">
+        <div className="absolute left-0 top-0 flex h-10 w-10 items-center justify-center rounded-full bg-slate-950 text-xs font-semibold text-white shadow-sm">
+          {year}
+        </div>
+        <div className="space-y-2">
+          {entries.map((entry) => (
+            <div
+              key={entry.monthKey}
+              className={cn(
+                "rounded-2xl border border-slate-100 bg-white shadow-[0_10px_24px_rgba(15,23,42,0.035)]",
+                compact ? "team-motion-card p-2.5" : "p-3"
+              )}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <MemberAvatar name={entry.firstName} size="sm" />
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                      {entry.monthLabel}
+                    </p>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {entry.firstName}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {entry.role ?? "Collaborateur"}
+                    </p>
+                  </div>
+                </div>
+                <Badge className="border-amber-200 bg-amber-50 text-amber-700">
+                  {formatCount(entry.positiveCount, "mention", "mentions")}
+                </Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
+type ComplimentCardProps = {
+  compliment: ClientCompliment;
+  index?: number;
+  animated?: boolean;
+};
+
+const ComplimentCard = ({
+  compliment,
+  index = 0,
+  animated = false
+}: ComplimentCardProps) => (
+  <article
+    className={cn(
+      "rounded-[20px] border border-slate-100 bg-gradient-to-br from-white to-slate-50/70 p-3 shadow-[0_14px_38px_rgba(15,23,42,0.045)] sm:rounded-[24px] sm:p-4",
+      animated && "team-motion-card"
+    )}
+    style={animated ? { animationDelay: `${Math.min(index, 8) * 45}ms` } : undefined}
+  >
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex items-center gap-2">
+        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+          <Heart className="h-4 w-4 fill-rose-500" />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-slate-950">
+            {compliment.memberName}
+          </p>
+          <p className="text-xs text-slate-500">
+            {compliment.memberRole ?? "Collaborateur"}
+          </p>
+        </div>
+      </div>
+      <Badge className="border-amber-200 bg-amber-50 text-amber-700">
+        <Star className="mr-1 h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+        Google {formatRating(compliment.rating)}
+      </Badge>
+    </div>
+    <blockquote className="mt-3 text-sm leading-6 text-slate-700 sm:mt-4 sm:text-[15px] sm:leading-7">
+      “{compliment.quote}”
+    </blockquote>
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+      <span className="text-xs font-medium text-slate-400">
+        {formatClientDate(compliment.date)}
+      </span>
+      <div className="flex flex-wrap gap-1.5">
+        {compliment.qualities.slice(0, 2).map((quality) => (
+          <span
+            key={quality.label}
+            className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
+          >
+            {quality.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  </article>
+);
 
 const TeamRanking = ({ session }: TeamRankingProps) => {
   const supabaseClient = supabase;
@@ -1260,6 +1423,23 @@ const TeamRanking = ({ session }: TeamRankingProps) => {
     () => getRecognitionRecords(members, allReviews, monthlyStats),
     [allReviews, members, monthlyStats]
   );
+  const displayRecords = useMemo(
+    () =>
+      recognitionRecords
+        .map(getRecordPresentation)
+        .sort((a, b) => {
+          const order: Record<RecordTone, number> = {
+            trophy: 0,
+            progress: 1,
+            streak: 2,
+            regular: 3,
+            default: 4
+          };
+          return order[a.tone] - order[b.tone];
+        })
+        .slice(0, 4),
+    [recognitionRecords]
+  );
 
   const emailDraft = useMemo(() => {
     if (!employeeOfMonth) return null;
@@ -1347,16 +1527,24 @@ L'équipe`;
   };
 
   const handlePrepareEmail = async () => {
-    if (!emailDraft || !employeeOfMonth?.email?.trim()) return;
+    if (!emailDraft || !employeeOfMonth?.email?.trim()) {
+      setMessage("Ajoutez un email collaborateur avant de préparer l’envoi.");
+      setTimeout(() => setMessage(null), 3000);
+      return;
+    }
     const fullDraft = `À: ${employeeOfMonth.email}
 Objet: ${emailDraft.subject}
 
 ${emailDraft.body}`;
+    let copied = false;
 
-    try {
-      await navigator.clipboard.writeText(fullDraft);
-    } catch {
-      // The mailto link still prepares the message if clipboard access is blocked.
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(fullDraft);
+        copied = true;
+      } catch {
+        copied = false;
+      }
     }
 
     const mailto = `mailto:${encodeURIComponent(
@@ -1365,7 +1553,11 @@ ${emailDraft.body}`;
       emailDraft.body
     )}`;
     window.location.href = mailto;
-    setMessage("Email préparé et copié dans le presse-papiers.");
+    setMessage(
+      copied
+        ? "Email préparé et copié dans le presse-papiers."
+        : "Email préparé. Copie indisponible sur ce navigateur."
+    );
     setTimeout(() => setMessage(null), 3000);
   };
 
@@ -1381,27 +1573,29 @@ ${emailDraft.body}`;
   const employeeSummary = employeeOfMonth
     ? buildRecognitionSummary(employeeOfMonth)
     : null;
+  const employeeMainQuote = employeeOfMonth?.clientQuotes[0] ?? null;
+  const employeeSecondaryQuotes = employeeOfMonth?.clientQuotes.slice(1) ?? [];
   const rewardSuggestion = getRewardSuggestion(employeeOfMonth?.id ?? null, month);
 
   const recognitionEmptyTitle =
     activeMembers.length === 0
-      ? "Aucun collaborateur actif"
+      ? "Équipe à configurer"
       : monthlyStats.reviewsAnalyzed === 0
-        ? "Aucun avis synchronisé sur ce mois"
+        ? "Avis à synchroniser sur ce mois"
         : monthlyStats.exploitableReviews === 0
-          ? "Avis sans texte exploitable"
-          : "Aucune mention positive détectée";
+          ? "Textes clients à venir"
+          : "Premières mentions à venir";
   const recognitionEmptyText =
     activeMembers.length === 0
       ? "Ajoutez au moins un collaborateur actif pour commencer à détecter les mentions dans les avis clients."
       : monthlyStats.reviewsAnalyzed === 0
         ? "Le podium apparaîtra dès que des avis Google du mois sélectionné seront disponibles."
         : monthlyStats.exploitableReviews === 0
-          ? "Les avis du mois ne contiennent pas encore de texte permettant d'identifier des collaborateurs."
+          ? "Les prochains avis textuels permettront de mettre les collaborateurs en lumière."
           : "Le podium se remplira dès qu'un avis positif citera précisément un membre actif de l'équipe.";
 
   return (
-    <div className="team-page">
+    <div className="team-page min-w-0 overflow-x-hidden">
       <style>
         {`@keyframes teamPodiumIn {
           0% { opacity: 0; transform: translateY(28px) scale(0.96); }
@@ -1434,6 +1628,15 @@ ${emailDraft.body}`;
           transform: rotateX(56deg) rotateZ(-1deg);
           transform-origin: bottom center;
         }
+        .team-focus-ring:focus-visible {
+          outline: 2px solid rgba(15, 23, 42, 0.22);
+          outline-offset: 3px;
+        }
+        @media (max-width: 767px) {
+          .team-podium-block {
+            display: none;
+          }
+        }
         @media (prefers-reduced-motion: reduce) {
           .team-motion-card,
           .team-counter {
@@ -1447,8 +1650,8 @@ ${emailDraft.body}`;
         `}
       </style>
 
-      <div className="team-screen space-y-6">
-      <section className="relative overflow-hidden rounded-2xl bg-slate-950 p-5 text-white shadow-[0_24px_70px_rgba(2,6,23,0.20)] sm:p-6 lg:p-8">
+      <div className="team-screen space-y-4 md:space-y-6">
+      <section className="relative overflow-hidden rounded-2xl bg-slate-950 p-4 text-white shadow-[0_24px_70px_rgba(2,6,23,0.20)] sm:p-6 lg:p-8">
         <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-amber-400 via-emerald-400 to-sky-400" />
 
         <div className="relative grid gap-6 xl:grid-cols-[1fr_auto] xl:items-end">
@@ -1457,13 +1660,13 @@ ${emailDraft.body}`;
               Reconnaissance client
             </Badge>
             <div>
-              <h1 className="text-3xl font-semibold tracking-normal text-white sm:text-4xl">
+              <h1 className="text-2xl font-semibold tracking-normal text-white sm:text-4xl">
                 Équipe & reconnaissance client
               </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-                Mettez en lumière les collaborateurs cités positivement dans les
-                avis, identifiez les qualités perçues par les clients et préparez
-                une félicitation humaine.
+              <p className="mt-3 hidden max-w-2xl text-sm leading-6 text-slate-300 sm:block sm:text-base">
+                Transformez les compliments de vos clients en motivation durable.
+                Chaque avis positif devient une reconnaissance concrète du
+                travail de votre équipe.
               </p>
             </div>
           </div>
@@ -1482,7 +1685,7 @@ ${emailDraft.body}`;
           </div>
         </div>
 
-        <div className="relative mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="relative mt-4 grid grid-cols-2 gap-2 sm:mt-7 sm:gap-3 xl:grid-cols-4">
           {[
             {
               label: "Avis analysés",
@@ -1507,7 +1710,7 @@ ${emailDraft.body}`;
           ].map((metric) => (
             <div
               key={metric.label}
-              className="rounded-2xl border border-white/10 bg-white/[0.08] p-4"
+              className="rounded-2xl border border-white/10 bg-white/[0.08] p-3 sm:p-4"
             >
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
@@ -1515,7 +1718,7 @@ ${emailDraft.body}`;
                 </p>
                 <metric.Icon className="h-4 w-4 text-amber-200" />
               </div>
-              <p className="mt-3 text-3xl font-semibold text-white">
+              <p className="mt-2 text-2xl font-semibold text-white sm:mt-3 sm:text-3xl">
                 {metric.value}
               </p>
             </div>
@@ -1523,12 +1726,12 @@ ${emailDraft.body}`;
         </div>
       </section>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/70 bg-white p-4 shadow-[0_14px_34px_rgba(15,23,42,0.045)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/70 bg-white p-3 shadow-[0_14px_34px_rgba(15,23,42,0.045)] sm:p-4">
         <div>
           <p className="text-sm font-semibold text-slate-900">
             Pilotage reconnaissance
           </p>
-          <p className="text-xs text-slate-500">
+          <p className="hidden text-xs text-slate-500 sm:block">
             Les emails, invitations, rôles et rapports mensuels restent gérés
             dans Paramètres.
           </p>
@@ -1536,7 +1739,7 @@ ${emailDraft.body}`;
         <div className="flex flex-wrap items-center gap-3">
           <Link
             to="/settings?tab=team"
-            className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-300 px-3 text-sm font-medium text-slate-900 transition hover:bg-slate-100"
+            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-300 px-3 text-sm font-medium text-slate-900 transition hover:bg-slate-100 sm:h-9 sm:min-h-0"
           >
             <Settings className="h-4 w-4" />
             Gérer dans Paramètres
@@ -1546,9 +1749,10 @@ ${emailDraft.body}`;
             <button
               type="button"
               className={cn(
-                "h-6 w-11 rounded-full border transition",
+                "team-focus-ring h-6 w-11 rounded-full border transition",
                 settingsEnabled ? "bg-emerald-500" : "bg-slate-200"
               )}
+              aria-label="Activer ou désactiver la gamification de reconnaissance"
               aria-pressed={settingsEnabled}
               onClick={() => handleToggleTeam(!settingsEnabled)}
             >
@@ -1604,7 +1808,7 @@ ${emailDraft.body}`;
                   )}
                 </div>
               </CardHeader>
-              <CardContent className="pt-6">
+              <CardContent className="px-4 pb-4 pt-4 sm:px-6 sm:pb-6 sm:pt-6">
                 {membersQuery.isLoading || reviewsQuery.isLoading ? (
                   <div className="grid gap-3 md:grid-cols-3">
                     <Skeleton className="h-56 w-full rounded-2xl" />
@@ -1624,16 +1828,16 @@ ${emailDraft.body}`;
                     </p>
                   </div>
                 ) : (
-                  <div className="team-podium-stage rounded-[28px] bg-gradient-to-b from-slate-50 via-white to-slate-100/70 p-4 sm:p-6">
+                  <div className="team-podium-stage rounded-2xl bg-gradient-to-b from-slate-50 via-white to-slate-100/70 p-3 sm:rounded-[28px] sm:p-6">
                     <div className="grid gap-4 md:grid-cols-[0.85fr_1.2fr_0.85fr] md:items-end">
                       {podiumSlots.map(({ member, meta, position }, index) => (
                         <article
                           key={member.id}
                           className={cn(
                             "team-motion-card relative flex flex-col items-center text-center",
-                            position === "first" && "md:col-start-2 md:order-2",
-                            position === "second" && "md:col-start-1 md:order-1",
-                            position === "third" && "md:col-start-3 md:order-3"
+                            position === "first" && "md:col-start-2 md:row-start-1",
+                            position === "second" && "md:col-start-1 md:row-start-1",
+                            position === "third" && "md:col-start-3 md:row-start-1"
                           )}
                           style={{
                             animation: "teamPodiumIn 640ms cubic-bezier(.2,.9,.2,1) both",
@@ -1642,9 +1846,9 @@ ${emailDraft.body}`;
                         >
                           <div
                             className={cn(
-                              "relative z-10 rounded-[28px] border bg-white/92 p-4 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur",
+                              "relative z-10 rounded-[22px] border bg-white/92 p-3 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur sm:rounded-[28px] sm:p-4",
                               position === "first"
-                                ? "w-full max-w-[260px] border-amber-200"
+                                ? "w-full border-amber-200 shadow-[0_24px_64px_rgba(245,158,11,0.18)] sm:max-w-[300px] sm:p-5"
                                 : "w-full max-w-[220px] border-slate-200"
                             )}
                           >
@@ -1667,8 +1871,8 @@ ${emailDraft.body}`;
                               className={cn(
                                 "mx-auto flex items-center justify-center rounded-[24px] bg-slate-950 text-white shadow-[0_16px_35px_rgba(15,23,42,0.18)]",
                                 position === "first"
-                                  ? "h-20 w-20 text-2xl"
-                                  : "h-16 w-16 text-lg"
+                                  ? "h-20 w-20 text-2xl sm:h-24 sm:w-24 sm:text-3xl"
+                                  : "h-14 w-14 text-base sm:h-16 sm:w-16 sm:text-lg"
                               )}
                             >
                               {initialsFromName(member.first_name)}
@@ -1676,7 +1880,7 @@ ${emailDraft.body}`;
                             <p
                               className={cn(
                                 "mt-4 font-semibold tracking-normal text-slate-950",
-                                position === "first" ? "text-3xl" : "text-2xl"
+                                position === "first" ? "text-2xl sm:text-3xl" : "text-xl sm:text-2xl"
                               )}
                             >
                               {member.first_name}
@@ -1685,24 +1889,24 @@ ${emailDraft.body}`;
                               {member.role ?? "Collaborateur"}
                             </p>
                             <div className="mt-4 grid grid-cols-2 gap-2">
-                              <div className="rounded-2xl bg-slate-50 p-3 text-left">
+                              <div className="rounded-2xl bg-slate-50 p-2.5 text-left sm:p-3">
                                 <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
                                   Mentions
                                 </p>
-                                <p className="team-counter mt-1 text-2xl font-semibold text-slate-950">
+                                <p className="team-counter mt-1 text-xl font-semibold text-slate-950 sm:text-2xl">
                                   {member.positiveCount}
                                 </p>
                               </div>
-                              <div className="rounded-2xl bg-slate-50 p-3 text-left">
+                              <div className="rounded-2xl bg-slate-50 p-2.5 text-left sm:p-3">
                                 <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
                                   Note
                                 </p>
-                                <p className="team-counter mt-1 text-2xl font-semibold text-slate-950">
+                                <p className="team-counter mt-1 text-xl font-semibold text-slate-950 sm:text-2xl">
                                   {formatRating(member.avgRating)}
                                 </p>
                               </div>
                             </div>
-                            <p className="mt-4 text-sm leading-6 text-slate-600">
+                            <p className="mt-3 text-sm leading-6 text-slate-600">
                               {member.qualities.length > 0
                                 ? `Les clients associent ${member.first_name} à ${member.qualities
                                     .map((quality) => quality.label)
@@ -1715,7 +1919,7 @@ ${emailDraft.body}`;
                             className={cn(
                               "team-podium-block mt-2 w-full max-w-[260px] rounded-[18px] border shadow-[0_18px_45px_rgba(15,23,42,0.12)]",
                               position === "first"
-                                ? "h-28 border-amber-200 bg-gradient-to-br from-amber-200 via-amber-100 to-white"
+                                ? "h-32 max-w-[300px] border-amber-200 bg-gradient-to-br from-amber-200 via-amber-100 to-white"
                                 : position === "second"
                                   ? "h-20 border-slate-200 bg-gradient-to-br from-slate-200 via-white to-slate-100"
                                   : "h-16 border-orange-200 bg-gradient-to-br from-orange-200 via-orange-100 to-white"
@@ -1754,7 +1958,7 @@ ${emailDraft.body}`;
                     <Star className="h-5 w-5 text-amber-300" />
                   </div>
                 </CardHeader>
-                <CardContent className="pt-6">
+                <CardContent className="px-4 pb-4 pt-4 sm:px-6 sm:pb-6 sm:pt-6">
                   {employeeOfMonth ? (
                     <div className="space-y-5">
                       <div className="flex items-center gap-4">
@@ -1791,14 +1995,14 @@ ${emailDraft.body}`;
                       </p>
 
                       <div className="grid gap-2 sm:grid-cols-[1.2fr_0.8fr_0.8fr]">
-                        <div className="rounded-2xl bg-slate-950 p-4 text-white">
+                        <div className="rounded-2xl bg-slate-950 p-3 text-white sm:p-4">
                           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
                             Score de reconnaissance
                           </p>
                           <p className="mt-3 text-sm leading-6 text-slate-300">
                             Les clients parlent de {employeeOfMonth.first_name} dans
                           </p>
-                          <p className="team-counter mt-1 text-5xl font-semibold text-white">
+                          <p className="team-counter mt-1 text-4xl font-semibold text-white sm:text-5xl">
                             {employeeRecognitionShare}%
                           </p>
                           <p className="text-sm text-slate-300">
@@ -1867,9 +2071,12 @@ ${emailDraft.body}`;
                             Vraies citations clients
                           </p>
                         </div>
-                        {employeeOfMonth.clientQuotes.length > 0 ? (
-                          <div className="mt-3 space-y-2">
-                            {employeeOfMonth.clientQuotes.map((quote) => (
+                        {employeeMainQuote ? (
+                          <div className="mt-3 space-y-3">
+                            <blockquote className="rounded-2xl border border-white bg-white px-3 py-3 text-base font-medium leading-7 text-slate-900 shadow-[0_16px_38px_rgba(15,23,42,0.06)] sm:px-4 sm:py-4 sm:text-lg sm:leading-8">
+                              “{employeeMainQuote}”
+                            </blockquote>
+                            {employeeSecondaryQuotes.map((quote) => (
                               <blockquote
                                 key={quote}
                                 className="rounded-xl bg-white px-3 py-2 text-sm leading-6 text-slate-600"
@@ -1880,7 +2087,7 @@ ${emailDraft.body}`;
                           </div>
                         ) : (
                           <p className="mt-3 text-sm text-slate-500">
-                            Aucune citation disponible.
+                            Les prochaines citations client apparaîtront ici.
                           </p>
                         )}
                       </div>
@@ -1915,7 +2122,7 @@ ${emailDraft.body}`;
                       <Button
                         onClick={handlePrepareEmail}
                         disabled={!employeeOfMonth.email?.trim()}
-                        className="w-full"
+                        className="min-h-11 w-full"
                       >
                         <Mail className="h-4 w-4" />
                         Préparer l’email de félicitations
@@ -1938,8 +2145,8 @@ ${emailDraft.body}`;
                     </div>
                   ) : (
                     <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm leading-6 text-slate-500">
-                      Aucun employé du mois n'est désigné tant qu'un avis positif
-                      ne cite pas explicitement un collaborateur actif.
+                      Le prochain collaborateur cité positivement dans un avis
+                      sera mis à l’honneur ici.
                     </div>
                   )}
                 </CardContent>
@@ -1962,7 +2169,7 @@ ${emailDraft.body}`;
                       disabled={hallOfFameEntries.length === 0}
                     >
                       <Trophy className="h-4 w-4 text-amber-600" />
-                      Voir tout l’historique
+                      Voir tout l’historique ({hallOfFameEntries.length} mois)
                     </Button>
                   </div>
                 </CardHeader>
@@ -1972,48 +2179,7 @@ ${emailDraft.body}`;
                       Le premier employé du mois apparaîtra ici.
                     </div>
                   ) : (
-                    <div className="relative max-h-[430px] space-y-4 overflow-hidden">
-                      <div className="absolute bottom-2 left-[19px] top-2 w-px bg-gradient-to-b from-amber-200 via-slate-200 to-transparent" />
-                      {hallOfFamePreviewByYear.map(([year, entries]) => (
-                        <div key={year} className="relative pl-12">
-                          <div className="absolute left-0 top-0 flex h-10 w-10 items-center justify-center rounded-full bg-slate-950 text-xs font-semibold text-white shadow-sm">
-                            {year}
-                          </div>
-                          <div className="space-y-2">
-                            {entries.map((entry) => (
-                              <div
-                                key={entry.monthKey}
-                                className="team-motion-card rounded-2xl border border-slate-100 bg-white p-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.035)]"
-                              >
-                                <div className="flex items-center justify-between gap-3">
-                                  <div className="flex items-center gap-3">
-                                    <MemberAvatar name={entry.firstName} size="sm" />
-                                    <div>
-                                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
-                                        {entry.monthLabel}
-                                      </p>
-                                      <p className="text-sm font-semibold text-slate-900">
-                                        {entry.firstName}
-                                      </p>
-                                      <p className="text-xs text-slate-500">
-                                        {entry.role ?? "Collaborateur"}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <Badge className="border-amber-200 bg-amber-50 text-amber-700">
-                                    {formatCount(
-                                      entry.positiveCount,
-                                      "mention",
-                                      "mentions"
-                                    )}
-                                  </Badge>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <HallOfFameTimeline groups={hallOfFamePreviewByYear} compact />
                   )}
                 </CardContent>
               </Card>
@@ -2041,7 +2207,7 @@ ${emailDraft.body}`;
                 disabled={allCompliments.length === 0}
               >
                 <MessageCircle className="h-4 w-4" />
-                Voir tous les compliments
+                Voir {formatCount(allCompliments.length, "compliment", "compliments")}
               </Button>
             </div>
 
@@ -2049,7 +2215,7 @@ ${emailDraft.body}`;
               <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-7 text-center">
                 <MessageCircle className="mx-auto h-7 w-7 text-slate-400" />
                 <p className="mt-3 text-sm font-semibold text-slate-900">
-                  Aucun compliment exploitable pour le moment
+                  Les premiers compliments apparaîtront ici
                 </p>
                 <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">
                   Les citations apparaîtront dès qu'un avis positif contient un
@@ -2059,49 +2225,12 @@ ${emailDraft.body}`;
             ) : (
               <div className="mt-5 grid max-h-[520px] gap-3 overflow-hidden md:grid-cols-2 xl:grid-cols-3">
                 {previewCompliments.map((compliment, index) => (
-                  <article
+                  <ComplimentCard
                     key={compliment.id}
-                    className="team-motion-card rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50/70 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.045)]"
-                    style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-50 text-rose-600">
-                          <Heart className="h-4 w-4 fill-rose-500" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-slate-950">
-                            {compliment.memberName}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            {compliment.memberRole ?? "Collaborateur"}
-                          </p>
-                        </div>
-                      </div>
-                      <Badge className="border-amber-200 bg-amber-50 text-amber-700">
-                        <Star className="mr-1 h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                        Google {formatRating(compliment.rating)}
-                      </Badge>
-                    </div>
-                    <blockquote className="mt-4 text-[15px] leading-7 text-slate-700">
-                      “{compliment.quote}”
-                    </blockquote>
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
-                      <span className="text-xs font-medium text-slate-400">
-                        {formatClientDate(compliment.date)}
-                      </span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {compliment.qualities.slice(0, 2).map((quality) => (
-                          <span
-                            key={quality.label}
-                            className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
-                          >
-                            {quality.label}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </article>
+                    compliment={compliment}
+                    index={index}
+                    animated
+                  />
                 ))}
               </div>
             )}
@@ -2121,27 +2250,44 @@ ${emailDraft.body}`;
                 </div>
               </CardHeader>
               <CardContent>
-                {recognitionRecords.length === 0 ? (
+                {displayRecords.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-5 text-sm text-slate-500">
                     Les records apparaîtront après quelques mentions positives.
                   </div>
                 ) : (
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                    {recognitionRecords.map((record) => (
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    {displayRecords.map((record) => (
                       <div
                         key={record.label}
-                        className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4"
+                        className={cn(
+                          "team-motion-card rounded-2xl border p-4 shadow-[0_12px_30px_rgba(15,23,42,0.035)]",
+                          record.tone === "trophy" &&
+                            "border-amber-100 bg-amber-50/60",
+                          record.tone === "progress" &&
+                            "border-emerald-100 bg-emerald-50/60",
+                          record.tone === "streak" &&
+                            "border-orange-100 bg-orange-50/60",
+                          record.tone === "regular" &&
+                            "border-sky-100 bg-sky-50/60",
+                          record.tone === "default" &&
+                            "border-slate-100 bg-slate-50/70"
+                        )}
                       >
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
-                          {record.label}
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-2xl" aria-hidden="true">
+                            {record.icon}
+                          </span>
+                          <Badge className="border-white/80 bg-white/80 text-slate-700">
+                            {record.value}
+                          </Badge>
+                        </div>
+                        <p className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                          {record.shortLabel}
                         </p>
-                        <p className="mt-2 text-sm font-semibold text-slate-950">
+                        <p className="mt-1 text-sm font-semibold text-slate-950">
                           {record.memberName}
                         </p>
-                        <Badge className="mt-3 border-slate-200 bg-white text-slate-700">
-                          {record.value}
-                        </Badge>
-                        <p className="mt-3 text-xs leading-5 text-slate-500">
+                        <p className="mt-2 text-xs leading-5 text-slate-500">
                           {record.detail}
                         </p>
                       </div>
@@ -2232,7 +2378,7 @@ ${emailDraft.body}`;
               <CardContent>
                 {monthlyStats.qualityTrends.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-5 text-sm text-slate-500">
-                    Données insuffisantes.
+                    Les tendances apparaîtront avec plus de retours clients.
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -2269,14 +2415,14 @@ ${emailDraft.body}`;
                 {[
                   ["Le plus cité", "Le collaborateur actif avec le plus de mentions."],
                   [
-                    "Mention client positive",
+                    "🌱 Premières mentions",
                     "Au moins un avis positif cite le collaborateur."
                   ],
                   [
-                    "Progression du mois",
+                    "⭐ En progression",
                     "Plus de mentions positives que le mois précédent."
                   ],
-                  ["Esprit d’équipe", "Collaborateur actif suivi dans l'équipe."]
+                  ["🤝 Présent dans l'équipe", "Collaborateur actif suivi dans l'équipe."]
                 ].map(([title, description]) => (
                   <div
                     key={title}
@@ -2329,7 +2475,7 @@ ${emailDraft.body}`;
                   Aucun collaborateur pour le moment.
                 </div>
               ) : (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="space-y-3">
                   {monthlyStats.memberStats.map((member) => {
                     const evolution = getEvolutionMeta(
                       member.positiveCount,
@@ -2337,132 +2483,126 @@ ${emailDraft.body}`;
                     );
                     const memberLevel = getRecognitionLevel(member.positiveCount);
                     const EvolutionIcon =
-                      evolution.direction === "up"
-                        ? TrendingUp
-                        : Minus;
+                      evolution.direction === "up" ? TrendingUp : Sparkles;
 
                     return (
-                    <article
-                      key={member.id}
-                      className={cn(
-                        "rounded-2xl border bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.035)]",
-                        member.is_active
-                          ? "border-slate-100"
-                          : "border-slate-100 opacity-70"
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <MemberAvatar
-                            name={member.first_name}
-                            imageUrl={member.imageUrl}
-                          />
-                          <div>
-                            <p className="font-semibold text-slate-900">
-                              {member.first_name}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              {member.role ?? "Collaborateur"}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <Badge variant={member.is_active ? "success" : "neutral"}>
-                            {member.is_active ? "Actif" : "Inactif"}
-                          </Badge>
-                          <Badge className={memberLevel.className}>
-                            <memberLevel.Icon className="mr-1 h-3.5 w-3.5" />
-                            {memberLevel.label}
-                          </Badge>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 grid grid-cols-3 gap-2">
-                        <div className="rounded-xl bg-slate-50 p-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                            Mentions
-                          </p>
-                          <p className="mt-1 text-lg font-semibold text-slate-900">
-                            {member.mentions}
-                          </p>
-                        </div>
-                        <div className="rounded-xl bg-slate-50 p-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                            Positifs
-                          </p>
-                          <p className="mt-1 text-lg font-semibold text-slate-900">
-                            {member.positiveCount}
-                          </p>
-                        </div>
-                        <div className="rounded-xl bg-slate-50 p-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                            Note
-                          </p>
-                          <p className="mt-1 text-lg font-semibold text-slate-900">
-                            {formatRating(member.avgRating)}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div
+                      <details
+                        key={member.id}
                         className={cn(
-                          "mt-3 flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-sm",
-                          evolution.direction === "up"
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : evolution.direction === "down"
-                              ? "border-slate-200 bg-slate-50 text-slate-600"
-                              : "border-slate-200 bg-slate-50 text-slate-600"
+                          "team-motion-card group rounded-2xl border bg-white shadow-[0_12px_30px_rgba(15,23,42,0.035)] transition",
+                          member.is_active
+                            ? "border-slate-100"
+                            : "border-slate-100 opacity-80"
                         )}
                       >
-                        <div className="flex items-center gap-2 font-semibold">
-                          <EvolutionIcon className="h-4 w-4" />
-                          {evolution.display}
-                        </div>
-                        <span className="text-xs opacity-80">
-                          {evolution.details}
-                        </span>
-                      </div>
-
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {member.badges.map((badge) => (
-                          <Badge
-                            key={badge}
-                            className={
-                              badge === "Mention client positive"
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : badge === "Progression du mois"
-                                  ? "border-sky-200 bg-sky-50 text-sky-700"
-                                  : badge === "Le plus cité"
-                                    ? "border-amber-200 bg-amber-50 text-amber-700"
-                                    : undefined
-                            }
-                          >
-                            {badge}
-                          </Badge>
-                        ))}
-                      </div>
-
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {member.qualities.length > 0 ? (
-                          member.qualities.slice(0, 3).map((quality) => (
-                            <span
-                              key={quality.label}
-                              className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600"
-                            >
-                              {quality.label}
+                        <summary className="team-focus-ring flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 outline-none transition hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <MemberAvatar
+                              name={member.first_name}
+                              imageUrl={member.imageUrl}
+                            />
+                            <div className="min-w-0">
+                              <p className="truncate font-semibold text-slate-900">
+                                {member.first_name}
+                              </p>
+                              <p className="truncate text-xs text-slate-500">
+                                {member.role ?? "Collaborateur"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <Badge className="border-slate-200 bg-slate-50 text-slate-700">
+                              {formatCount(member.mentions, "mention", "mentions")}
+                            </Badge>
+                            <Badge className={memberLevel.className}>
+                              <memberLevel.Icon className="mr-1 h-3.5 w-3.5" />
+                              {memberLevel.label}
+                            </Badge>
+                            <span className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-500 transition group-open:bg-slate-950 group-open:text-white">
+                              ▼ Voir les détails
                             </span>
-                          ))
-                        ) : (
-                          <span className="text-xs text-slate-400">
-                            Qualités détectées à venir
-                          </span>
-                        )}
-                      </div>
+                          </div>
+                        </summary>
 
-                      <p className="mt-4 text-xs text-slate-500">
-                        Taux positif associé : {formatRatio(member.positiveRate)}
-                      </p>
-                    </article>
+                        <div className="border-t border-slate-100 px-4 pb-4 pt-3">
+                          <div className="grid gap-2 sm:grid-cols-3">
+                            <div className="rounded-xl bg-slate-50 p-3">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                Note
+                              </p>
+                              <p className="mt-1 text-lg font-semibold text-slate-900">
+                                {formatRating(member.avgRating)}
+                              </p>
+                            </div>
+                            <div className="rounded-xl bg-slate-50 p-3">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                Positifs
+                              </p>
+                              <p className="mt-1 text-lg font-semibold text-slate-900">
+                                {member.positiveCount}
+                              </p>
+                            </div>
+                            <div className="rounded-xl bg-slate-50 p-3">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                Taux associé
+                              </p>
+                              <p className="mt-1 text-lg font-semibold text-slate-900">
+                                {formatRatio(member.positiveRate)}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div
+                            className={cn(
+                              "mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-3 py-2 text-sm",
+                              evolution.direction === "up"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-slate-200 bg-slate-50 text-slate-600"
+                            )}
+                          >
+                            <div className="flex items-center gap-2 font-semibold">
+                              <EvolutionIcon className="h-4 w-4" />
+                              {evolution.display}
+                            </div>
+                            <span className="text-xs opacity-80">
+                              {evolution.details}
+                            </span>
+                          </div>
+
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {member.qualities.length > 0 ? (
+                              member.qualities.slice(0, 3).map((quality) => (
+                                <span
+                                  key={quality.label}
+                                  className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600"
+                                >
+                                  {quality.label}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                                🤝 Présent dans l'équipe
+                              </span>
+                            )}
+                            {member.badges.map((badge) => (
+                              <Badge
+                                key={badge}
+                                className={
+                                  badge === "🌱 Premières mentions"
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                    : badge === "⭐ En progression"
+                                      ? "border-sky-200 bg-sky-50 text-sky-700"
+                                      : badge === "Le plus cité"
+                                        ? "border-amber-200 bg-amber-50 text-amber-700"
+                                        : "border-slate-200 bg-slate-50 text-slate-600"
+                                }
+                              >
+                                {badge}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      </details>
                     );
                   })}
                 </div>
@@ -2565,7 +2705,7 @@ ${emailDraft.body}`;
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant={member.is_active ? "success" : "neutral"}>
-                          {member.is_active ? "Actif" : "Inactif"}
+                          {member.is_active ? "Suivi" : "Hors suivi"}
                         </Badge>
                         <Button
                           size="sm"
@@ -2616,14 +2756,14 @@ ${emailDraft.body}`;
       </div>
 
       {historyOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-3 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur-sm sm:items-center sm:p-4">
           <div
-            className="w-full max-w-2xl rounded-[28px] border border-white/60 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.25)]"
+            className="max-h-[88vh] w-full max-w-2xl overflow-hidden rounded-[24px] border border-white/60 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.25)] sm:rounded-[28px]"
             role="dialog"
             aria-modal="true"
             aria-label="Historique complet du Hall of Fame"
           >
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 p-5">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 p-4 sm:p-5">
               <div>
                 <p className="text-lg font-semibold text-slate-950">
                   Historique Hall of Fame
@@ -2634,61 +2774,20 @@ ${emailDraft.body}`;
               </div>
               <button
                 type="button"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100"
+                className="team-focus-ring flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100"
                 onClick={() => setHistoryOpen(false)}
                 aria-label="Fermer l’historique"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="max-h-[72vh] overflow-y-auto p-5">
+            <div className="max-h-[70vh] overflow-y-auto p-4 sm:p-5">
               {hallOfFameByYear.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
                   Le premier employé du mois apparaîtra ici.
                 </div>
               ) : (
-                <div className="relative space-y-4">
-                  <div className="absolute bottom-2 left-[19px] top-2 w-px bg-gradient-to-b from-amber-200 via-slate-200 to-transparent" />
-                  {hallOfFameByYear.map(([year, entries]) => (
-                    <div key={year} className="relative pl-12">
-                      <div className="absolute left-0 top-0 flex h-10 w-10 items-center justify-center rounded-full bg-slate-950 text-xs font-semibold text-white shadow-sm">
-                        {year}
-                      </div>
-                      <div className="space-y-2">
-                        {entries.map((entry) => (
-                          <div
-                            key={entry.monthKey}
-                            className="rounded-2xl border border-slate-100 bg-white p-3 shadow-[0_10px_24px_rgba(15,23,42,0.035)]"
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="flex items-center gap-3">
-                                <MemberAvatar name={entry.firstName} size="sm" />
-                                <div>
-                                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
-                                    {entry.monthLabel}
-                                  </p>
-                                  <p className="text-sm font-semibold text-slate-900">
-                                    {entry.firstName}
-                                  </p>
-                                  <p className="text-xs text-slate-500">
-                                    {entry.role ?? "Collaborateur"}
-                                  </p>
-                                </div>
-                              </div>
-                              <Badge className="border-amber-200 bg-amber-50 text-amber-700">
-                                {formatCount(
-                                  entry.positiveCount,
-                                  "mention",
-                                  "mentions"
-                                )}
-                              </Badge>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <HallOfFameTimeline groups={hallOfFameByYear} />
               )}
             </div>
           </div>
@@ -2696,14 +2795,14 @@ ${emailDraft.body}`;
       )}
 
       {complimentsOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-3 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur-sm sm:items-center sm:p-4">
           <div
-            className="w-full max-w-5xl rounded-[28px] border border-white/60 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.25)]"
+            className="max-h-[88vh] w-full max-w-5xl overflow-hidden rounded-[24px] border border-white/60 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.25)] sm:rounded-[28px]"
             role="dialog"
             aria-modal="true"
             aria-label="Tous les compliments clients"
           >
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 p-5">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 p-4 sm:p-5">
               <div>
                 <p className="text-lg font-semibold text-slate-950">
                   Tous les compliments
@@ -2714,7 +2813,7 @@ ${emailDraft.body}`;
               </div>
               <button
                 type="button"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100"
+                className="team-focus-ring flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100"
                 onClick={() => setComplimentsOpen(false)}
                 aria-label="Fermer les compliments"
               >
@@ -2722,9 +2821,10 @@ ${emailDraft.body}`;
               </button>
             </div>
 
-            <div className="border-b border-slate-100 p-5">
+            <div className="border-b border-slate-100 p-4 sm:p-5">
               <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_190px]">
                 <label className="relative">
+                  <span className="sr-only">Rechercher dans les compliments</span>
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     className="h-10 w-full rounded-full border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:bg-white"
@@ -2736,6 +2836,7 @@ ${emailDraft.body}`;
                 <select
                   className="h-10 rounded-full border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-slate-400 focus:bg-white"
                   value={complimentSort}
+                  aria-label="Trier les compliments"
                   onChange={(event) =>
                     setComplimentSort(event.target.value as ComplimentSort)
                   }
@@ -2751,8 +2852,9 @@ ${emailDraft.body}`;
                     key={filter.id}
                     type="button"
                     onClick={() => setComplimentFilter(filter.id)}
+                    aria-pressed={complimentFilter === filter.id}
                     className={cn(
-                      "shrink-0 rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                      "team-focus-ring shrink-0 rounded-full border px-3 py-1.5 text-sm font-medium transition",
                       complimentFilter === filter.id
                         ? "border-slate-950 bg-slate-950 text-white"
                         : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
@@ -2764,56 +2866,18 @@ ${emailDraft.body}`;
               </div>
             </div>
 
-            <div className="max-h-[66vh] overflow-y-auto p-5">
+            <div className="max-h-[62vh] overflow-y-auto p-4 sm:p-5">
               {visibleCompliments.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-7 text-center text-sm text-slate-500">
-                  Aucun compliment ne correspond à ces filtres.
+                  Ajustez les filtres pour retrouver les compliments clients.
                 </div>
               ) : (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {visibleCompliments.map((compliment) => (
-                    <article
+                    <ComplimentCard
                       key={compliment.id}
-                      className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50/70 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.045)]"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-2">
-                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-50 text-rose-600">
-                            <Heart className="h-4 w-4 fill-rose-500" />
-                          </div>
-                          <div>
-                            <p className="text-sm font-semibold text-slate-950">
-                              {compliment.memberName}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              {compliment.memberRole ?? "Collaborateur"}
-                            </p>
-                          </div>
-                        </div>
-                        <Badge className="border-amber-200 bg-amber-50 text-amber-700">
-                          <Star className="mr-1 h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                          Google {formatRating(compliment.rating)}
-                        </Badge>
-                      </div>
-                      <blockquote className="mt-4 text-[15px] leading-7 text-slate-700">
-                        “{compliment.quote}”
-                      </blockquote>
-                      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
-                        <span className="text-xs font-medium text-slate-400">
-                          {formatClientDate(compliment.date)}
-                        </span>
-                        <div className="flex flex-wrap gap-1.5">
-                          {compliment.qualities.slice(0, 2).map((quality) => (
-                            <span
-                              key={quality.label}
-                              className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
-                            >
-                              {quality.label}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </article>
+                      compliment={compliment}
+                    />
                   ))}
                 </div>
               )}

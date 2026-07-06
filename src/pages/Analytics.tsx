@@ -1669,7 +1669,7 @@ const Analytics = ({
       : null;
 
   return (
-    <div className="analytics-page space-y-10 pb-12 lg:space-y-12">
+    <div className="analytics-page min-w-0 space-y-4 overflow-x-hidden pb-4 md:space-y-8 lg:space-y-12">
       <style>
         {`
           @keyframes analyticsFadeUp {
@@ -1745,8 +1745,8 @@ const Analytics = ({
         `}
       </style>
       <section className="analytics-section overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_16px_44px_rgba(15,23,42,0.055)]">
-        <div className="border-b border-slate-100/70 bg-gradient-to-br from-white via-white to-slate-50/80 px-5 py-6 sm:px-6 lg:px-8">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+        <div className="border-b border-slate-100/70 bg-gradient-to-br from-white via-white to-slate-50/80 px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 {overview && overview.data_status !== "ok" && (
@@ -1758,12 +1758,12 @@ const Analytics = ({
                   </span>
                 )}
               </div>
-              <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 sm:mt-3 sm:text-4xl">
                 Cockpit réputation
               </h2>
             </div>
 
-            <div className="grid gap-3 rounded-2xl border border-slate-200/70 bg-white/80 p-3 shadow-[0_12px_30px_rgba(15,23,42,0.04)] sm:grid-cols-2 xl:min-w-[560px] xl:grid-cols-[1.2fr_0.9fr_auto]">
+            <div className="grid gap-2 rounded-2xl border border-slate-200/70 bg-white/80 p-2.5 shadow-[0_12px_30px_rgba(15,23,42,0.04)] sm:grid-cols-2 sm:p-3 xl:min-w-[560px] xl:grid-cols-[1.2fr_0.9fr_auto]">
               <label className="min-w-0 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
                 Lieu
                 <select
@@ -1803,7 +1803,7 @@ const Analytics = ({
               <Button
                 variant="outline"
                 size="sm"
-                className="mt-6 h-10 rounded-full"
+                className="h-10 min-h-11 rounded-full sm:mt-6 sm:min-h-0"
                 onClick={() => analyticsQuery.refetch()}
                 disabled={loading}
               >
@@ -1862,7 +1862,7 @@ const Analytics = ({
           </div>
         </div>
 
-        <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 p-4 sm:gap-4 sm:p-5 lg:grid-cols-3 xl:grid-cols-6">
           {showSkeleton
             ? Array.from({ length: 6 }).map((_, index) => (
                 <Skeleton key={index} className="h-36 rounded-2xl" />
@@ -1886,7 +1886,7 @@ const Analytics = ({
       </section>
 
       <DashboardCard>
-        <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
+        <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-4 py-4 sm:px-6 sm:py-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <div className="flex items-center gap-2">
@@ -1899,8 +1899,8 @@ const Analytics = ({
             )}
           </div>
         </CardHeader>
-        <CardContent className="grid gap-6 px-5 pt-6 sm:px-6 xl:grid-cols-[1.25fr_0.75fr]">
-          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <CardContent className="grid gap-4 px-4 pt-4 sm:px-6 sm:pt-6 xl:grid-cols-[1.25fr_0.75fr]">
+          <section className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-3">
             {showSkeleton ? (
               Array.from({ length: 5 }).map((_, index) => (
                 <Skeleton key={index} className="h-36 rounded-2xl" />
@@ -1916,7 +1916,7 @@ const Analytics = ({
             )}
           </section>
 
-          <section className="rounded-2xl bg-slate-50/70 p-4">
+          <section className="rounded-2xl bg-slate-50/70 p-3 sm:p-4">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <ListChecks className="h-4 w-4 text-slate-500" />
@@ -1955,7 +1955,7 @@ const Analytics = ({
         recommendationCount={priorityActions.length}
         showSkeleton={showSkeleton}
       >
-              <section className="rounded-2xl bg-slate-950 p-5 text-white shadow-[0_16px_44px_rgba(15,23,42,0.12)]">
+              <section className="rounded-2xl bg-slate-950 p-4 text-white shadow-[0_16px_44px_rgba(15,23,42,0.12)] sm:p-5">
                 <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
                   <Sparkles className="h-4 w-4 text-white" />
                   Recommandation principale
@@ -2037,7 +2037,7 @@ const Analytics = ({
                           {items.map((item) => (
                             <article
                               key={item.id}
-                              className="rounded-2xl bg-white/80 p-4"
+                              className="rounded-2xl bg-white/80 p-3 sm:p-4"
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
@@ -2167,7 +2167,7 @@ const Analytics = ({
               </AnalyticsDisclosure>
 
               <AnalyticsDisclosure title="Plan d'action" badge="impact attendu">
-                <div className="grid gap-4 lg:grid-cols-3">
+                <div className="grid gap-3 sm:gap-4 lg:grid-cols-3">
                   {[
                     {
                       label: "Impact élevé",
@@ -2217,7 +2217,7 @@ const Analytics = ({
       )}
 
       <DashboardCard>
-        <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
+        <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-4 py-4 sm:px-6 sm:py-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex items-center gap-2">
               <CardTitle>Réputation</CardTitle>
@@ -2234,7 +2234,7 @@ const Analytics = ({
             </select>
           </div>
         </CardHeader>
-        <CardContent className="space-y-6 px-5 pt-6 sm:px-6">
+        <CardContent className="space-y-4 px-4 pt-4 sm:px-6 sm:pt-6">
           {showSkeleton ? (
             <Skeleton className="h-[400px] rounded-2xl" />
           ) : (
@@ -2249,7 +2249,7 @@ const Analytics = ({
               }
             />
           )}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
             {chartInsights.length > 0 ? (
               chartInsights.map((fact) => {
                 const FactIcon = fact.Icon;
@@ -2278,7 +2278,7 @@ const Analytics = ({
         </CardContent>
       </DashboardCard>
 
-      <section className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:gap-7">
         <DashboardCard>
           <CardHeader className="border-b border-slate-100/60 bg-slate-50/30 px-5 py-5 sm:px-6">
             <div className="flex items-center justify-between gap-3">

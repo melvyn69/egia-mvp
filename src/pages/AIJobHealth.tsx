@@ -373,37 +373,50 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
   }, [runs, runsFilter, showErrorsOnly, showRecentOnly]);
 
   const handleCopyMeta = async (meta?: RunRow["meta"]) => {
-    if (!meta) return;
+    const resetCopyStatus = () => {
+      window.setTimeout(() => setCopyStatus(null), 1800);
+    };
+    if (!meta) {
+      setCopyStatus("Aucune donnée à copier.");
+      resetCopyStatus();
+      return;
+    }
+    if (!navigator.clipboard?.writeText) {
+      setCopyStatus("Impossible de copier sur mobile.");
+      resetCopyStatus();
+      return;
+    }
     try {
       await navigator.clipboard.writeText(JSON.stringify(meta, null, 2));
       setCopyStatus("Copié");
-      window.setTimeout(() => setCopyStatus(null), 1500);
+      resetCopyStatus();
     } catch {
-      setCopyStatus("Échec");
-      window.setTimeout(() => setCopyStatus(null), 1500);
+      setCopyStatus("Impossible de copier sur mobile.");
+      resetCopyStatus();
     }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-4 overflow-x-hidden md:space-y-6">
       <div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-semibold text-slate-900">
+            <h2 className="text-xl font-semibold text-slate-900 md:text-2xl">
               Santé des jobs IA
             </h2>
-            <p className="text-sm text-slate-500">
+            <p className="hidden text-sm text-slate-500 sm:block">
               Suivi interne des traitements IA par établissement.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid w-full grid-cols-2 gap-2 sm:w-auto sm:flex sm:flex-wrap sm:items-center">
             <Button
               onClick={() => setRefreshTick((value) => value + 1)}
               variant="outline"
+              className="min-h-11"
             >
               Rafraîchir
             </Button>
-            <Button onClick={triggerRun} disabled={runLoading}>
+            <Button onClick={triggerRun} disabled={runLoading} className="min-h-11">
               {runLoading ? "Lancement..." : "Lancer l'analyse IA"}
             </Button>
           </div>
@@ -426,8 +439,8 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
             isLoading={googleConnection.isLoading}
           />
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-600">
-          <label className="flex items-center gap-2">
+        <div className="mt-3 grid gap-2 text-sm text-slate-600 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
+          <label className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 sm:min-h-0 sm:border-0 sm:bg-transparent sm:px-0">
             <input
               type="checkbox"
               className="h-4 w-4 rounded border-slate-300"
@@ -436,7 +449,7 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
             />
             Afficher seulement erreurs
           </label>
-          <label className="flex items-center gap-2">
+          <label className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 sm:min-h-0 sm:border-0 sm:bg-transparent sm:px-0">
             <input
               type="checkbox"
               className="h-4 w-4 rounded border-slate-300"
@@ -445,7 +458,7 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
             />
             Afficher seulement runs récents (24h)
           </label>
-          <div className="flex items-center gap-2">
+          <div className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 sm:min-h-0 sm:border-0 sm:bg-transparent sm:px-0">
             <span className="text-xs font-semibold uppercase text-slate-400">
               Filtre runs
             </span>
@@ -477,8 +490,8 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
           <div className="grid gap-4 lg:grid-cols-2">
             {items.map((item) => (
               <Card key={item.locationId}>
-                <CardHeader className="flex flex-row items-center justify-between gap-3">
-                  <div>
+                <CardHeader className="flex flex-row items-center justify-between gap-3 p-4 md:p-6">
+                  <div className="min-w-0">
                     <CardTitle className="text-base">{item.location}</CardTitle>
                   </div>
                   <span
@@ -487,7 +500,7 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
                     {item.status}
                   </span>
                 </CardHeader>
-                <CardContent className="text-sm text-slate-600 space-y-1">
+                <CardContent className="space-y-1 px-4 pb-4 text-sm text-slate-600 md:px-6 md:pb-6">
                   <div>Dernier run : {formatTimestamp(item.lastRunAt)}</div>
                   <div>Avis traités : {item.processed}</div>
                   <div>Tags créés : {item.tags}</div>
@@ -502,6 +515,7 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
                     <Button
                       size="sm"
                       variant="outline"
+                      className="min-h-11 w-full sm:w-auto"
                       disabled={runLocationLoading === item.locationId}
                       onClick={() => triggerRunForLocation(item.locationId)}
                     >
@@ -521,17 +535,17 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
           </div>
 
           <Card>
-            <CardHeader>
+            <CardHeader className="p-4 md:p-6">
               <CardTitle>20 derniers runs IA</CardTitle>
             </CardHeader>
-            <CardContent className="text-sm text-slate-600">
+            <CardContent className="px-4 pb-4 text-sm text-slate-600 md:px-6 md:pb-6">
               {filteredRuns.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">
                   Aucun run enregistré.
                 </div>
               ) : (
                 <>
-                  <div className="grid grid-cols-7 gap-2 border-b border-slate-200 pb-2 text-xs font-semibold uppercase text-slate-500">
+                  <div className="hidden grid-cols-7 gap-2 border-b border-slate-200 pb-2 text-xs font-semibold uppercase text-slate-500 md:grid">
                     <div>Time</div>
                     <div>Location</div>
                     <div>Processed</div>
@@ -546,26 +560,45 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
                         type="button"
                         key={run.id}
                         onClick={() => setSelectedRun(run)}
-                        className="grid w-full grid-cols-7 gap-2 py-2 text-left hover:bg-slate-50"
+                        className="grid w-full gap-1 rounded-xl px-2 py-3 text-left hover:bg-slate-50 md:grid-cols-7 md:gap-2 md:rounded-none md:px-0 md:py-2"
                       >
-                        <div>{formatTimestamp(run.started_at)}</div>
-                        <div>
+                        <div className="flex justify-between gap-3 md:block">
+                          <span className="text-xs font-semibold uppercase text-slate-400 md:hidden">Time</span>
+                          <span>{formatTimestamp(run.started_at)}</span>
+                        </div>
+                        <div className="flex justify-between gap-3 md:block">
+                          <span className="text-xs font-semibold uppercase text-slate-400 md:hidden">Lieu</span>
+                          <span className="text-right md:text-left">
                           {run.meta?.location_id
                             ? locationLabelById.get(run.meta.location_id) ??
                               run.meta.location_id
                             : "—"}
+                          </span>
                         </div>
-                        <div>{run.processed ?? 0}</div>
-                        <div>{run.tags_upserted ?? 0}</div>
-                        <div>{run.errors_count ?? 0}</div>
-                        <div>
+                        <div className="flex justify-between gap-3 md:block">
+                          <span className="text-xs font-semibold uppercase text-slate-400 md:hidden">Avis</span>
+                          <span>{run.processed ?? 0}</span>
+                        </div>
+                        <div className="flex justify-between gap-3 md:block">
+                          <span className="text-xs font-semibold uppercase text-slate-400 md:hidden">Tags</span>
+                          <span>{run.tags_upserted ?? 0}</span>
+                        </div>
+                        <div className="flex justify-between gap-3 md:block">
+                          <span className="text-xs font-semibold uppercase text-slate-400 md:hidden">Erreurs</span>
+                          <span>{run.errors_count ?? 0}</span>
+                        </div>
+                        <div className="flex justify-between gap-3 md:block">
+                          <span className="text-xs font-semibold uppercase text-slate-400 md:hidden">Durée</span>
+                          <span>
                           {formatDurationSeconds(
                             run.started_at,
                             run.finished_at,
                             run.duration_ms ?? null
                           )}
+                          </span>
                         </div>
-                        <div>
+                        <div className="flex justify-between gap-3 md:block">
+                          <span className="text-xs font-semibold uppercase text-slate-400 md:hidden">Skip</span>
                           <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
                             {formatSkipReason(run.skip_reason)}
                           </span>
@@ -580,8 +613,8 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
         </div>
       )}
       {selectedRun && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:items-center sm:p-4">
+          <div className="max-h-[86vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-4 shadow-xl sm:p-5">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-slate-900">
                 Détails du run
@@ -619,6 +652,7 @@ const AIJobHealth = ({ session }: AIJobHealthProps) => {
                     <Button
                       variant="outline"
                       size="sm"
+                      className="min-h-11 sm:min-h-0"
                       onClick={() => handleCopyMeta(selectedRun.meta)}
                     >
                       Copier le JSON

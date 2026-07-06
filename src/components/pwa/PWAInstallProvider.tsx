@@ -55,13 +55,18 @@ const PWAInstallProvider = ({ children }: { children: React.ReactNode }) => {
     if (!deferredPrompt) {
       return "unavailable";
     }
-    await deferredPrompt.prompt();
-    const choice = await deferredPrompt.userChoice;
-    setDeferredPrompt(null);
-    if (choice.outcome === "dismissed") {
-      dismissPwaInstallPrompt();
-      setIsDismissed(true);
-      return "dismissed";
+    try {
+      await deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      setDeferredPrompt(null);
+      if (choice.outcome === "dismissed") {
+        dismissPwaInstallPrompt();
+        setIsDismissed(true);
+        return "dismissed";
+      }
+    } catch {
+      setDeferredPrompt(null);
+      return "unavailable";
     }
     return "prompted";
   };

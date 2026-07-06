@@ -2457,27 +2457,28 @@ const Inbox = () => {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="min-w-0 space-y-4 overflow-x-hidden">
+      <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
               <Command size={14} />
               Cockpit opérationnel
             </div>
-            <h2 className="mt-2 text-2xl font-semibold text-slate-950">
+            <h2 className="mt-2 text-xl font-semibold text-slate-950 sm:text-2xl">
               Inbox EGIA
             </h2>
-            <p className="mt-1 max-w-2xl text-sm text-slate-500">
+            <p className="mt-1 hidden max-w-2xl text-sm text-slate-500 sm:block">
               Priorisez, rédigez et pilotez les réponses clients depuis une vue
               calme, lisible et actionnable.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid w-full grid-cols-2 gap-2 sm:w-auto sm:flex sm:flex-wrap">
             <Button
               type="button"
               variant={focusMode ? "default" : "outline"}
               size="sm"
+              className="min-h-11 sm:min-h-0"
               onClick={() => setFocusMode((current) => !current)}
               disabled={!selectedReview}
               title="Mettre l'avis actif au premier plan"
@@ -2489,6 +2490,7 @@ const Inbox = () => {
               type="button"
               variant="outline"
               size="sm"
+              className="min-h-11 sm:min-h-0"
               onClick={() => setMobileInboxView("reply")}
               disabled={!selectedReview}
             >
@@ -2497,7 +2499,7 @@ const Inbox = () => {
             </Button>
           </div>
         </div>
-        <div className="mt-3 grid gap-px overflow-hidden rounded-2xl border border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-slate-200 bg-slate-200 xl:grid-cols-4">
           <div className="bg-white px-3 py-2.5">
             <p className="text-xs font-semibold uppercase text-slate-400">
               À traiter
@@ -2531,7 +2533,7 @@ const Inbox = () => {
             </p>
           </div>
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+        <div className="mt-2 hidden flex-wrap items-center gap-2 text-xs text-slate-600 sm:flex">
           <span>Synchronisation automatique toutes les 5 minutes</span>
           <span>•</span>
           <span>Dernière synchronisation : {formatSinceMinutes(lastCronSyncAt)}</span>
@@ -2669,12 +2671,12 @@ const Inbox = () => {
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-1 rounded-2xl border border-slate-200 bg-white p-1 lg:hidden">
+        <div className="grid grid-cols-3 gap-1 rounded-2xl border border-slate-200 bg-white p-1 lg:hidden">
         <button
           type="button"
           onClick={() => setMobileInboxView("reviews")}
           className={cn(
-            "rounded-xl px-2 py-2 text-xs font-semibold transition",
+            "min-h-11 rounded-xl px-2 py-2 text-xs font-semibold transition",
             mobileInboxView === "reviews"
               ? "bg-ink text-white"
               : "text-slate-600"
@@ -2690,7 +2692,7 @@ const Inbox = () => {
           onClick={() => setMobileInboxView("details")}
           disabled={!selectedReview}
           className={cn(
-            "rounded-xl px-2 py-2 text-xs font-semibold transition disabled:opacity-40",
+            "min-h-11 rounded-xl px-2 py-2 text-xs font-semibold transition disabled:opacity-40",
             mobileInboxView === "details"
               ? "bg-ink text-white"
               : "text-slate-600"
@@ -2703,7 +2705,7 @@ const Inbox = () => {
           onClick={() => setMobileInboxView("reply")}
           disabled={!selectedReview}
           className={cn(
-            "rounded-xl px-2 py-2 text-xs font-semibold transition disabled:opacity-40",
+            "min-h-11 rounded-xl px-2 py-2 text-xs font-semibold transition disabled:opacity-40",
             mobileInboxView === "reply"
               ? "bg-ink text-white"
               : "text-slate-600"
@@ -2740,7 +2742,7 @@ const Inbox = () => {
                 type="button"
                 variant="outline"
                 size="sm"
-                className="lg:hidden"
+                className="min-h-11 lg:hidden"
                 onClick={() => setFiltersOpen((current) => !current)}
               >
                 {filtersOpen ? "Masquer filtres" : "Filtres"}
@@ -2817,6 +2819,7 @@ const Inbox = () => {
                   type="button"
                   variant="outline"
                   size="sm"
+                  className="min-h-11 sm:min-h-0"
                   onClick={handleGenerateBatch}
                   disabled={batchGenerating || eligibleFilteredReviews.length === 0}
                 >
@@ -2856,6 +2859,7 @@ const Inbox = () => {
                             type="button"
                             size="sm"
                             variant="outline"
+                            className="min-h-11 sm:min-h-0"
                             disabled={aiRunLocationLoading === location.id}
                             onClick={() =>
                               handleRunAiForSpecificLocation(location.id)
@@ -3173,6 +3177,7 @@ const Inbox = () => {
                 type="button"
                 size="sm"
                 variant="outline"
+                className="min-h-11 sm:min-h-0"
                 onClick={() => selectAdjacentReview("previous")}
                 disabled={filteredReviews.length <= 1}
                 title="Avis précédent"
@@ -3183,6 +3188,7 @@ const Inbox = () => {
                 type="button"
                 size="sm"
                 variant="outline"
+                className="min-h-11 sm:min-h-0"
                 onClick={() => selectAdjacentReview("next")}
                 disabled={filteredReviews.length <= 1}
                 title="Avis suivant"
@@ -3193,7 +3199,7 @@ const Inbox = () => {
                 <Button
                   type="button"
                   size="sm"
-                  className="lg:hidden"
+                  className="min-h-11 lg:hidden"
                   onClick={() => setMobileInboxView("reply")}
                 >
                   Répondre
@@ -3279,6 +3285,7 @@ const Inbox = () => {
                     <Button
                       type="button"
                       size="sm"
+                      className="min-h-11 sm:min-h-0"
                       onClick={() => setMobileInboxView("reply")}
                     >
                       <MessageSquareReply size={15} />
@@ -3288,6 +3295,7 @@ const Inbox = () => {
                       type="button"
                       size="sm"
                       variant="outline"
+                      className="min-h-11 sm:min-h-0"
                       onClick={handleGenerate}
                       disabled={
                         isGenerating ||
@@ -3435,7 +3443,7 @@ const Inbox = () => {
                 type="button"
                 variant="outline"
                 size="sm"
-                className="lg:hidden"
+                className="min-h-11 lg:hidden"
                 onClick={() => setMobileInboxView("details")}
                 disabled={!selectedReview}
               >
@@ -3653,9 +3661,9 @@ const Inbox = () => {
                   </div>
                 </div>
 
-                <div className="sticky bottom-20 z-20 -mx-4 flex flex-wrap gap-2 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur lg:static lg:bottom-auto lg:z-auto lg:mx-0 lg:border-t-0 lg:bg-transparent lg:px-0 lg:py-0 lg:backdrop-blur-none">
+                <div className="sticky bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-20 -mx-3 grid grid-cols-2 gap-2 border-t border-slate-200 bg-white/95 px-3 py-3 backdrop-blur sm:-mx-4 sm:flex sm:flex-wrap sm:px-4 lg:static lg:bottom-auto lg:z-auto lg:mx-0 lg:flex lg:border-t-0 lg:bg-transparent lg:px-0 lg:py-0 lg:backdrop-blur-none">
                   {selectedReviewHasRealReply ? (
-                    <Button type="button" variant="outline" disabled>
+                    <Button type="button" variant="outline" disabled className="min-h-11 sm:min-h-0">
                       Avis répondu
                     </Button>
                   ) : !hasSavedDraft ? (
@@ -3663,6 +3671,7 @@ const Inbox = () => {
                       <Button
                         type="button"
                         onClick={handleGenerate}
+                        className="min-h-11 sm:min-h-0"
                         disabled={
                           isGenerating ||
                           !selectedReview ||
@@ -3678,6 +3687,7 @@ const Inbox = () => {
                           type="button"
                           variant="outline"
                           onClick={handleUseNoteOnlyTemplate}
+                          className="min-h-11 sm:min-h-0"
                           disabled={!selectedReview}
                         >
                           Modèle note seule
@@ -3686,6 +3696,7 @@ const Inbox = () => {
                         <Button
                           type="button"
                           variant="outline"
+                          className="min-h-11 sm:min-h-0"
                           onClick={() => {
                             const editor = document.getElementById("reply-editor");
                             if (editor instanceof HTMLTextAreaElement) {
@@ -3703,6 +3714,7 @@ const Inbox = () => {
                       <Button
                         type="button"
                         onClick={handleSend}
+                        className="min-h-11 sm:min-h-0"
                         disabled={
                           isGenerating ||
                           replySending ||
@@ -3717,6 +3729,7 @@ const Inbox = () => {
                         type="button"
                         variant="outline"
                         onClick={handleSave}
+                        className="min-h-11 sm:min-h-0"
                         disabled={isGenerating || replySaving || !selectedReview}
                       >
                         {replySaving ? "Sauvegarde..." : "Sauvegarder"}
@@ -3725,6 +3738,7 @@ const Inbox = () => {
                         type="button"
                         variant="outline"
                         onClick={handleGenerate}
+                        className="min-h-11 sm:min-h-0"
                         disabled={
                           isGenerating ||
                           !selectedReview ||

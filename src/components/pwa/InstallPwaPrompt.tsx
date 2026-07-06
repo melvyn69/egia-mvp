@@ -35,7 +35,7 @@ const InstallPwaPrompt = ({ className }: InstallPwaPromptProps) => {
     }
 
     setIsInstalling(true);
-    const result = await install();
+    const result = await install().catch(() => "unavailable" as const);
     setIsInstalling(false);
 
     if (result === "unavailable") {

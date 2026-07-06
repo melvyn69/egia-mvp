@@ -187,7 +187,7 @@ const Automation = ({ session, locations }: AutomationProps) => {
   );
 
   return (
-    <div className="space-y-8">
+    <div className="min-w-0 space-y-4 overflow-x-hidden md:space-y-8">
       {/* Non-regression checklist:
          - Créer manuellement -> ouvre /automation/builder
          - Templates -> ouvrent /automation/builder?template=...
@@ -197,24 +197,28 @@ const Automation = ({ session, locations }: AutomationProps) => {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold text-slate-900">
+            <h1 className="text-xl font-semibold text-slate-900 md:text-2xl">
               Automatisations
             </h1>
             <Badge variant="neutral">Bêta privée</Badge>
           </div>
-          <p className="text-sm text-slate-500">
+          <p className="hidden text-sm text-slate-500 sm:block">
             Configurez le pilote automatique pour votre e-réputation.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:w-auto sm:flex sm:flex-wrap sm:items-center">
           <Button
             variant="outline"
             onClick={handleRunNow}
             disabled={running}
+            className="min-h-11"
           >
             {running ? "Exécution..." : "Lancer maintenant"}
           </Button>
-          <Button onClick={() => navigate("/automation/builder")}>
+          <Button
+            onClick={() => navigate("/automation/builder")}
+            className="min-h-11"
+          >
             Créer un scénario
           </Button>
         </div>
@@ -250,21 +254,23 @@ const Automation = ({ session, locations }: AutomationProps) => {
         <h2 className="text-sm font-semibold text-slate-700">
           Modèles prêts à l’emploi
         </h2>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {templateCards.map((card) => (
             <button
               key={card.id}
               type="button"
-              className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-slate-300 hover:shadow-md"
+              className="min-h-[118px] rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:border-slate-300 hover:shadow-md md:p-4"
               onClick={() => navigate(`/automation/builder?template=${card.id}`)}
             >
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 md:h-10 md:w-10 md:rounded-2xl">
                 ✦
               </div>
-              <p className="mt-4 text-sm font-semibold text-slate-900">
+              <p className="mt-3 text-sm font-semibold text-slate-900 md:mt-4">
                 {card.title}
               </p>
-              <p className="mt-2 text-xs text-slate-500">{card.description}</p>
+              <p className="mt-1.5 text-xs leading-5 text-slate-500 md:mt-2">
+                {card.description}
+              </p>
             </button>
           ))}
         </div>
@@ -299,8 +305,8 @@ const Automation = ({ session, locations }: AutomationProps) => {
           <div className="space-y-4">
             {workflows.map((workflow) => (
               <Card key={workflow.id} className="border border-indigo-200">
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <div className="space-y-1">
+                <CardHeader className="flex flex-row items-center justify-between p-4 md:p-6">
+                  <div className="min-w-0 space-y-1">
                     <Badge variant="success">Pilote automatique</Badge>
                     <CardTitle className="text-base">
                       {workflow.name?.trim() || "Automatisation"}
@@ -322,10 +328,11 @@ const Automation = ({ session, locations }: AutomationProps) => {
                     />
                   </div>
                 </CardHeader>
-                <CardContent className="flex flex-wrap items-center gap-2">
+                <CardContent className="grid grid-cols-2 gap-2 px-4 pb-4 md:flex md:flex-wrap md:px-6 md:pb-6">
                   <Button
                     variant="outline"
                     size="sm"
+                    className="min-h-11 md:min-h-0"
                     disabled
                     title="Bientôt disponible"
                   >
@@ -334,6 +341,7 @@ const Automation = ({ session, locations }: AutomationProps) => {
                   <Button
                     variant="outline"
                     size="sm"
+                    className="min-h-11 md:min-h-0"
                     onClick={() =>
                       navigate(`/automation/builder?id=${workflow.id}`)
                     }

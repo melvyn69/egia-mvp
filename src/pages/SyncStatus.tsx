@@ -154,9 +154,9 @@ const SyncStatus = ({ session }: SyncStatusProps) => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-4 overflow-x-hidden md:space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold text-slate-900">
+        <h2 className="text-xl font-semibold text-slate-900 md:text-2xl">
           Statut synchronisation
         </h2>
         <p className="text-sm text-slate-500">
@@ -169,10 +169,10 @@ const SyncStatus = ({ session }: SyncStatusProps) => {
       ) : (
         <>
           <Card>
-            <CardHeader>
+            <CardHeader className="p-4 md:p-6">
               <CardTitle>Connexion Google</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm text-slate-600">
+            <CardContent className="space-y-3 px-4 pb-4 text-sm text-slate-600 md:px-6 md:pb-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <GoogleConnectionBadge
                   status={googleConnection.status}
@@ -201,6 +201,7 @@ const SyncStatus = ({ session }: SyncStatusProps) => {
               {googleConnection.status === "reauth_required" && (
                 <Button
                   size="sm"
+                  className="min-h-11 sm:min-h-0"
                   onClick={() => {
                     window.location.href = "/connect";
                   }}
@@ -212,37 +213,37 @@ const SyncStatus = ({ session }: SyncStatusProps) => {
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader className="p-4 md:p-6">
               <CardTitle>Dernier sync global</CardTitle>
             </CardHeader>
-            <CardContent className="text-sm text-slate-600">
+            <CardContent className="px-4 pb-4 text-sm text-slate-600 md:px-6 md:pb-6">
               {formatTimestamp(lastSyncAt)}
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader className="p-4 md:p-6">
               <CardTitle>Jobs</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 text-sm text-slate-600">
+            <CardContent className="grid grid-cols-2 gap-2 px-4 pb-4 text-sm text-slate-600 md:px-6 md:pb-6">
               <div>En file: {jobStats.queued}</div>
               <div>En cours: {jobStats.running}</div>
               <div>En erreur: {jobStats.failed}</div>
-              <div>Derniere erreur: {jobStats.lastError ?? "—"}</div>
+              <div className="col-span-2">Derniere erreur: {jobStats.lastError ?? "—"}</div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader className="p-4 md:p-6">
               <CardTitle>Dernier sync par lieu (actifs)</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 text-sm text-slate-600">
+            <CardContent className="space-y-2 px-4 pb-4 text-sm text-slate-600 md:px-6 md:pb-6">
               {locationsWithSync.length === 0 ? (
                 <div>—</div>
               ) : (
                 locationsWithSync.map((loc) => (
-                  <div key={loc.id} className="flex items-center justify-between">
-                    <span>{loc.label}</span>
+                  <div key={loc.id} className="flex min-w-0 flex-col gap-1 rounded-xl bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                    <span className="min-w-0 truncate">{loc.label}</span>
                     <span className="text-xs text-slate-500">{loc.lastSync}</span>
                   </div>
                 ))

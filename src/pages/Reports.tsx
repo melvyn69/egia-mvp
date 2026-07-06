@@ -468,7 +468,7 @@ const ReportHeroMetric = ({
 }) => (
   <div
     className={cn(
-      "min-w-0 overflow-hidden rounded-[20px] border p-4 shadow-[0_18px_42px_rgba(15,23,42,0.045)] md:rounded-[24px]",
+    "min-w-0 overflow-hidden rounded-[18px] border p-3 shadow-[0_18px_42px_rgba(15,23,42,0.045)] md:rounded-[24px] md:p-4",
       highlight
         ? "border-[#020617] bg-[#020617] text-white"
         : "border-slate-200/70 bg-white text-slate-950"
@@ -477,7 +477,7 @@ const ReportHeroMetric = ({
     <p className={cn("text-xs font-semibold uppercase tracking-[0.08em]", highlight ? "text-blue-200" : "text-slate-500")}>
       {label}
     </p>
-    <div className="mt-2 truncate text-2xl font-semibold leading-none md:text-3xl">{value}</div>
+    <div className="mt-2 truncate text-xl font-semibold leading-none md:text-3xl">{value}</div>
     {detail && (
       <p className={cn("mt-2 text-xs leading-5", highlight ? "text-slate-300" : "text-slate-500")}>
         {detail}
@@ -515,7 +515,7 @@ const ReportReadyKpiCard = ({
 }) => (
   <div
     className={cn(
-      "rounded-[24px] border p-5 shadow-[0_18px_46px_rgba(15,23,42,0.06)]",
+      "rounded-[20px] border p-4 shadow-[0_18px_46px_rgba(15,23,42,0.06)] md:rounded-[24px] md:p-5",
       highlight
         ? "border-[#020617] bg-[#020617] text-white"
         : "border-slate-100 bg-white text-slate-950"
@@ -529,7 +529,7 @@ const ReportReadyKpiCard = ({
     >
       {label}
     </p>
-    <div className="mt-3 text-3xl font-semibold leading-none tracking-tight">
+    <div className="mt-2 text-2xl font-semibold leading-none tracking-tight md:mt-3 md:text-3xl">
       {value}
     </div>
     {detail && (
@@ -889,45 +889,54 @@ const Reports = ({ session, locations }: ReportsProps) => {
     const mode = report.render_mode === "classic" ? "classic" : "premium";
     const endpoint =
       mode === "premium" ? "/api/reports/generate_html" : "/api/reports/generate";
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ report_id: report.id })
-    });
-    if (!res.ok) {
-      setError("Impossible de générer le PDF.");
-      return;
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ report_id: report.id })
+      });
+      if (!res.ok) {
+        setError("Impossible de générer le PDF.");
+        return;
+      }
+      const data = (await res.json().catch(() => null)) as
+        | ReportGenerationResponse
+        | null;
+      const generatedAt =
+        data?.generated_at ??
+        data?.last_generated_at ??
+        new Date().toISOString();
+      setGeneratedReportModal({
+        report,
+        generatedAt,
+        pdfUrl: data?.pdf?.url ?? null,
+        storagePath: data?.pdf?.path ?? data?.storage_path ?? report.storage_path,
+        pageCount: getGeneratedPageCount(data),
+        pdfSize: getGeneratedPdfSize(data)
+      });
+      void queryClient.invalidateQueries({
+        queryKey: reportsCacheKey,
+        exact: true
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["coach-reports-count", userId],
+        exact: true
+      });
+    } catch {
+      setError("Connexion nécessaire pour générer le PDF.");
     }
-    const data = (await res.json().catch(() => null)) as
-      | ReportGenerationResponse
-      | null;
-    const generatedAt =
-      data?.generated_at ??
-      data?.last_generated_at ??
-      new Date().toISOString();
-    setGeneratedReportModal({
-      report,
-      generatedAt,
-      pdfUrl: data?.pdf?.url ?? null,
-      storagePath: data?.pdf?.path ?? data?.storage_path ?? report.storage_path,
-      pageCount: getGeneratedPageCount(data),
-      pdfSize: getGeneratedPdfSize(data)
-    });
-    void queryClient.invalidateQueries({
-      queryKey: reportsCacheKey,
-      exact: true
-    });
-    void queryClient.invalidateQueries({
-      queryKey: ["coach-reports-count", userId],
-      exact: true
-    });
   };
 
   const handleDownload = async (report: ReportRow) => {
-    if (!supabaseClient || !report.storage_path) {
+    if (!supabaseClient) {
+      setError("Connexion nécessaire pour télécharger.");
+      return;
+    }
+    if (!report.storage_path) {
+      setError("PDF non disponible. Régénérez le rapport.");
       return;
     }
     const { data, error: urlError } = await supabaseClient.storage
@@ -937,7 +946,10 @@ const Reports = ({ session, locations }: ReportsProps) => {
       setError("Impossible de télécharger le PDF.");
       return;
     }
-    window.open(data.signedUrl, "_blank", "noopener");
+    const opened = window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      window.location.assign(data.signedUrl);
+    }
   };
 
   const handleDelete = async (report: ReportRow) => {
@@ -1231,12 +1243,12 @@ const Reports = ({ session, locations }: ReportsProps) => {
         />
       )}
 
-      <section className="reports-print-section min-w-0 overflow-hidden rounded-[24px] border border-slate-200/80 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.06)]">
-        <div className="grid min-w-0 gap-5 p-4 md:p-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.82fr)] xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
-          <div className="flex min-h-[150px] min-w-0 flex-col justify-between">
+      <section className="reports-print-section min-w-0 overflow-hidden rounded-[22px] border border-slate-200/80 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.06)] md:rounded-[24px]">
+        <div className="grid min-w-0 gap-4 p-3 md:gap-5 md:p-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.82fr)] xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
+          <div className="flex min-w-0 flex-col justify-between md:min-h-[150px]">
             <div>
               {(reportBranding.companyName || reportBranding.logoUrl) ? (
-                <div className="mb-5">
+                <div className="mb-3 md:mb-5">
                   <ReportBrandBlock
                     branding={reportBranding}
                     locationNames={allLocationNames}
@@ -1247,14 +1259,14 @@ const Reports = ({ session, locations }: ReportsProps) => {
                   <FileText className="h-5 w-5" />
                 </div>
               )}
-              <h2 className="text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">
+              <h2 className="text-3xl font-semibold tracking-tight text-slate-950 md:text-5xl">
                 Rapports
               </h2>
-              <p className="mt-3 max-w-xl text-base leading-7 text-slate-500">
+              <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500 md:mt-3 md:text-base md:leading-7">
                 Retrouvez toute l'évolution de votre réputation.
               </p>
             </div>
-            <div className="mt-7 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500 md:mt-7">
               <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-blue-700">
                 Timeline mensuelle
               </span>
@@ -1269,7 +1281,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
             </div>
           </div>
 
-          <div className="grid min-w-0 gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+          <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3 md:gap-3 lg:grid-cols-1 xl:grid-cols-3">
             <ReportHeroMetric
               label="Total rapports"
               value={reports.length}
@@ -1299,7 +1311,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
       </section>
 
       <Card className="reports-print-hidden min-w-0 overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
-        <CardHeader className="p-5 pb-0 md:p-6 md:pb-0">
+        <CardHeader className="p-4 pb-0 md:p-6 md:pb-0">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <CardTitle>{editingId ? "Modifier un rapport" : "Créer un rapport"}</CardTitle>
@@ -1440,12 +1452,12 @@ const Reports = ({ session, locations }: ReportsProps) => {
                 {error}
               </div>
             )}
-            <div className="flex flex-wrap items-center gap-2">
-              <Button onClick={handleSave} disabled={saving}>
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+              <Button onClick={handleSave} disabled={saving} className="min-h-11 sm:min-h-0">
                 {saving ? "Enregistrement..." : "Enregistrer"}
               </Button>
               {editingId && (
-                <Button variant="outline" onClick={resetForm}>
+                <Button variant="outline" onClick={resetForm} className="min-h-11 sm:min-h-0">
                   Annuler
                 </Button>
               )}
@@ -1455,7 +1467,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
       </Card>
 
       <Card className="reports-print-section min-w-0 overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
-        <CardHeader className="p-5 pb-0 md:p-6 md:pb-0">
+        <CardHeader className="p-4 pb-0 md:p-6 md:pb-0">
           <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div className="min-w-0">
               <CardTitle>Historique</CardTitle>
@@ -1468,7 +1480,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                 </p>
               )}
             </div>
-            <div className="reports-print-hidden flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="reports-print-hidden flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
               <div className="flex max-w-full overflow-x-auto rounded-full border border-slate-200 bg-slate-50 p-1">
                 {reportFilterOptions.map((option) => (
                   <button
@@ -1498,7 +1510,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
             </div>
           </div>
         </CardHeader>
-        <CardContent className="p-5 md:p-6">
+        <CardContent className="p-4 md:p-6">
           {reportsFirstLoad ? (
             <div className="space-y-4">
               <Skeleton className="h-40 w-full rounded-[24px]" />
@@ -1529,9 +1541,9 @@ const Reports = ({ session, locations }: ReportsProps) => {
               </p>
             </div>
           ) : (
-            <div className="space-y-6">
+            <div className="space-y-5 md:space-y-6">
               {reportGroups.map((group) => (
-                <section key={group.label} className="reports-print-card relative min-w-0 pl-5 md:pl-7">
+                <section key={group.label} className="reports-print-card relative min-w-0 pl-4 md:pl-7">
                   <div className="absolute left-2 top-9 h-[calc(100%-1rem)] w-px bg-blue-100 md:left-3" />
                   <div className="mb-4 flex items-center gap-3">
                     <span className="absolute left-0 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 ring-4 ring-white md:left-1">
@@ -1597,7 +1609,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                       return (
                         <article
                           key={report.id}
-                          className="reports-print-card min-w-0 overflow-hidden rounded-[22px] border border-slate-200/80 bg-white p-4 shadow-[0_18px_48px_rgba(15,23,42,0.045)] transition hover:-translate-y-0.5 hover:border-blue-100 hover:shadow-[0_24px_64px_rgba(15,23,42,0.07)] md:rounded-[24px] md:p-5"
+                          className="reports-print-card min-w-0 overflow-hidden rounded-[20px] border border-slate-200/80 bg-white p-3 shadow-[0_18px_48px_rgba(15,23,42,0.045)] transition hover:-translate-y-0.5 hover:border-blue-100 hover:shadow-[0_24px_64px_rgba(15,23,42,0.07)] md:rounded-[24px] md:p-5"
                         >
                           <div className="flex min-w-0 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                             <div className="min-w-0">
@@ -1634,14 +1646,15 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                 </p>
                               )}
                             </div>
-                            <div className="reports-print-hidden flex shrink-0 flex-wrap items-center gap-2 xl:justify-end">
-                              <Button size="sm" onClick={() => handleEdit(report)}>
+                            <div className="reports-print-hidden grid shrink-0 grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center xl:justify-end">
+                              <Button size="sm" className="min-h-11 sm:min-h-0" onClick={() => handleEdit(report)}>
                                 <Eye className="h-4 w-4" />
                                 Voir
                               </Button>
                               <Button
                                 variant="outline"
                                 size="sm"
+                                className="min-h-11 sm:min-h-0"
                                 disabled={!report.storage_path}
                                 onClick={() => handleDownload(report)}
                               >
@@ -1651,6 +1664,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                               <Button
                                 variant="outline"
                                 size="sm"
+                                className="min-h-11 sm:min-h-0"
                                 onClick={() => handleGenerate(report)}
                               >
                                 <RefreshCw className="h-4 w-4" />
@@ -1659,7 +1673,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                                className="min-h-11 text-red-600 hover:bg-red-50 hover:text-red-700 sm:min-h-0"
                                 onClick={() => handleDelete(report)}
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -1668,7 +1682,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                             </div>
                           </div>
 
-                          <div className="mt-4 grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                          <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                             {periodLabel && (
                               <ReportDataPoint
                                 label="Période"
@@ -1704,7 +1718,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                           </div>
 
                           {(healthScore.value || evolution || themes.length > 0) && (
-                          <div className="mt-3 grid min-w-0 gap-3 lg:grid-cols-[0.9fr_0.8fr_1.2fr]">
+                          <div className="mt-3 grid min-w-0 gap-2 md:gap-3 lg:grid-cols-[0.9fr_0.8fr_1.2fr]">
                             {healthScore.value && (
                             <div className="reports-print-card min-w-0 overflow-hidden rounded-[22px] border border-[#020617] bg-[#020617] p-4 text-white shadow-[0_18px_42px_rgba(2,6,23,0.18)] md:rounded-[24px]">
                               <div className="flex items-center justify-between gap-3">

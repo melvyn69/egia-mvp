@@ -25,7 +25,7 @@ const InstallAppCTA = ({
       onFallback();
       return;
     }
-    const result = await install();
+    const result = await install().catch(() => "unavailable" as const);
     if (result === "unavailable") {
       onFallback();
     }

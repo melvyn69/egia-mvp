@@ -89,7 +89,7 @@ export const DashboardCard = ({
 );
 
 export const EmptyState = ({ label = EMPTY_ANALYSIS }: { label?: string }) => (
-  <div className="flex min-h-[136px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 text-center text-sm text-slate-500">
+  <div className="flex min-h-[104px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 text-center text-sm text-slate-500 sm:min-h-[136px]">
     {label}
   </div>
 );
@@ -109,7 +109,7 @@ export const AnalyticsDisclosure = ({
 }) => (
   <details
     {...(defaultOpen ? { open: true } : {})}
-    className="group rounded-2xl border border-slate-100/80 bg-slate-50/70 p-4 transition hover:border-slate-200 hover:bg-slate-50"
+    className="group rounded-2xl border border-slate-100/80 bg-slate-50/70 p-3 transition hover:border-slate-200 hover:bg-slate-50 sm:p-4"
   >
     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900/10 [&::-webkit-details-marker]:hidden">
       <span className="min-w-0">
@@ -362,14 +362,14 @@ export const AnalyticsKpiCard = ({
   <button
     type="button"
     onClick={() => onOpen(id)}
-    className="analytics-kpi-motion group h-full min-w-0 rounded-2xl border border-slate-200/70 bg-white px-4 py-4 text-left shadow-[0_12px_30px_rgba(15,23,42,0.04)] transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_16px_38px_rgba(15,23,42,0.07)] focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+    className="analytics-kpi-motion group h-full min-h-[132px] min-w-0 rounded-2xl border border-slate-200/70 bg-white px-3 py-3 text-left shadow-[0_12px_30px_rgba(15,23,42,0.04)] transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_16px_38px_rgba(15,23,42,0.07)] focus:outline-none focus:ring-2 focus:ring-slate-900/10 sm:min-h-0 sm:px-4 sm:py-4"
   >
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
         <p className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
           {label}
         </p>
-        <p className="mt-2 truncate text-2xl font-semibold tracking-tight text-slate-950">
+        <p className="mt-2 truncate text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">
           {value}
         </p>
       </div>
@@ -401,13 +401,13 @@ export const TodayMetricTile = ({ metric }: { metric: TodayBriefMetric }) => {
   }[metric.tone];
 
   return (
-    <div className={cn("analytics-card-motion h-full rounded-2xl border p-4", toneClass)}>
+    <div className={cn("analytics-card-motion h-full rounded-2xl border p-3 sm:p-4", toneClass)}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
             {metric.label}
           </p>
-          <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+          <p className="mt-2 text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">
             {metric.value}
           </p>
         </div>
@@ -439,7 +439,7 @@ export const TodayTaskCard = ({
   }[task.tone];
 
   return (
-    <article className={cn("analytics-card-motion h-full rounded-2xl border p-4", toneClass)}>
+    <article className={cn("analytics-card-motion h-full rounded-2xl border p-3 sm:p-4", toneClass)}>
       <div className="flex items-start gap-3">
         <span className={cn("mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full", dotClass)} />
         <div className="min-w-0 flex-1">
@@ -508,7 +508,7 @@ export const AnalyticsMainChart = ({
           viewBox={`0 0 ${width} ${height}`}
           role="img"
           aria-label={`${getMetricLabel(metric)} sur la période`}
-          className="h-[340px] w-full"
+          className="h-[220px] w-full sm:h-[300px] lg:h-[340px]"
           preserveAspectRatio="none"
         >
           <defs>

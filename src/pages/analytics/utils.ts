@@ -95,20 +95,21 @@ export const getTopicSummary = (topic: AnalyticsTopic) => {
 export const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
-export const getReasonLabel = (reasons: string[]): string => {
-  if (reasons.includes("no_locations")) {
+export const getReasonLabel = (reasons: string[] | null | undefined): string => {
+  const safeReasons = Array.isArray(reasons) ? reasons : [];
+  if (safeReasons.includes("no_locations")) {
     return "Aucune fiche connectée";
   }
-  if (reasons.includes("no_reviews_in_range")) {
+  if (safeReasons.includes("no_reviews_in_range")) {
     return "Aucun avis sur la période";
   }
-  if (reasons.includes("no_sentiment_data")) {
+  if (safeReasons.includes("no_sentiment_data")) {
     return "Analyse en cours";
   }
-  if (reasons.includes("no_ai_topics")) {
+  if (safeReasons.includes("no_ai_topics")) {
     return "Pas de thèmes détectés";
   }
-  if (reasons.includes("no_replyable_reviews")) {
+  if (safeReasons.includes("no_replyable_reviews")) {
     return "Aucun avis avec texte";
   }
   return "Pas assez de données";
