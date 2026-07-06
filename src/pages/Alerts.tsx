@@ -581,6 +581,9 @@ const Alerts = ({ session }: AlertsProps) => {
 
   return (
     <div className="alerts-page min-w-0 max-w-full space-y-4 overflow-x-hidden pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:space-y-6 lg:pb-4">
+      <div className="mb-3 rounded-xl bg-red-500 p-3 text-sm font-bold text-white">
+        DEBUG ALERTS RESPONSIVE ACTIVE
+      </div>
       <style>{`
         .alerts-page,
         .alerts-page * {
