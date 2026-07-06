@@ -502,9 +502,9 @@ const ReportDataPoint = ({
   value: ReactNode;
   detail?: ReactNode;
 }) => (
-  <div className="reports-print-card min-w-0 overflow-hidden rounded-[20px] border border-slate-200/70 bg-white px-3 py-2.5 shadow-[0_12px_30px_rgba(15,23,42,0.035)] md:rounded-[24px] md:px-4 md:py-3">
+  <div className="reports-print-card min-w-0 overflow-hidden rounded-[18px] border border-slate-200/70 bg-white px-3 py-2 shadow-[0_12px_30px_rgba(15,23,42,0.035)] md:rounded-[24px] md:px-4 md:py-3">
     <p className="text-xs font-medium text-slate-500">{label}</p>
-    <div className="mt-1 truncate text-base font-semibold text-slate-950 md:text-lg">{value}</div>
+    <div className="mt-1 truncate text-sm font-semibold text-slate-950 sm:text-base md:text-lg">{value}</div>
     {detail && <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>}
   </div>
 );
@@ -1149,7 +1149,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
   };
 
   return (
-    <div className="reports-page min-w-0 max-w-full space-y-4 overflow-x-hidden pb-4 md:space-y-6">
+    <div className="reports-page min-w-0 max-w-full space-y-4 overflow-x-hidden pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:space-y-6 lg:pb-4">
       <style>{`
         @keyframes reportReadyFade {
           from { opacity: 0; }
@@ -1326,7 +1326,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
             <Badge variant="neutral">{renderMode === "premium" ? "Premium" : "Classique"}</Badge>
           </div>
         </CardHeader>
-        <CardContent className="grid min-w-0 gap-4 p-4 md:p-5 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.48fr)]">
+        <CardContent className="grid min-w-0 gap-3 p-3 sm:gap-4 sm:p-4 md:p-5 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.48fr)]">
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <label className="text-xs font-semibold text-slate-500">
@@ -1400,7 +1400,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
             </div>
           </div>
 
-          <div className="space-y-4 rounded-[24px] border border-slate-200/70 bg-slate-50/70 p-4">
+          <div className="space-y-3 rounded-[22px] border border-slate-200/70 bg-slate-50/70 p-3 sm:space-y-4 sm:rounded-[24px] sm:p-4">
             <div>
               <label className="text-xs font-semibold text-slate-500">Notes</label>
               <textarea
@@ -1456,7 +1456,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                 {error}
               </div>
             )}
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+            <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-2 sm:flex sm:flex-wrap sm:items-center">
               <Button onClick={handleSave} disabled={saving} className="min-h-11 sm:min-h-0">
                 {saving ? "Enregistrement..." : "Enregistrer"}
               </Button>
@@ -1471,7 +1471,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
       </Card>
 
       <Card className="reports-print-section min-w-0 overflow-hidden rounded-[24px] border-slate-200/70 bg-white shadow-[0_18px_54px_rgba(15,23,42,0.045)]">
-        <CardHeader className="p-4 pb-0 md:p-6 md:pb-0">
+        <CardHeader className="p-3 pb-0 sm:p-4 sm:pb-0 md:p-6 md:pb-0">
           <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div className="min-w-0">
               <CardTitle>Historique</CardTitle>
@@ -1514,7 +1514,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
             </div>
           </div>
         </CardHeader>
-        <CardContent className="p-4 md:p-6">
+        <CardContent className="p-3 sm:p-4 md:p-6">
           {reportsFirstLoad ? (
             <div className="space-y-4">
               <Skeleton className="h-40 w-full rounded-[24px]" />
@@ -1547,10 +1547,10 @@ const Reports = ({ session, locations }: ReportsProps) => {
           ) : (
             <div className="space-y-5 md:space-y-6">
               {reportGroups.map((group) => (
-                <section key={group.label} className="reports-print-card relative min-w-0 pl-4 md:pl-7">
-                  <div className="absolute left-2 top-9 h-[calc(100%-1rem)] w-px bg-blue-100 md:left-3" />
-                  <div className="mb-4 flex items-center gap-3">
-                    <span className="absolute left-0 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 ring-4 ring-white md:left-1">
+                <section key={group.label} className="reports-print-card relative min-w-0 pl-0 md:pl-7">
+                  <div className="absolute left-2 top-9 hidden h-[calc(100%-1rem)] w-px bg-blue-100 md:left-3 md:block" />
+                  <div className="mb-3 flex items-center gap-3 md:mb-4">
+                    <span className="hidden h-4 w-4 items-center justify-center rounded-full bg-blue-600 ring-4 ring-white md:absolute md:left-1 md:flex">
                       <span className="h-1.5 w-1.5 rounded-full bg-white" />
                     </span>
                     <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
@@ -1650,15 +1650,15 @@ const Reports = ({ session, locations }: ReportsProps) => {
                                 </p>
                               )}
                             </div>
-                            <div className="reports-print-hidden grid shrink-0 grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center xl:justify-end">
-                              <Button size="sm" className="min-h-11 sm:min-h-0" onClick={() => handleEdit(report)}>
+                            <div className="reports-print-hidden grid shrink-0 grid-cols-1 gap-2 min-[390px]:grid-cols-2 sm:flex sm:flex-wrap sm:items-center xl:justify-end">
+                              <Button size="sm" className="min-h-11 justify-center whitespace-nowrap text-xs sm:min-h-0" onClick={() => handleEdit(report)}>
                                 <Eye className="h-4 w-4" />
                                 Voir
                               </Button>
                               <Button
                                 variant="outline"
                                 size="sm"
-                                className="min-h-11 sm:min-h-0"
+                                className="min-h-11 justify-center whitespace-nowrap text-xs sm:min-h-0"
                                 disabled={!report.storage_path}
                                 onClick={() => handleDownload(report)}
                               >
@@ -1668,7 +1668,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                               <Button
                                 variant="outline"
                                 size="sm"
-                                className="min-h-11 sm:min-h-0"
+                                className="min-h-11 justify-center whitespace-nowrap text-xs sm:min-h-0"
                                 onClick={() => handleGenerate(report)}
                               >
                                 <RefreshCw className="h-4 w-4" />
@@ -1677,7 +1677,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="min-h-11 text-red-600 hover:bg-red-50 hover:text-red-700 sm:min-h-0"
+                                className="min-h-11 justify-center whitespace-nowrap text-xs text-red-600 hover:bg-red-50 hover:text-red-700 sm:min-h-0"
                                 onClick={() => handleDelete(report)}
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -1686,7 +1686,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
                             </div>
                           </div>
 
-                          <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                          <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-6">
                             {periodLabel && (
                               <ReportDataPoint
                                 label="Période"

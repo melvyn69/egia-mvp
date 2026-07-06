@@ -316,6 +316,9 @@ const App = () => {
     const handleWindowError = (event: ErrorEvent) => {
       const error = event.error ?? event.message;
       if (isBenignBrowserError(error)) {
+        if (import.meta.env.DEV) {
+          console.info("[browser-error] ignored benign error", error);
+        }
         event.preventDefault();
         return;
       }
@@ -331,6 +334,9 @@ const App = () => {
     };
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       if (isBenignBrowserError(event.reason)) {
+        if (import.meta.env.DEV) {
+          console.info("[browser-error] ignored benign rejection", event.reason);
+        }
         event.preventDefault();
         return;
       }
@@ -1221,7 +1227,7 @@ const App = () => {
         </div>
       </div>
       {session && usesAppShell && mobileMenuOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden">
+        <div className="fixed inset-0 z-50 lg:hidden">
           <button
             type="button"
             className="absolute inset-0 bg-slate-900/40"

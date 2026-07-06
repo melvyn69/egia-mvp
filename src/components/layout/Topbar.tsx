@@ -79,7 +79,7 @@ const Topbar = ({
   };
 
   return (
-    <div className="sticky top-0 z-30 flex min-h-[72px] items-center justify-between gap-2 border-b border-slate-200 bg-white/85 px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] backdrop-blur print:hidden md:px-6 md:py-5 lg:static lg:min-h-0 lg:items-center lg:gap-3">
+    <div className="sticky top-0 z-40 flex min-h-[72px] items-center justify-between gap-2 border-b border-slate-200 bg-white/90 px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] backdrop-blur print:hidden md:px-6 md:py-5 lg:static lg:z-30 lg:min-h-0 lg:items-center lg:gap-3">
       <div className="flex min-w-0 flex-1 items-center gap-2 lg:items-start lg:gap-3">
         {onToggleMenu && (
           <Button

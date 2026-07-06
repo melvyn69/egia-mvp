@@ -168,9 +168,9 @@ const Billing = ({ isAdmin }: BillingProps) => {
   }
 
   return (
-    <div className="space-y-6 rounded-3xl bg-slate-50/80 p-4 sm:p-6">
+    <div className="space-y-4 rounded-2xl bg-slate-50/80 p-3 pb-[calc(7rem+env(safe-area-inset-bottom))] sm:space-y-6 sm:rounded-3xl sm:p-6 lg:pb-6">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-950 sm:text-3xl">
+        <h1 className="text-xl font-semibold text-slate-950 sm:text-3xl">
           Abonnement & Facturation
         </h1>
         <p className="mt-2 text-sm text-slate-500">
@@ -179,10 +179,10 @@ const Billing = ({ isAdmin }: BillingProps) => {
       </div>
 
       <Card className="border-l-4 border-l-emerald-500 bg-white">
-        <CardContent className="flex flex-col gap-5 pt-6 lg:flex-row lg:items-center lg:justify-between">
-          <div className="space-y-4">
+        <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between lg:p-6">
+          <div className="space-y-3 sm:space-y-4">
             <div className="flex flex-wrap items-center gap-3">
-              <h2 className="text-xl font-semibold text-slate-950">
+              <h2 className="text-lg font-semibold text-slate-950 sm:text-xl">
                 Plan actuel : Growth
               </h2>
               <Badge variant="success">Actif</Badge>
@@ -210,7 +210,7 @@ const Billing = ({ isAdmin }: BillingProps) => {
       </Card>
 
       <Card className="bg-white">
-        <CardHeader>
+        <CardHeader className="p-4 pb-2 sm:p-6 sm:pb-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <CardTitle>Usage & Limites</CardTitle>
@@ -221,16 +221,16 @@ const Billing = ({ isAdmin }: BillingProps) => {
             <Badge variant="warning">Attention volume IA</Badge>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="space-y-5">
+        <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-6">
+            <div className="space-y-4 sm:space-y-5">
               {usageItems.map((item) => {
                 const percent = Math.min(100, (item.current / item.limit) * 100);
                 const isHighUsage = percent >= 85;
 
                 return (
-                  <div key={item.label} className="space-y-2">
-                    <div className="flex items-center justify-between gap-3 text-sm">
+                  <div key={item.label} className="space-y-2 rounded-2xl border border-slate-100 bg-slate-50/70 p-3 sm:border-0 sm:bg-transparent sm:p-0">
+                    <div className="flex items-start justify-between gap-3 text-sm sm:items-center">
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <span className="font-medium text-slate-800">
                           {item.label}
@@ -259,8 +259,8 @@ const Billing = ({ isAdmin }: BillingProps) => {
               })}
             </div>
 
-            <div className="rounded-2xl bg-slate-100 p-5">
-              <h3 className="text-lg font-semibold text-slate-950">
+            <div className="rounded-2xl bg-slate-100 p-4 sm:p-5">
+              <h3 className="text-base font-semibold text-slate-950 sm:text-lg">
                 Besoin de plus de puissance ?
               </h3>
               <p className="mt-2 text-sm text-slate-600">
@@ -277,7 +277,7 @@ const Billing = ({ isAdmin }: BillingProps) => {
                   Passez au pilotage multi-sites
                 </div>
               </div>
-              <Button className="mt-5 bg-violet-700 hover:bg-violet-800" onClick={scrollToPricing}>
+              <Button className="mt-5 min-h-11 w-full bg-violet-700 hover:bg-violet-800 sm:w-auto" onClick={scrollToPricing}>
                 Voir les offres
                 <ArrowRight size={16} />
               </Button>
@@ -288,14 +288,14 @@ const Billing = ({ isAdmin }: BillingProps) => {
 
       <section className="grid gap-4 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)]">
         <Card className="overflow-hidden border-slate-900 bg-slate-950 text-white">
-          <CardContent className="pt-6">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-emerald-300">
+          <CardContent className="p-4 sm:p-6">
+            <div className="flex items-start gap-3 sm:gap-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-emerald-300 sm:h-12 sm:w-12">
                 <TrendingUp size={22} />
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-slate-300">ROI EGIA</p>
-                <h2 className="mt-2 text-2xl font-semibold leading-tight">
+                <h2 className="mt-2 text-xl font-semibold leading-tight sm:text-2xl">
                   EGIA vous a déjà économisé environ 11h ce mois-ci.
                 </h2>
                 <p className="mt-3 text-sm text-slate-300">
@@ -308,18 +308,18 @@ const Billing = ({ isAdmin }: BillingProps) => {
         </Card>
 
         <Card className="bg-white">
-          <CardHeader>
+          <CardHeader className="p-4 pb-2 sm:p-6 sm:pb-3">
             <CardTitle>Valeur business générée</CardTitle>
             <p className="text-sm text-slate-500">
               Une lecture simple de ce que votre abonnement transforme déjà.
             </p>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
             <div className="grid gap-3 sm:grid-cols-3">
               {businessValue.map((item) => (
                 <div
                   key={item.label}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:p-4"
                 >
                   <p className="text-xs font-semibold uppercase text-slate-400">
                     {item.label}
@@ -336,13 +336,13 @@ const Billing = ({ isAdmin }: BillingProps) => {
       </section>
 
       <Card className="bg-gradient-to-br from-white via-violet-50 to-slate-100">
-        <CardContent className="grid gap-5 pt-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+        <CardContent className="grid gap-4 p-4 sm:gap-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white px-3 py-1 text-xs font-semibold text-violet-700">
               <Sparkles size={14} />
               Upgrade recommandé
             </div>
-            <h2 className="mt-3 text-2xl font-semibold text-slate-950">
+            <h2 className="mt-3 text-xl font-semibold text-slate-950 sm:text-2xl">
               Débloquez les workflows avancés et passez au pilotage multi-sites.
             </h2>
             <p className="mt-2 max-w-2xl text-sm text-slate-600">
@@ -351,10 +351,10 @@ const Billing = ({ isAdmin }: BillingProps) => {
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row lg:flex-col">
-            <Button className="bg-violet-700 hover:bg-violet-800" onClick={scrollToPricing}>
+            <Button className="min-h-11 bg-violet-700 hover:bg-violet-800 sm:min-h-0" onClick={scrollToPricing}>
               Comparer les offres
             </Button>
-            <Button variant="outline" disabled title="Bientôt disponible">
+            <Button variant="outline" className="min-h-11 sm:min-h-0" disabled title="Bientôt disponible">
               Contacter l’équipe
             </Button>
           </div>
@@ -380,7 +380,7 @@ const Billing = ({ isAdmin }: BillingProps) => {
                     : "bg-white"
               }
             >
-              <CardContent className="flex h-full flex-col pt-6">
+              <CardContent className="flex h-full flex-col p-4 sm:p-6">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3
@@ -412,7 +412,7 @@ const Billing = ({ isAdmin }: BillingProps) => {
                   )}
                 </div>
 
-                <div className="mt-6">
+                <div className="mt-4 sm:mt-6">
                   <span
                     className={`text-3xl font-semibold ${
                       plan.dark ? "text-white" : "text-slate-950"
@@ -432,7 +432,7 @@ const Billing = ({ isAdmin }: BillingProps) => {
                 </div>
 
                 <ul
-                  className={`mt-6 space-y-3 text-sm ${
+                  className={`mt-4 space-y-2 text-sm sm:mt-6 sm:space-y-3 ${
                     plan.dark ? "text-slate-200" : "text-slate-600"
                   }`}
                 >
@@ -452,7 +452,7 @@ const Billing = ({ isAdmin }: BillingProps) => {
                 </ul>
 
                 <Button
-                  className={`mt-6 w-full ${
+                  className={`mt-5 min-h-11 w-full sm:mt-6 sm:min-h-0 ${
                     plan.dark ? "bg-white text-slate-950 hover:bg-slate-100" : ""
                   }`}
                   variant={plan.current ? "secondary" : "default"}
@@ -468,7 +468,7 @@ const Billing = ({ isAdmin }: BillingProps) => {
       </section>
 
       <Card className="bg-white">
-        <CardHeader className="flex-row items-center justify-between gap-3">
+        <CardHeader className="flex-row items-center justify-between gap-3 p-4 pb-2 sm:p-6 sm:pb-3">
           <div>
             <CardTitle>Historique factures</CardTitle>
             <p className="mt-1 text-sm text-slate-500">
@@ -477,8 +477,11 @@ const Billing = ({ isAdmin }: BillingProps) => {
           </div>
           <FileText size={20} className="text-slate-400" />
         </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
+        <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 p-4 text-center text-sm text-slate-500 sm:hidden">
+            Aucune facture disponible.
+          </div>
+          <div className="hidden overflow-x-auto sm:block">
             <table className="w-full min-w-[620px] border-separate border-spacing-0 text-left text-sm">
               <thead>
                 <tr className="text-xs font-semibold uppercase text-slate-400">
@@ -504,7 +507,7 @@ const Billing = ({ isAdmin }: BillingProps) => {
         </CardContent>
       </Card>
 
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 p-3 shadow-[0_-16px_36px_-24px_rgba(15,23,42,0.6)] backdrop-blur lg:hidden">
+      <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 border-t border-slate-200 bg-white/95 p-2 shadow-[0_-16px_36px_-24px_rgba(15,23,42,0.6)] backdrop-blur lg:hidden">
         <div className="mx-auto flex max-w-lg items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-slate-950">

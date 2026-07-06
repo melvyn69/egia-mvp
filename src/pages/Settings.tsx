@@ -738,28 +738,32 @@ const Settings = ({ session }: SettingsProps) => {
   const tabContent = (() => {
     if (activeTab === "team") {
       return (
-        <div className="space-y-6">
-          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-card sm:flex-row sm:items-center sm:justify-between">
-            <div>
+        <div className="space-y-4 md:space-y-6">
+          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-card sm:flex-row sm:items-center sm:justify-between sm:p-4">
+            <div className="min-w-0">
               <p className="text-sm font-semibold text-slate-900">
                 Reconnaissance client
               </p>
-              <p className="text-xs text-slate-500">
+              <p className="mt-1 text-xs leading-5 text-slate-500">
                 Consultez le podium, les mentions et l'employé du mois depuis la
                 page Équipe.
               </p>
             </div>
-            <Button variant="outline" onClick={() => navigate("/team")}>
+            <Button
+              variant="outline"
+              className="min-h-11 w-full sm:w-auto"
+              onClick={() => navigate("/team")}
+            >
               Voir le classement
             </Button>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
+          <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr] lg:gap-6">
           <Card>
-            <CardHeader>
+            <CardHeader className="p-4 pb-2 sm:p-6 sm:pb-3">
               <CardTitle>Collaborateurs actifs</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-3 p-4 pt-0 sm:space-y-4 sm:p-6 sm:pt-0">
               <p className="text-xs text-slate-500">
                 Le rapport mensuel est envoyé automatiquement par email aux
                 membres actifs.
@@ -782,15 +786,15 @@ const Settings = ({ session }: SettingsProps) => {
                   return (
                     <div
                       key={member.id}
-                      className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                      className="flex min-w-0 flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4 xl:flex-row xl:items-center xl:justify-between"
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-ink text-sm font-semibold text-white">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-ink text-sm font-semibold text-white sm:h-12 sm:w-12">
                           {initialsFromName(name)}
                         </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-semibold text-slate-900">
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <p className="min-w-0 text-sm font-semibold text-slate-900">
                               {name}
                             </p>
                             {member.receive_monthly_reports && (
@@ -802,12 +806,14 @@ const Settings = ({ session }: SettingsProps) => {
                               </Badge>
                             )}
                           </div>
-                          <p className="text-xs text-slate-500">{email}</p>
+                          <p className="mt-1 break-all text-xs leading-5 text-slate-500">
+                            {email}
+                          </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-4">
+                      <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center xl:flex xl:shrink-0 xl:items-center xl:gap-4">
                         <label
-                          className="flex items-center gap-2 text-xs text-slate-600"
+                          className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-600 xl:min-h-0 xl:border-0 xl:px-0 xl:py-0"
                           onClick={() => {
                             if (!canToggle) {
                               setToggleError(
@@ -827,10 +833,10 @@ const Settings = ({ session }: SettingsProps) => {
                               handleMemberToggle(member, event.target.checked)
                             }
                           />
-                          Recevoir le rapport mensuel
+                          <span>Recevoir le rapport mensuel</span>
                         </label>
                         {!canToggle && (
-                          <span className="text-xs text-slate-400">
+                          <span className="text-xs leading-5 text-slate-400 sm:col-span-2 xl:col-span-1">
                             Ajoutez un email pour activer.
                           </span>
                         )}
@@ -847,10 +853,10 @@ const Settings = ({ session }: SettingsProps) => {
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader className="p-4 pb-2 sm:p-6 sm:pb-3">
               <CardTitle>Invitations en attente</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-3 p-4 pt-0 sm:p-6 sm:pt-0">
               {invitationsQuery.isLoading ? (
                 <Skeleton className="h-16 w-full" />
               ) : (invitationsQuery.data ?? []).length === 0 ? (
@@ -861,10 +867,10 @@ const Settings = ({ session }: SettingsProps) => {
                 (invitationsQuery.data ?? []).map((invite) => (
                   <div
                     key={invite.id}
-                    className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-3 text-sm"
+                    className="flex min-w-0 flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <div>
-                      <p className="font-medium text-slate-900">
+                    <div className="min-w-0">
+                      <p className="break-all font-medium text-slate-900">
                         {invite.email}
                       </p>
                       <p className="text-xs text-slate-500">
@@ -874,6 +880,7 @@ const Settings = ({ session }: SettingsProps) => {
                     <Button
                       variant="outline"
                       size="sm"
+                      className="min-h-11 w-full sm:min-h-0 sm:w-auto"
                       onClick={() => handleResend(invite)}
                     >
                       Renvoyer
@@ -885,10 +892,10 @@ const Settings = ({ session }: SettingsProps) => {
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader className="p-4 pb-2 sm:p-6 sm:pb-3">
               <CardTitle>Inviter un membre</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 p-4 pt-0 sm:p-6 sm:pt-0">
               <div className="grid gap-3">
                 <label className="text-xs font-semibold text-slate-600">
                   Prénom
@@ -920,7 +927,9 @@ const Settings = ({ session }: SettingsProps) => {
                   </select>
                 </label>
                 <label className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-700">
-                  Recevoir les rapports mensuels
+                  <span className="pr-3 leading-5">
+                    Recevoir les rapports mensuels
+                  </span>
                   <input
                     type="checkbox"
                     checked={inviteMonthly}
@@ -941,7 +950,11 @@ const Settings = ({ session }: SettingsProps) => {
                 <p className="text-xs text-emerald-600">{inviteSuccess}</p>
               )}
 
-              <Button onClick={handleInvite} disabled={inviteSending}>
+              <Button
+                className="min-h-11 w-full sm:w-auto"
+                onClick={handleInvite}
+                disabled={inviteSending}
+              >
                 Envoyer l’invitation
               </Button>
             </CardContent>

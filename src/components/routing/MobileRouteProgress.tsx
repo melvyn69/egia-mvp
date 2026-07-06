@@ -20,7 +20,7 @@ const MobileRouteProgress = () => {
       <div
         key={pathname}
         className="h-full w-full origin-left bg-gradient-to-r from-[#68e0cf] via-[#8fd7ff] to-[#9b7cff]"
-        style={{ animation: "egia-mobile-route-progress 220ms ease-out forwards" }}
+        style={{ animation: "egia-mobile-route-progress 180ms ease-out forwards" }}
       />
     </div>
   );
