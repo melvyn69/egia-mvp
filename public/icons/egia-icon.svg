@@ -1,0 +1,24 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="egia-a" x1="365" y1="222" x2="407" y2="286" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.42" stop-color="#78E6D7"/>
+      <stop offset="0.72" stop-color="#8EC9FF"/>
+      <stop offset="1" stop-color="#A27BFF"/>
+    </linearGradient>
+    <radialGradient id="egia-glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(356 174) rotate(128) scale(260)">
+      <stop stop-color="#8EC9FF" stop-opacity="0.12"/>
+      <stop offset="0.46" stop-color="#A27BFF" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#0B0F17" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="#0B0F17"/>
+  <rect width="512" height="512" fill="url(#egia-glow)"/>
+  <g fill="#FFFFFF" font-family="Inter, Avenir Next, Helvetica Neue, Arial, sans-serif" font-size="64" font-weight="300">
+    <text x="102" y="278">E</text>
+    <text x="190" y="278">G</text>
+    <text x="286" y="278">I</text>
+  </g>
+  <path d="M365 284 L386 226" stroke="url(#egia-a)" stroke-width="7" stroke-linecap="butt"/>
+  <path d="M407 284 L386 226" stroke="url(#egia-a)" stroke-width="7" stroke-linecap="butt"/>
+</svg>
