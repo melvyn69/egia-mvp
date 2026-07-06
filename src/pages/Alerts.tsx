@@ -211,17 +211,17 @@ const AlertKpiCard = ({
   }[tone];
 
   return (
-    <Card className="min-w-0 max-w-full shadow-none">
-      <CardContent className="flex min-w-0 items-center justify-between gap-2 p-3 sm:gap-3 sm:p-4">
+    <Card className="min-w-0 max-w-full rounded-xl shadow-none sm:rounded-2xl">
+      <CardContent className="flex min-w-0 items-center justify-between gap-2 p-2.5 sm:gap-3 sm:p-4">
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-medium leading-tight text-slate-500 sm:text-xs">
+          <p className="text-[10px] font-medium leading-tight text-slate-500 sm:text-xs">
             {label}
           </p>
-          <p className="mt-1 break-words text-xl font-semibold leading-tight text-slate-950 sm:text-2xl">
+          <p className="mt-0.5 break-words text-lg font-semibold leading-tight text-slate-950 sm:mt-1 sm:text-2xl">
             {value}
           </p>
         </div>
-        <span className={`h-2 w-2 shrink-0 rounded-full ${accentClass}`} />
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full sm:h-2 sm:w-2 ${accentClass}`} />
       </CardContent>
     </Card>
   );
@@ -234,11 +234,11 @@ const PriorityAlertCard = ({
   alert: FormattedAlert;
   onResolve: (alert: FormattedAlert) => void;
 }) => (
-  <div className="min-w-0 max-w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 shadow-sm sm:px-4">
-    <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center md:justify-between">
+  <div className="min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 shadow-sm sm:rounded-2xl sm:px-4 sm:py-3">
+    <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:justify-between">
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <Badge className={severityClassMap[alert.severity]}>
+        <div className="flex flex-wrap items-center gap-1.5 text-xs sm:gap-2 sm:text-sm">
+          <Badge className={`${severityClassMap[alert.severity]} px-2 py-0.5 text-[11px]`}>
             {severityLabelMap[alert.severity]}
           </Badge>
           <span className="min-w-0 max-w-full truncate font-semibold text-slate-950">
@@ -254,16 +254,16 @@ const PriorityAlertCard = ({
           <span className="text-slate-400">·</span>
           <span className="text-slate-600">{alert.typeLabel}</span>
         </div>
-        <p className="mt-1 min-w-0 truncate text-sm text-slate-600">
+        <p className="mt-0.5 min-w-0 truncate text-xs text-slate-600 sm:mt-1 sm:text-sm">
           {alert.reason}
         </p>
       </div>
-      <div className="flex w-full flex-wrap gap-2 sm:w-auto md:shrink-0">
+      <div className="flex w-full flex-wrap gap-1.5 sm:w-auto sm:gap-2 md:shrink-0">
         <Button
           variant="outline"
           size="sm"
           onClick={() => window.location.assign(getReviewUrl(alert))}
-          className="min-w-0 flex-1 sm:flex-none"
+          className="h-7 min-w-0 flex-1 px-2 text-[11px] sm:h-9 sm:flex-none sm:px-3 sm:text-sm"
         >
           {canReplyToAlert(alert) ? "Répondre" : "Voir"}
         </Button>
@@ -272,9 +272,9 @@ const PriorityAlertCard = ({
             variant="ghost"
             size="sm"
             onClick={() => onResolve(alert)}
-            className="min-w-0 flex-1 sm:flex-none"
+            className="h-7 min-w-0 flex-1 px-2 text-[11px] sm:h-9 sm:flex-none sm:px-3 sm:text-sm"
           >
-            <CheckCircle2 className="h-4 w-4" />
+            <CheckCircle2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             Traiter
           </Button>
         )}
@@ -299,7 +299,7 @@ const AlertFilters = ({
         key={filter}
         type="button"
         onClick={() => onChange(filter)}
-        className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+        className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium transition sm:px-3 sm:py-1.5 sm:text-xs ${
           activeFilter === filter
             ? "border-slate-950 bg-slate-950 text-white"
             : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-950"
@@ -319,21 +319,21 @@ const AlertListItem = ({
   alert: FormattedAlert;
   onResolve: (alert: FormattedAlert) => void;
 }) => (
-  <div className="min-w-0 max-w-full border-t border-slate-100 px-3 py-3 first:border-t-0 sm:px-4 md:grid md:grid-cols-[1.2fr_1.4fr_0.7fr_0.45fr_0.6fr_0.8fr] md:items-center md:gap-4 md:px-5">
+  <div className="min-w-0 max-w-full border-t border-slate-100 px-2.5 py-2.5 first:border-t-0 sm:px-4 sm:py-3 md:grid md:grid-cols-[1.2fr_1.4fr_0.7fr_0.45fr_0.6fr_0.8fr] md:items-center md:gap-4 md:px-5">
     <div className="flex min-w-0 items-center justify-between gap-3 md:block">
-      <p className="min-w-0 truncate text-sm font-medium text-slate-950">
+      <p className="min-w-0 truncate text-xs font-medium text-slate-950 sm:text-sm">
         {alert.author ?? "Client non identifié"}
       </p>
-      <Badge className={`shrink-0 md:hidden ${severityClassMap[alert.severity]}`}>
+      <Badge className={`shrink-0 px-2 py-0.5 text-[11px] md:hidden ${severityClassMap[alert.severity]}`}>
         {severityLabelMap[alert.severity]}
       </Badge>
     </div>
     <div className="mt-1 flex min-w-0 items-center gap-2 md:mt-0">
       <span className={`h-2 w-2 shrink-0 rounded-full ${severityAccentMap[alert.severity]}`} />
-      <p className="truncate text-sm text-slate-600">{alert.typeLabel}</p>
+      <p className="truncate text-xs text-slate-600 sm:text-sm">{alert.typeLabel}</p>
     </div>
     <div className="hidden md:block">
-      <Badge className={severityClassMap[alert.severity]}>
+      <Badge className={`${severityClassMap[alert.severity]} px-2 py-0.5 text-[11px]`}>
         {severityLabelMap[alert.severity]}
       </Badge>
     </div>
@@ -352,7 +352,7 @@ const AlertListItem = ({
         variant="outline"
         size="sm"
         onClick={() => window.location.assign(getReviewUrl(alert))}
-        className="h-8 min-w-0 px-3 text-xs"
+        className="h-7 min-w-0 px-2 text-[11px] sm:h-8 sm:px-3 sm:text-xs"
       >
         {canReplyToAlert(alert) ? "Répondre" : "Voir"}
       </Button>
@@ -361,7 +361,7 @@ const AlertListItem = ({
           variant="ghost"
           size="sm"
           onClick={() => onResolve(alert)}
-          className="h-8 min-w-0 px-3 text-xs"
+          className="h-7 min-w-0 px-2 text-[11px] sm:h-8 sm:px-3 sm:text-xs"
         >
           Traiter
         </Button>
@@ -580,24 +580,24 @@ const Alerts = ({ session }: AlertsProps) => {
   ).length;
 
   return (
-    <div className="w-full max-w-full space-y-4 overflow-x-hidden">
-      <div className="w-full min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm sm:px-5">
-        <div className="flex w-full min-w-0 max-w-full flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="w-full max-w-full space-y-3 overflow-x-hidden sm:space-y-4">
+      <div className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm sm:rounded-2xl sm:px-5 sm:py-4">
+        <div className="flex w-full min-w-0 max-w-full flex-col gap-3 sm:gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0 max-w-full">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400 sm:text-xs sm:tracking-[0.3em]">
               CENTRE D'ALERTES
             </p>
-            <h1 className="mt-2 break-words text-2xl font-semibold tracking-tight text-slate-950">
+            <h1 className="mt-1.5 break-words text-xl font-semibold tracking-tight text-slate-950 sm:mt-2 sm:text-2xl">
               Alertes intelligentes
             </h1>
-            <p className="mt-1 max-w-full text-sm text-slate-500">
+            <p className="mt-0.5 max-w-full text-xs text-slate-500 sm:mt-1 sm:text-sm">
               {openAlerts.length} ouvertes · {urgentOpenCount} urgentes ·
               Surveillance active
             </p>
           </div>
-          <div className="flex w-full min-w-0 max-w-full flex-col gap-3 overflow-hidden sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+          <div className="flex w-full min-w-0 max-w-full flex-col gap-2 overflow-hidden sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3">
             <span
-              className="block w-full min-w-0 max-w-full truncate rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-center text-xs font-medium text-emerald-700 sm:w-auto sm:max-w-[18rem] sm:text-left lg:max-w-none"
+              className="block w-full min-w-0 max-w-full truncate rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-center text-[11px] font-medium text-emerald-700 sm:w-auto sm:max-w-[18rem] sm:px-3 sm:py-1.5 sm:text-left sm:text-xs lg:max-w-none"
               title={`Surveillance active${lastCheckedLabel ? ` · Vérifié à ${lastCheckedLabel}` : ""}`}
             >
               Surveillance active
@@ -609,10 +609,10 @@ const Alerts = ({ session }: AlertsProps) => {
                 size="sm"
                 onClick={handleRefresh}
                 disabled={alertsQuery.isFetching}
-                className="h-8 w-full min-w-0 max-w-full px-2 text-xs"
+                className="h-7 w-full min-w-0 max-w-full px-2 text-[11px] sm:h-8 sm:text-xs"
               >
                 <RefreshCw
-                  className={`h-3.5 w-3.5 shrink-0 ${alertsQuery.isFetching ? "animate-spin" : ""}`}
+                  className={`h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5 ${alertsQuery.isFetching ? "animate-spin" : ""}`}
                 />
                 <span className="min-w-0 truncate">Actualiser</span>
               </Button>
@@ -620,9 +620,9 @@ const Alerts = ({ session }: AlertsProps) => {
                 variant="default"
                 size="sm"
                 onClick={() => window.location.assign("/settings?tab=alerts")}
-                className="h-8 w-full min-w-0 max-w-full px-2 text-xs"
+                className="h-7 w-full min-w-0 max-w-full px-2 text-[11px] sm:h-8 sm:text-xs"
               >
-                <Settings className="h-3.5 w-3.5 shrink-0" />
+                <Settings className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
                 <span className="min-w-0 truncate sm:hidden">Réglages</span>
                 <span className="hidden min-w-0 truncate sm:inline">Paramètres</span>
               </Button>
@@ -632,14 +632,14 @@ const Alerts = ({ session }: AlertsProps) => {
       </div>
 
       {alertsQuery.isLoading ? (
-        <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-3 min-[380px]:grid-cols-2 xl:grid-cols-4">
-          <Skeleton className="h-20 w-full rounded-2xl" />
-          <Skeleton className="h-20 w-full rounded-2xl" />
-          <Skeleton className="h-20 w-full rounded-2xl" />
-          <Skeleton className="h-20 w-full rounded-2xl" />
+        <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-2 min-[380px]:grid-cols-2 sm:gap-3 xl:grid-cols-4">
+          <Skeleton className="h-14 w-full rounded-xl sm:h-20 sm:rounded-2xl" />
+          <Skeleton className="h-14 w-full rounded-xl sm:h-20 sm:rounded-2xl" />
+          <Skeleton className="h-14 w-full rounded-xl sm:h-20 sm:rounded-2xl" />
+          <Skeleton className="h-14 w-full rounded-xl sm:h-20 sm:rounded-2xl" />
         </div>
       ) : (
-        <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-3 min-[380px]:grid-cols-2 xl:grid-cols-4">
+        <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-2 min-[380px]:grid-cols-2 sm:gap-3 xl:grid-cols-4">
           <AlertKpiCard
             label="À traiter"
             value={openAlerts.length}
@@ -663,29 +663,29 @@ const Alerts = ({ session }: AlertsProps) => {
         </div>
       )}
 
-      <Card className="min-w-0 max-w-full overflow-hidden shadow-sm">
-        <CardHeader className="px-4 py-4 sm:px-5">
+      <Card className="min-w-0 max-w-full overflow-hidden rounded-xl shadow-sm sm:rounded-2xl">
+        <CardHeader className="px-3 py-3 sm:px-5 sm:py-4">
           <div className="flex min-w-0 items-start justify-between gap-3">
             <div className="min-w-0">
-              <CardTitle className="text-base">À traiter en priorité</CardTitle>
-              <p className="mt-1 text-xs text-slate-500">
+              <CardTitle className="text-sm sm:text-base">À traiter en priorité</CardTitle>
+              <p className="mt-0.5 text-[11px] text-slate-500 sm:mt-1 sm:text-xs">
                 3 signaux maximum, classés par urgence.
               </p>
             </div>
-            <Badge className="w-fit shrink-0 border-slate-200 bg-slate-50 text-slate-600">
+            <Badge className="w-fit shrink-0 border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600 sm:px-3 sm:py-1 sm:text-xs">
               {priorityAlerts.length}{" "}
               {priorityAlerts.length > 1 ? "signaux" : "signal"}
             </Badge>
           </div>
         </CardHeader>
-        <CardContent className="space-y-2 px-4 pb-4 sm:px-5 sm:pb-5">
+        <CardContent className="space-y-1.5 px-3 pb-3 sm:space-y-2 sm:px-5 sm:pb-5">
           {alertsQuery.isLoading ? (
             <div className="space-y-2">
-              <Skeleton className="h-20 w-full rounded-2xl" />
-              <Skeleton className="h-20 w-full rounded-2xl" />
+              <Skeleton className="h-16 w-full rounded-xl sm:h-20 sm:rounded-2xl" />
+              <Skeleton className="h-16 w-full rounded-xl sm:h-20 sm:rounded-2xl" />
             </div>
           ) : priorityAlerts.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center">
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center sm:rounded-2xl sm:px-4 sm:py-5">
               <p className="text-sm font-semibold text-slate-950">Aucun signal prioritaire</p>
               <p className="mt-1 text-xs text-slate-500">La surveillance reste active.</p>
             </div>
@@ -701,10 +701,10 @@ const Alerts = ({ session }: AlertsProps) => {
         </CardContent>
       </Card>
 
-      <Card className="min-w-0 max-w-full overflow-hidden shadow-sm">
-        <CardHeader className="gap-3 px-4 py-4 sm:px-5">
+      <Card className="min-w-0 max-w-full overflow-hidden rounded-xl shadow-sm sm:rounded-2xl">
+        <CardHeader className="gap-2 px-3 py-3 sm:gap-3 sm:px-5 sm:py-4">
           <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <CardTitle className="shrink-0 text-base">Toutes les alertes</CardTitle>
+            <CardTitle className="shrink-0 text-sm sm:text-base">Toutes les alertes</CardTitle>
             <div className="min-w-0 max-w-full md:flex-1 md:pl-4">
               <AlertFilters
                 activeFilter={activeFilter}
@@ -716,40 +716,42 @@ const Alerts = ({ session }: AlertsProps) => {
         </CardHeader>
         <CardContent className="min-w-0 px-0 pb-0">
           {alertsQuery.isLoading ? (
-            <div className="space-y-2 px-4 pb-4 sm:px-5 sm:pb-5">
-              <Skeleton className="h-14 w-full rounded-xl" />
-              <Skeleton className="h-14 w-full rounded-xl" />
-              <Skeleton className="h-14 w-full rounded-xl" />
+            <div className="space-y-1.5 px-3 pb-3 sm:space-y-2 sm:px-5 sm:pb-5">
+              <Skeleton className="h-12 w-full rounded-xl sm:h-14" />
+              <Skeleton className="h-12 w-full rounded-xl sm:h-14" />
+              <Skeleton className="h-12 w-full rounded-xl sm:h-14" />
             </div>
           ) : formattedAlerts.length === 0 ? (
-            <div className="mx-4 mb-4 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center sm:mx-5 sm:mb-5 sm:px-6">
+            <div className="mx-3 mb-3 rounded-xl border border-dashed border-slate-200 bg-white px-3 py-5 text-center sm:mx-5 sm:mb-5 sm:rounded-2xl sm:px-6 sm:py-8">
               <p className="text-sm font-semibold text-slate-950">
                 Tout est sous contrôle
               </p>
-              <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
+              <p className="mx-auto mt-1.5 max-w-md text-xs text-slate-500 sm:mt-2 sm:text-sm">
                 Aucune alerte ne demande d'action pour le moment.
               </p>
-              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-2 sm:mt-4">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleRefresh}
                   disabled={alertsQuery.isFetching}
+                  className="h-7 px-2 text-[11px] sm:h-9 sm:px-3 sm:text-sm"
                 >
-                  <RefreshCw className="h-4 w-4" />
+                  <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                   {alertsQuery.isFetching ? "Actualisation..." : "Actualiser"}
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => window.location.assign("/settings?tab=alerts")}
+                  className="h-7 px-2 text-[11px] sm:h-9 sm:px-3 sm:text-sm"
                 >
                   Paramètres
                 </Button>
               </div>
             </div>
           ) : filteredAlerts.length === 0 ? (
-            <div className="mx-4 mb-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center sm:mx-5 sm:mb-5 sm:px-6">
+            <div className="mx-3 mb-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center sm:mx-5 sm:mb-5 sm:rounded-2xl sm:px-6 sm:py-6">
               <p className="text-sm font-semibold text-slate-950">
                 Aucun résultat pour ce filtre
               </p>
@@ -774,7 +776,7 @@ const Alerts = ({ session }: AlertsProps) => {
                 ))}
               </div>
               {hasMoreAlerts && (
-                <div className="border-t border-slate-100 px-5 py-4 text-center">
+                <div className="border-t border-slate-100 px-3 py-3 text-center sm:px-5 sm:py-4">
                   <Button
                     variant="outline"
                     size="sm"
@@ -782,17 +784,17 @@ const Alerts = ({ session }: AlertsProps) => {
                       setVisibleAlertCount((count) => count + INITIAL_VISIBLE_ALERTS)
                     }
                   >
-                    Afficher plus
+                    <span className="text-[11px] sm:text-sm">Afficher plus</span>
                   </Button>
                 </div>
               )}
             </>
           )}
           {resolveError && (
-            <p className="px-5 pb-4 text-xs text-rose-600">{resolveError}</p>
+            <p className="px-3 pb-3 text-xs text-rose-600 sm:px-5 sm:pb-4">{resolveError}</p>
           )}
           {resolveSuccess && (
-            <p className="px-5 pb-4 text-xs text-emerald-600">{resolveSuccess}</p>
+            <p className="px-3 pb-3 text-xs text-emerald-600 sm:px-5 sm:pb-4">{resolveSuccess}</p>
           )}
         </CardContent>
       </Card>
