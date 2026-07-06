@@ -255,7 +255,9 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
   const guidanceMessages = useMemo(() => {
     const messages: string[] = [];
     if (!name.trim()) {
-      messages.push("Nom manquant : le scénario sera enregistré comme Workflow sans nom.");
+      messages.push(
+        "Nom recommandé : ajoute un nom clair pour retrouver ce scénario facilement."
+      );
     }
     if (locationScope === "selected" && selectedLocationIds.length === 0) {
       messages.push("Aucun établissement sélectionné : la portée restera globale.");
@@ -735,28 +737,6 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
         </div>
       ) : (
         <>
-          {templateLabel && !isEditing && (
-            <section className="min-w-0 overflow-hidden rounded-2xl border border-emerald-200/80 bg-emerald-50/80 p-3 shadow-sm sm:p-4">
-              <div className="flex min-w-0 items-start gap-3">
-                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-emerald-700 shadow-sm">
-                  <Sparkles className="h-4 w-4" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
-                    Modèle préconfiguré
-                  </p>
-                  <h2 className="mt-1 text-sm font-semibold text-slate-950 sm:text-base">
-                    {templateLabel}
-                  </h2>
-                  <p className="mt-1 text-sm text-emerald-800/80">
-                    Ajustez les règles et les actions avant d'enregistrer. Rien
-                    n'est créé en base sans validation.
-                  </p>
-                </div>
-              </div>
-            </section>
-          )}
-
           <WorkflowSummaryCard
             displayName={displayName}
             triggerLabel={getTriggerLabel(trigger)}
@@ -764,14 +744,11 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
             actionCount={actions.length}
             scopeSummary={scopeSummary}
             enabled={enabled}
+            templateLabel={!isEditing ? templateLabel : null}
           />
 
-          <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
-            <aside className="order-1 min-w-0 lg:order-2">
-              <HelpPanel />
-            </aside>
-
-            <main className="order-2 min-w-0 space-y-4 lg:order-1">
+          <div className="grid min-w-0 gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+            <main className="order-1 min-w-0 space-y-3 sm:space-y-4 lg:order-1">
               <BuilderStepCard
                 step="01"
                 title="Paramètres"
@@ -932,7 +909,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                 {conditions.length === 0 ? (
                   <EmptyBuilderState
                     title="Aucune condition"
-                    description="Le scénario s'appliquera à tous les avis correspondant au déclencheur."
+                    description="Sinon, tous les avis du déclencheur passent."
                   />
                 ) : (
                   <div className="space-y-3">
@@ -955,22 +932,30 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                 description="Définissez ce qu'EGIA déclenche quand les règles correspondent."
                 Icon={BellRing}
                 action={
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full min-w-0 sm:w-auto"
-                    onClick={addAction}
-                  >
-                    <CirclePlus className="h-4 w-4 shrink-0" />
-                    <span>Ajouter</span>
-                  </Button>
+                  <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
+                    <Badge
+                      variant="warning"
+                      className="shrink-0 px-2 py-0.5 text-[11px]"
+                    >
+                      Requis
+                    </Badge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="min-w-0 flex-1 sm:flex-none"
+                      onClick={addAction}
+                    >
+                      <CirclePlus className="h-4 w-4 shrink-0" />
+                      <span>Ajouter</span>
+                    </Button>
+                  </div>
                 }
               >
                 {actions.length === 0 ? (
                   <EmptyBuilderState
                     tone="warning"
                     title="Aucune action configurée"
-                    description="Ajoutez au moins une action pour pouvoir enregistrer le scénario."
+                    description="Ajoutez une action pour enregistrer."
                   />
                 ) : (
                   <div className="space-y-3">
@@ -1044,10 +1029,10 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                 <CardContent className="p-3 sm:p-4">
                   <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <p className="min-w-0 text-xs text-slate-500">
-                      Tester maintenant lance le moteur global d'automatisation
-                      existant, pas uniquement ce scénario.
+                      Tester le moteur global lance l'analyse existante sur les
+                      automatisations disponibles, pas uniquement ce scénario.
                     </p>
-                    <div className="grid w-full min-w-0 grid-cols-1 gap-2 min-[390px]:grid-cols-3 lg:w-auto lg:min-w-[430px]">
+                    <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-3 lg:w-auto lg:min-w-[430px]">
                       <Button
                         variant="outline"
                         className="min-h-11 min-w-0 px-3 lg:min-h-0"
@@ -1063,7 +1048,7 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                       >
                         <Play className="h-4 w-4 shrink-0" />
                         <span className="truncate">
-                          {runNowLoading ? "Test..." : "Tester maintenant"}
+                          {runNowLoading ? "Analyse..." : "Tester le moteur global"}
                         </span>
                       </Button>
                       <Button
@@ -1081,6 +1066,10 @@ const AutomationBuilder = ({ session, locations }: AutomationBuilderProps) => {
                 </CardContent>
               </Card>
             </main>
+
+            <aside className="order-2 min-w-0 lg:order-2">
+              <HelpPanel />
+            </aside>
           </div>
         </>
       )}
@@ -1150,7 +1139,8 @@ const WorkflowSummaryCard = ({
   conditionCount,
   actionCount,
   scopeSummary,
-  enabled
+  enabled,
+  templateLabel
 }: {
   displayName: string;
   triggerLabel: string;
@@ -1158,6 +1148,7 @@ const WorkflowSummaryCard = ({
   actionCount: number;
   scopeSummary: string;
   enabled: boolean;
+  templateLabel: string | null;
 }) => (
   <Card className="min-w-0 overflow-hidden border-slate-200/80 shadow-sm">
     <CardContent className="p-3 sm:p-5">
@@ -1189,6 +1180,15 @@ const WorkflowSummaryCard = ({
         <SummaryMetric label="Portée" value={scopeSummary} />
         <SummaryMetric label="Statut" value={getWorkflowStatusLabel(enabled)} />
       </div>
+      {templateLabel && (
+        <div className="mt-3 flex min-w-0 items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0" />
+          <p className="min-w-0 leading-relaxed">
+            <span className="font-semibold">Modèle préconfiguré : </span>
+            {templateLabel}. Ajustez les règles avant d'enregistrer.
+          </p>
+        </div>
+      )}
     </CardContent>
   </Card>
 );
