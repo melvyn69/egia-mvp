@@ -20,6 +20,7 @@ import {
 import { cn } from "../../lib/utils";
 import { supabase } from "../../lib/supabase";
 import { analyticsQueryKey, fetchAnalyticsBundle } from "../../queries/analytics";
+import { scrollToRouteTop } from "../../lib/scrollToRouteTop";
 import { InstallAppCTA } from "../InstallAppCTA";
 import { EgiaLogo } from "../brand/EgiaLogo";
 
@@ -97,7 +98,13 @@ const Sidebar = ({
           />
         </div>
 
-      <nav className={variant === "mobile" ? "space-y-1.5" : "space-y-2"} onClick={() => onNavigate?.()}>
+      <nav
+        className={variant === "mobile" ? "space-y-1.5" : "space-y-2"}
+        onClick={() => {
+          scrollToRouteTop();
+          onNavigate?.();
+        }}
+      >
         <NavLink
           to="/"
           end

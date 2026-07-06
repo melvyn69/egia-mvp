@@ -1552,12 +1552,20 @@ ${emailDraft.body}`;
     )}?subject=${encodeURIComponent(emailDraft.subject)}&body=${encodeURIComponent(
       emailDraft.body
     )}`;
-    window.location.href = mailto;
-    setMessage(
-      copied
-        ? "Email préparé et copié dans le presse-papiers."
-        : "Email préparé. Copie indisponible sur ce navigateur."
-    );
+    try {
+      window.location.href = mailto;
+      setMessage(
+        copied
+          ? "Email préparé et copié dans le presse-papiers."
+          : "Email préparé. Copie indisponible sur ce navigateur."
+      );
+    } catch {
+      setMessage(
+        copied
+          ? "Email copié. Ouvrez votre app mail pour l’envoyer."
+          : "Action mail indisponible sur ce navigateur."
+      );
+    }
     setTimeout(() => setMessage(null), 3000);
   };
 

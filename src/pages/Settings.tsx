@@ -253,7 +253,10 @@ const Settings = ({ session }: SettingsProps) => {
         window.location.origin);
   const handleOpenApp = () => {
     if (!appBaseUrl) return;
-    window.open(appBaseUrl, "_blank");
+    const opened = window.open(appBaseUrl, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      window.location.assign(appBaseUrl);
+    }
   };
 
   useEffect(() => {

@@ -8,6 +8,7 @@ import {
   Settings
 } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { scrollToRouteTop } from "../../lib/scrollToRouteTop";
 
 const items = [
   { to: "/", label: "Dashboard", Icon: LayoutDashboard, end: true },
@@ -26,6 +27,7 @@ const MobileBottomNav = () => (
           key={to}
           to={to}
           end={end}
+          onClick={scrollToRouteTop}
           aria-label={label}
           className={({ isActive }) =>
             cn(

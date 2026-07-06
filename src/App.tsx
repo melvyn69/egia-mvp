@@ -37,6 +37,12 @@ import { isAdminUser } from "./lib/admin";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { EgiaLogo } from "./components/brand/EgiaLogo";
+import { MobileRouteProgress } from "./components/routing/MobileRouteProgress";
+import { ScrollToTop } from "./components/routing/ScrollToTop";
+import {
+  getFriendlyMobileError,
+  isBenignBrowserError
+} from "./lib/browserErrors";
 
 type OnboardingLocationProgress = {
   locationId: string;
@@ -56,29 +62,6 @@ type SyncFailureRow = {
 type SyncTarget = {
   locationId: string;
   label: string;
-};
-
-const getFriendlyBrowserError = (error: unknown): string => {
-  if (error instanceof DOMException) {
-    if (error.name === "NotAllowedError" || error.name === "SecurityError") {
-      return error.message.toLowerCase().includes("clipboard")
-        ? "Impossible de copier sur mobile."
-        : "Action indisponible sur ce navigateur.";
-    }
-    if (error.name === "AbortError") {
-      return "Action annulée par le navigateur.";
-    }
-  }
-
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-
-  return "Action interrompue par le navigateur.";
 };
 
 const App = () => {
@@ -331,11 +314,34 @@ const App = () => {
 
   useEffect(() => {
     const handleWindowError = (event: ErrorEvent) => {
-      const message = getFriendlyBrowserError(event.error ?? event.message);
+      const error = event.error ?? event.message;
+      if (isBenignBrowserError(error)) {
+        event.preventDefault();
+        return;
+      }
+      const message = getFriendlyMobileError(
+        error,
+        "Une action a échoué. Réessayez après chargement des données."
+      );
+      if (!message) {
+        event.preventDefault();
+        return;
+      }
       setErrorToast(message);
     };
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-      const message = getFriendlyBrowserError(event.reason);
+      if (isBenignBrowserError(event.reason)) {
+        event.preventDefault();
+        return;
+      }
+      const message = getFriendlyMobileError(
+        event.reason,
+        "Une action a échoué. Réessayez après chargement des données."
+      );
+      if (!message) {
+        event.preventDefault();
+        return;
+      }
       setErrorToast(message);
     };
     window.addEventListener("error", handleWindowError);
@@ -1001,6 +1007,8 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-sand">
+      <ScrollToTop />
+      <MobileRouteProgress />
       <div className={usesAppShell ? "flex" : ""}>
         {session && usesAppShell && <Sidebar showAdminLinks={isAdminSession} />}
         <div
@@ -1026,6 +1034,7 @@ const App = () => {
           )}
 
           <main
+            data-route-scroll-container
             className={
               usesAppShell
                 ? "min-w-0 flex-1 space-y-4 overflow-x-hidden bg-gradient-to-br from-sand via-white to-clay px-3 py-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:px-6 md:py-8 lg:space-y-6 lg:pb-8"

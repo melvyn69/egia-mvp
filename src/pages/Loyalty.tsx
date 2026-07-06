@@ -292,8 +292,16 @@ const Loyalty = ({
 
   const handleCopy = async () => {
     if (!publicJoinUrl) return;
-    await navigator.clipboard?.writeText(publicJoinUrl);
-    setNotice("Lien d’adhésion copié.");
+    if (!navigator.clipboard?.writeText) {
+      setError("Copie indisponible sur ce navigateur.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(publicJoinUrl);
+      setNotice("Lien d’adhésion copié.");
+    } catch {
+      setError("Copie indisponible sur ce navigateur.");
+    }
   };
 
   const stats = statsQuery.data;

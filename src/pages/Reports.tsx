@@ -118,6 +118,13 @@ const reportFilterOptions: Array<{ value: ReportFilter; label: string }> = [
   { value: "yearly", label: "Annuel" }
 ];
 
+const openExternalUrl = (url: string) => {
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    window.location.assign(url);
+  }
+};
+
 const periodLabels: Record<string, string> = {
   last_7_days: "7 derniers jours",
   last_30_days: "30 derniers jours",
@@ -946,10 +953,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
       setError("Impossible de télécharger le PDF.");
       return;
     }
-    const opened = window.open(data.signedUrl, "_blank", "noopener,noreferrer");
-    if (!opened) {
-      window.location.assign(data.signedUrl);
-    }
+    openExternalUrl(data.signedUrl);
   };
 
   const handleDelete = async (report: ReportRow) => {
@@ -1120,7 +1124,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
   const handleOpenGeneratedReport = () => {
     if (!generatedReportModal) return;
     if (generatedReportModal.pdfUrl) {
-      window.open(generatedReportModal.pdfUrl, "_blank", "noopener");
+      openExternalUrl(generatedReportModal.pdfUrl);
       return;
     }
     if (generatedReportModal.storagePath) {
@@ -1140,7 +1144,7 @@ const Reports = ({ session, locations }: ReportsProps) => {
       return;
     }
     if (generatedReportModal.pdfUrl) {
-      window.open(generatedReportModal.pdfUrl, "_blank", "noopener");
+      openExternalUrl(generatedReportModal.pdfUrl);
     }
   };
 

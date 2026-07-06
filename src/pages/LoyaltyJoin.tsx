@@ -93,9 +93,16 @@ const LoyaltyJoin = () => {
 
   const handleCopyMemberCode = async () => {
     if (!member?.member_code) return;
-    await navigator.clipboard?.writeText(member.member_code);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
+    if (!navigator.clipboard?.writeText) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(member.member_code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
   };
 
   const handleAddToAppleWallet = () => {
