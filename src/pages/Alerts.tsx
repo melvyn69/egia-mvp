@@ -292,7 +292,7 @@ const AlertFilters = ({
   counts: Record<AlertFilter, number>;
   onChange: (filter: AlertFilter) => void;
 }) => (
-  <div className="max-w-full overflow-x-auto pb-1">
+  <div className="alerts-scroll-x max-w-full overflow-x-auto pb-1">
     <div className="flex w-max max-w-none gap-1.5">
     {(Object.keys(filterLabels) as AlertFilter[]).map((filter) => (
       <button
@@ -580,7 +580,20 @@ const Alerts = ({ session }: AlertsProps) => {
   ).length;
 
   return (
-    <div className="min-w-0 space-y-4 overflow-x-hidden">
+    <div className="alerts-page min-w-0 max-w-full space-y-4 overflow-x-hidden pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:space-y-6 lg:pb-4">
+      <style>{`
+        .alerts-page,
+        .alerts-page * {
+          box-sizing: border-box;
+        }
+        .alerts-page > * {
+          max-width: 100%;
+          min-width: 0;
+        }
+        .alerts-page button {
+          min-width: 0;
+        }
+      `}</style>
       <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0 max-w-full">
@@ -595,7 +608,7 @@ const Alerts = ({ session }: AlertsProps) => {
               Surveillance active
             </p>
           </div>
-          <div className="w-full min-w-0 max-w-full space-y-2 overflow-hidden lg:w-auto lg:min-w-[18rem] lg:space-y-0">
+          <div className="w-full min-w-0 max-w-full space-y-2 overflow-hidden lg:w-auto lg:max-w-sm lg:space-y-0">
             <span
               className="block w-full min-w-0 max-w-full truncate rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-center text-[11px] font-medium text-emerald-700 sm:px-3 sm:py-1.5 sm:text-xs lg:mb-2"
               title={`Surveillance active${lastCheckedLabel ? ` · Vérifié à ${lastCheckedLabel}` : ""}`}
