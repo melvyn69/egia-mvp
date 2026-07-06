@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Menu, Sparkles } from "lucide-react";
+import { Bell, Menu } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   getUnreadNotificationCount,
@@ -9,6 +9,7 @@ import {
 } from "../../lib/notifications";
 import { getActiveLegalEntityLogo, pickInitials } from "../../lib/businessBranding";
 import { Skeleton } from "../ui/skeleton";
+import { EgiaLogo } from "../brand/EgiaLogo";
 
 type TopbarProps = {
   title: string;
@@ -92,9 +93,11 @@ const Topbar = ({
           </Button>
         )}
         <div className="min-w-0">
-          <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400 md:text-xs md:tracking-[0.3em]">
-            <Sparkles size={12} />
-            EGIA LIVE
+          <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 md:text-xs">
+            <EgiaLogo variant="light" size="sm" />
+            <span className="rounded-full bg-[#68e0cf]/10 px-1.5 py-0.5 text-[9px] tracking-[0.16em] text-[#148f82] md:text-[10px]">
+              LIVE
+            </span>
           </p>
           <h1 className="truncate text-lg font-semibold leading-tight text-slate-900 md:text-3xl">
             {title}

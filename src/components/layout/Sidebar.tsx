@@ -4,7 +4,6 @@ import {
   Activity,
   BarChart3,
   Bell,
-  Building2,
   CreditCard,
   FileText,
   LayoutDashboard,
@@ -22,6 +21,7 @@ import { cn } from "../../lib/utils";
 import { supabase } from "../../lib/supabase";
 import { analyticsQueryKey, fetchAnalyticsBundle } from "../../queries/analytics";
 import { InstallAppCTA } from "../InstallAppCTA";
+import { EgiaLogo } from "../brand/EgiaLogo";
 
 const desktopNavLinkBase =
   "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition";
@@ -88,15 +88,13 @@ const Sidebar = ({
     <aside className={cn(baseClasses, className)}>
       <div className={variant === "mobile" ? "space-y-4" : "space-y-6"}>
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-ink text-white shadow-lg">
-            <Building2 size={20} />
-          </div>
-          <div>
-            <p className="text-sm uppercase tracking-[0.2em] text-slate-400">
-              EGIA
-            </p>
-            <p className="text-lg font-semibold text-slate-900">Business Suite</p>
-          </div>
+          <EgiaLogo variant="icon" size={variant === "mobile" ? "sm" : "md"} />
+          <EgiaLogo
+            variant="light"
+            size={variant === "mobile" ? "sm" : "md"}
+            showSuite
+            className="min-w-0"
+          />
         </div>
 
       <nav className={variant === "mobile" ? "space-y-1.5" : "space-y-2"} onClick={() => onNavigate?.()}>
