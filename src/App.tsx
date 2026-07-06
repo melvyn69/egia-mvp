@@ -1020,7 +1020,7 @@ const App = () => {
         <div
           className={
             usesAppShell
-              ? "flex min-h-screen flex-1 flex-col"
+              ? "flex min-h-screen min-w-0 flex-1 flex-col"
               : "min-h-screen flex-1"
           }
         >
