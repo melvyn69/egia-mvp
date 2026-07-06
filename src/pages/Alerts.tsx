@@ -292,14 +292,13 @@ const AlertFilters = ({
   counts: Record<AlertFilter, number>;
   onChange: (filter: AlertFilter) => void;
 }) => (
-  <div className="alerts-scroll-x max-w-full overflow-x-auto pb-1">
-    <div className="flex w-max max-w-none gap-1.5">
+  <div className="alerts-scroll-x flex min-w-0 max-w-full gap-1.5 overflow-x-auto pb-1">
     {(Object.keys(filterLabels) as AlertFilter[]).map((filter) => (
       <button
         key={filter}
         type="button"
         onClick={() => onChange(filter)}
-        className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium transition sm:px-3 sm:py-1.5 sm:text-xs ${
+        className={`shrink-0 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium transition sm:px-3 sm:py-1.5 sm:text-xs ${
           activeFilter === filter
             ? "border-slate-950 bg-slate-950 text-white"
             : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-950"
@@ -308,7 +307,6 @@ const AlertFilters = ({
         {filterLabels[filter]} <span className="opacity-70">{counts[filter]}</span>
       </button>
     ))}
-    </div>
   </div>
 );
 
@@ -319,7 +317,7 @@ const AlertListItem = ({
   alert: FormattedAlert;
   onResolve: (alert: FormattedAlert) => void;
 }) => (
-  <div className="min-w-0 max-w-full border-t border-slate-100 px-2.5 py-2.5 first:border-t-0 sm:px-4 sm:py-3 md:grid md:grid-cols-[1.2fr_1.4fr_0.7fr_0.45fr_0.6fr_0.8fr] md:items-center md:gap-4 md:px-5">
+  <div className="min-w-0 max-w-full border-t border-slate-100 px-2.5 py-2.5 first:border-t-0 sm:px-4 sm:py-3 md:grid md:grid-cols-6 md:items-center md:gap-4 md:px-5">
     <div className="flex min-w-0 items-center justify-between gap-3 md:block">
       <p className="min-w-0 truncate text-xs font-medium text-slate-950 sm:text-sm">
         {alert.author ?? "Client non identifié"}
@@ -581,22 +579,6 @@ const Alerts = ({ session }: AlertsProps) => {
 
   return (
     <div className="alerts-page min-w-0 max-w-full space-y-4 overflow-x-hidden pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:space-y-6 lg:pb-4">
-      <div className="mb-3 rounded-xl bg-red-500 p-3 text-sm font-bold text-white">
-        DEBUG ALERTS RESPONSIVE ACTIVE
-      </div>
-      <style>{`
-        .alerts-page,
-        .alerts-page * {
-          box-sizing: border-box;
-        }
-        .alerts-page > * {
-          max-width: 100%;
-          min-width: 0;
-        }
-        .alerts-page button {
-          min-width: 0;
-        }
-      `}</style>
       <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0 max-w-full">
@@ -619,7 +601,7 @@ const Alerts = ({ session }: AlertsProps) => {
               Surveillance active
               {lastCheckedLabel ? ` · Vérifié à ${lastCheckedLabel}` : ""}
             </span>
-            <div className="grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+            <div className="grid w-full min-w-0 max-w-full grid-cols-2 gap-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -773,7 +755,7 @@ const Alerts = ({ session }: AlertsProps) => {
             </div>
           ) : (
             <>
-              <div className="hidden border-t border-slate-100 bg-slate-50 px-5 py-2 text-xs font-medium uppercase tracking-[0.14em] text-slate-400 md:grid md:grid-cols-[1.2fr_1.4fr_0.7fr_0.45fr_0.6fr_0.8fr] md:gap-4">
+              <div className="hidden border-t border-slate-100 bg-slate-50 px-5 py-2 text-xs font-medium uppercase tracking-[0.14em] text-slate-400 md:grid md:grid-cols-6 md:gap-4">
                 <span>Client</span>
                 <span>Signal</span>
                 <span>Priorité</span>
