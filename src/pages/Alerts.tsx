@@ -580,9 +580,9 @@ const Alerts = ({ session }: AlertsProps) => {
   ).length;
 
   return (
-    <div className="max-w-full space-y-4 overflow-x-hidden">
-      <div className="min-w-0 max-w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm sm:px-5">
-        <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="w-full max-w-full space-y-4 overflow-x-hidden">
+      <div className="w-full min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm sm:px-5">
+        <div className="flex w-full min-w-0 max-w-full flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0 max-w-full">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
               CENTRE D'ALERTES
@@ -595,45 +595,51 @@ const Alerts = ({ session }: AlertsProps) => {
               Surveillance active
             </p>
           </div>
-          <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center lg:justify-end">
-            <span className="col-span-2 min-w-0 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-center text-xs font-medium text-emerald-700 sm:col-auto sm:text-left">
+          <div className="flex w-full min-w-0 max-w-full flex-col gap-3 overflow-hidden sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+            <span
+              className="block w-full min-w-0 max-w-full truncate rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-center text-xs font-medium text-emerald-700 sm:w-auto sm:max-w-[18rem] sm:text-left lg:max-w-none"
+              title={`Surveillance active${lastCheckedLabel ? ` · Vérifié à ${lastCheckedLabel}` : ""}`}
+            >
               Surveillance active
               {lastCheckedLabel ? ` · Vérifié à ${lastCheckedLabel}` : ""}
             </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefresh}
-              disabled={alertsQuery.isFetching}
-              className="h-8 min-w-0 px-3 text-xs"
-            >
-              <RefreshCw
-                className={`h-3.5 w-3.5 ${alertsQuery.isFetching ? "animate-spin" : ""}`}
-              />
-              Actualiser
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => window.location.assign("/settings?tab=alerts")}
-              className="h-8 min-w-0 px-3 text-xs"
-            >
-              <Settings className="h-3.5 w-3.5" />
-              Paramètres
-            </Button>
+            <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-2 min-[380px]:grid-cols-2 sm:w-auto sm:grid-cols-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRefresh}
+                disabled={alertsQuery.isFetching}
+                className="h-8 w-full min-w-0 max-w-full px-2 text-xs"
+              >
+                <RefreshCw
+                  className={`h-3.5 w-3.5 shrink-0 ${alertsQuery.isFetching ? "animate-spin" : ""}`}
+                />
+                <span className="min-w-0 truncate">Actualiser</span>
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => window.location.assign("/settings?tab=alerts")}
+                className="h-8 w-full min-w-0 max-w-full px-2 text-xs"
+              >
+                <Settings className="h-3.5 w-3.5 shrink-0" />
+                <span className="min-w-0 truncate sm:hidden">Réglages</span>
+                <span className="hidden min-w-0 truncate sm:inline">Paramètres</span>
+              </Button>
+            </div>
           </div>
         </div>
       </div>
 
       {alertsQuery.isLoading ? (
-        <div className="grid max-w-full grid-cols-[repeat(auto-fit,minmax(142px,1fr))] gap-3 xl:grid-cols-4">
+        <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-3 min-[380px]:grid-cols-2 xl:grid-cols-4">
           <Skeleton className="h-20 w-full rounded-2xl" />
           <Skeleton className="h-20 w-full rounded-2xl" />
           <Skeleton className="h-20 w-full rounded-2xl" />
           <Skeleton className="h-20 w-full rounded-2xl" />
         </div>
       ) : (
-        <div className="grid max-w-full grid-cols-[repeat(auto-fit,minmax(142px,1fr))] gap-3 xl:grid-cols-4">
+        <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-3 min-[380px]:grid-cols-2 xl:grid-cols-4">
           <AlertKpiCard
             label="À traiter"
             value={openAlerts.length}
