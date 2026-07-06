@@ -580,30 +580,30 @@ const Alerts = ({ session }: AlertsProps) => {
   ).length;
 
   return (
-    <div className="w-full max-w-full space-y-3 overflow-x-hidden sm:space-y-4">
-      <div className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm sm:rounded-2xl sm:px-5 sm:py-4">
-        <div className="flex w-full min-w-0 max-w-full flex-col gap-3 sm:gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="min-w-0 space-y-4 overflow-x-hidden">
+      <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+        <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0 max-w-full">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400 sm:text-xs sm:tracking-[0.3em]">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 sm:text-xs">
               CENTRE D'ALERTES
             </p>
-            <h1 className="mt-1.5 break-words text-xl font-semibold tracking-tight text-slate-950 sm:mt-2 sm:text-2xl">
+            <h1 className="mt-1 truncate text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">
               Alertes intelligentes
             </h1>
-            <p className="mt-0.5 max-w-full text-xs text-slate-500 sm:mt-1 sm:text-sm">
+            <p className="mt-1 truncate text-xs text-slate-500 sm:text-sm">
               {openAlerts.length} ouvertes · {urgentOpenCount} urgentes ·
               Surveillance active
             </p>
           </div>
-          <div className="flex w-full min-w-0 max-w-full flex-col gap-2 overflow-hidden sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3">
+          <div className="w-full min-w-0 max-w-full space-y-2 overflow-hidden lg:w-auto lg:min-w-[18rem] lg:space-y-0">
             <span
-              className="block w-full min-w-0 max-w-full truncate rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-center text-[11px] font-medium text-emerald-700 sm:w-auto sm:max-w-[18rem] sm:px-3 sm:py-1.5 sm:text-left sm:text-xs lg:max-w-none"
+              className="block w-full min-w-0 max-w-full truncate rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-center text-[11px] font-medium text-emerald-700 sm:px-3 sm:py-1.5 sm:text-xs lg:mb-2"
               title={`Surveillance active${lastCheckedLabel ? ` · Vérifié à ${lastCheckedLabel}` : ""}`}
             >
               Surveillance active
               {lastCheckedLabel ? ` · Vérifié à ${lastCheckedLabel}` : ""}
             </span>
-            <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-2 min-[380px]:grid-cols-2 sm:w-auto sm:grid-cols-2">
+            <div className="grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -623,8 +623,7 @@ const Alerts = ({ session }: AlertsProps) => {
                 className="h-7 w-full min-w-0 max-w-full px-2 text-[11px] sm:h-8 sm:text-xs"
               >
                 <Settings className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
-                <span className="min-w-0 truncate sm:hidden">Réglages</span>
-                <span className="hidden min-w-0 truncate sm:inline">Paramètres</span>
+                <span className="min-w-0 truncate">Réglages</span>
               </Button>
             </div>
           </div>
@@ -632,14 +631,14 @@ const Alerts = ({ session }: AlertsProps) => {
       </div>
 
       {alertsQuery.isLoading ? (
-        <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-2 min-[380px]:grid-cols-2 sm:gap-3 xl:grid-cols-4">
+        <div className="grid min-w-0 grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
           <Skeleton className="h-14 w-full rounded-xl sm:h-20 sm:rounded-2xl" />
           <Skeleton className="h-14 w-full rounded-xl sm:h-20 sm:rounded-2xl" />
           <Skeleton className="h-14 w-full rounded-xl sm:h-20 sm:rounded-2xl" />
           <Skeleton className="h-14 w-full rounded-xl sm:h-20 sm:rounded-2xl" />
         </div>
       ) : (
-        <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-2 min-[380px]:grid-cols-2 sm:gap-3 xl:grid-cols-4">
+        <div className="grid min-w-0 grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
           <AlertKpiCard
             label="À traiter"
             value={openAlerts.length}
