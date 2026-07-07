@@ -144,28 +144,28 @@ const helpCopy = {
     eyebrow: "ACADEMY EGIA",
     title: "Maîtrisez EGIA en autonomie",
     description:
-      "Guides, parcours, vidéos et diagnostics pour apprendre à piloter votre réputation, vos avis, vos réponses IA, vos alertes et vos programmes de fidélité.",
-    primaryCta: "Continuer mon parcours",
-    secondaryCta: "Explorer les guides",
+      "Guides opérationnels, parcours de prise en main et diagnostics pour piloter vos avis, vos réponses IA, vos alertes et vos programmes de fidélité avec méthode.",
+    primaryCta: "Reprendre le parcours",
+    secondaryCta: "Voir la documentation",
     progressLabel: "Progression Academy",
     progressValue: "36%",
     progressDetail:
-      "Votre compte est configuré pour démarrer. Les modules avancés vous aideront à structurer une routine durable.",
+      "Votre socle est prêt. Les modules avancés vous aident à installer une routine fiable dans la durée.",
     progressModules: ["Google", "Avis", "IA", "Rapports"],
     metrics: [
       { id: "guides", label: "Guides" },
-      { id: "paths", label: "Étapes" },
+      { id: "paths", label: "Parcours" },
       { id: "faq", label: "FAQ" }
     ]
   },
   search: {
-    label: "Recherche intelligente",
-    placeholder: "Rechercher un guide, une fonctionnalité ou un problème",
-    emptyTitle: "Aucun guide trouvé",
+    label: "Recherche Academy",
+    placeholder: "Rechercher un guide, une fonctionnalité ou un sujet",
+    emptyTitle: "Aucun résultat exploitable",
     emptyDescription:
-      "Essayez un mot plus simple comme avis, Google, IA, fidélité, facture ou sécurité.",
-    resultSingular: "guide disponible",
-    resultPlural: "guides disponibles",
+      "Essayez un terme plus direct comme avis, IA, Google, fidélité, facture ou sécurité.",
+    resultSingular: "guide trouvé",
+    resultPlural: "guides trouvés",
     clear: "Effacer",
     suggestions: [
       "Répondre à un avis",
@@ -177,7 +177,7 @@ const helpCopy = {
   },
   sections: {
     starter: {
-      eyebrow: "PARCOURS RECOMMANDÉ",
+      eyebrow: "PLAN D'ACTIVATION",
       title: "Démarrer sans friction",
       description:
         "Suivez ces étapes dans l'ordre pour rendre votre espace EGIA opérationnel avant de former l'équipe."
@@ -190,25 +190,26 @@ const helpCopy = {
     },
     videos: {
       eyebrow: "ACADEMY VIDÉO",
-      title: "Vidéos prêtes à brancher",
+      title: "Bibliothèque vidéo",
       description:
-        "Les emplacements sont prévus pour les futures vidéos YouTube. Les guides restent accessibles sans contenu externe."
+        "La bibliothèque vidéo sera enrichie progressivement. Chaque fiche renvoie déjà au guide complet associé.",
+      placeholderLabel: "Module à venir"
     },
     support: {
       eyebrow: "ACCOMPAGNEMENT",
-      title: "Besoin d'un regard humain ?",
+      title: "Choisir le bon accompagnement",
       description:
-        "Les formulaires seront connectés plus tard. L'interface prépare déjà les bons parcours : rendez-vous, diagnostic et support."
+        "Rendez-vous, diagnostic ou support : chaque canal est cadré pour orienter la demande au bon niveau d'expertise."
     },
     faq: {
       eyebrow: "QUESTIONS FRÉQUENTES",
-      title: "Réponses rapides",
+      title: "Clarifications essentielles",
       description:
-        "La FAQ complète les guides. Elle sert aux clarifications courtes, pas à remplacer la formation."
+        "Des réponses courtes pour lever les ambiguïtés avant de revenir au guide détaillé."
     }
   },
   filters: {
-    all: "Tous",
+    all: "Tout",
     guides: "guides"
   },
   guideLabels: {
@@ -224,27 +225,27 @@ const helpCopy = {
       title: "Demander un rendez-vous",
       description:
         "Pour structurer votre configuration, former une équipe ou améliorer vos routines opérationnelles.",
-      cta: "Préparer une demande",
+      cta: "Préparer la demande",
       detail: "15 à 30 minutes",
-      status: "Interface prête"
+      status: "Circuit rendez-vous"
     },
     {
       icon: "search",
       title: "Diagnostic guidé",
       description:
         "Pour comprendre pourquoi un avis, une synchronisation, une alerte ou une réponse IA ne fonctionne pas comme prévu.",
-      cta: "Lancer le diagnostic",
+      cta: "Préparer le diagnostic",
       detail: "Résolution autonome",
-      status: "Interface prête"
+      status: "Parcours diagnostic"
     },
     {
       icon: "support",
       title: "Contacter le support",
       description:
         "À utiliser uniquement si une action technique reste bloquée après les vérifications recommandées.",
-      cta: "Ouvrir le formulaire",
-      detail: "Connexion future",
-      status: "À connecter"
+      cta: "Préparer le message",
+      detail: "Support priorisé",
+      status: "Circuit support"
     }
   ] satisfies SupportCard[]
 };
@@ -1055,25 +1056,25 @@ const starterSteps = [
     title: "Connecter Google",
     description: "Autorisez EGIA à lire vos établissements et vos avis.",
     to: "/connect",
-    status: "Prioritaire"
+    status: "Essentiel"
   },
   {
     title: "Vérifier les établissements",
     description: "Contrôlez les lieux actifs avant d'analyser vos données.",
     to: "/settings?tab=locations",
-    status: "Recommandé"
+    status: "À valider"
   },
   {
     title: "Configurer la voix IA",
     description: "Définissez le ton attendu pour les réponses générées.",
     to: "/settings/brand-voice",
-    status: "Recommandé"
+    status: "À configurer"
   },
   {
     title: "Traiter les premiers avis",
     description: "Utilisez la Boîte de réception pour installer la routine.",
     to: "/inbox",
-    status: "À faire"
+    status: "À lancer"
   }
 ];
 
@@ -1191,7 +1192,7 @@ const Help = () => {
   const hasVisibleGuides = visibleGuides.length > 0;
 
   return (
-    <div className="help-page min-w-0 space-y-5 overflow-x-hidden pb-4 md:space-y-7 lg:space-y-8">
+    <div className="help-page min-w-0 space-y-4 overflow-x-hidden pb-3 md:space-y-6 lg:space-y-8 lg:pb-4">
       <style>
         {`
           @keyframes helpFadeUp {
@@ -1210,23 +1211,23 @@ const Help = () => {
           }
         `}
       </style>
-      <section className="help-motion overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-[0_18px_48px_rgba(15,23,42,0.06)]">
-        <div className="grid min-w-0 gap-5 p-4 sm:p-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] lg:p-7">
+      <section className="help-motion overflow-hidden rounded-xl border border-slate-200/70 bg-white shadow-[0_18px_48px_rgba(15,23,42,0.06)] lg:rounded-2xl">
+        <div className="grid min-w-0 gap-3 p-3 sm:gap-4 sm:p-4 md:p-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] lg:gap-5 lg:p-7">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               {helpCopy.hero.eyebrow}
             </p>
-            <h2 className="mt-3 max-w-3xl text-3xl font-semibold leading-[1.02] tracking-normal text-slate-950 sm:text-4xl lg:text-5xl">
+            <h2 className="mt-2 max-w-3xl text-2xl font-semibold leading-[1.05] tracking-normal text-slate-950 sm:text-3xl md:text-4xl lg:mt-3 lg:text-5xl">
               {helpCopy.hero.title}
             </h2>
-            <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
+            <p className="mt-3 max-w-2xl text-sm leading-5 text-slate-600 md:text-base md:leading-6 lg:mt-4">
               {helpCopy.hero.description}
             </p>
-            <div className="mt-5 grid max-w-lg grid-cols-3 gap-2">
+            <div className="mt-4 grid max-w-lg grid-cols-3 gap-2 lg:mt-5">
               {heroMetrics.map((metric) => (
                 <div
                   key={metric.label}
-                  className="rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-2"
+                  className="rounded-xl border border-slate-200 bg-slate-50/70 px-2.5 py-2 lg:rounded-2xl lg:px-3"
                 >
                   <p className="text-lg font-semibold leading-none text-slate-950">
                     {metric.value}
@@ -1237,16 +1238,16 @@ const Help = () => {
                 </div>
               ))}
             </div>
-            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap lg:mt-5">
               <a
-                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-ink px-4 text-sm font-medium text-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 motion-reduce:transform-none sm:w-auto"
+                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-full bg-ink px-4 text-sm font-medium text-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 motion-reduce:transform-none sm:w-auto lg:h-10"
                 href="#guides"
               >
                 <BookOpen className="h-4 w-4" />
                 {helpCopy.hero.primaryCta}
               </a>
               <a
-                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 transition duration-200 hover:-translate-y-0.5 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30 motion-reduce:transform-none sm:w-auto"
+                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 transition duration-200 hover:-translate-y-0.5 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30 motion-reduce:transform-none sm:w-auto lg:h-10"
                 href="#documentation"
               >
                 {helpCopy.hero.secondaryCta}
@@ -1255,35 +1256,35 @@ const Help = () => {
             </div>
           </div>
 
-          <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+          <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/80 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] lg:rounded-2xl lg:p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   {helpCopy.hero.progressLabel}
                 </p>
-                <p className="mt-2 text-3xl font-semibold text-slate-950">
+                <p className="mt-1 text-2xl font-semibold text-slate-950 lg:mt-2 lg:text-3xl">
                   {helpCopy.hero.progressValue}
                 </p>
               </div>
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ink text-white">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink text-white lg:h-10 lg:w-10">
                 <Sparkles className="h-4 w-4" />
               </span>
             </div>
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-white">
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-white lg:mt-4">
               <div
                 className="h-full rounded-full bg-ink"
                 style={{ width: helpCopy.hero.progressValue }}
               />
             </div>
-            <p className="mt-4 text-sm leading-6 text-slate-600">
+            <p className="mt-3 text-sm leading-5 text-slate-600 lg:mt-4 lg:leading-6">
               {helpCopy.hero.progressDetail}
             </p>
-            <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="mt-3 grid grid-cols-4 gap-1.5 lg:mt-4 lg:grid-cols-2 lg:gap-2">
               {helpCopy.hero.progressModules.map((item, index) => (
                 <div
                   key={item}
                   className={cn(
-                    "rounded-xl border px-3 py-2 text-xs font-medium",
+                    "rounded-lg border px-2 py-1.5 text-center text-[11px] font-medium lg:rounded-xl lg:px-3 lg:py-2 lg:text-left lg:text-xs",
                     index < 2
                       ? "border-emerald-200 bg-emerald-50 text-emerald-800"
                       : "border-slate-200 bg-white text-slate-600"
@@ -1305,7 +1306,7 @@ const Help = () => {
           <div className="min-w-0 lg:basis-1/4">
             <p
               id="help-search-title"
-              className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400"
+              className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500"
             >
               {helpCopy.search.label}
             </p>
@@ -1317,7 +1318,7 @@ const Help = () => {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={helpCopy.search.placeholder}
-              className="h-11 w-full min-w-0 rounded-full border border-slate-200 bg-slate-50/80 pl-10 pr-24 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white focus:ring-2 focus:ring-slate-900/10"
+              className="h-10 w-full min-w-0 rounded-full border border-slate-200 bg-slate-50/80 pl-10 pr-20 text-xs text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:ring-2 focus:ring-slate-900/10 sm:h-11 sm:pr-24 sm:text-sm"
             />
             {query && (
               <button
@@ -1343,7 +1344,7 @@ const Help = () => {
               </button>
             ))}
           </div>
-          <p className="shrink-0 text-xs font-medium text-slate-400">
+          <p className="shrink-0 text-xs font-medium text-slate-500">
             {visibleGuides.length}{" "}
             {visibleGuides.length > 1
               ? helpCopy.search.resultPlural
@@ -1354,31 +1355,37 @@ const Help = () => {
 
       <section className="help-motion grid min-w-0 gap-4 xl:grid-cols-[0.85fr_1.15fr]">
         <Card className="min-w-0 shadow-sm">
-          <CardHeader>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+          <CardHeader className="gap-1.5 p-4 lg:gap-2 lg:p-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
               {helpCopy.sections.starter.eyebrow}
             </p>
-            <CardTitle>{helpCopy.sections.starter.title}</CardTitle>
-            <CardDescription>{helpCopy.sections.starter.description}</CardDescription>
+            <CardTitle className="text-base lg:text-lg">
+              {helpCopy.sections.starter.title}
+            </CardTitle>
+            <CardDescription className="leading-5">
+              {helpCopy.sections.starter.description}
+            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-2 px-4 pb-4 lg:space-y-3 lg:px-6 lg:pb-6">
             {starterSteps.map((step, index) => (
               <Link
                 key={step.title}
                 to={step.to}
-                className="group flex min-w-0 items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3 transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 motion-reduce:transform-none"
+                className="group flex min-w-0 items-start gap-2 rounded-xl border border-slate-200 bg-white p-2.5 transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 motion-reduce:transform-none lg:gap-3 lg:rounded-2xl lg:p-3"
               >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-950 text-sm font-semibold text-white">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-950 text-xs font-semibold text-white lg:h-8 lg:w-8 lg:text-sm">
                   {index + 1}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex min-w-0 flex-wrap items-center gap-2">
-                    <span className="font-semibold text-slate-950">{step.title}</span>
-                    <Badge className="border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600">
+                    <span className="text-sm font-semibold text-slate-950 lg:text-base">
+                      {step.title}
+                    </span>
+                    <Badge className="border-slate-200 bg-slate-50 px-2 py-0.5 text-[9px] text-slate-600 lg:text-[10px]">
                       {step.status}
                     </Badge>
                   </span>
-                  <span className="mt-1 block text-sm leading-5 text-slate-500">
+                  <span className="mt-1 block text-xs leading-5 text-slate-500 lg:text-sm">
                     {step.description}
                   </span>
                 </span>
@@ -1389,14 +1396,18 @@ const Help = () => {
         </Card>
 
         <Card className="min-w-0 overflow-hidden shadow-sm">
-          <CardHeader>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+          <CardHeader className="gap-1.5 p-4 lg:gap-2 lg:p-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
               {helpCopy.sections.videos.eyebrow}
             </p>
-            <CardTitle>{helpCopy.sections.videos.title}</CardTitle>
-            <CardDescription>{helpCopy.sections.videos.description}</CardDescription>
+            <CardTitle className="text-base lg:text-lg">
+              {helpCopy.sections.videos.title}
+            </CardTitle>
+            <CardDescription className="leading-5">
+              {helpCopy.sections.videos.description}
+            </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-3">
+          <CardContent className="grid gap-2 px-4 pb-4 md:grid-cols-3 lg:gap-3 lg:px-6 lg:pb-6">
             {academyVideos.map((video) => (
               <button
                 type="button"
@@ -1406,20 +1417,28 @@ const Help = () => {
                   setSelectedGuideId(video.guideId);
                   document.getElementById("guides")?.scrollIntoView({ behavior: "smooth" });
                 }}
-                className="group min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 text-left transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 motion-reduce:transform-none"
+                className="group flex min-w-0 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-2.5 text-left transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 motion-reduce:transform-none md:block md:rounded-2xl md:p-3"
               >
-                <span className="flex aspect-video items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white text-slate-500">
+                <span className="flex h-16 w-24 shrink-0 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-white text-slate-500 md:aspect-video md:h-auto md:w-full md:rounded-xl">
                   <PlayCircle className="h-7 w-7 transition group-hover:text-slate-950" />
                 </span>
-                <span className="mt-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                  <Video className="h-3.5 w-3.5" />
-                  {video.duration}
-                </span>
-                <span className="mt-1 block font-semibold leading-5 text-slate-950">
-                  {video.title}
-                </span>
-                <span className="mt-1 line-clamp-3 block text-xs leading-5 text-slate-500">
-                  {video.description}
+                <span className="min-w-0 flex-1 md:block">
+                  <span className="flex flex-wrap items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 md:mt-3 md:text-[11px]">
+                    <Video className="h-3.5 w-3.5" />
+                    {video.duration}
+                    <Badge
+                      variant="neutral"
+                      className="border-slate-200 bg-white px-1.5 py-0 text-[9px] normal-case tracking-normal text-slate-500"
+                    >
+                      {helpCopy.sections.videos.placeholderLabel}
+                    </Badge>
+                  </span>
+                  <span className="mt-1 block text-sm font-semibold leading-5 text-slate-950 md:text-base">
+                    {video.title}
+                  </span>
+                  <span className="mt-1 line-clamp-2 block text-xs leading-5 text-slate-500 md:line-clamp-3">
+                    {video.description}
+                  </span>
                 </span>
               </button>
             ))}
@@ -1434,7 +1453,7 @@ const Help = () => {
           description={helpCopy.sections.categories.description}
         />
 
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-2 md:grid-cols-2 md:gap-3 xl:grid-cols-3">
           {categories.map((category) => (
             <CategoryCard
               key={category.id}
@@ -1463,10 +1482,10 @@ const Help = () => {
 
         <div id="guides" className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
           <Card className="min-w-0 overflow-hidden shadow-sm">
-            <CardContent className="space-y-2 p-3">
+            <CardContent className="flex gap-2 overflow-x-auto p-2 [-ms-overflow-style:none] [scrollbar-width:none] lg:block lg:space-y-2 lg:overflow-visible lg:p-3">
               {visibleGuides.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center">
-                  <HelpCircle className="mx-auto h-8 w-8 text-slate-400" />
+                <div className="w-full shrink-0 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center">
+                  <HelpCircle className="mx-auto h-8 w-8 text-slate-500" />
                   <p className="mt-3 font-semibold text-slate-950">
                     {helpCopy.search.emptyTitle}
                   </p>
@@ -1522,13 +1541,15 @@ const Help = () => {
           {faqs.map((faq) => (
             <details
               key={faq.question}
-              className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition open:border-slate-300"
+              className="group rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition open:border-slate-300 lg:rounded-2xl lg:p-4"
             >
-              <summary className="flex cursor-pointer list-none items-start justify-between gap-3 rounded-xl text-sm font-semibold text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20">
+              <summary className="flex cursor-pointer list-none items-start justify-between gap-3 rounded-xl text-sm font-semibold leading-5 text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20">
                 <span>{faq.question}</span>
                 <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition group-open:rotate-90 group-open:text-slate-700" />
               </summary>
-              <p className="mt-3 text-sm leading-6 text-slate-600">{faq.answer}</p>
+              <p className="mt-2 text-sm leading-5 text-slate-600 lg:mt-3 lg:leading-6">
+                {faq.answer}
+              </p>
             </details>
           ))}
         </div>
@@ -1547,13 +1568,13 @@ const SectionHeader = ({
   description: string;
 }) => (
   <div className="min-w-0">
-    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
       {eyebrow}
     </p>
-    <h2 className="mt-1 text-2xl font-semibold tracking-normal text-slate-950">
+    <h2 className="mt-1 text-xl font-semibold tracking-normal text-slate-950 sm:text-2xl">
       {title}
     </h2>
-    <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+    <p className="mt-1 max-w-3xl text-sm leading-5 text-slate-500 sm:leading-6">
       {description}
     </p>
   </div>
@@ -1575,14 +1596,14 @@ const CategoryCard = ({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "group min-w-0 rounded-2xl border bg-white p-4 text-left shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 motion-reduce:transform-none",
+        "group min-w-0 rounded-xl border bg-white p-3 text-left shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 motion-reduce:transform-none lg:rounded-2xl lg:p-4",
         active ? "border-slate-950" : "border-slate-200"
       )}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-2 lg:gap-3">
         <span
           className={cn(
-            "flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition",
+            "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition lg:h-10 lg:w-10",
             active
               ? "bg-slate-950 text-white"
               : "bg-slate-100 text-slate-700 group-hover:bg-slate-950 group-hover:text-white"
@@ -1592,12 +1613,17 @@ const CategoryCard = ({
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-start justify-between gap-3">
-            <span className="font-semibold text-slate-950">{category.title}</span>
-            <Badge variant="neutral" className="shrink-0">
+            <span className="text-sm font-semibold text-slate-950 lg:text-base">
+              {category.title}
+            </span>
+            <Badge
+              variant="neutral"
+              className="shrink-0 px-2 py-0.5 text-[10px] lg:px-3 lg:py-1 lg:text-xs"
+            >
               {category.guideIds.length} {helpCopy.filters.guides}
             </Badge>
           </span>
-          <span className="mt-1 block text-sm leading-6 text-slate-500">
+          <span className="mt-1 line-clamp-2 block text-xs leading-5 text-slate-500 lg:line-clamp-none lg:text-sm lg:leading-6">
             {category.description}
           </span>
         </span>
@@ -1620,7 +1646,7 @@ const CategoryPill = ({
     onClick={onClick}
     aria-pressed={active}
     className={cn(
-      "shrink-0 rounded-full border px-3 py-2 text-sm font-medium transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20",
+      "shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 sm:py-2 sm:text-sm",
       active
         ? "border-slate-950 bg-slate-950 text-white shadow-sm"
         : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950"
@@ -1640,25 +1666,25 @@ const SupportActionCard = ({
   const Icon = iconMap[card.icon];
   return (
     <Card className="min-w-0 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-card motion-reduce:transform-none">
-      <CardHeader>
+      <CardHeader className="gap-2 p-4 lg:p-6">
         <div className="flex items-start justify-between gap-3">
           <span
             className={cn(
-              "flex h-10 w-10 shrink-0 items-center justify-center rounded-full",
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-full lg:h-10 lg:w-10",
               emphasized ? "bg-ink text-white" : "bg-slate-100 text-slate-700"
             )}
           >
             <Icon className="h-4 w-4" />
           </span>
-          <Badge variant="neutral" className="shrink-0">
+          <Badge variant="neutral" className="shrink-0 px-2 py-0.5 text-[10px] lg:px-3 lg:py-1 lg:text-xs">
             {card.detail}
           </Badge>
         </div>
         <CardTitle className="text-base">{card.title}</CardTitle>
-        <CardDescription>{card.description}</CardDescription>
+        <CardDescription className="leading-5">{card.description}</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+      <CardContent className="space-y-2 px-4 pb-4 lg:space-y-3 lg:px-6 lg:pb-6">
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600 lg:rounded-2xl">
           {card.status}
         </div>
         <Button
@@ -1667,6 +1693,8 @@ const SupportActionCard = ({
           className="w-full disabled:cursor-default disabled:opacity-100"
           disabled
           aria-disabled="true"
+          aria-label={`${card.cta} · ${card.status}`}
+          title={card.status}
         >
           {card.cta}
         </Button>
@@ -1691,7 +1719,7 @@ const GuideListButton = ({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "group flex w-full min-w-0 items-start gap-3 rounded-2xl border p-3 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 motion-reduce:transform-none",
+        "group flex min-w-[10.5rem] max-w-[11.5rem] shrink-0 items-center gap-2 rounded-xl border p-2 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 motion-reduce:transform-none lg:w-full lg:max-w-none lg:items-start lg:gap-3 lg:rounded-2xl lg:p-3",
         active
           ? "border-slate-950 bg-slate-950 text-white shadow-sm"
           : "border-slate-200 bg-white text-slate-700 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-sm"
@@ -1699,19 +1727,19 @@ const GuideListButton = ({
     >
       <span
         className={cn(
-          "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
+          "flex h-7 w-7 shrink-0 items-center justify-center rounded-full lg:mt-0.5 lg:h-9 lg:w-9",
           active ? "bg-white/10 text-white" : "bg-slate-100 text-slate-700"
         )}
       >
         <Icon className="h-4 w-4" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className={cn("block font-semibold", active ? "text-white" : "text-slate-950")}>
+        <span className={cn("block truncate text-sm font-semibold lg:text-base", active ? "text-white" : "text-slate-950")}>
           {guide.title}
         </span>
         <span
           className={cn(
-            "mt-1 line-clamp-2 block text-xs leading-5",
+            "hidden text-xs leading-5 lg:mt-1 lg:line-clamp-2 lg:block",
             active ? "text-slate-300" : "text-slate-500"
           )}
         >
@@ -1720,7 +1748,7 @@ const GuideListButton = ({
       </span>
       <ChevronRight
         className={cn(
-          "mt-1 h-4 w-4 shrink-0 transition",
+          "mt-1 hidden h-4 w-4 shrink-0 transition lg:block",
           active ? "text-white" : "text-slate-300 group-hover:text-slate-700"
         )}
       />
@@ -1729,14 +1757,14 @@ const GuideListButton = ({
 };
 
 const GuideEmptyState = () => (
-  <article className="min-w-0 rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center shadow-sm">
-    <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+  <article className="min-w-0 rounded-2xl border border-dashed border-slate-200 bg-white p-4 text-center shadow-sm lg:p-6">
+    <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 lg:h-12 lg:w-12">
       <Search className="h-5 w-5" />
     </span>
-    <h2 className="mt-4 text-xl font-semibold tracking-normal text-slate-950">
+    <h2 className="mt-3 text-lg font-semibold tracking-normal text-slate-950 lg:mt-4 lg:text-xl">
       {helpCopy.search.emptyTitle}
     </h2>
-    <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
+    <p className="mx-auto mt-2 max-w-md text-sm leading-5 text-slate-500 lg:leading-6">
       {helpCopy.search.emptyDescription}
     </p>
   </article>
@@ -1746,52 +1774,59 @@ const GuideDetail = ({ guide }: { guide: HelpGuide }) => {
   const Icon = iconMap[guide.icon];
   return (
     <article className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-100 bg-gradient-to-br from-white to-slate-50/80 p-4 sm:p-5">
+      <div className="border-b border-slate-100 bg-gradient-to-br from-white to-slate-50/80 p-3 sm:p-4 lg:p-5">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-ink text-white">
-            <Icon className="h-5 w-5" />
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink text-white lg:h-11 lg:w-11">
+            <Icon className="h-4 w-4 lg:h-5 lg:w-5" />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={levelVariant[guide.level]}>{guide.level}</Badge>
-              <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-500">
+              <Badge
+                variant={levelVariant[guide.level]}
+                className="px-2 py-0.5 text-[10px] lg:px-3 lg:py-1 lg:text-xs"
+              >
+                {guide.level}
+              </Badge>
+              <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-500 lg:px-3 lg:py-1 lg:text-xs">
                 <Clock3 className="h-3.5 w-3.5" />
                 {guide.duration}
               </span>
             </div>
-            <h2 className="mt-3 text-2xl font-semibold tracking-normal text-slate-950">
+            <h2 className="mt-2 text-xl font-semibold tracking-normal text-slate-950 lg:mt-3 lg:text-2xl">
               {guide.title}
             </h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600">{guide.description}</p>
+            <p className="mt-2 text-sm leading-5 text-slate-600 lg:leading-6">
+              {guide.description}
+            </p>
           </div>
         </div>
-        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-            {helpCopy.guideLabels.objective}
-          </p>
-          <p className="mt-1 text-sm font-medium leading-6 text-slate-800">
+        <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3 lg:mt-4 lg:rounded-2xl lg:p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              {helpCopy.guideLabels.objective}
+            </p>
+          <p className="mt-1 text-sm font-medium leading-5 text-slate-800 lg:leading-6">
             {guide.objective}
           </p>
         </div>
       </div>
 
-      <div className="grid gap-5 p-4 sm:p-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.72fr)]">
-        <div className="min-w-0 space-y-5">
+      <div className="grid gap-4 p-3 sm:p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.72fr)] lg:gap-5 lg:p-5">
+        <div className="min-w-0 space-y-4 lg:space-y-5">
           <GuideSection title={helpCopy.guideLabels.steps} items={guide.steps} ordered />
           <GuideSection title={helpCopy.guideLabels.bestPractices} items={guide.bestPractices} />
           <GuideSection title={helpCopy.guideLabels.commonMistakes} items={guide.commonMistakes} muted />
         </div>
-        <aside className="min-w-0 space-y-4">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+        <aside className="min-w-0 space-y-3 lg:space-y-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 lg:rounded-2xl lg:p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
               {helpCopy.guideLabels.usefulLinks}
             </p>
-            <div className="mt-3 space-y-2">
+            <div className="mt-2 space-y-2 lg:mt-3">
               {guide.usefulLinks.map((link) => (
                 <Link
                   key={`${guide.id}-${link.to}-${link.label}`}
                   to={link.to}
-                  className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition duration-200 hover:border-slate-300 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
+                  className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition duration-200 hover:border-slate-300 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 lg:rounded-xl"
                 >
                   <span className="min-w-0 truncate">{link.label}</span>
                   <ArrowRight className="h-4 w-4 shrink-0 text-slate-400" />
@@ -1801,7 +1836,7 @@ const GuideDetail = ({ guide }: { guide: HelpGuide }) => {
           </div>
           <Link
             to={guide.cta.to}
-            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-ink px-4 text-sm font-medium text-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 motion-reduce:transform-none"
+            className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-full bg-ink px-4 text-sm font-medium text-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 motion-reduce:transform-none lg:h-10"
           >
             {guide.cta.label}
             <ArrowRight className="h-4 w-4" />
@@ -1824,25 +1859,27 @@ const GuideSection = ({
   muted?: boolean;
 }) => (
   <section className="min-w-0">
-    <h3 className="text-base font-semibold text-slate-950">{title}</h3>
+    <h3 className="text-sm font-semibold text-slate-950 lg:text-base">{title}</h3>
     {ordered ? (
-      <ol className="mt-3 space-y-2">
+      <ol className="mt-2 space-y-1.5 lg:mt-3 lg:space-y-2">
         {items.map((item, index) => (
-          <li key={item} className="flex min-w-0 gap-3 rounded-xl bg-slate-50/80 p-3">
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-semibold text-slate-700 shadow-sm">
+          <li key={item} className="flex min-w-0 gap-2 rounded-lg bg-slate-50/80 p-2.5 lg:gap-3 lg:rounded-xl lg:p-3">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white text-[11px] font-semibold text-slate-700 shadow-sm lg:h-6 lg:w-6 lg:text-xs">
               {index + 1}
             </span>
-            <span className="min-w-0 text-sm leading-6 text-slate-600">{item}</span>
+            <span className="min-w-0 text-sm leading-5 text-slate-600 lg:leading-6">
+              {item}
+            </span>
           </li>
         ))}
       </ol>
     ) : (
-      <ul className="mt-3 space-y-2">
+      <ul className="mt-2 space-y-1.5 lg:mt-3 lg:space-y-2">
         {items.map((item) => (
           <li
             key={item}
             className={cn(
-              "flex min-w-0 gap-3 rounded-xl border p-3 text-sm leading-6",
+              "flex min-w-0 gap-2 rounded-lg border p-2.5 text-sm leading-5 lg:gap-3 lg:rounded-xl lg:p-3 lg:leading-6",
               muted
                 ? "border-amber-100 bg-amber-50/70 text-amber-900"
                 : "border-slate-100 bg-white text-slate-600"

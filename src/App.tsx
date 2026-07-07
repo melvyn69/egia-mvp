@@ -49,17 +49,41 @@ const Help = lazy(() =>
 );
 
 const HelpRouteFallback = () => (
-  <div className="space-y-4" aria-label="Chargement du centre d'aide">
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-      <div className="h-3 w-28 animate-pulse rounded-full bg-slate-200" />
-      <div className="mt-4 h-9 w-3/4 max-w-xl animate-pulse rounded-xl bg-slate-200" />
-      <div className="mt-3 h-4 w-full max-w-2xl animate-pulse rounded-full bg-slate-100" />
-      <div className="mt-2 h-4 w-2/3 max-w-lg animate-pulse rounded-full bg-slate-100" />
+  <div className="space-y-4" aria-label="Chargement de l'Academy EGIA">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5 lg:p-7">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+        <div className="min-w-0">
+          <div className="h-3 w-24 animate-pulse rounded-full bg-slate-200" />
+          <div className="mt-4 h-8 w-4/5 max-w-xl animate-pulse rounded-xl bg-slate-200 sm:h-10" />
+          <div className="mt-3 h-4 w-full max-w-2xl animate-pulse rounded-full bg-slate-100" />
+          <div className="mt-2 h-4 w-3/4 max-w-lg animate-pulse rounded-full bg-slate-100" />
+          <div className="mt-5 grid max-w-lg grid-cols-3 gap-2">
+            <div className="h-14 animate-pulse rounded-xl border border-slate-200 bg-slate-50" />
+            <div className="h-14 animate-pulse rounded-xl border border-slate-200 bg-slate-50" />
+            <div className="h-14 animate-pulse rounded-xl border border-slate-200 bg-slate-50" />
+          </div>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex items-start justify-between">
+            <div className="h-3 w-32 animate-pulse rounded-full bg-slate-200" />
+            <div className="h-9 w-9 animate-pulse rounded-full bg-slate-200" />
+          </div>
+          <div className="mt-5 h-8 w-20 animate-pulse rounded-lg bg-slate-200" />
+          <div className="mt-4 h-2 animate-pulse rounded-full bg-white" />
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="h-9 animate-pulse rounded-xl bg-white" />
+            <div className="h-9 animate-pulse rounded-xl bg-white" />
+          </div>
+        </div>
+      </div>
     </div>
-    <div className="grid gap-4 lg:grid-cols-3">
-      <div className="h-32 animate-pulse rounded-2xl border border-slate-200 bg-white" />
-      <div className="h-32 animate-pulse rounded-2xl border border-slate-200 bg-white" />
-      <div className="h-32 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+    <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+      <div className="h-10 animate-pulse rounded-full bg-slate-100" />
+    </div>
+    <div className="grid gap-3 md:grid-cols-3">
+      <div className="h-24 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+      <div className="h-24 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+      <div className="h-24 animate-pulse rounded-2xl border border-slate-200 bg-white" />
     </div>
   </div>
 );
