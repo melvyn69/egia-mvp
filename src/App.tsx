@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Routes, Route, useLocation } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, supabaseAnonKey, supabaseUrl } from "./lib/supabase";
@@ -43,6 +43,26 @@ import {
   getFriendlyMobileError,
   isBenignBrowserError
 } from "./lib/browserErrors";
+
+const Help = lazy(() =>
+  import("./pages/Help").then((module) => ({ default: module.Help }))
+);
+
+const HelpRouteFallback = () => (
+  <div className="space-y-4" aria-label="Chargement du centre d'aide">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+      <div className="h-3 w-28 animate-pulse rounded-full bg-slate-200" />
+      <div className="mt-4 h-9 w-3/4 max-w-xl animate-pulse rounded-xl bg-slate-200" />
+      <div className="mt-3 h-4 w-full max-w-2xl animate-pulse rounded-full bg-slate-100" />
+      <div className="mt-2 h-4 w-2/3 max-w-lg animate-pulse rounded-full bg-slate-100" />
+    </div>
+    <div className="grid gap-4 lg:grid-cols-3">
+      <div className="h-32 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+      <div className="h-32 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+      <div className="h-32 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+    </div>
+  </div>
+);
 
 type OnboardingLocationProgress = {
   locationId: string;
@@ -250,6 +270,13 @@ const App = () => {
       return {
         title: "Paramètres",
         subtitle: "Profil, entreprise, équipe et préférences."
+      };
+    }
+
+    if (location.pathname === "/help") {
+      return {
+        title: "Centre d'aide",
+        subtitle: "Guides, Academy et parcours pour maîtriser EGIA."
       };
     }
 
@@ -1192,6 +1219,14 @@ const App = () => {
                   element={<TestLab session={session} />}
                 />
                 <Route path="/settings" element={<Settings session={session} />} />
+                <Route
+                  path="/help"
+                  element={
+                    <Suspense fallback={<HelpRouteFallback />}>
+                      <Help />
+                    </Suspense>
+                  }
+                />
                 <Route path="/invite" element={<Invite session={session} />} />
                 <Route path="/alerts" element={<Alerts session={session} />} />
                 <Route

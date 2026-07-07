@@ -6,6 +6,7 @@ import {
   Bell,
   CreditCard,
   FileText,
+  HelpCircle,
   LayoutDashboard,
   Mailbox,
   Radar,
@@ -249,6 +250,20 @@ const Sidebar = ({
         >
           <Settings size={18} />
           Paramètres
+        </NavLink>
+        <NavLink
+          to="/help"
+          className={({ isActive }) =>
+            cn(
+              navLinkBase,
+              isActive
+                ? "bg-ink text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            )
+          }
+        >
+          <HelpCircle size={18} />
+          Centre d'aide
         </NavLink>
         {showAdminLinks && (
           <div className="space-y-2 border-t border-slate-200 pt-3">
