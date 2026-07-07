@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Navigate, Routes, Route, useLocation } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, supabaseAnonKey, supabaseUrl } from "./lib/supabase";
 import { startGoogleConnection } from "./lib/googleAuth";
@@ -27,8 +27,7 @@ import Settings from "./pages/Settings";
 import Invite from "./pages/Invite";
 import Alerts from "./pages/Alerts";
 import { Competitors } from "./pages/Competitors";
-import { SyncStatus } from "./pages/SyncStatus";
-import AIJobHealth from "./pages/AIJobHealth";
+import { SystemHealth } from "./pages/SystemHealth";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
 import { OfflineBanner } from "./components/pwa/OfflineBanner";
@@ -311,17 +310,14 @@ const App = () => {
       };
     }
 
-    if (location.pathname === "/sync-status") {
+    if (
+      location.pathname === "/system-health" ||
+      location.pathname === "/sync-status" ||
+      location.pathname === "/ai-job-health"
+    ) {
       return {
-        title: "Statut de synchronisation",
-        subtitle: "Suivi des synchronisations Google et erreurs."
-      };
-    }
-
-    if (location.pathname === "/ai-job-health") {
-      return {
-        title: "Santé des jobs IA",
-        subtitle: "État des jobs IA, files et traitements."
+        title: "Centre de supervision",
+        subtitle: "Santé Google, synchronisations et traitements IA."
       };
     }
 
@@ -1242,12 +1238,17 @@ const App = () => {
                   path="/settings/test-lab"
                   element={<TestLab session={session} />}
                 />
-                <Route path="/settings" element={<Settings session={session} />} />
+                <Route
+                  path="/settings"
+                  element={
+                    <Settings session={session} isAdmin={isAdminSession} />
+                  }
+                />
                 <Route
                   path="/help"
                   element={
                     <Suspense fallback={<HelpRouteFallback />}>
-                      <Help />
+                      <Help showAdminLinks={isAdminSession} />
                     </Suspense>
                   }
                 />
@@ -1268,12 +1269,32 @@ const App = () => {
                   element={<TeamRanking session={session} />}
                 />
                 <Route
+                  path="/system-health"
+                  element={
+                    isAdminSession ? (
+                      <SystemHealth session={session} />
+                    ) : (
+                      <Navigate to="/" replace />
+                    )
+                  }
+                />
+                <Route
                   path="/sync-status"
-                  element={<SyncStatus session={session} />}
+                  element={
+                    <Navigate
+                      to={isAdminSession ? "/system-health" : "/"}
+                      replace
+                    />
+                  }
                 />
                 <Route
                   path="/ai-job-health"
-                  element={<AIJobHealth session={session} />}
+                  element={
+                    <Navigate
+                      to={isAdminSession ? "/system-health" : "/"}
+                      replace
+                    />
+                  }
                 />
                 <Route
                   path="/google_oauth_callback"

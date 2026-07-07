@@ -28,6 +28,7 @@ import SettingsProfile from "./SettingsProfile";
 
 type SettingsProps = {
   session: Session | null;
+  isAdmin?: boolean;
 };
 
 type TeamMemberRow = {
@@ -304,7 +305,7 @@ const TripAdvisorLogo = () => (
   <span className="text-sm font-semibold text-emerald-600">TA</span>
 );
 
-const Settings = ({ session }: SettingsProps) => {
+const Settings = ({ session, isAdmin = false }: SettingsProps) => {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -1436,13 +1437,15 @@ const Settings = ({ session }: SettingsProps) => {
                 <p className="text-sm text-slate-600">
                   Lieux connectés et statut d’activation.
                 </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigate("/sync-status")}
-                >
-                  Voir le statut de synchronisation
-                </Button>
+                {isAdmin && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate("/system-health")}
+                  >
+                    Voir le statut de synchronisation
+                  </Button>
+                )}
               </div>
               {locationsNotice && (
                 <p className="text-xs text-emerald-600">{locationsNotice}</p>
@@ -1582,12 +1585,14 @@ const Settings = ({ session }: SettingsProps) => {
               >
                 Importer depuis Google
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => navigate("/sync-status")}
-              >
-                Voir le statut de synchronisation
-              </Button>
+              {isAdmin && (
+                <Button
+                  variant="outline"
+                  onClick={() => navigate("/system-health")}
+                >
+                  Voir le statut de synchronisation
+                </Button>
+              )}
             </div>
           </div>
         </div>

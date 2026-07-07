@@ -10,7 +10,6 @@ import {
   LayoutDashboard,
   Mailbox,
   Radar,
-  RefreshCw,
   Settings,
   Sparkles,
   Target,
@@ -327,21 +326,7 @@ const Sidebar = ({
               Équipe
             </NavLink>
             <NavLink
-              to="/sync-status"
-              className={({ isActive }) =>
-                cn(
-                  navLinkBase,
-                  isActive
-                    ? "bg-ink text-white shadow"
-                    : "text-slate-600 hover:bg-slate-100"
-                )
-              }
-            >
-              <RefreshCw size={18} />
-              Statut sync
-            </NavLink>
-            <NavLink
-              to="/ai-job-health"
+              to="/system-health"
               className={({ isActive }) =>
                 cn(
                   navLinkBase,
@@ -352,7 +337,7 @@ const Sidebar = ({
               }
             >
               <Activity size={18} />
-              Santé IA
+              Supervision
             </NavLink>
           </div>
         )}

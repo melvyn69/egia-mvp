@@ -85,6 +85,10 @@ type HelpGuide = {
   keywords: string[];
 };
 
+type HelpProps = {
+  showAdminLinks?: boolean;
+};
+
 type HelpCategory = {
   id: string;
   icon: HelpIcon;
@@ -732,7 +736,7 @@ const guides: HelpGuide[] = [
     usefulLinks: [
       { label: "Paramètres", to: "/settings" },
       { label: "Connexion Google", to: "/connect" },
-      { label: "Synchronisation", to: "/sync-status" }
+      { label: "Supervision", to: "/system-health" }
     ],
     cta: { label: "Ouvrir les paramètres", to: "/settings" },
     keywords: ["paramètres", "configuration", "google", "établissement", "compte"]
@@ -1150,7 +1154,7 @@ const levelVariant: Record<HelpGuide["level"], "success" | "warning" | "neutral"
   Avancé: "warning"
 };
 
-const Help = () => {
+const Help = ({ showAdminLinks = false }: HelpProps) => {
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [selectedGuideId, setSelectedGuideId] = useState(guides[0]?.id ?? "");
@@ -1190,6 +1194,9 @@ const Help = () => {
     visibleGuides[0] ??
     selectedGuide;
   const hasVisibleGuides = visibleGuides.length > 0;
+  const displayGuideUsefulLinks = displayGuide.usefulLinks.filter(
+    (link) => showAdminLinks || link.to !== "/system-health"
+  );
 
   return (
     <div className="help-page min-w-0 space-y-4 overflow-x-hidden pb-3 md:space-y-6 lg:space-y-8 lg:pb-4">
@@ -1507,7 +1514,10 @@ const Help = () => {
           </Card>
 
           {hasVisibleGuides ? (
-            <GuideDetail guide={displayGuide} />
+            <GuideDetail
+              guide={displayGuide}
+              usefulLinks={displayGuideUsefulLinks}
+            />
           ) : (
             <GuideEmptyState />
           )}
@@ -1770,7 +1780,13 @@ const GuideEmptyState = () => (
   </article>
 );
 
-const GuideDetail = ({ guide }: { guide: HelpGuide }) => {
+const GuideDetail = ({
+  guide,
+  usefulLinks
+}: {
+  guide: HelpGuide;
+  usefulLinks: HelpLink[];
+}) => {
   const Icon = iconMap[guide.icon];
   return (
     <article className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -1822,7 +1838,7 @@ const GuideDetail = ({ guide }: { guide: HelpGuide }) => {
               {helpCopy.guideLabels.usefulLinks}
             </p>
             <div className="mt-2 space-y-2 lg:mt-3">
-              {guide.usefulLinks.map((link) => (
+              {usefulLinks.map((link) => (
                 <Link
                   key={`${guide.id}-${link.to}-${link.label}`}
                   to={link.to}
