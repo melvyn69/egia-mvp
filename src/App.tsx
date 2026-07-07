@@ -28,11 +28,12 @@ import Invite from "./pages/Invite";
 import Alerts from "./pages/Alerts";
 import { Competitors } from "./pages/Competitors";
 import { SystemHealth } from "./pages/SystemHealth";
+import { DeveloperConsole } from "./pages/DeveloperConsole";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthCallback } from "./pages/AuthCallback";
 import { OfflineBanner } from "./components/pwa/OfflineBanner";
 import { useGoogleConnectionStatus } from "./hooks/useGoogleConnectionStatus";
-import { isAdminUser } from "./lib/admin";
+import { isAdminUser, isDeveloperUser } from "./lib/admin";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { EgiaLogo } from "./components/brand/EgiaLogo";
@@ -157,6 +158,7 @@ const App = () => {
   const isPublicLoyaltyPath = location.pathname.startsWith("/loyalty/join/");
   const usesAppShell = !isPublicLoyaltyPath;
   const isAdminSession = isAdminUser(session?.user.email);
+  const isDeveloperSession = isDeveloperUser(session?.user.email);
   const passwordLoginEnabled =
     import.meta.env.VITE_ENABLE_PASSWORD_LOGIN === "true";
   const googleConnection = useGoogleConnectionStatus(session);
@@ -182,6 +184,16 @@ const App = () => {
       return {
         title: "Connexion",
         subtitle: "Reliez vos lieux Google Business Profile."
+      };
+    }
+
+    if (
+      location.pathname === "/developer-console" ||
+      location.pathname === "/god-mode"
+    ) {
+      return {
+        title: "God Mode",
+        subtitle: "Founder OS interne."
       };
     }
 
@@ -1063,7 +1075,12 @@ const App = () => {
       <ScrollToTop />
       <MobileRouteProgress />
       <div className={usesAppShell ? "flex" : ""}>
-        {session && usesAppShell && <Sidebar showAdminLinks={isAdminSession} />}
+        {session && usesAppShell && (
+          <Sidebar
+            showAdminLinks={isAdminSession}
+            showDeveloperLinks={isDeveloperSession}
+          />
+        )}
         <div
           className={
             usesAppShell
@@ -1269,6 +1286,24 @@ const App = () => {
                   element={<TeamRanking session={session} />}
                 />
                 <Route
+                  path="/developer-console"
+                  element={
+                    <DeveloperConsole
+                      session={session}
+                      isDeveloper={isDeveloperSession}
+                    />
+                  }
+                />
+                <Route
+                  path="/god-mode"
+                  element={
+                    <DeveloperConsole
+                      session={session}
+                      isDeveloper={isDeveloperSession}
+                    />
+                  }
+                />
+                <Route
                   path="/system-health"
                   element={
                     isAdminSession ? (
@@ -1320,6 +1355,7 @@ const App = () => {
               className="h-full"
               onNavigate={() => setMobileMenuOpen(false)}
               showAdminLinks={isAdminSession}
+              showDeveloperLinks={isDeveloperSession}
             />
           </div>
         </div>

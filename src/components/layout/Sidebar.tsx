@@ -11,6 +11,7 @@ import {
   Mailbox,
   Radar,
   Settings,
+  ShieldCheck,
   Sparkles,
   Target,
   Trophy,
@@ -36,13 +37,15 @@ type SidebarProps = {
   className?: string;
   onNavigate?: () => void;
   showAdminLinks?: boolean;
+  showDeveloperLinks?: boolean;
 };
 
 const Sidebar = ({
   variant = "desktop",
   className,
   onNavigate,
-  showAdminLinks = false
+  showAdminLinks = false,
+  showDeveloperLinks = false
 }: SidebarProps) => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -264,6 +267,27 @@ const Sidebar = ({
           <HelpCircle size={18} />
           Centre d'aide
         </NavLink>
+        {showDeveloperLinks && (
+          <div className="space-y-2 border-t border-slate-200 pt-3">
+            <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+              Dev
+            </p>
+            <NavLink
+              to="/developer-console"
+              className={({ isActive }) =>
+                cn(
+                  navLinkBase,
+                  isActive
+                    ? "bg-ink text-white shadow"
+                    : "text-slate-600 hover:bg-slate-100"
+                )
+              }
+            >
+              <ShieldCheck size={18} />
+              God Mode
+            </NavLink>
+          </div>
+        )}
         {showAdminLinks && (
           <div className="space-y-2 border-t border-slate-200 pt-3">
             <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">

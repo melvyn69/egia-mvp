@@ -5,6 +5,13 @@ const adminEmails = new Set(
     .filter(Boolean)
 );
 
+const developerEmails = new Set(
+  String(import.meta.env.VITE_DEVELOPER_EMAILS ?? "")
+    .split(",")
+    .map((email: string) => email.trim().toLowerCase())
+    .filter(Boolean)
+);
+
 const isAdminUser = (email?: string | null) => {
   if (!email) {
     return false;
@@ -12,4 +19,11 @@ const isAdminUser = (email?: string | null) => {
   return adminEmails.has(email.trim().toLowerCase());
 };
 
-export { isAdminUser };
+const isDeveloperUser = (email?: string | null) => {
+  if (!email) {
+    return false;
+  }
+  return developerEmails.has(email.trim().toLowerCase());
+};
+
+export { isAdminUser, isDeveloperUser };
