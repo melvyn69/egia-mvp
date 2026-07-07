@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
 import {
@@ -579,27 +579,37 @@ const KpiCard = ({ item }: { item: MockKpi }) => (
 
 const ClientActions = ({
   compact = false,
-  onView
+  onView,
+  showView = true
 }: {
   compact?: boolean;
   onView?: () => void;
+  showView?: boolean;
 }) => (
   <div
     className={cn(
       "grid gap-1.5",
-      compact ? "grid-cols-2" : "grid-cols-2 xl:grid-cols-4"
+      compact
+        ? showView
+          ? "grid-cols-2"
+          : "grid-cols-1 sm:grid-cols-3"
+        : showView
+          ? "grid-cols-2 xl:grid-cols-4"
+          : "grid-cols-1 sm:grid-cols-3"
     )}
   >
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      className="h-8 min-w-0 px-2 text-xs"
-      onClick={onView}
-    >
-      <Eye className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span className="truncate">Voir</span>
-    </Button>
+    {showView && (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-8 min-w-0 px-2 text-xs"
+        onClick={onView}
+      >
+        <Eye className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span className="truncate">Voir</span>
+      </Button>
+    )}
     <Button
       type="button"
       size="sm"
@@ -616,6 +626,9 @@ const ClientActions = ({
       type="button"
       size="sm"
       variant="outline"
+      disabled
+      aria-disabled="true"
+      title="Logs client non branches dans cette V1 UI mockee."
       className="h-8 min-w-0 px-2 text-xs"
     >
       <Terminal className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -719,6 +732,21 @@ const DeveloperConsole = ({ session, isDeveloper }: DeveloperConsoleProps) => {
       arpu: Math.round(currentMrr / mockClients.length)
     };
   }, []);
+
+  useEffect(() => {
+    if (!selectedClient) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSelectedClient(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedClient]);
 
   if (!isAuthorized) {
     return <DeveloperAccessDenied email={session?.user.email} />;
@@ -1164,13 +1192,21 @@ const DeveloperConsole = ({ session, isDeveloper }: DeveloperConsoleProps) => {
             aria-label="Fermer le detail client"
             onClick={() => setSelectedClient(null)}
           />
-          <aside className="relative max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-slate-200 bg-white p-4 shadow-soft sm:rounded-3xl sm:p-5">
+          <aside
+            className="relative max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-slate-200 bg-white p-4 shadow-soft sm:rounded-3xl sm:p-5"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="developer-client-detail-title"
+          >
             <div className="flex min-w-0 items-start justify-between gap-3">
               <div className="min-w-0">
                 <Badge className={cn("px-2 py-0.5 text-[11px]", healthClass[selectedClient.health])}>
                   {healthLabel[selectedClient.health]}
                 </Badge>
-                <h2 className="mt-3 truncate text-xl font-semibold text-slate-950">
+                <h2
+                  id="developer-client-detail-title"
+                  className="mt-3 truncate text-xl font-semibold text-slate-950"
+                >
                   {selectedClient.establishment}
                 </h2>
                 <p className="mt-1 truncate text-sm text-slate-500">
@@ -1220,7 +1256,7 @@ const DeveloperConsole = ({ session, isDeveloper }: DeveloperConsoleProps) => {
                 tant que les garde-fous backend ne sont pas branches.
               </p>
               <div className="mt-3">
-                <ClientActions compact />
+                <ClientActions compact showView={false} />
               </div>
             </div>
           </aside>
