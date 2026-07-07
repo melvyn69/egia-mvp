@@ -6,6 +6,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Skeleton } from "../components/ui/skeleton";
 import { supabase } from "../lib/supabase";
 
+const panelClass =
+  "overflow-hidden rounded-[1.35rem] border border-slate-200/80 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.06)]";
+
+const sectionHeaderClass = "border-b border-slate-100 px-4 py-4 sm:px-6";
+
+const fieldClass =
+  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
+
 type SettingsProfileProps = {
   session: Session | null;
 };
@@ -87,9 +95,9 @@ const SettingsProfile = ({ session }: SettingsProfileProps) => {
       });
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || "Impossible de mettre a jour le profil.");
+        throw new Error(text || "Impossible de mettre à jour le profil.");
       }
-      setStatus("Profil mis a jour.");
+      setStatus("Profil mis à jour.");
       await queryClient.invalidateQueries({
         queryKey: ["profile", session?.user?.id]
       });
@@ -97,7 +105,7 @@ const SettingsProfile = ({ session }: SettingsProfileProps) => {
       setError(
         err instanceof Error
           ? err.message
-          : "Impossible de mettre a jour le profil."
+          : "Impossible de mettre à jour le profil."
       );
     } finally {
       setSaving(false);
@@ -109,7 +117,7 @@ const SettingsProfile = ({ session }: SettingsProfileProps) => {
     setPasswordMessage(null);
     setError(null);
     if (!password || password.length < 8) {
-      setPasswordMessage("Le mot de passe doit contenir au moins 8 caracteres.");
+      setPasswordMessage("Le mot de passe doit contenir au moins 8 caractères.");
       return;
     }
     if (password !== passwordConfirm) {
@@ -118,12 +126,12 @@ const SettingsProfile = ({ session }: SettingsProfileProps) => {
     }
     const { error: updateError } = await supabase.auth.updateUser({ password });
     if (updateError) {
-      setPasswordMessage("Impossible de mettre a jour le mot de passe.");
+      setPasswordMessage("Impossible de mettre à jour le mot de passe.");
       return;
     }
     setPassword("");
     setPasswordConfirm("");
-    setPasswordMessage("Mot de passe mis a jour.");
+    setPasswordMessage("Mot de passe mis à jour.");
   };
 
   const handleDeleteRequest = async () => {
@@ -158,11 +166,23 @@ const SettingsProfile = ({ session }: SettingsProfileProps) => {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Mon profil</CardTitle>
+      <Card className={panelClass}>
+        <CardHeader className={sectionHeaderClass}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="text-base font-semibold sm:text-lg">Mon profil</CardTitle>
+              <p className="mt-1 text-sm leading-6 text-slate-500">
+                Informations personnelles utilisées dans l'espace équipe.
+              </p>
+            </div>
+            {role && (
+              <span className="inline-flex w-fit rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                {role}
+              </span>
+            )}
+          </div>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 px-4 py-4 sm:px-6">
           {profileQuery.isLoading ? (
             <Skeleton className="h-20 w-full" />
           ) : (
@@ -170,7 +190,7 @@ const SettingsProfile = ({ session }: SettingsProfileProps) => {
               <label className="block text-xs font-semibold text-slate-600">
                 Nom complet
                 <input
-                  className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                  className={fieldClass}
                   value={fullName}
                   onChange={(event) => setFullName(event.target.value)}
                   placeholder="Prénom Nom"
@@ -179,7 +199,8 @@ const SettingsProfile = ({ session }: SettingsProfileProps) => {
               <label className="block text-xs font-semibold text-slate-600">
                 Email
                 <input
-                  className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                  type="email"
+                  className={`${fieldClass} bg-slate-50 text-slate-700`}
                   value={email}
                   readOnly
                 />
@@ -200,11 +221,14 @@ const SettingsProfile = ({ session }: SettingsProfileProps) => {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Sécurité</CardTitle>
+      <Card className={panelClass}>
+        <CardHeader className={sectionHeaderClass}>
+          <CardTitle className="text-base font-semibold sm:text-lg">Sécurité</CardTitle>
+          <p className="text-sm leading-6 text-slate-500">
+            Gestion du mot de passe selon le fournisseur de connexion.
+          </p>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 px-4 py-4 sm:px-6">
           {provider === "google" ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
               Votre compte est connecté via Google. La gestion du mot de passe
@@ -216,7 +240,7 @@ const SettingsProfile = ({ session }: SettingsProfileProps) => {
                 Nouveau mot de passe
                 <input
                   type="password"
-                  className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                  className={fieldClass}
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                 />
@@ -225,7 +249,7 @@ const SettingsProfile = ({ session }: SettingsProfileProps) => {
                 Confirmer le mot de passe
                 <input
                   type="password"
-                  className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                  className={fieldClass}
                   value={passwordConfirm}
                   onChange={(event) => setPasswordConfirm(event.target.value)}
                 />
@@ -234,26 +258,29 @@ const SettingsProfile = ({ session }: SettingsProfileProps) => {
                 <p className="text-xs text-slate-500">{passwordMessage}</p>
               )}
               <Button variant="outline" onClick={handlePasswordUpdate}>
-                Mettre a jour le mot de passe
+                Mettre à jour le mot de passe
               </Button>
             </>
           )}
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Zone de danger</CardTitle>
+      <Card className={panelClass}>
+        <CardHeader className={sectionHeaderClass}>
+          <CardTitle className="text-base font-semibold sm:text-lg">Zone de danger</CardTitle>
+          <p className="text-sm leading-6 text-slate-500">
+            Demande de désactivation du compte courant.
+          </p>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 px-4 py-4 sm:px-6">
           <p className="text-sm text-slate-600">
-            Cette action desactive votre acces. Vous pourrez revenir vers
+            Cette action désactive votre accès. Vous pourrez revenir vers
             l'equipe EGIA si besoin.
           </p>
           <label className="block text-xs font-semibold text-slate-600">
             Tapez SUPPRIMER pour confirmer
             <input
-              className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+              className={fieldClass}
               value={deleteConfirm}
               onChange={(event) => setDeleteConfirm(event.target.value)}
               placeholder="SUPPRIMER"

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
+import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -34,7 +35,16 @@ const defaultForm: BrandVoiceForm = {
   forbidden_words: []
 };
 
+const panelClass =
+  "overflow-hidden rounded-[1.35rem] border border-slate-200/80 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.06)]";
+
+const sectionHeaderClass = "border-b border-slate-100 px-4 py-4 sm:px-6";
+
+const fieldClass =
+  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
+
 const BrandVoice = ({ session }: BrandVoiceProps) => {
+  const queryClient = useQueryClient();
   const supabaseClient = supabase;
   const [form, setForm] = useState<BrandVoiceForm>(defaultForm);
   const [loading, setLoading] = useState(false);
@@ -218,7 +228,10 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
       console.error("brand_voice save error:", error);
       setError("Impossible de sauvegarder.");
     } else {
-      setSuccess("Enregistre.");
+      setSuccess("Enregistré.");
+      void queryClient.invalidateQueries({
+        queryKey: ["brand-voice-status", session.user.id]
+      });
     }
     setSaving(false);
   };
@@ -293,25 +306,42 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold text-slate-900">Identité IA</h2>
-        <p className="text-sm text-slate-500">
-          Définissez la voix de marque et testez vos réponses.
-        </p>
+      <div className="rounded-[1.35rem] border border-slate-200/80 bg-white px-4 py-4 shadow-sm sm:px-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-950">Identité IA</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              Définissez la voix de marque et testez vos réponses.
+            </p>
+          </div>
+          <Badge variant={form.enabled ? "success" : "neutral"}>
+            {form.enabled ? "Active" : "Inactive"}
+          </Badge>
+        </div>
       </div>
 
       {loading ? (
         <Skeleton className="h-40 w-full" />
       ) : (
         <>
-          <Card>
-            <CardHeader>
-              <CardTitle>Appliquer à</CardTitle>
+          <Card className={panelClass}>
+            <CardHeader className={sectionHeaderClass}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle className="text-base font-semibold sm:text-lg">Appliquer à</CardTitle>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">
+                    Choisissez une règle globale ou propre à un établissement.
+                  </p>
+                </div>
+                {usingGlobalFallback && selectedLocationId && (
+                  <Badge variant="neutral">Règle globale</Badge>
+                )}
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-4 py-4 sm:px-6">
               <div className="flex flex-wrap items-center gap-2">
                 <select
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                  className={fieldClass}
                   value={selectedLocationId ?? ""}
                   onChange={(event) => {
                     setSelectedLocationId(event.target.value || null);
@@ -326,19 +356,26 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
                     </option>
                   ))}
                 </select>
-                {usingGlobalFallback && selectedLocationId && (
-                  <Badge variant="neutral">Règle globale</Badge>
-                )}
               </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Activer l'identité IA</CardTitle>
+          <Card className={panelClass}>
+            <CardHeader className={sectionHeaderClass}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle className="text-base font-semibold sm:text-lg">Activer l'identité IA</CardTitle>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">
+                    Détermine si cette voix doit guider les réponses générées.
+                  </p>
+                </div>
+                <Badge variant={form.enabled ? "success" : "neutral"}>
+                  {form.enabled ? "Activée" : "Désactivée"}
+                </Badge>
+              </div>
             </CardHeader>
-            <CardContent>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
+            <CardContent className="px-4 py-4 sm:px-6">
+              <label className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-600">
                 <input
                   type="checkbox"
                   checked={form.enabled}
@@ -356,17 +393,20 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
 
           <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
             <div className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Paramètres de voix</CardTitle>
+              <Card className={panelClass}>
+                <CardHeader className={sectionHeaderClass}>
+                  <CardTitle className="text-base font-semibold sm:text-lg">Paramètres de voix</CardTitle>
+                  <p className="text-sm leading-6 text-slate-500">
+                    Ton, langage, contexte et contraintes éditoriales.
+                  </p>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-4 px-4 py-4 sm:px-6">
                   <div>
                     <label className="text-xs font-semibold text-slate-500">
                       Ton
                     </label>
                     <select
-                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                      className={fieldClass}
                       value={form.tone}
                       onChange={(event) =>
                         setForm((prev) => ({
@@ -425,7 +465,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
                       Contexte établissement
                     </label>
                     <textarea
-                      className="mt-2 min-h-[120px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                      className={`${fieldClass} min-h-[120px]`}
                       value={form.context}
                       onChange={(event) =>
                         setForm((prev) => ({
@@ -460,7 +500,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
                     </label>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <input
-                        className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                        className="min-w-[180px] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
                         value={newWord}
                         onChange={(event) => setNewWord(event.target.value)}
                         placeholder="Ajouter un mot"
@@ -481,7 +521,8 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
                             <button
                               type="button"
                               onClick={() => removeWord(word)}
-                              className="text-xs text-slate-500"
+                              className="text-xs text-slate-500 hover:text-slate-900"
+                              aria-label={`Retirer ${word}`}
                             >
                               ×
                             </button>
@@ -496,17 +537,20 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
               </Card>
             </div>
             <div className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Laboratoire de test</CardTitle>
+              <Card className={panelClass}>
+                <CardHeader className={sectionHeaderClass}>
+                  <CardTitle className="text-base font-semibold sm:text-lg">Laboratoire de test</CardTitle>
+                  <p className="text-sm leading-6 text-slate-500">
+                    Simulez une réponse sans écrire dans Google.
+                  </p>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-3 px-4 py-4 sm:px-6">
                   <div>
                     <label className="text-xs font-semibold text-slate-500">
                       Situation (avis reçu ou message)
                     </label>
                     <textarea
-                      className="mt-2 min-h-[140px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                      className={`${fieldClass} min-h-[140px]`}
                       value={testInput}
                       onChange={(event) => setTestInput(event.target.value)}
                       placeholder="Collez ici un avis client pour tester la réponse."
@@ -523,7 +567,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
                       Réponse de l’IA (simulation)
                     </label>
                     <textarea
-                      className="mt-2 min-h-[140px] w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                      className={`${fieldClass} min-h-[140px] bg-slate-50`}
                       value={testOutput}
                       readOnly
                       placeholder="La réponse s'affichera ici."
@@ -538,7 +582,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
           </div>
 
           {(error || success) && (
-            <Card>
+            <Card className={panelClass}>
               <CardContent className="pt-6 text-sm">
                 {error && <span className="text-amber-700">{error}</span>}
                 {success && <span className="text-emerald-700">{success}</span>}
@@ -548,7 +592,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
 
           <div className="flex items-center gap-2">
             <Button onClick={handleSave} disabled={!canSave || saving}>
-              {saving ? "Sauvegarde..." : "Enregistrer"}
+              {saving ? "Enregistrement..." : "Enregistrer"}
             </Button>
             {!canSave && (
               <span className="text-xs text-slate-500">

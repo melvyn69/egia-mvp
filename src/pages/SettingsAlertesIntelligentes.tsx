@@ -1,24 +1,44 @@
-import { useState } from "react";
+import { Badge } from "../components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 
+const panelClass =
+  "overflow-hidden rounded-[1.35rem] border border-slate-200/80 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.06)]";
+
+const sectionHeaderClass = "border-b border-slate-100 px-4 py-4 sm:px-6";
+
 const SettingsAlertesIntelligentes = () => {
-  const [enabled, setEnabled] = useState(true);
-  const [tolerance, setTolerance] = useState("standard");
-  const [alertTypes, setAlertTypes] = useState({
+  const enabled = true;
+  const tolerance: "strict" | "standard" | "relaxed" = "standard";
+  const alertTypes = {
     reputation_drop: true,
     unanswered_reviews: true,
     negative_spike: true,
     long_negative: false
-  });
-  const [frequency, setFrequency] = useState("instant");
+  };
+  const frequency = String("instant") as "instant" | "daily" | "weekly";
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Alertes intelligentes</CardTitle>
+      <Card className={panelClass}>
+        <CardHeader className={sectionHeaderClass}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="text-base font-semibold sm:text-lg">
+                Alertes intelligentes
+              </CardTitle>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                Surveillance proactive et signaux à fort impact.
+              </p>
+            </div>
+            <Badge variant="warning">Préférences non connectées</Badge>
+          </div>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm text-slate-600">
+        <CardContent className="space-y-3 px-4 py-4 text-sm leading-6 text-slate-600 sm:px-6">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Aucun service de préférences d'alertes n'est connecté à ce compte.
+            Les réglages ci-dessous sont affichés en lecture seule afin de ne
+            pas simuler une sauvegarde.
+          </div>
           <p>
             EGIA surveille en continu les signaux qui méritent une action
             rapide, sans vous surcharger. Vous gardez le contrôle sur le niveau
@@ -31,12 +51,22 @@ const SettingsAlertesIntelligentes = () => {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Surveillance automatique</CardTitle>
+      <Card className={panelClass}>
+        <CardHeader className={sectionHeaderClass}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="text-base font-semibold sm:text-lg">
+                Surveillance automatique
+              </CardTitle>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                Ajustez la sensibilité affichée pour les règles de surveillance.
+              </p>
+            </div>
+            <Badge variant="warning">Lecture seule</Badge>
+          </div>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4">
+        <CardContent className="space-y-4 px-4 py-4 sm:px-6">
+          <label className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 transition hover:bg-white">
             <div>
               <p className="text-sm font-semibold text-slate-900">
                 Activer la surveillance intelligente
@@ -49,17 +79,17 @@ const SettingsAlertesIntelligentes = () => {
               type="checkbox"
               className="h-4 w-4 accent-ink"
               checked={enabled}
-              onChange={(event) => setEnabled(event.target.checked)}
+              readOnly
+              disabled
             />
           </label>
 
           <label className="block text-xs font-semibold text-slate-600">
-            Niveau de tolerance
+            Niveau de tolérance
             <select
               className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
               value={tolerance}
-              onChange={(event) => setTolerance(event.target.value)}
-              disabled={!enabled}
+              disabled
             >
               <option value="strict">Strict (alertes exigeantes)</option>
               <option value="standard">Équilibre (recommandé)</option>
@@ -72,89 +102,89 @@ const SettingsAlertesIntelligentes = () => {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Types d'alertes</CardTitle>
+      <Card className={panelClass}>
+        <CardHeader className={sectionHeaderClass}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="text-base font-semibold sm:text-lg">
+                Types d'alertes
+              </CardTitle>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                Sélectionnez les signaux qui doivent rester visibles.
+              </p>
+            </div>
+            <Badge variant="warning">Lecture seule</Badge>
+          </div>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <label className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-700">
+        <CardContent className="space-y-3 px-4 py-4 sm:px-6">
+          <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/40 px-3 py-3 text-sm text-slate-700">
             Baisse notable de réputation
             <input
               type="checkbox"
               className="h-4 w-4 accent-ink"
               checked={alertTypes.reputation_drop}
-              onChange={(event) =>
-                setAlertTypes((prev) => ({
-                  ...prev,
-                  reputation_drop: event.target.checked
-                }))
-              }
-              disabled={!enabled}
+              readOnly
+              disabled
             />
           </label>
-          <label className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-700">
+          <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/40 px-3 py-3 text-sm text-slate-700">
             Avis sensibles sans réponse
             <input
               type="checkbox"
               className="h-4 w-4 accent-ink"
               checked={alertTypes.unanswered_reviews}
-              onChange={(event) =>
-                setAlertTypes((prev) => ({
-                  ...prev,
-                  unanswered_reviews: event.target.checked
-                }))
-              }
-              disabled={!enabled}
+              readOnly
+              disabled
             />
           </label>
-          <label className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-700">
+          <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/40 px-3 py-3 text-sm text-slate-700">
             Pic d'avis négatifs
             <input
               type="checkbox"
               className="h-4 w-4 accent-ink"
               checked={alertTypes.negative_spike}
-              onChange={(event) =>
-                setAlertTypes((prev) => ({
-                  ...prev,
-                  negative_spike: event.target.checked
-                }))
-              }
-              disabled={!enabled}
+              readOnly
+              disabled
             />
           </label>
           <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-400">
-            Avis détaillé et sensible (V2)
+            Avis détaillé et sensible
             <input
               type="checkbox"
               className="h-4 w-4"
               checked={alertTypes.long_negative}
-              onChange={(event) =>
-                setAlertTypes((prev) => ({
-                  ...prev,
-                  long_negative: event.target.checked
-                }))
-              }
+              readOnly
               disabled
             />
           </label>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Frequence email</CardTitle>
+      <Card className={panelClass}>
+        <CardHeader className={sectionHeaderClass}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="text-base font-semibold sm:text-lg">
+                Fréquence email
+              </CardTitle>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                Définissez le rythme de notification affiché.
+              </p>
+            </div>
+            <Badge variant="warning">Lecture seule</Badge>
+          </div>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm text-slate-700">
+        <CardContent className="space-y-3 px-4 py-4 text-sm text-slate-700 sm:px-6">
           <label className="flex items-center gap-2">
             <input
               type="radio"
               name="alert-frequency"
               className="h-4 w-4 accent-ink"
               checked={frequency === "instant"}
-              onChange={() => setFrequency("instant")}
-              disabled={!enabled}
+              readOnly
+              disabled
             />
-            Instantane (des qu'une action est prioritaire)
+            Instantané (dès qu'une action est prioritaire)
           </label>
           <label className="flex items-center gap-2">
             <input
@@ -162,8 +192,8 @@ const SettingsAlertesIntelligentes = () => {
               name="alert-frequency"
               className="h-4 w-4 accent-ink"
               checked={frequency === "daily"}
-              onChange={() => setFrequency("daily")}
-              disabled={!enabled}
+              readOnly
+              disabled
             />
             Digest quotidien (mise en perspective)
           </label>
@@ -173,10 +203,10 @@ const SettingsAlertesIntelligentes = () => {
               name="alert-frequency"
               className="h-4 w-4"
               checked={frequency === "weekly"}
-              onChange={() => setFrequency("weekly")}
+              readOnly
               disabled
             />
-            Synthese hebdomadaire (V2)
+            Synthèse hebdomadaire
           </label>
         </CardContent>
       </Card>

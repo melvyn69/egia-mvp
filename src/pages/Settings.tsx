@@ -2,7 +2,16 @@ import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Smartphone } from "lucide-react";
+import {
+  Bell,
+  Brain,
+  Building2,
+  Plug,
+  Settings2,
+  ShieldCheck,
+  Smartphone,
+  Users
+} from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -58,6 +67,11 @@ type LocationRow = {
   last_synced_at?: string | null;
 };
 
+type BrandVoiceStatusRow = {
+  id: string;
+  enabled?: boolean | null;
+};
+
 type TabId =
   | "integrations"
   | "ai-identity"
@@ -110,6 +124,78 @@ const tabs: Array<{ id: TabId; label: string; description: string }> = [
     description: "Surveillance proactive et signaux à fort impact."
   }
 ];
+
+const tabIcons: Record<TabId, typeof Plug> = {
+  integrations: Plug,
+  "ai-identity": Brain,
+  locations: Building2,
+  mobile: Smartphone,
+  team: Users,
+  profile: ShieldCheck,
+  company: Settings2,
+  alerts: Bell
+};
+
+const panelClass =
+  "overflow-hidden rounded-[1.35rem] border border-slate-200/80 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.06)]";
+
+const sectionHeaderClass =
+  "border-b border-slate-100 px-4 py-4 sm:px-6";
+
+const sectionContentClass = "space-y-4 px-4 py-4 sm:px-6 sm:py-5";
+
+const fieldClass =
+  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
+
+const SectionHeader = ({
+  title,
+  description,
+  status,
+  statusVariant = "neutral"
+}: {
+  title: string;
+  description: string;
+  status?: string;
+  statusVariant?: "success" | "warning" | "neutral";
+}) => (
+  <div className={sectionHeaderClass}>
+    <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="min-w-0">
+        <h2 className="text-base font-semibold text-slate-950 sm:text-lg">
+          {title}
+        </h2>
+        <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+          {description}
+        </p>
+      </div>
+      {status && (
+        <Badge variant={statusVariant} className="w-fit shrink-0">
+          {status}
+        </Badge>
+      )}
+    </div>
+  </div>
+);
+
+const MetricTile = ({
+  label,
+  value,
+  detail
+}: {
+  label: string;
+  value: string | number;
+  detail: string;
+}) => (
+  <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm">
+    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+      {label}
+    </p>
+    <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+      {value}
+    </p>
+    <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>
+  </div>
+);
 
 const roleLabel = (value: string | null) => {
   if (!value) return "Éditeur";
@@ -242,6 +328,7 @@ const Settings = ({ session }: SettingsProps) => {
   const [locationsError, setLocationsError] = useState<string | null>(null);
   const [syncingLocations, setSyncingLocations] = useState(false);
   const [selectedActiveIds, setSelectedActiveIds] = useState<string[]>([]);
+  const [activeLocationsLoaded, setActiveLocationsLoaded] = useState(false);
   const [activeLocationsSaving, setActiveLocationsSaving] = useState(false);
   const pwaInstall = usePwaInstall();
   const appBaseUrl =
@@ -378,8 +465,10 @@ const Settings = ({ session }: SettingsProps) => {
   useEffect(() => {
     if (!supabaseClient || !userId) {
       setSelectedActiveIds([]);
+      setActiveLocationsLoaded(false);
       return;
     }
+    setActiveLocationsLoaded(false);
     let cancelled = false;
     const load = async () => {
       const { data, error } = await supabaseClient
@@ -391,6 +480,7 @@ const Settings = ({ session }: SettingsProps) => {
       if (error) {
         console.error("business_settings load error:", error);
         setSelectedActiveIds((locationsQuery.data ?? []).map((loc) => loc.id));
+        setActiveLocationsLoaded(true);
         return;
       }
       const ids = Array.isArray(data?.active_location_ids)
@@ -399,6 +489,7 @@ const Settings = ({ session }: SettingsProps) => {
       const allIds = (locationsQuery.data ?? []).map((loc) => loc.id);
       const resolved = ids && ids.length > 0 ? ids : allIds;
       setSelectedActiveIds(resolved);
+      setActiveLocationsLoaded(true);
     };
     void load();
     return () => {
@@ -443,6 +534,21 @@ const Settings = ({ session }: SettingsProps) => {
     enabled: Boolean(supabaseClient) && Boolean(userId)
   });
 
+  const brandVoiceStatusQuery = useQuery({
+    queryKey: ["brand-voice-status", userId],
+    queryFn: async () => {
+      if (!supabaseClient || !userId) return [] as BrandVoiceStatusRow[];
+      const { data, error } = await supabaseClient
+        .from("brand_voice")
+        .select("id, enabled")
+        .eq("user_id", userId)
+        .limit(5);
+      if (error) throw error;
+      return (data ?? []) as BrandVoiceStatusRow[];
+    },
+    enabled: Boolean(supabaseClient) && Boolean(userId)
+  });
+
   const persistActiveLocations = async (nextActive: string[]) => {
     if (!supabaseClient || !userId) return;
     setActiveLocationsSaving(true);
@@ -470,6 +576,12 @@ const Settings = ({ session }: SettingsProps) => {
   };
 
   const handleLocationToggle = (locationId: string, checked: boolean) => {
+    if (!checked && selectedActiveIds.length <= 1) {
+      setLocationsError(
+        "Au moins un établissement doit rester actif avec la configuration actuelle."
+      );
+      return;
+    }
     setSelectedActiveIds((prev) => {
       const next = checked
         ? Array.from(new Set([...prev, locationId]))
@@ -525,8 +637,8 @@ const Settings = ({ session }: SettingsProps) => {
       }
       setLocationsNotice(
         data?.queued
-          ? "Synchronisation planifiee."
-          : "Synchronisation lancee."
+          ? "Synchronisation planifiée."
+          : "Synchronisation lancée."
       );
       await queryClient.invalidateQueries({
         queryKey: ["google-locations", userId]
@@ -548,7 +660,7 @@ const Settings = ({ session }: SettingsProps) => {
     const firstName = inviteFirstName.trim();
     const email = inviteEmail.trim().toLowerCase();
     if (!firstName) {
-      setInviteError("Le prenom est obligatoire.");
+      setInviteError("Le prénom est obligatoire.");
       setInviteSending(false);
       return;
     }
@@ -703,7 +815,7 @@ const Settings = ({ session }: SettingsProps) => {
             : row
         );
       });
-      setToggleError("Impossible de mettre a jour ce membre.");
+      setToggleError("Impossible de mettre à jour ce membre.");
     }
   };
 
@@ -718,11 +830,13 @@ const Settings = ({ session }: SettingsProps) => {
     }));
     const { error } = await sb
       .from("business_settings")
-      .update({
+      .upsert({
+        user_id: userId,
+        business_id: userId,
+        business_name: session?.user?.email ?? "Business",
         monthly_report_enabled: nextValue,
         updated_at: new Date().toISOString()
-      })
-      .eq("user_id", userId);
+      }, { onConflict: "business_id" });
     if (error) {
       queryClient.setQueryData(["business-settings", userId], (old) => ({
         ...(old as BusinessSettingsRow | null),
@@ -734,36 +848,58 @@ const Settings = ({ session }: SettingsProps) => {
   };
 
   const teamMembers = teamMembersQuery.data ?? [];
+  const locations = locationsQuery.data ?? [];
+  const googleConnected = Boolean(googleConnectionQuery.data);
+  const hasBrandVoice = (brandVoiceStatusQuery.data ?? []).length > 0;
+  const enabledBrandVoice = (brandVoiceStatusQuery.data ?? []).some(
+    (row) => row.enabled !== false
+  );
+  const configuredSignals = [
+    googleConnected,
+    locations.length > 0,
+    teamMembers.length > 0,
+    hasBrandVoice,
+    monthlyEnabled
+  ];
+  const configurationScore = Math.round(
+    (configuredSignals.filter(Boolean).length / configuredSignals.length) * 100
+  );
 
   const tabContent = (() => {
     if (activeTab === "team") {
       return (
         <div className="space-y-4 md:space-y-6">
-          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-card sm:flex-row sm:items-center sm:justify-between sm:p-4">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-slate-900">
-                Reconnaissance client
+          <section className={panelClass}>
+            <SectionHeader
+              title="Reconnaissance client"
+              description="Consultez le podium, les mentions et l'employé du mois depuis la page Équipe."
+              status="Connecté à l'équipe"
+              statusVariant="success"
+            />
+            <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+              <p className="max-w-2xl text-sm leading-6 text-slate-500">
+                Les données collaborateurs restent synchronisées avec les
+                classements et les rapports mensuels.
               </p>
-              <p className="mt-1 text-xs leading-5 text-slate-500">
-                Consultez le podium, les mentions et l'employé du mois depuis la
-                page Équipe.
-              </p>
+              <Button
+                variant="outline"
+                className="min-h-11 w-full sm:w-auto"
+                onClick={() => navigate("/team")}
+              >
+                Voir le classement
+              </Button>
             </div>
-            <Button
-              variant="outline"
-              className="min-h-11 w-full sm:w-auto"
-              onClick={() => navigate("/team")}
-            >
-              Voir le classement
-            </Button>
-          </div>
+          </section>
 
           <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr] lg:gap-6">
-          <Card>
-            <CardHeader className="p-4 pb-2 sm:p-6 sm:pb-3">
-              <CardTitle>Collaborateurs actifs</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 p-4 pt-0 sm:space-y-4 sm:p-6 sm:pt-0">
+          <Card className={panelClass}>
+            <SectionHeader
+              title="Collaborateurs actifs"
+              description="Le rapport mensuel est envoyé automatiquement par email aux membres actifs."
+              status={`${teamMembers.length} actifs`}
+              statusVariant={teamMembers.length > 0 ? "success" : "neutral"}
+            />
+            <CardContent className={sectionContentClass}>
               <p className="text-xs text-slate-500">
                 Le rapport mensuel est envoyé automatiquement par email aux
                 membres actifs.
@@ -774,8 +910,11 @@ const Settings = ({ session }: SettingsProps) => {
                   <Skeleton className="h-20 w-full" />
                 </div>
               ) : teamMembers.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500">
-                  Aucun collaborateur actif.
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 p-6 text-sm text-slate-500">
+                  <p className="font-semibold text-slate-900">Aucun collaborateur actif</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">
+                    Invitez un membre pour activer les rôles et les rapports partagés.
+                  </p>
                 </div>
               ) : (
                 teamMembers.map((member) => {
@@ -786,7 +925,7 @@ const Settings = ({ session }: SettingsProps) => {
                   return (
                     <div
                       key={member.id}
-                      className="flex min-w-0 flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4 xl:flex-row xl:items-center xl:justify-between"
+                      className="flex min-w-0 flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/40 p-3 shadow-sm transition hover:border-slate-300 hover:bg-white sm:p-4 xl:flex-row xl:items-center xl:justify-between"
                     >
                       <div className="flex min-w-0 items-start gap-3">
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-ink text-sm font-semibold text-white sm:h-12 sm:w-12">
@@ -813,7 +952,7 @@ const Settings = ({ session }: SettingsProps) => {
                       </div>
                       <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center xl:flex xl:shrink-0 xl:items-center xl:gap-4">
                         <label
-                          className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-600 xl:min-h-0 xl:border-0 xl:px-0 xl:py-0"
+                          className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 xl:min-h-0 xl:border-0 xl:bg-transparent xl:px-0 xl:py-0"
                           onClick={() => {
                             if (!canToggle) {
                               setToggleError(
@@ -852,22 +991,24 @@ const Settings = ({ session }: SettingsProps) => {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="p-4 pb-2 sm:p-6 sm:pb-3">
-              <CardTitle>Invitations en attente</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 p-4 pt-0 sm:p-6 sm:pt-0">
+          <Card className={panelClass}>
+            <SectionHeader
+              title="Invitations en attente"
+              description="Relancez les invitations envoyées qui n'ont pas encore été acceptées."
+              status={`${(invitationsQuery.data ?? []).length} en attente`}
+            />
+            <CardContent className={sectionContentClass}>
               {invitationsQuery.isLoading ? (
                 <Skeleton className="h-16 w-full" />
               ) : (invitationsQuery.data ?? []).length === 0 ? (
-                <p className="text-sm text-slate-500">
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 p-5 text-sm text-slate-500">
                   Aucune invitation en attente.
-                </p>
+                </div>
               ) : (
                 (invitationsQuery.data ?? []).map((invite) => (
                   <div
                     key={invite.id}
-                    className="flex min-w-0 flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                    className="flex min-w-0 flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/40 p-3 text-sm transition hover:bg-white sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="min-w-0">
                       <p className="break-all font-medium text-slate-900">
@@ -891,16 +1032,18 @@ const Settings = ({ session }: SettingsProps) => {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="p-4 pb-2 sm:p-6 sm:pb-3">
-              <CardTitle>Inviter un membre</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 p-4 pt-0 sm:p-6 sm:pt-0">
+          <Card className={panelClass}>
+            <SectionHeader
+              title="Inviter un membre"
+              description="Ajoutez un collaborateur et définissez ses droits dès l'invitation."
+              status="Action"
+            />
+            <CardContent className={sectionContentClass}>
               <div className="grid gap-3">
                 <label className="text-xs font-semibold text-slate-600">
                   Prénom
                   <input
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                    className={fieldClass}
                     value={inviteFirstName}
                     onChange={(event) => setInviteFirstName(event.target.value)}
                     placeholder="Prénom"
@@ -909,16 +1052,17 @@ const Settings = ({ session }: SettingsProps) => {
                 <label className="text-xs font-semibold text-slate-600">
                   Email professionnel
                   <input
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                    type="email"
+                    className={fieldClass}
                     value={inviteEmail}
                     onChange={(event) => setInviteEmail(event.target.value)}
-                    placeholder="prenom@entreprise.com"
+                    placeholder="prenom.nom@entreprise.com"
                   />
                 </label>
                 <label className="text-xs font-semibold text-slate-600">
                   Rôle
                   <select
-                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                    className={fieldClass}
                     value={inviteRole}
                     onChange={(event) => setInviteRole(event.target.value)}
                   >
@@ -926,7 +1070,7 @@ const Settings = ({ session }: SettingsProps) => {
                     <option value="admin">Admin</option>
                   </select>
                 </label>
-                <label className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-700">
+                <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-3 text-sm text-slate-700">
                   <span className="pr-3 leading-5">
                     Recevoir les rapports mensuels
                   </span>
@@ -967,15 +1111,18 @@ const Settings = ({ session }: SettingsProps) => {
     if (activeTab === "company") {
       return (
         <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Entreprise</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <Card className={panelClass}>
+            <SectionHeader
+              title="Entreprise"
+              description="Pilotez l'envoi global des rapports et les informations utilisées dans les documents."
+              status={monthlyEnabled ? "Rapports activés" : "Rapports désactivés"}
+              statusVariant={monthlyEnabled ? "success" : "neutral"}
+            />
+            <CardContent className={sectionContentClass}>
               {businessSettingsQuery.isLoading ? (
                 <Skeleton className="h-16 w-full" />
               ) : (
-                <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4">
+                <label className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200/80 bg-slate-50/60 p-4 transition hover:bg-white">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">
                       Activer l’envoi du rapport mensuel
@@ -1022,8 +1169,8 @@ const Settings = ({ session }: SettingsProps) => {
           id: "facebook",
           name: "Facebook Pages",
           type: "Source d'avis",
-          description: "Gérez les avis et commentaires de vos pages.",
-          status: "soon",
+          description: "Connecteur backend non activé pour ce compte.",
+          status: "unavailable",
           actionLabel: null,
           accent: "bg-slate-50 border-slate-200",
           Icon: FacebookLogo
@@ -1032,8 +1179,8 @@ const Settings = ({ session }: SettingsProps) => {
           id: "instagram",
           name: "Instagram",
           type: "Canal social",
-          description: "Publiez vos meilleurs avis en story.",
-          status: "soon",
+          description: "Connecteur backend non activé pour ce compte.",
+          status: "unavailable",
           actionLabel: null,
           accent: "bg-slate-50 border-slate-200",
           Icon: InstagramLogo
@@ -1042,8 +1189,8 @@ const Settings = ({ session }: SettingsProps) => {
           id: "tripadvisor",
           name: "TripAdvisor",
           type: "Source d'avis",
-          description: "Importation des avis voyageurs.",
-          status: "soon",
+          description: "Connecteur backend non activé pour ce compte.",
+          status: "unavailable",
           actionLabel: null,
           accent: "bg-slate-50 border-slate-200",
           Icon: TripAdvisorLogo
@@ -1051,23 +1198,23 @@ const Settings = ({ session }: SettingsProps) => {
       ] as const;
 
       return (
-        <div className="space-y-6">
-          <div>
-            <h2 className="text-xl font-semibold text-slate-900">Connexions</h2>
-            <p className="text-sm text-slate-500">
-              Centralisez vos sources d'avis et canaux sociaux.
-            </p>
-          </div>
+        <section className={panelClass}>
+          <SectionHeader
+            title="Connexions"
+            description="Centralisez vos sources d'avis et canaux sociaux."
+            status={googleActive ? "Google actif" : "Connexion requise"}
+            statusVariant={googleActive ? "success" : "warning"}
+          />
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 p-4 sm:p-6 md:grid-cols-2">
             {integrations.map((integration) => {
               const isActive = integration.status === "active";
-              const isSoon = integration.status === "soon";
+              const isUnavailable = integration.status === "unavailable";
               return (
                 <div
                   key={integration.id}
                   className={cn(
-                    "rounded-2xl border p-4",
+                    "rounded-2xl border p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-[0_16px_40px_rgba(15,23,42,0.08)]",
                     isActive ? integration.accent : "bg-white border-slate-200"
                   )}
                 >
@@ -1087,8 +1234,8 @@ const Settings = ({ session }: SettingsProps) => {
                     </div>
                     {isActive ? (
                       <Badge variant="success">ACTIF</Badge>
-                    ) : isSoon ? (
-                      <Badge variant="neutral">BIENTOT</Badge>
+                    ) : isUnavailable ? (
+                      <Badge variant="neutral">NON ACTIVÉ</Badge>
                     ) : (
                       <Badge variant="warning">INACTIF</Badge>
                     )}
@@ -1111,7 +1258,7 @@ const Settings = ({ session }: SettingsProps) => {
               );
             })}
           </div>
-        </div>
+        </section>
       );
     }
 
@@ -1122,8 +1269,9 @@ const Settings = ({ session }: SettingsProps) => {
     if (activeTab === "locations") {
       const connected = Boolean(googleConnectionQuery.data);
       const locations = locationsQuery.data ?? [];
-      const activeCount =
-        selectedActiveIds.length > 0 ? selectedActiveIds.length : locations.length;
+      const activeCount = activeLocationsLoaded
+        ? selectedActiveIds.length
+        : locations.length;
       const reviewsNeedingReply = reviewsNeedingReplyQuery.data ?? [];
       const reviewsByLocation = new Map<string, number>();
       reviewsNeedingReply.forEach((row) => {
@@ -1154,34 +1302,33 @@ const Settings = ({ session }: SettingsProps) => {
         latestLocationSync ?? lastSyncQuery.data ?? latestReviewTime ?? null;
       return (
         <div className="space-y-6">
-          <div>
-            <h2 className="text-xl font-semibold text-slate-900">
-              Pilotage business
-            </h2>
-            <p className="text-sm text-slate-500">
-              Suivez la santé des lieux connectés et des avis à traiter.
-            </p>
-          </div>
+          <section className={panelClass}>
+            <SectionHeader
+              title="Pilotage business"
+              description="Suivez la santé des lieux connectés et des avis à traiter."
+              status={connected ? "Google connecté" : "Connexion requise"}
+              statusVariant={connected ? "success" : "warning"}
+            />
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <Card>
-              <CardHeader>
-                <CardTitle>Lieux actifs</CardTitle>
+            <div className="grid gap-4 p-4 sm:p-6 md:grid-cols-3">
+            <Card className="border-slate-200/80 bg-slate-50/60 shadow-sm">
+              <CardHeader className="p-4 pb-2">
+                <CardTitle className="text-sm font-semibold">Lieux actifs</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="px-4 pb-4">
                 <p className="text-3xl font-semibold text-slate-900">
-                  {locationsQuery.isLoading ? "…" : activeCount}
+                  {locationsQuery.isLoading || !activeLocationsLoaded ? "…" : activeCount}
                 </p>
                 <p className="text-xs text-slate-500">
                   Établissements suivis dans le dashboard.
                 </p>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>Dernière synchro</CardTitle>
+            <Card className="border-slate-200/80 bg-slate-50/60 shadow-sm">
+              <CardHeader className="p-4 pb-2">
+                <CardTitle className="text-sm font-semibold">Dernière synchro</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="px-4 pb-4">
                 <p className="text-3xl font-semibold text-slate-900">
                   {lastSyncQuery.isLoading ? "…" : formatRelativeTime(lastSync)}
                 </p>
@@ -1190,11 +1337,11 @@ const Settings = ({ session }: SettingsProps) => {
                 </p>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>Avis à traiter</CardTitle>
+            <Card className="border-slate-200/80 bg-slate-50/60 shadow-sm">
+              <CardHeader className="p-4 pb-2">
+                <CardTitle className="text-sm font-semibold">Avis à traiter</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="px-4 pb-4">
                 <p className="text-3xl font-semibold text-slate-900">
                   {reviewsNeedingReplyQuery.isLoading ? "…" : totalNeedsReply}
                 </p>
@@ -1203,9 +1350,9 @@ const Settings = ({ session }: SettingsProps) => {
                 </p>
               </CardContent>
             </Card>
-          </div>
+            </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-4 sm:px-6">
             <div className="flex items-center gap-2">
               {connected ? (
                 <Badge variant="success">Google connecté</Badge>
@@ -1216,16 +1363,33 @@ const Settings = ({ session }: SettingsProps) => {
                 Synchronisez vos avis et mettez à jour vos fiches en temps réel.
               </p>
             </div>
-            <Button onClick={handleSyncLocations} disabled={syncingLocations}>
-              {syncingLocations ? "Synchronisation..." : "Synchroniser maintenant"}
+            <Button
+              onClick={() => {
+                if (connected) {
+                  void handleSyncLocations();
+                } else {
+                  void handleConnectGoogle();
+                }
+              }}
+              disabled={syncingLocations}
+            >
+              {syncingLocations
+                ? "Synchronisation..."
+                : connected
+                  ? "Synchroniser maintenant"
+                  : "Connecter Google"}
             </Button>
           </div>
+          </section>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Connexion Google Business Profile</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <Card className={panelClass}>
+            <SectionHeader
+              title="Connexion Google Business Profile"
+              description="Autorisation Google officielle pour accéder aux avis, répondre et publier."
+              status={connected ? "Connecté" : "À connecter"}
+              statusVariant={connected ? "success" : "warning"}
+            />
+            <CardContent className={sectionContentClass}>
               <p className="text-sm text-slate-600">
                 Synchronisez vos avis et mettez à jour vos fiches en temps réel.
               </p>
@@ -1263,11 +1427,14 @@ const Settings = ({ session }: SettingsProps) => {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Vos établissements</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <Card className={panelClass}>
+            <SectionHeader
+              title="Vos établissements"
+              description="Lieux connectés, statut d'activation et accès rapide à la boîte de réception."
+              status={`${locations.length} lieux`}
+              statusVariant={locations.length > 0 ? "success" : "neutral"}
+            />
+            <CardContent className={sectionContentClass}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm text-slate-600">
                   Lieux connectés et statut d’activation.
@@ -1298,9 +1465,11 @@ const Settings = ({ session }: SettingsProps) => {
                   ))}
                 </div>
               ) : locations.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500">
-                  Aucun établissement. Cliquez sur “Importer depuis Google” pour
-                  démarrer.
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 p-6 text-sm text-slate-500">
+                  <p className="font-semibold text-slate-900">Aucun établissement importé</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">
+                    Cliquez sur “Importer depuis Google” pour démarrer.
+                  </p>
                 </div>
               ) : (
                 <div className="grid gap-4 md:grid-cols-2">
@@ -1312,8 +1481,8 @@ const Settings = ({ session }: SettingsProps) => {
                       location.last_synced_at ?? lastSync
                     );
                     return (
-                      <Card key={location.id}>
-                        <CardContent className="space-y-4 pt-6">
+                      <Card key={location.id} className="border-slate-200/80 bg-slate-50/50 shadow-sm transition hover:bg-white hover:shadow-[0_16px_40px_rgba(15,23,42,0.07)]">
+                        <CardContent className="space-y-4 p-4">
                           <div className="space-y-1">
                             <div className="flex items-center justify-between gap-2">
                               <p className="text-sm font-semibold text-slate-900">
@@ -1349,7 +1518,13 @@ const Settings = ({ session }: SettingsProps) => {
                                 type="checkbox"
                                 className="h-4 w-4 accent-ink"
                                 checked={isActive}
-                                disabled={activeLocationsSaving}
+                                disabled={
+                                  !activeLocationsLoaded ||
+                                  activeLocationsSaving ||
+                                  (activeLocationsLoaded &&
+                                    isActive &&
+                                    selectedActiveIds.length <= 1)
+                                }
                                 onChange={(event) =>
                                   handleLocationToggle(
                                     location.id,
@@ -1375,20 +1550,28 @@ const Settings = ({ session }: SettingsProps) => {
                   })}
                 </div>
               )}
-              {locations.length > 0 && activeCount === 0 && (
+              {activeLocationsLoaded && locations.length > 0 && activeCount === 0 && (
                 <p className="text-xs text-amber-600">
                   Aucun lieu actif. Activez au moins un établissement pour
                   recevoir les alertes et rapports.
                 </p>
               )}
+              {activeLocationsLoaded && locations.length > 0 && activeCount === 1 && (
+                <p className="text-xs text-slate-500">
+                  Un établissement doit rester actif : l'état zéro actif n'est
+                  pas pris en charge par la configuration actuelle.
+                </p>
+              )}
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Actions rapides</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-3">
+          <Card className={panelClass}>
+            <SectionHeader
+              title="Actions rapides"
+              description="Lancez les actions opérationnelles liées à Google et aux synchronisations."
+              status="Actions"
+            />
+            <CardContent className="flex flex-wrap gap-3 px-4 py-4 sm:px-6">
               <Button
                 onClick={() => {
                   if (connected) {
@@ -1438,35 +1621,31 @@ const Settings = ({ session }: SettingsProps) => {
         <div className="space-y-4 sm:space-y-6">
           <InstallPwaPrompt />
 
-          <Card>
-            <CardHeader className="p-4 pb-2 sm:p-6 sm:pb-4">
-              <CardTitle className="flex flex-wrap items-center justify-between gap-3">
-                <span className="flex items-center gap-2">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-ink/10 text-ink">
-                    <Smartphone size={18} />
-                  </span>
-                  Application mobile
-                </span>
-                <Badge variant={statusVariant}>{statusLabel}</Badge>
-              </CardTitle>
-            </CardHeader>
+          <Card className={panelClass}>
+            <SectionHeader
+              title="Application mobile"
+              description="Accédez à EGIA en plein écran depuis votre écran d'accueil, sans passer par une boutique d'applications."
+              status={statusLabel}
+              statusVariant={statusVariant}
+            />
             <CardContent className="space-y-3 px-4 pb-4 text-sm text-slate-600 sm:space-y-4 sm:px-6 sm:pb-6">
-              <p>
-                Accédez à EGIA en plein écran depuis votre écran d’accueil,
-                sans passer par une boutique d’applications.
-              </p>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ink/10 text-ink">
+                  <Smartphone size={18} />
+                </span>
+                <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
                   Statut
                 </p>
                 <p className="mt-1 text-sm text-slate-700">
                   {statusDescription}
                 </p>
+                </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className={panelClass}>
             <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <p className="text-sm text-slate-600">
                 Lancez EGIA depuis votre écran d’accueil pour une expérience
@@ -1504,33 +1683,145 @@ const Settings = ({ session }: SettingsProps) => {
   })();
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="hidden sm:block">
-        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-          Paramètres
-        </p>
-        <h1 className="text-2xl font-semibold text-slate-900">Paramètres</h1>
+    <div className="space-y-5 sm:space-y-6">
+      <section className="overflow-hidden rounded-[1.75rem] border border-slate-200/80 bg-white shadow-[0_22px_70px_rgba(15,23,42,0.08)]">
+        <div className="border-b border-slate-100 bg-gradient-to-b from-white to-slate-50/70 px-4 py-5 sm:px-6 lg:px-7">
+          <div className="flex min-w-0 flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 shadow-sm">
+                <Settings2 className="h-3.5 w-3.5" />
+                Centre de contrôle
+              </div>
+              <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
+                Paramètres EGIA
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 sm:text-base">
+                Connexions, établissements, équipe, identité IA et informations
+                d’entreprise au même endroit.
+              </p>
+            </div>
+
+            <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3 lg:w-[420px]">
+              <MetricTile
+                label="Configuration"
+                value={`${configurationScore}%`}
+                detail="Signaux activés"
+              />
+              <MetricTile
+                label="Google"
+                value={googleConnectionQuery.isLoading ? "…" : googleConnected ? "Actif" : "À connecter"}
+                detail="Business Profile"
+              />
+              <MetricTile
+                label="Équipe"
+                value={teamMembersQuery.isLoading ? "…" : teamMembers.length}
+                detail="Membres actifs"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-3 px-4 py-4 sm:grid-cols-2 sm:px-6 lg:grid-cols-5 lg:px-7">
+          {[
+            {
+              label: "Établissements",
+              value: locationsQuery.isLoading ? "…" : locations.length,
+              active: locations.length > 0
+            },
+            {
+              label: "Identité IA",
+              value: brandVoiceStatusQuery.isLoading
+                ? "…"
+                : enabledBrandVoice
+                  ? "Active"
+                  : hasBrandVoice
+                    ? "Désactivée"
+                    : "Non définie",
+              active: enabledBrandVoice
+            },
+            {
+              label: "Rapports",
+              value: businessSettingsQuery.isLoading
+                ? "…"
+                : monthlyEnabled
+                  ? "Activés"
+                  : "Désactivés",
+              active: monthlyEnabled
+            },
+            {
+              label: "Invitations",
+              value: invitationsQuery.isLoading
+                ? "…"
+                : (invitationsQuery.data ?? []).length,
+              active: (invitationsQuery.data ?? []).length > 0
+            },
+            {
+              label: "Alertes",
+              value: "Préférences non connectées",
+              active: false
+            }
+          ].map((item) => (
+            <div
+              key={item.label}
+              className="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-3"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-xs font-medium text-slate-500">
+                  {item.label}
+                </p>
+                <p className="mt-1 truncate text-sm font-semibold text-slate-950">
+                  {item.value}
+                </p>
+              </div>
+              <span
+                className={cn(
+                  "h-2.5 w-2.5 shrink-0 rounded-full",
+                  item.active ? "bg-emerald-500" : "bg-slate-300"
+                )}
+                aria-hidden="true"
+              />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="-mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
+        <div
+          className="flex min-w-max gap-2 rounded-[1.35rem] border border-slate-200/80 bg-white/85 p-1.5 shadow-sm backdrop-blur sm:min-w-0 sm:flex-wrap"
+          role="tablist"
+          aria-label="Sections des paramètres"
+        >
+          {tabs.map((tab) => {
+            const Icon = tabIcons[tab.id];
+            const selected = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  "group inline-flex h-10 items-center gap-2 rounded-full px-3.5 text-xs font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30 sm:h-11 sm:px-4",
+                  selected
+                    ? "bg-ink text-white shadow-[0_8px_24px_rgba(15,23,42,0.18)]"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+                )}
+              >
+                <Icon
+                  className={cn(
+                    "h-4 w-4 transition-transform duration-200 group-hover:scale-105",
+                    selected ? "text-white" : "text-slate-400"
+                  )}
+                />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-            className={cn(
-              "rounded-full border px-4 py-2 text-xs font-semibold transition",
-              activeTab === tab.id
-                ? "border-ink bg-ink text-white"
-                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="rounded-2xl border border-slate-200 bg-white/70 p-3 text-xs text-slate-500 sm:p-4">
+      <div className="rounded-2xl border border-slate-200/80 bg-white/80 px-4 py-3 text-sm leading-6 text-slate-500 shadow-sm">
         {tabs.find((tab) => tab.id === activeTab)?.description}
       </div>
 

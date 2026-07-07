@@ -7,6 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Skeleton } from "../components/ui/skeleton";
 import { supabase } from "../lib/supabase";
 
+const panelClass =
+  "overflow-hidden rounded-[1.35rem] border border-slate-200/80 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.06)]";
+
+const sectionHeaderClass = "border-b border-slate-100 px-4 py-4 sm:px-6";
+
+const fieldClass =
+  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
+
 type SettingsEntrepriseProps = {
   session: Session | null;
 };
@@ -294,7 +302,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
       if (payload?.data?.signed_url) {
         setLogoPreviewUrl(payload.data.signed_url);
       }
-      setStatusMessage("Logo mis a jour.");
+      setStatusMessage("Logo mis à jour.");
       await queryClient.invalidateQueries({
         queryKey: ["legal-entities", session?.user?.id]
       });
@@ -350,9 +358,14 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1.1fr_1.6fr]">
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Entités légales</CardTitle>
+      <Card className={panelClass}>
+        <CardHeader className={`${sectionHeaderClass} flex flex-row items-start justify-between gap-3`}>
+          <div>
+            <CardTitle className="text-base font-semibold sm:text-lg">Entités légales</CardTitle>
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              Sociétés utilisées pour la facturation, les PDF et les emails.
+            </p>
+          </div>
           <Button
             variant="outline"
             size="sm"
@@ -364,7 +377,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             Ajouter
           </Button>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-3 px-4 py-4 sm:px-6">
           {entitiesQuery.isLoading ? (
             <div className="space-y-3">
               <Skeleton className="h-16 w-full" />
@@ -380,10 +393,10 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
                 key={entity.id}
                 type="button"
                 onClick={() => setSelectedId(entity.id ?? "new")}
-                className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm transition ${
+                className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm shadow-sm transition ${
                   selectedId === entity.id
                     ? "border-ink bg-ink/5 text-ink"
-                    : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                    : "border-slate-200 bg-slate-50/50 text-slate-700 hover:bg-white"
                 }`}
               >
                 <div>
@@ -401,16 +414,24 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Détails de l'entité</CardTitle>
+      <Card className={panelClass}>
+        <CardHeader className={sectionHeaderClass}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="text-base font-semibold sm:text-lg">Détails de l'entité</CardTitle>
+              <p className="mt-1 text-sm leading-6 text-slate-500">
+                Coordonnées légales, facturation et logo documentaire.
+              </p>
+            </div>
+            {selectedEntity?.is_default && <Badge variant="success">Par défaut</Badge>}
+          </div>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 px-4 py-4 sm:px-6">
           <div className="grid gap-3 md:grid-cols-2">
             <label className="text-xs font-semibold text-slate-600">
               Nom commercial
               <input
-                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                className={fieldClass}
                 value={formState.company_name ?? ""}
                 onChange={(event) =>
                   updateField("company_name", event.target.value)
@@ -421,7 +442,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             <label className="text-xs font-semibold text-slate-600">
               Raison sociale
               <input
-                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                className={fieldClass}
                 value={formState.legal_name ?? ""}
                 onChange={(event) =>
                   updateField("legal_name", event.target.value)
@@ -432,7 +453,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             <label className="text-xs font-semibold text-slate-600">
               SIRET
               <input
-                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                className={fieldClass}
                 value={formState.siret ?? ""}
                 onChange={(event) => updateField("siret", event.target.value)}
                 placeholder="000 000 000 00000"
@@ -441,7 +462,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             <label className="text-xs font-semibold text-slate-600">
               TVA intracom
               <input
-                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                className={fieldClass}
                 value={formState.vat_number ?? ""}
                 onChange={(event) =>
                   updateField("vat_number", event.target.value)
@@ -452,7 +473,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             <label className="text-xs font-semibold text-slate-600">
               Industrie
               <input
-                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                className={fieldClass}
                 value={formState.industry ?? ""}
                 onChange={(event) =>
                   updateField("industry", event.target.value)
@@ -463,7 +484,8 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             <label className="text-xs font-semibold text-slate-600">
               Email facturation
               <input
-                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                type="email"
+                className={fieldClass}
                 value={formState.billing_email ?? ""}
                 onChange={(event) =>
                   updateField("billing_email", event.target.value)
@@ -474,7 +496,8 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             <label className="text-xs font-semibold text-slate-600">
               Téléphone facturation
               <input
-                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                type="tel"
+                className={fieldClass}
                 value={formState.billing_phone ?? ""}
                 onChange={(event) =>
                   updateField("billing_phone", event.target.value)
@@ -485,7 +508,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             <label className="text-xs font-semibold text-slate-600">
               Adresse (ligne 1)
               <input
-                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                className={fieldClass}
                 value={formState.billing_address_line1 ?? ""}
                 onChange={(event) =>
                   updateField("billing_address_line1", event.target.value)
@@ -496,7 +519,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             <label className="text-xs font-semibold text-slate-600">
               Adresse (ligne 2)
               <input
-                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                className={fieldClass}
                 value={formState.billing_address_line2 ?? ""}
                 onChange={(event) =>
                   updateField("billing_address_line2", event.target.value)
@@ -507,7 +530,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             <label className="text-xs font-semibold text-slate-600">
               Code postal
               <input
-                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                className={fieldClass}
                 value={formState.billing_postal_code ?? ""}
                 onChange={(event) =>
                   updateField("billing_postal_code", event.target.value)
@@ -518,7 +541,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             <label className="text-xs font-semibold text-slate-600">
               Ville
               <input
-                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                className={fieldClass}
                 value={formState.billing_city ?? ""}
                 onChange={(event) =>
                   updateField("billing_city", event.target.value)
@@ -529,7 +552,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             <label className="text-xs font-semibold text-slate-600">
               Région
               <input
-                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                className={fieldClass}
                 value={formState.billing_region ?? ""}
                 onChange={(event) =>
                   updateField("billing_region", event.target.value)
@@ -540,7 +563,7 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             <label className="text-xs font-semibold text-slate-600">
               Pays
               <input
-                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                className={fieldClass}
                 value={formState.billing_country ?? "FR"}
                 onChange={(event) =>
                   updateField("billing_country", event.target.value)
@@ -550,14 +573,14 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
             </label>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <p className="text-sm font-semibold text-slate-900">
                   Logo de facturation
                 </p>
                 <p className="text-xs text-slate-500">
-                  Utilise dans les documents PDF et emails.
+                  Utilisé dans les documents PDF et emails.
                 </p>
               </div>
               <div className="flex items-center gap-2">
