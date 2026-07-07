@@ -13,7 +13,7 @@ const panelClass =
 const sectionHeaderClass = "border-b border-slate-100 px-4 py-4 sm:px-6";
 
 const fieldClass =
-  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
+  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
 
 type SettingsEntrepriseProps = {
   session: Session | null;

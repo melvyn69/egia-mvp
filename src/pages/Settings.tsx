@@ -137,15 +137,15 @@ const tabIcons: Record<TabId, typeof Plug> = {
 };
 
 const panelClass =
-  "overflow-hidden rounded-[1.35rem] border border-slate-200/80 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.06)]";
+  "overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.045)]";
 
 const sectionHeaderClass =
-  "border-b border-slate-100 px-4 py-4 sm:px-6";
+  "border-b border-slate-100 px-4 py-3 sm:px-5";
 
-const sectionContentClass = "space-y-4 px-4 py-4 sm:px-6 sm:py-5";
+const sectionContentClass = "space-y-3 px-4 py-3 sm:px-5 sm:py-4";
 
 const fieldClass =
-  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
+  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
 
 const SectionHeader = ({
   title,
@@ -186,11 +186,11 @@ const MetricTile = ({
   value: string | number;
   detail: string;
 }) => (
-  <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm">
+  <div className="rounded-xl border border-slate-200/80 bg-white px-3 py-2 shadow-sm transition hover:border-slate-300">
     <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
       {label}
     </p>
-    <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+    <p className="mt-1 text-xl font-semibold tracking-tight text-slate-950">
       {value}
     </p>
     <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>
@@ -876,7 +876,7 @@ const Settings = ({ session }: SettingsProps) => {
               status="Connecté à l'équipe"
               statusVariant="success"
             />
-            <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <p className="max-w-2xl text-sm leading-6 text-slate-500">
                 Les données collaborateurs restent synchronisées avec les
                 classements et les rapports mensuels.
@@ -891,7 +891,7 @@ const Settings = ({ session }: SettingsProps) => {
             </div>
           </section>
 
-          <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr] lg:gap-6">
+          <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr] lg:gap-4">
           <Card className={panelClass}>
             <SectionHeader
               title="Collaborateurs actifs"
@@ -925,10 +925,10 @@ const Settings = ({ session }: SettingsProps) => {
                   return (
                     <div
                       key={member.id}
-                      className="flex min-w-0 flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/40 p-3 shadow-sm transition hover:border-slate-300 hover:bg-white sm:p-4 xl:flex-row xl:items-center xl:justify-between"
+                      className="flex min-w-0 flex-col gap-3 rounded-xl border border-slate-200/80 bg-slate-50/40 p-3 shadow-sm transition hover:border-slate-300 hover:bg-white xl:flex-row xl:items-center xl:justify-between"
                     >
                       <div className="flex min-w-0 items-start gap-3">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-ink text-sm font-semibold text-white sm:h-12 sm:w-12">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
                           {initialsFromName(name)}
                         </div>
                         <div className="min-w-0">
@@ -952,7 +952,7 @@ const Settings = ({ session }: SettingsProps) => {
                       </div>
                       <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center xl:flex xl:shrink-0 xl:items-center xl:gap-4">
                         <label
-                          className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 xl:min-h-0 xl:border-0 xl:bg-transparent xl:px-0 xl:py-0"
+                          className="flex min-h-10 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 xl:min-h-0 xl:border-0 xl:bg-transparent xl:px-0 xl:py-0"
                           onClick={() => {
                             if (!canToggle) {
                               setToggleError(
@@ -1008,7 +1008,7 @@ const Settings = ({ session }: SettingsProps) => {
                 (invitationsQuery.data ?? []).map((invite) => (
                   <div
                     key={invite.id}
-                    className="flex min-w-0 flex-col gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/40 p-3 text-sm transition hover:bg-white sm:flex-row sm:items-center sm:justify-between"
+                    className="flex min-w-0 flex-col gap-2 rounded-xl border border-slate-200/80 bg-slate-50/40 p-3 text-sm transition hover:bg-white sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="min-w-0">
                       <p className="break-all font-medium text-slate-900">
@@ -1016,6 +1016,9 @@ const Settings = ({ session }: SettingsProps) => {
                       </p>
                       <p className="text-xs text-slate-500">
                         {roleLabel(invite.role ?? "editor")}
+                        {invite.expires_at
+                          ? ` · expire le ${new Date(invite.expires_at).toLocaleDateString("fr-FR")}`
+                          : ""}
                       </p>
                     </div>
                     <Button
@@ -1039,7 +1042,7 @@ const Settings = ({ session }: SettingsProps) => {
               status="Action"
             />
             <CardContent className={sectionContentClass}>
-              <div className="grid gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <label className="text-xs font-semibold text-slate-600">
                   Prénom
                   <input
@@ -1059,7 +1062,7 @@ const Settings = ({ session }: SettingsProps) => {
                     placeholder="prenom.nom@entreprise.com"
                   />
                 </label>
-                <label className="text-xs font-semibold text-slate-600">
+                <label className="text-xs font-semibold text-slate-600 sm:col-span-2">
                   Rôle
                   <select
                     className={fieldClass}
@@ -1070,7 +1073,7 @@ const Settings = ({ session }: SettingsProps) => {
                     <option value="admin">Admin</option>
                   </select>
                 </label>
-                <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-3 text-sm text-slate-700">
+                <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-3 text-sm text-slate-700 sm:col-span-2">
                   <span className="pr-3 leading-5">
                     Recevoir les rapports mensuels
                   </span>
@@ -1081,7 +1084,7 @@ const Settings = ({ session }: SettingsProps) => {
                     className="h-4 w-4 accent-ink"
                   />
                 </label>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-500 sm:col-span-2">
                   Le rapport mensuel est envoyé automatiquement par email aux
                   membres actifs.
                 </p>
@@ -1310,46 +1313,40 @@ const Settings = ({ session }: SettingsProps) => {
               statusVariant={connected ? "success" : "warning"}
             />
 
-            <div className="grid gap-4 p-4 sm:p-6 md:grid-cols-3">
-            <Card className="border-slate-200/80 bg-slate-50/60 shadow-sm">
-              <CardHeader className="p-4 pb-2">
-                <CardTitle className="text-sm font-semibold">Lieux actifs</CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-4">
+            <div className="grid gap-3 p-4 sm:p-5 md:grid-cols-3">
+            <div className="rounded-xl border border-slate-200/80 bg-slate-50/60 px-4 py-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Lieux actifs</p>
                 <p className="text-3xl font-semibold text-slate-900">
                   {locationsQuery.isLoading || !activeLocationsLoaded ? "…" : activeCount}
                 </p>
                 <p className="text-xs text-slate-500">
                   Établissements suivis dans le dashboard.
                 </p>
-              </CardContent>
-            </Card>
-            <Card className="border-slate-200/80 bg-slate-50/60 shadow-sm">
-              <CardHeader className="p-4 pb-2">
-                <CardTitle className="text-sm font-semibold">Dernière synchro</CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-4">
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200/80 bg-slate-50/60 px-4 py-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Dernière synchro</p>
                 <p className="text-3xl font-semibold text-slate-900">
                   {lastSyncQuery.isLoading ? "…" : formatRelativeTime(lastSync)}
                 </p>
                 <p className="text-xs text-slate-500">
                   Dernière activité connue côté Google.
                 </p>
-              </CardContent>
-            </Card>
-            <Card className="border-slate-200/80 bg-slate-50/60 shadow-sm">
-              <CardHeader className="p-4 pb-2">
-                <CardTitle className="text-sm font-semibold">Avis à traiter</CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-4">
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200/80 bg-slate-50/60 px-4 py-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Avis à traiter</p>
                 <p className="text-3xl font-semibold text-slate-900">
                   {reviewsNeedingReplyQuery.isLoading ? "…" : totalNeedsReply}
                 </p>
                 <p className="text-xs text-slate-500">
                   Avis nécessitant une réponse.
                 </p>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
             </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-4 sm:px-6">
@@ -1456,12 +1453,12 @@ const Settings = ({ session }: SettingsProps) => {
               {locationsQuery.isLoading ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   {Array.from({ length: 2 }).map((_, index) => (
-                    <Card key={`location-skeleton-${index}`}>
-                      <CardContent className="space-y-3 pt-6">
+                    <div key={`location-skeleton-${index}`} className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-4">
+                      <div className="space-y-3">
                         <Skeleton className="h-5 w-2/3" />
                         <Skeleton className="h-4 w-1/2" />
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </div>
                   ))}
                 </div>
               ) : locations.length === 0 ? (
@@ -1472,7 +1469,7 @@ const Settings = ({ session }: SettingsProps) => {
                   </p>
                 </div>
               ) : (
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
                   {locations.map((location) => {
                     const address = formatAddress(location.address_json);
                     const isActive = selectedActiveIds.includes(location.id);
@@ -1481,10 +1478,9 @@ const Settings = ({ session }: SettingsProps) => {
                       location.last_synced_at ?? lastSync
                     );
                     return (
-                      <Card key={location.id} className="border-slate-200/80 bg-slate-50/50 shadow-sm transition hover:bg-white hover:shadow-[0_16px_40px_rgba(15,23,42,0.07)]">
-                        <CardContent className="space-y-4 p-4">
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between gap-2">
+                      <div key={location.id} className="grid gap-3 bg-white p-4 transition hover:bg-slate-50/70 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto] lg:items-center">
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex min-w-0 flex-wrap items-center gap-2">
                               <p className="text-sm font-semibold text-slate-900">
                                 {location.location_title ??
                                   location.location_resource_name}
@@ -1496,10 +1492,13 @@ const Settings = ({ session }: SettingsProps) => {
                               )}
                             </div>
                             {address && (
-                              <p className="text-xs text-slate-500">{address}</p>
+                              <p className="truncate text-xs text-slate-500">{address}</p>
                             )}
                           </div>
-                          <div className="flex items-center justify-between text-xs text-slate-500">
+                          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 lg:justify-end">
+                            {location.phone ? (
+                              <span className="truncate">{location.phone}</span>
+                            ) : null}
                             <span>Dernière synchro : {lastSyncLabel}</span>
                             {location.website_uri ? (
                               <a
@@ -1508,11 +1507,11 @@ const Settings = ({ session }: SettingsProps) => {
                                 rel="noreferrer"
                                 className="text-ink/80 hover:underline"
                               >
-                                Site web
-                              </a>
+                              Site web
+                            </a>
                             ) : null}
                           </div>
-                          <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                             <label className="flex items-center gap-2 text-xs text-slate-600">
                               <input
                                 type="checkbox"
@@ -1544,8 +1543,7 @@ const Settings = ({ session }: SettingsProps) => {
                               Ouvrir la boîte de réception
                             </Button>
                           </div>
-                        </CardContent>
-                      </Card>
+                      </div>
                     );
                   })}
                 </div>
@@ -1565,13 +1563,14 @@ const Settings = ({ session }: SettingsProps) => {
             </CardContent>
           </Card>
 
-          <Card className={panelClass}>
-            <SectionHeader
-              title="Actions rapides"
-              description="Lancez les actions opérationnelles liées à Google et aux synchronisations."
-              status="Actions"
-            />
-            <CardContent className="flex flex-wrap gap-3 px-4 py-4 sm:px-6">
+          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-950">Actions rapides</p>
+              <p className="mt-0.5 text-xs leading-5 text-slate-500">
+                Connexion Google et statut de synchronisation.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
               <Button
                 onClick={() => {
                   if (connected) {
@@ -1589,8 +1588,8 @@ const Settings = ({ session }: SettingsProps) => {
               >
                 Voir le statut de synchronisation
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       );
     }
@@ -1645,8 +1644,7 @@ const Settings = ({ session }: SettingsProps) => {
             </CardContent>
           </Card>
 
-          <Card className={panelClass}>
-            <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <p className="text-sm text-slate-600">
                 Lancez EGIA depuis votre écran d’accueil pour une expérience
                 pleine page.
@@ -1654,8 +1652,7 @@ const Settings = ({ session }: SettingsProps) => {
               <Button className="min-h-11 sm:min-h-0" variant="outline" size="sm" onClick={handleOpenApp}>
                 Ouvrir l’application
               </Button>
-            </CardContent>
-          </Card>
+          </div>
         </div>
       );
     }
@@ -1684,24 +1681,24 @@ const Settings = ({ session }: SettingsProps) => {
 
   return (
     <div className="space-y-5 sm:space-y-6">
-      <section className="overflow-hidden rounded-[1.75rem] border border-slate-200/80 bg-white shadow-[0_22px_70px_rgba(15,23,42,0.08)]">
-        <div className="border-b border-slate-100 bg-gradient-to-b from-white to-slate-50/70 px-4 py-5 sm:px-6 lg:px-7">
-          <div className="flex min-w-0 flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+      <section className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_14px_45px_rgba(15,23,42,0.06)]">
+        <div className="border-b border-slate-100 bg-gradient-to-b from-white to-slate-50/70 px-4 py-4 sm:px-5 lg:px-6">
+          <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
-              <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 shadow-sm">
+              <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 shadow-sm">
                 <Settings2 className="h-3.5 w-3.5" />
                 Centre de contrôle
               </div>
-              <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
+              <h1 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">
                 Paramètres EGIA
               </h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 sm:text-base">
+              <p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-500">
                 Connexions, établissements, équipe, identité IA et informations
                 d’entreprise au même endroit.
               </p>
             </div>
 
-            <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3 lg:w-[420px]">
+            <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3 lg:w-[390px]">
               <MetricTile
                 label="Configuration"
                 value={`${configurationScore}%`}
@@ -1721,7 +1718,7 @@ const Settings = ({ session }: SettingsProps) => {
           </div>
         </div>
 
-        <div className="grid gap-3 px-4 py-4 sm:grid-cols-2 sm:px-6 lg:grid-cols-5 lg:px-7">
+        <div className="grid gap-2 px-4 py-3 sm:grid-cols-2 sm:px-5 lg:grid-cols-5 lg:px-6">
           {[
             {
               label: "Établissements",
@@ -1763,7 +1760,7 @@ const Settings = ({ session }: SettingsProps) => {
           ].map((item) => (
             <div
               key={item.label}
-              className="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-3"
+              className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200/80 bg-slate-50/70 px-3 py-2 transition hover:border-slate-300 hover:bg-white"
             >
               <div className="min-w-0">
                 <p className="truncate text-xs font-medium text-slate-500">
@@ -1787,7 +1784,7 @@ const Settings = ({ session }: SettingsProps) => {
 
       <div className="-mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
         <div
-          className="flex min-w-max gap-2 rounded-[1.35rem] border border-slate-200/80 bg-white/85 p-1.5 shadow-sm backdrop-blur sm:min-w-0 sm:flex-wrap"
+          className="flex min-w-max gap-1.5 rounded-2xl border border-slate-200/80 bg-white/85 p-1.5 shadow-sm backdrop-blur sm:min-w-0 sm:flex-wrap"
           role="tablist"
           aria-label="Sections des paramètres"
         >
@@ -1802,7 +1799,7 @@ const Settings = ({ session }: SettingsProps) => {
                 aria-selected={selected}
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  "group inline-flex h-10 items-center gap-2 rounded-full px-3.5 text-xs font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30 sm:h-11 sm:px-4",
+                  "group inline-flex h-9 items-center gap-2 rounded-full px-3 text-xs font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30 sm:h-10 sm:px-3.5",
                   selected
                     ? "bg-ink text-white shadow-[0_8px_24px_rgba(15,23,42,0.18)]"
                     : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
@@ -1821,7 +1818,7 @@ const Settings = ({ session }: SettingsProps) => {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white/80 px-4 py-3 text-sm leading-6 text-slate-500 shadow-sm">
+      <div className="rounded-xl border border-slate-200/80 bg-white/80 px-4 py-2 text-sm leading-6 text-slate-500 shadow-sm">
         {tabs.find((tab) => tab.id === activeTab)?.description}
       </div>
 

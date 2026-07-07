@@ -12,7 +12,7 @@ const panelClass =
 const sectionHeaderClass = "border-b border-slate-100 px-4 py-4 sm:px-6";
 
 const fieldClass =
-  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
+  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
 
 type SettingsProfileProps = {
   session: Session | null;
@@ -165,7 +165,7 @@ const SettingsProfile = ({ session }: SettingsProfileProps) => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <Card className={panelClass}>
         <CardHeader className={sectionHeaderClass}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

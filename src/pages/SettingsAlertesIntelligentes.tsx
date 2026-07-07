@@ -51,21 +51,26 @@ const SettingsAlertesIntelligentes = () => {
         </CardContent>
       </Card>
 
-      <Card className={panelClass}>
-        <CardHeader className={sectionHeaderClass}>
+      <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <CardTitle className="text-base font-semibold sm:text-lg">
-                Surveillance automatique
-              </CardTitle>
+              <h3 className="text-base font-semibold text-slate-950">
+                Préférences affichées
+              </h3>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-                Ajustez la sensibilité affichée pour les règles de surveillance.
+                Lecture des règles disponibles côté produit, sans sauvegarde
+                utilisateur.
               </p>
             </div>
             <Badge variant="warning">Lecture seule</Badge>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4 px-4 py-4 sm:px-6">
+        </div>
+        <div className="grid gap-4 px-4 py-4 sm:px-5 lg:grid-cols-[0.9fr_1.1fr_0.9fr]">
+          <div className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+              Surveillance
+            </p>
           <label className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 transition hover:bg-white">
             <div>
               <p className="text-sm font-semibold text-slate-900">
@@ -99,24 +104,12 @@ const SettingsAlertesIntelligentes = () => {
           <p className="text-xs text-slate-500">
             Ajustez la sensibilité selon votre capacité de réaction.
           </p>
-        </CardContent>
-      </Card>
-
-      <Card className={panelClass}>
-        <CardHeader className={sectionHeaderClass}>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <CardTitle className="text-base font-semibold sm:text-lg">
-                Types d'alertes
-              </CardTitle>
-              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-                Sélectionnez les signaux qui doivent rester visibles.
-              </p>
-            </div>
-            <Badge variant="warning">Lecture seule</Badge>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-3 px-4 py-4 sm:px-6">
+
+          <div className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+            Types d'alertes
+          </p>
           <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/40 px-3 py-3 text-sm text-slate-700">
             Baisse notable de réputation
             <input
@@ -157,24 +150,12 @@ const SettingsAlertesIntelligentes = () => {
               disabled
             />
           </label>
-        </CardContent>
-      </Card>
-
-      <Card className={panelClass}>
-        <CardHeader className={sectionHeaderClass}>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <CardTitle className="text-base font-semibold sm:text-lg">
-                Fréquence email
-              </CardTitle>
-              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-                Définissez le rythme de notification affiché.
-              </p>
-            </div>
-            <Badge variant="warning">Lecture seule</Badge>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-3 px-4 py-4 text-sm text-slate-700 sm:px-6">
+
+          <div className="space-y-3 text-sm text-slate-700">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+            Fréquence email
+          </p>
           <label className="flex items-center gap-2">
             <input
               type="radio"
@@ -208,8 +189,9 @@ const SettingsAlertesIntelligentes = () => {
             />
             Synthèse hebdomadaire
           </label>
-        </CardContent>
-      </Card>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

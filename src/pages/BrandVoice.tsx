@@ -41,7 +41,7 @@ const panelClass =
 const sectionHeaderClass = "border-b border-slate-100 px-4 py-4 sm:px-6";
 
 const fieldClass =
-  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
+  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
 
 const BrandVoice = ({ session }: BrandVoiceProps) => {
   const queryClient = useQueryClient();
@@ -286,7 +286,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
 
   if (!supabaseClient) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-4">
         <div>
           <h2 className="text-2xl font-semibold text-slate-900">
             Brand Voice
@@ -305,7 +305,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="rounded-[1.35rem] border border-slate-200/80 bg-white px-4 py-4 shadow-sm sm:px-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -392,7 +392,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
           </Card>
 
           <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-            <div className="space-y-6">
+            <div className="space-y-4">
               <Card className={panelClass}>
                 <CardHeader className={sectionHeaderClass}>
                   <CardTitle className="text-base font-semibold sm:text-lg">Paramètres de voix</CardTitle>
@@ -500,7 +500,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
                     </label>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <input
-                        className="min-w-[180px] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                        className="min-w-[180px] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
                         value={newWord}
                         onChange={(event) => setNewWord(event.target.value)}
                         placeholder="Ajouter un mot"
@@ -536,7 +536,7 @@ const BrandVoice = ({ session }: BrandVoiceProps) => {
                 </CardContent>
               </Card>
             </div>
-            <div className="space-y-6">
+            <div className="space-y-4">
               <Card className={panelClass}>
                 <CardHeader className={sectionHeaderClass}>
                   <CardTitle className="text-base font-semibold sm:text-lg">Laboratoire de test</CardTitle>
