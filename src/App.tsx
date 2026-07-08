@@ -34,11 +34,11 @@ import { AuthCallback } from "./pages/AuthCallback";
 import { OfflineBanner } from "./components/pwa/OfflineBanner";
 import { useGoogleConnectionStatus } from "./hooks/useGoogleConnectionStatus";
 import { isAdminUser, isDeveloperUser } from "./lib/admin";
-import { Button } from "./components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
-import { EgiaLogo } from "./components/brand/EgiaLogo";
 import { MobileRouteProgress } from "./components/routing/MobileRouteProgress";
 import { ScrollToTop } from "./components/routing/ScrollToTop";
+import { SEOHead } from "./components/seo/SEOHead";
+import { LoginExperience, MarketingLandingPage } from "./pages/PublicExperience";
+import { landingSeo, landingStructuredData } from "./pages/publicExperienceData";
 import {
   getFriendlyMobileError,
   isBenignBrowserError
@@ -116,6 +116,8 @@ const App = () => {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [passwordSignInLoading, setPasswordSignInLoading] = useState(false);
+  const [googleSignInLoading, setGoogleSignInLoading] = useState(false);
+  const [passwordResetLoading, setPasswordResetLoading] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
   const [syncAllLoading, setSyncAllLoading] = useState(false);
   const [syncAllMessage, setSyncAllMessage] = useState<string | null>(null);
@@ -156,16 +158,25 @@ const App = () => {
     location.pathname === "/google_oauth_callback" ||
     location.pathname === "/auth/callback";
   const isPublicLoyaltyPath = location.pathname.startsWith("/loyalty/join/");
-  const usesAppShell = !isPublicLoyaltyPath;
+  const showsPublicExperience =
+    !session && !isCallbackPath && !isPublicLoyaltyPath;
+  const showsMarketingLanding =
+    showsPublicExperience && location.pathname === "/";
+  const usesAppShell = !isPublicLoyaltyPath && !showsPublicExperience;
   const isAdminSession = isAdminUser(session?.user.email);
   const isDeveloperSession = isDeveloperUser(session?.user.email);
-  const passwordLoginEnabled =
-    import.meta.env.VITE_ENABLE_PASSWORD_LOGIN === "true";
   const googleConnection = useGoogleConnectionStatus(session);
   const googleConnected = googleConnection.status === "connected";
   const googleReauthRequired = googleConnection.status === "reauth_required";
 
   const pageMeta = useMemo(() => {
+    if (location.pathname === "/login") {
+      return {
+        title: "Connexion",
+        subtitle: "Accédez à votre espace Reviewflow."
+      };
+    }
+
     if (location.pathname === "/auth/callback") {
       return {
         title: "Connexion",
@@ -338,6 +349,49 @@ const App = () => {
       subtitle: "Suivi des avis, KPIs et activité en temps réel."
     };
   }, [location.pathname]);
+
+  const seoMeta = useMemo(() => {
+    const isLandingMeta =
+      !session && !isCallbackPath && !isPublicLoyaltyPath && location.pathname === "/";
+    const isLoginMeta =
+      !session && !isCallbackPath && !isPublicLoyaltyPath && location.pathname !== "/";
+
+    if (isLandingMeta) {
+      return {
+        title: landingSeo.title,
+        description: landingSeo.description,
+        robots: "index,follow",
+        imagePath: landingSeo.imagePath,
+        structuredData: landingStructuredData
+      };
+    }
+
+    if (isLoginMeta) {
+      return {
+        title: "Connexion Reviewflow | EGIA Business Suite",
+        description:
+          "Connexion sécurisée à Reviewflow, le cockpit EGIA pour piloter avis, réputation locale, réponses IA et reporting multi-établissements.",
+        robots: "noindex,nofollow",
+        imagePath: "/icons/egia-icon-512.png",
+        structuredData: []
+      };
+    }
+
+    return {
+      title: `${pageMeta.title} | EGIA Business Suite`,
+      description: pageMeta.subtitle,
+      robots: "noindex,nofollow",
+      imagePath: "/icons/egia-icon-512.png",
+      structuredData: []
+    };
+  }, [
+    isCallbackPath,
+    isPublicLoyaltyPath,
+    location.pathname,
+    pageMeta.subtitle,
+    pageMeta.title,
+    session
+  ]);
 
   useEffect(() => {
     if (!supabase) {
@@ -523,6 +577,66 @@ const App = () => {
     }
 
     setAuthMessage("Lien de connexion envoyé. Vérifiez votre boîte mail.");
+  };
+
+  const handleGoogleSignIn = async () => {
+    setAuthError(null);
+    setAuthMessage(null);
+
+    if (!supabase || envMissing) {
+      setAuthError(
+        "Auth Supabase non configurée. Vérifiez les variables d'environnement."
+      );
+      return;
+    }
+
+    setGoogleSignInLoading(true);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`
+      }
+    });
+    setGoogleSignInLoading(false);
+
+    if (error) {
+      console.error("google auth sign-in error:", error);
+      setAuthError("Connexion Google impossible.");
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    setAuthError(null);
+    setAuthMessage(null);
+
+    if (!supabase || envMissing) {
+      setAuthError(
+        "Auth Supabase non configurée. Vérifiez les variables d'environnement."
+      );
+      return;
+    }
+
+    if (!authEmail.trim()) {
+      setAuthError("Email requis.");
+      return;
+    }
+
+    setPasswordResetLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(
+      authEmail.trim(),
+      {
+        redirectTo: `${window.location.origin}/auth/callback`
+      }
+    );
+    setPasswordResetLoading(false);
+
+    if (error) {
+      console.error("password reset error:", error);
+      setAuthError("Impossible d'envoyer l'email de réinitialisation.");
+      return;
+    }
+
+    setAuthMessage("Email de réinitialisation envoyé. Vérifiez votre boîte mail.");
   };
 
   const handlePasswordSignIn = async () => {
@@ -1001,77 +1115,16 @@ const App = () => {
     showErrorToast("Diagnostic de session journalisé dans la console.");
   };
 
-  const authPanel = (
-    <div className="mx-auto max-w-xl">
-      <Card>
-        <CardHeader>
-          <div className="mb-2 flex items-center gap-3">
-            <EgiaLogo variant="icon" size="md" />
-            <EgiaLogo variant="light" size="md" showSuite />
-          </div>
-          <CardTitle>Bienvenue sur EGIA</CardTitle>
-          <p className="text-sm text-slate-500">
-            Connectez-vous pour accéder au tableau de bord.
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {authError && (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
-              {authError}
-            </div>
-          )}
-          {authMessage && (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
-              {authMessage}
-            </div>
-          )}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-700">
-              Email
-            </label>
-            <input
-              type="email"
-              value={authEmail}
-              onChange={(event) => setAuthEmail(event.target.value)}
-              placeholder="vous@entreprise.com"
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 outline-none focus:border-ink/60 focus:ring-2 focus:ring-ink/10"
-            />
-          </div>
-          <Button onClick={handleSignIn} disabled={envMissing}>
-            Recevoir le lien de connexion
-          </Button>
-          {passwordLoginEnabled && (
-            <div className="space-y-3 border-t border-slate-200 pt-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
-                  Mot de passe admin
-                </label>
-                <input
-                  type="password"
-                  value={authPassword}
-                  onChange={(event) => setAuthPassword(event.target.value)}
-                  placeholder="Mot de passe"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 outline-none focus:border-ink/60 focus:ring-2 focus:ring-ink/10"
-                />
-              </div>
-              <Button
-                variant="outline"
-                onClick={handlePasswordSignIn}
-                disabled={envMissing || passwordSignInLoading}
-              >
-                {passwordSignInLoading
-                  ? "Connexion..."
-                  : "Connexion admin"}
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-
   return (
     <div className="min-h-screen bg-sand">
+      <SEOHead
+        title={seoMeta.title}
+        description={seoMeta.description}
+        canonicalPath={location.pathname}
+        robots={seoMeta.robots}
+        imagePath={seoMeta.imagePath}
+        structuredData={seoMeta.structuredData}
+      />
       <ScrollToTop />
       <MobileRouteProgress />
       <div className={usesAppShell ? "flex" : ""}>
@@ -1111,7 +1164,7 @@ const App = () => {
                 : "min-h-screen min-w-0 overflow-x-hidden bg-gradient-to-br from-sand via-white to-clay"
             }
           >
-            {envMissing && (
+            {envMissing && !showsPublicExperience && (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
                 Variables d&apos;env Supabase manquantes. Ajoutez
                 VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env.local.
@@ -1122,11 +1175,32 @@ const App = () => {
                 {googleError}
               </div>
             )}
-            {!session && !isCallbackPath && !isPublicLoyaltyPath ? (
-              authPanel
+            {showsPublicExperience ? (
+              showsMarketingLanding ? (
+                <MarketingLandingPage />
+              ) : (
+                <LoginExperience
+                  authEmail={authEmail}
+                  authPassword={authPassword}
+                  authError={authError}
+                  authMessage={authMessage}
+                  envMissing={envMissing}
+                  passwordSignInLoading={passwordSignInLoading}
+                  googleSignInLoading={googleSignInLoading}
+                  passwordResetLoading={passwordResetLoading}
+                  onEmailChange={setAuthEmail}
+                  onPasswordChange={setAuthPassword}
+                  onMagicLink={handleSignIn}
+                  onPasswordSignIn={handlePasswordSignIn}
+                  onGoogleSignIn={handleGoogleSignIn}
+                  onForgotPassword={handleForgotPassword}
+                  onSignup={handleSignIn}
+                />
+              )
             ) : (
               <Routes>
                 <Route path="/loyalty/join/:publicToken" element={<LoyaltyJoin />} />
+                <Route path="/login" element={<Navigate to="/" replace />} />
                 <Route
                   path="/"
                   element={
