@@ -7,6 +7,15 @@
 @layer base {
   :root {
     --radius: 14px;
+    --rf-white: #ffffff;
+    --rf-porcelain: #f8fbff;
+    --rf-mist: #eef4ff;
+    --rf-line: #dbe4f0;
+    --rf-ink: #080a18;
+    --rf-indigo: #4f46e5;
+    --rf-violet: #7c3aed;
+    --rf-blue: #2563eb;
+    --rf-cyan: #22d3ee;
   }
 
   * {
@@ -38,18 +47,1345 @@
   }
 }
 
+@layer components {
+  .premium-page-background {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 251, 255, 0.97) 38%, rgba(241, 245, 249, 0.92) 100%),
+      linear-gradient(115deg, rgba(79, 70, 229, 0.075), rgba(37, 99, 235, 0.055) 34%, rgba(124, 58, 237, 0.05) 64%, rgba(34, 211, 238, 0.035));
+  }
+
+  .premium-section-soft {
+    background:
+      linear-gradient(180deg, rgba(248, 251, 255, 0.96), rgba(241, 245, 249, 0.92)),
+      linear-gradient(120deg, rgba(79, 70, 229, 0.04), transparent 42%, rgba(14, 165, 233, 0.035));
+  }
+
+  .premium-section-white {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 252, 255, 0.96)),
+      linear-gradient(120deg, rgba(79, 70, 229, 0.018), transparent 48%, rgba(34, 211, 238, 0.014));
+  }
+
+  .premium-section-muted {
+    background:
+      linear-gradient(180deg, rgba(245, 248, 253, 0.98), rgba(238, 243, 250, 0.96)),
+      linear-gradient(125deg, rgba(79, 70, 229, 0.055), transparent 42%, rgba(14, 165, 233, 0.045));
+  }
+
+  .premium-section-gradient {
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.9) 40%, rgba(238, 242, 255, 0.84) 70%, rgba(236, 254, 255, 0.58)),
+      linear-gradient(225deg, rgba(34, 211, 238, 0.06), transparent 40%),
+      linear-gradient(35deg, rgba(124, 58, 237, 0.052), transparent 44%);
+  }
+
+  .editorial-hero-title,
+  .editorial-section-title {
+    font-family: "Newsreader", "Times New Roman", serif;
+    letter-spacing: 0;
+    text-wrap: balance;
+  }
+
+  .editorial-hero-title {
+    font-size: 3.45rem;
+    font-weight: 600;
+    line-height: 0.9;
+  }
+
+  .editorial-section-title {
+    font-size: 2.65rem;
+    font-weight: 500;
+    line-height: 0.98;
+  }
+
+  .editorial-copy {
+    color: rgb(71 85 105);
+    font-weight: 400;
+    letter-spacing: 0;
+    line-height: 1.75;
+  }
+
+  @media (min-width: 640px) {
+    .editorial-hero-title {
+      font-size: 4.7rem;
+    }
+
+    .editorial-section-title {
+      font-size: 3.35rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .editorial-hero-title {
+      font-size: 5.15rem;
+    }
+
+    .editorial-section-title {
+      font-size: 3.8rem;
+    }
+  }
+
+  @media (min-width: 1280px) {
+    .editorial-hero-title {
+      font-size: 5.55rem;
+    }
+  }
+
+  .premium-grid-background {
+    background-image:
+      linear-gradient(rgba(15, 23, 42, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(15, 23, 42, 0.035) 1px, transparent 1px),
+      linear-gradient(135deg, rgba(79, 70, 229, 0.055), transparent 38%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(241, 245, 249, 0.88));
+    background-size: 56px 56px, 56px 56px, 100% 100%, 100% 100%;
+  }
+
+  .premium-surface {
+    border: 1px solid rgba(203, 213, 225, 0.82);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 251, 255, 0.78));
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.78) inset,
+      0 22px 70px -48px rgba(15, 23, 42, 0.5),
+      0 0 0 1px rgba(255, 255, 255, 0.34);
+    backdrop-filter: blur(18px);
+  }
+
+  .premium-card {
+    border: 1px solid rgba(219, 228, 240, 0.94);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 251, 255, 0.92) 58%, rgba(244, 247, 252, 0.86));
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.9) inset,
+      0 18px 54px -42px rgba(15, 23, 42, 0.45),
+      0 0 0 1px rgba(255, 255, 255, 0.42);
+  }
+
+  .premium-card-hover {
+    position: relative;
+    isolation: isolate;
+    transition:
+      transform 260ms ease-out;
+    will-change: transform;
+  }
+
+  .premium-card-hover::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.92) inset,
+      0 34px 90px -52px rgba(79, 70, 229, 0.44),
+      0 18px 48px -38px rgba(34, 211, 238, 0.38);
+    transition: opacity 260ms ease-out;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .premium-card-hover:hover {
+      transform: translate3d(0, -4px, 0) scale(1.008);
+    }
+
+    .premium-card-hover:hover::after {
+      opacity: 1;
+    }
+  }
+
+  .premium-button-motion,
+  .premium-nav-motion,
+  .premium-link-motion {
+    position: relative;
+    isolation: isolate;
+    transition: transform 240ms ease-out;
+    will-change: transform;
+  }
+
+  .premium-button-motion::after,
+  .premium-nav-motion::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 240ms ease-out;
+  }
+
+  .premium-button-motion::after {
+    box-shadow:
+      0 18px 44px -30px rgba(15, 23, 42, 0.62),
+      0 10px 28px -24px rgba(79, 70, 229, 0.38);
+  }
+
+  .premium-nav-motion::after {
+    background: rgba(248, 250, 252, 0.92);
+    box-shadow:
+      0 14px 34px -30px rgba(15, 23, 42, 0.32);
+  }
+
+  .premium-button-motion.premium-button-motion,
+  .premium-nav-motion.premium-nav-motion,
+  .premium-link-motion.premium-link-motion {
+    transition-property: transform;
+    transition-duration: 240ms;
+    transition-timing-function: ease-out;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .premium-button-motion:not(:disabled):hover {
+      transform: translate3d(0, -2px, 0) scale(1.008);
+    }
+
+    .premium-button-motion:not(:disabled):hover::after,
+    .premium-nav-motion:hover::after {
+      opacity: 1;
+    }
+
+    .premium-nav-motion:hover,
+    .premium-link-motion:not(:disabled):hover {
+      transform: translate3d(0, -1px, 0) scale(1.006);
+    }
+  }
+
+  .premium-cta-primary,
+  .premium-cta-secondary {
+    position: relative;
+    isolation: isolate;
+    overflow: visible;
+    transition: transform 260ms ease-out;
+    will-change: transform;
+  }
+
+  .premium-cta-primary::after,
+  .premium-cta-secondary::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    border-radius: inherit;
+    opacity: 0;
+    transition: opacity 260ms ease-out;
+  }
+
+  .premium-cta-primary::after {
+    box-shadow:
+      0 20px 48px -24px rgba(15, 23, 42, 0.95),
+      0 12px 34px -26px rgba(79, 70, 229, 0.75);
+  }
+
+  .premium-cta-secondary::after {
+    box-shadow:
+      0 16px 40px -28px rgba(79, 70, 229, 0.45),
+      0 8px 28px -24px rgba(34, 211, 238, 0.34);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .premium-cta-primary:hover,
+    .premium-cta-secondary:hover {
+      transform: translate3d(0, -2px, 0) scale(1.01);
+    }
+
+    .premium-cta-primary:hover::after,
+    .premium-cta-secondary:hover::after {
+      opacity: 1;
+    }
+  }
+
+  .reviewflow-tab-button {
+    transition: transform 220ms ease-out;
+    will-change: transform;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .reviewflow-tab-button:hover {
+      transform: translate3d(0, -1px, 0) scale(1.006);
+    }
+  }
+
+  .premium-dark-panel {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background:
+      linear-gradient(145deg, rgba(8, 10, 24, 0.985), rgba(15, 23, 42, 0.985) 38%, rgba(30, 27, 75, 0.96) 70%, rgba(23, 37, 84, 0.94)),
+      linear-gradient(90deg, rgba(125, 211, 252, 0.08), rgba(255, 255, 255, 0.04) 45%, rgba(139, 92, 246, 0.08));
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.08) inset,
+      0 38px 110px -60px rgba(15, 23, 42, 0.82);
+  }
+
+  .premium-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: fit-content;
+    border-radius: 9999px;
+    border: 1px solid rgba(199, 210, 254, 0.82);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 251, 255, 0.72)),
+      rgba(255, 255, 255, 0.76);
+    padding: 0.375rem 0.75rem;
+    color: rgb(67, 56, 202);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    box-shadow: 0 12px 32px -26px rgba(79, 70, 229, 0.9);
+    backdrop-filter: blur(14px);
+  }
+
+  .premium-soft-divider {
+    background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.34), transparent);
+  }
+
+  .reviewflow-hero-stage {
+    perspective: 1400px;
+    isolation: isolate;
+  }
+
+  .reviewflow-hero-halo {
+    position: absolute;
+    inset: 5% 2% -3%;
+    z-index: -1;
+    border-radius: 42px;
+    background:
+      linear-gradient(135deg, rgba(79, 70, 229, 0.18), rgba(37, 99, 235, 0.11) 46%, rgba(34, 211, 238, 0.08) 72%, rgba(255, 255, 255, 0));
+    filter: blur(26px);
+    opacity: 0.7;
+  }
+
+  .reviewflow-dashboard-shell {
+    border: 1px solid rgba(226, 232, 240, 0.88);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.93), rgba(248, 251, 255, 0.76)),
+      linear-gradient(135deg, rgba(99, 102, 241, 0.13), rgba(37, 99, 235, 0.08) 45%, rgba(34, 211, 238, 0.07));
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.82) inset,
+      0 38px 110px -62px rgba(15, 23, 42, 0.72);
+    transform: rotateX(1.5deg) rotateY(-2deg);
+    transform-style: preserve-3d;
+  }
+
+  .reviewflow-dashboard-screen {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background:
+      linear-gradient(145deg, rgba(8, 10, 24, 0.99), rgba(15, 23, 42, 0.985) 42%, rgba(30, 27, 75, 0.965) 72%, rgba(23, 37, 84, 0.94)),
+      linear-gradient(90deg, rgba(125, 211, 252, 0.07), rgba(255, 255, 255, 0.035), rgba(139, 92, 246, 0.07));
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.08) inset,
+      0 28px 80px -54px rgba(15, 23, 42, 0.86);
+  }
+
+  .reviewflow-dashboard-screen::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(112deg, transparent 0%, rgba(255, 255, 255, 0.08) 34%, transparent 54%),
+      linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 44px;
+    opacity: 0.5;
+  }
+
+  .reviewflow-dashboard-screen > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .reviewflow-live-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    border-radius: 9999px;
+    background: rgba(34, 211, 238, 0.11);
+    padding: 0.35rem 0.7rem;
+    color: rgb(165, 243, 252);
+    font-size: 0.75rem;
+    font-weight: 700;
+    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.14) inset;
+  }
+
+  .reviewflow-live-dot {
+    height: 0.42rem;
+    width: 0.42rem;
+    border-radius: 9999px;
+    background: rgb(34, 211, 238);
+    box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.12);
+  }
+
+  .reviewflow-metric-card,
+  .reviewflow-panel,
+  .reviewflow-mobile-insight,
+  .reviewflow-float-card {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.092), rgba(255, 255, 255, 0.052)),
+      linear-gradient(135deg, rgba(125, 211, 252, 0.045), rgba(139, 92, 246, 0.035)),
+      rgba(255, 255, 255, 0.045);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.075) inset,
+      0 18px 50px -40px rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(18px);
+  }
+
+  .reviewflow-metric-card {
+    border-radius: 1.25rem;
+    padding: 1.1rem;
+  }
+
+  .reviewflow-panel {
+    border-radius: 1.35rem;
+  }
+
+  .reviewflow-mobile-insight {
+    border-radius: 1rem;
+    padding: 0.75rem;
+  }
+
+  .reviewflow-float-card {
+    position: absolute;
+    z-index: 4;
+    width: 15.5rem;
+    border-radius: 1.25rem;
+    padding: 1.15rem;
+    color: white;
+  }
+
+  .reviewflow-float-card-left {
+    left: -2.25rem;
+    top: 27%;
+  }
+
+  .reviewflow-float-card-right {
+    right: -1.8rem;
+    bottom: 18%;
+  }
+
+  .reviewflow-line-chart {
+    display: flex;
+    height: 8.5rem;
+    align-items: end;
+    gap: 0.6rem;
+    border-radius: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    padding: 0.9rem;
+  }
+
+  .reviewflow-line-column,
+  .reviewflow-volume-bar {
+    flex: 1 1 0%;
+    border-radius: 9999px 9999px 0.3rem 0.3rem;
+    background: linear-gradient(180deg, rgb(125, 211, 252), rgb(129, 140, 248) 56%, rgb(91, 33, 182));
+    box-shadow: 0 0 22px rgba(34, 211, 238, 0.12);
+    transform-origin: bottom;
+  }
+
+  .reviewflow-demo-stage {
+    position: relative;
+    isolation: isolate;
+    border-radius: 2rem;
+    padding: 1rem;
+    background:
+      linear-gradient(135deg, rgba(99, 102, 241, 0.1), transparent 36%),
+      linear-gradient(225deg, rgba(14, 165, 233, 0.07), transparent 34%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(248, 251, 255, 0.66));
+    border: 1px solid rgba(226, 232, 240, 0.86);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.8) inset,
+      0 34px 96px -64px rgba(15, 23, 42, 0.58);
+  }
+
+  .reviewflow-demo-dashboard {
+    position: relative;
+    overflow: hidden;
+    border-radius: 1.55rem;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 251, 255, 0.92)),
+      linear-gradient(110deg, rgba(99, 102, 241, 0.06), rgba(14, 165, 233, 0.035) 45%, transparent);
+    padding: 1.25rem;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.96) inset,
+      0 28px 84px -58px rgba(15, 23, 42, 0.48);
+  }
+
+  @media (min-width: 640px) {
+    .reviewflow-demo-stage {
+      padding: 1.15rem;
+    }
+
+    .reviewflow-demo-dashboard {
+      padding: 1.75rem;
+    }
+  }
+
+  .reviewflow-demo-dashboard::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(110deg, transparent, rgba(255, 255, 255, 0.62), transparent),
+      linear-gradient(rgba(15, 23, 42, 0.03) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 42px;
+    opacity: 0.45;
+  }
+
+  .reviewflow-demo-dashboard > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .reviewflow-demo-transition {
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-kpi-shift {
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-demo-chip,
+  .reviewflow-demo-title,
+  .reviewflow-demo-copy,
+  .reviewflow-demo-mini-kpi,
+  .reviewflow-demo-row {
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-demo-mini-kpi {
+    border-radius: 1.1rem;
+    border: 1px solid rgba(226, 232, 240, 0.86);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 251, 255, 0.72)),
+      rgba(255, 255, 255, 0.72);
+    padding: 0.9rem 1rem;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.9) inset,
+      0 16px 42px -34px rgba(79, 70, 229, 0.42);
+  }
+
+  .reviewflow-depth-card {
+    border-radius: 1.35rem;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 251, 255, 0.8)),
+      rgba(255, 255, 255, 0.72);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.94) inset,
+      0 18px 58px -44px rgba(15, 23, 42, 0.42);
+    backdrop-filter: blur(14px);
+  }
+
+  .reviewflow-feature-preview {
+    position: relative;
+    overflow: hidden;
+    border-radius: 1.25rem;
+    border: 1px solid rgba(219, 228, 240, 0.86);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 251, 255, 0.78)),
+      linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(34, 211, 238, 0.04));
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.88) inset,
+      0 18px 44px -38px rgba(15, 23, 42, 0.42);
+  }
+
+  .reviewflow-feature-preview::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(110deg, transparent, rgba(255, 255, 255, 0.56), transparent),
+      linear-gradient(rgba(15, 23, 42, 0.025) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 34px;
+    opacity: 0.42;
+  }
+
+  .reviewflow-feature-preview > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .reviewflow-mini-dashboard,
+  .reviewflow-mini-chart,
+  .reviewflow-mini-ai-response,
+  .reviewflow-mini-kpi-tile {
+    border: 1px solid rgba(226, 232, 240, 0.82);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 251, 255, 0.74)),
+      rgba(255, 255, 255, 0.78);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.9) inset,
+      0 14px 36px -32px rgba(15, 23, 42, 0.38);
+  }
+
+  .reviewflow-mini-dashboard {
+    border-radius: 1rem;
+    padding: 0.9rem;
+  }
+
+  .reviewflow-mini-chart,
+  .reviewflow-mini-ai-response {
+    border-radius: 1rem;
+  }
+
+  .reviewflow-mini-ai-response {
+    background:
+      linear-gradient(180deg, rgba(238, 242, 255, 0.84), rgba(236, 254, 255, 0.48)),
+      rgba(255, 255, 255, 0.72);
+    padding: 0.85rem;
+  }
+
+  .reviewflow-mini-kpi-tile {
+    min-width: 0;
+    border-radius: 0.85rem;
+    padding: 0.62rem 0.7rem;
+  }
+
+  .reviewflow-preview-bar,
+  .reviewflow-login-bar {
+    transform-origin: bottom;
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-login-flow {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .reviewflow-login-panel-glow {
+    position: absolute;
+    inset: 8% 5% auto;
+    height: 18rem;
+    border-radius: 9999px;
+    background:
+      radial-gradient(circle at 30% 35%, rgba(34, 211, 238, 0.18), transparent 38%),
+      radial-gradient(circle at 72% 40%, rgba(124, 58, 237, 0.2), transparent 42%);
+    filter: blur(34px);
+    opacity: 0.74;
+    pointer-events: none;
+  }
+
+  .reviewflow-login-card,
+  .reviewflow-login-metric-card,
+  .reviewflow-login-analysis-pill,
+  .reviewflow-login-ai-card {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.078), rgba(255, 255, 255, 0.045)),
+      rgba(255, 255, 255, 0.045);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.07) inset,
+      0 20px 60px -48px rgba(0, 0, 0, 0.84);
+    backdrop-filter: blur(16px);
+  }
+
+  .reviewflow-login-card {
+    border-radius: 1.5rem;
+  }
+
+  .reviewflow-login-topbar {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .reviewflow-login-topbar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(110deg, transparent, rgba(255, 255, 255, 0.07), transparent);
+    opacity: 0.64;
+  }
+
+  .reviewflow-login-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    border-radius: 9999px;
+    background: rgba(34, 211, 238, 0.11);
+    padding: 0.38rem 0.72rem;
+    color: rgb(207, 250, 254);
+    font-size: 0.75rem;
+    font-weight: 700;
+    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.12) inset;
+  }
+
+  .reviewflow-login-notification {
+    min-width: 0;
+    border-radius: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background:
+      linear-gradient(145deg, rgba(255, 255, 255, 0.084), rgba(255, 255, 255, 0.042)),
+      rgba(255, 255, 255, 0.035);
+    padding: 0.72rem 0.82rem;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 14px 34px -30px rgba(0, 0, 0, 0.72);
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-login-notification-cyan {
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 0 0 1px rgba(34, 211, 238, 0.08) inset,
+      0 14px 34px -30px rgba(34, 211, 238, 0.54);
+  }
+
+  .reviewflow-login-notification-violet {
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 0 0 1px rgba(167, 139, 250, 0.08) inset,
+      0 14px 34px -30px rgba(124, 58, 237, 0.54);
+  }
+
+  .reviewflow-login-notification-indigo {
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 0 0 1px rgba(129, 140, 248, 0.08) inset,
+      0 14px 34px -30px rgba(79, 70, 229, 0.54);
+  }
+
+  .reviewflow-login-pulse-dot {
+    height: 0.54rem;
+    width: 0.54rem;
+    flex: 0 0 auto;
+    border-radius: 9999px;
+    background: rgb(34, 211, 238);
+    box-shadow: 0 0 0 5px rgba(34, 211, 238, 0.1);
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-login-pipeline {
+    position: relative;
+  }
+
+  .reviewflow-login-pipeline-line {
+    position: absolute;
+    left: 0.8rem;
+    right: 0.8rem;
+    top: 1.55rem;
+    height: 1px;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, rgba(34, 211, 238, 0.04), rgba(34, 211, 238, 0.34), rgba(124, 58, 237, 0.28), rgba(34, 211, 238, 0.04));
+    pointer-events: none;
+  }
+
+  .reviewflow-login-step {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+    border-radius: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background:
+      linear-gradient(145deg, rgba(255, 255, 255, 0.072), rgba(255, 255, 255, 0.036)),
+      rgba(255, 255, 255, 0.035);
+    padding: 0.65rem;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.055) inset;
+  }
+
+  .reviewflow-login-metric-card {
+    border-radius: 1.35rem;
+    padding: 1.15rem;
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-login-review-card {
+    border-radius: 1.1rem;
+    background: rgba(255, 255, 255, 0.97);
+    padding: 1rem;
+    color: rgb(15 23 42);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.86) inset,
+      0 16px 44px -34px rgba(15, 23, 42, 0.38);
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-login-analysis-pill {
+    min-width: 0;
+    border-radius: 1rem;
+    padding: 0.7rem 0.75rem;
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-login-analysis-card {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .reviewflow-login-analysis-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(110deg, transparent 12%, rgba(34, 211, 238, 0.09) 44%, transparent 64%),
+      radial-gradient(circle at 82% 20%, rgba(124, 58, 237, 0.12), transparent 34%);
+    opacity: 0.52;
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-login-analysis-card > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .reviewflow-login-ai-scan {
+    border: 1px solid rgba(34, 211, 238, 0.12);
+    background:
+      linear-gradient(135deg, rgba(34, 211, 238, 0.09), rgba(124, 58, 237, 0.07)),
+      rgba(255, 255, 255, 0.035);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.055) inset,
+      0 14px 38px -32px rgba(34, 211, 238, 0.52);
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-login-ai-card {
+    border-color: rgba(34, 211, 238, 0.2);
+    border-radius: 1.1rem;
+    background:
+      linear-gradient(135deg, rgba(34, 211, 238, 0.12), rgba(99, 102, 241, 0.11)),
+      rgba(255, 255, 255, 0.04);
+    padding: 1rem;
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-login-event {
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-login-response-cursor {
+    height: 0.48rem;
+    width: 0.48rem;
+    flex: 0 0 auto;
+    border-radius: 9999px;
+    background: rgb(34, 211, 238);
+    box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.12);
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-login-graph-card {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .reviewflow-login-graph {
+    position: relative;
+    overflow: hidden;
+    border-radius: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    background:
+      linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+      rgba(255, 255, 255, 0.026);
+    background-size: 100% 33.33%, 14.28% 100%, 100% 100%;
+    padding: 0.75rem 0.75rem 0;
+  }
+
+  .reviewflow-login-graph-cursor {
+    position: absolute;
+    bottom: 0.75rem;
+    right: 17%;
+    height: 72%;
+    width: 1px;
+    border-radius: 9999px;
+    background: linear-gradient(180deg, transparent, rgba(34, 211, 238, 0.64), transparent);
+    box-shadow: 0 0 18px rgba(34, 211, 238, 0.2);
+    pointer-events: none;
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-depth-notification,
+  .reviewflow-depth-notification-dark {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border-radius: 1.1rem;
+    padding: 0.85rem 0.95rem;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.9) inset,
+      0 14px 38px -32px rgba(15, 23, 42, 0.5);
+  }
+
+  .reviewflow-depth-notification {
+    border: 1px solid rgba(226, 232, 240, 0.86);
+    background: rgba(255, 255, 255, 0.72);
+  }
+
+  .reviewflow-depth-notification-dark {
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.055);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 14px 38px -30px rgba(0, 0, 0, 0.8);
+  }
+
+  .reviewflow-depth-tooltip {
+    position: absolute;
+    right: 1rem;
+    top: 4.25rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    border-radius: 9999px;
+    border: 1px solid rgba(199, 210, 254, 0.75);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 251, 255, 0.76)),
+      rgba(255, 255, 255, 0.78);
+    padding: 0.45rem 0.7rem;
+    color: rgb(67, 56, 202);
+    font-size: 0.75rem;
+    font-weight: 700;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.9) inset,
+      0 18px 46px -28px rgba(79, 70, 229, 0.48);
+    backdrop-filter: blur(16px);
+  }
+
+  .reviewflow-depth-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.65rem;
+    border-radius: 9999px;
+    border: 1px solid rgba(226, 232, 240, 0.82);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 251, 255, 0.7)),
+      rgba(255, 255, 255, 0.72);
+    padding: 0.25rem 0.65rem;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.82) inset,
+      0 10px 30px -26px rgba(15, 23, 42, 0.42);
+  }
+
+  .reviewflow-demo-stat {
+    min-width: 8.5rem;
+    border-radius: 1.25rem;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background:
+      linear-gradient(145deg, rgba(8, 10, 24, 0.98), rgba(30, 27, 75, 0.94) 58%, rgba(23, 37, 84, 0.9)),
+      linear-gradient(90deg, rgba(34, 211, 238, 0.08), transparent);
+    padding: 1.15rem 1.25rem;
+    color: white;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.08) inset,
+      0 18px 48px -30px rgba(15, 23, 42, 0.72);
+  }
+
+  .reviewflow-demo-bar {
+    flex: 1 1 0%;
+    border-radius: 0.9rem 0.9rem 0.25rem 0.25rem;
+    background: linear-gradient(180deg, rgb(125, 211, 252), rgb(129, 140, 248) 56%, rgb(91, 33, 182));
+    box-shadow: 0 0 18px rgba(34, 211, 238, 0.13);
+    transform-origin: bottom;
+    will-change: transform, opacity;
+  }
+
+  .reviewflow-volume-bar {
+    border-radius: 0.8rem 0.8rem 0.25rem 0.25rem;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .reviewflow-dashboard-shell {
+      animation: reviewflow-stage-breathe 12s ease-in-out infinite;
+    }
+
+    .reviewflow-dashboard-screen::before {
+      animation: reviewflow-light-scan 10s ease-in-out infinite;
+    }
+
+    .reviewflow-float-card-left {
+      animation: reviewflow-float-one 9s ease-in-out infinite;
+    }
+
+    .reviewflow-float-card-right {
+      animation: reviewflow-float-two 10s ease-in-out infinite;
+    }
+
+    .reviewflow-live-dot {
+      animation: reviewflow-live-pulse 2.6s ease-in-out infinite;
+    }
+
+    .reviewflow-line-column,
+    .reviewflow-volume-bar {
+      animation: reviewflow-bar-breathe 4.8s ease-in-out infinite;
+    }
+
+    .reviewflow-depth-tooltip {
+      animation: reviewflow-tooltip-breathe 5.4s ease-in-out infinite;
+    }
+
+    .reviewflow-demo-transition {
+      animation: reviewflow-panel-enter 360ms ease-out both;
+    }
+
+    .reviewflow-kpi-shift,
+    .reviewflow-demo-chip,
+    .reviewflow-demo-title,
+    .reviewflow-demo-copy,
+    .reviewflow-demo-mini-kpi,
+    .reviewflow-demo-row {
+      animation: reviewflow-kpi-enter 320ms ease-out both;
+      animation-delay: var(--demo-delay, 0ms);
+    }
+
+    .reviewflow-demo-dashboard .reviewflow-depth-card {
+      animation:
+        reviewflow-card-enter 420ms ease-out both,
+        reviewflow-card-drift 8s ease-in-out infinite;
+      animation-delay:
+        var(--demo-delay, 0ms),
+        calc(520ms + var(--demo-delay, 0ms));
+    }
+
+    .reviewflow-demo-bar {
+      animation:
+        reviewflow-demo-bar-grow 440ms ease-out both,
+        reviewflow-bar-breathe 5.2s ease-in-out infinite;
+      animation-delay:
+        var(--demo-delay, 0ms),
+        calc(540ms + var(--demo-delay, 0ms));
+    }
+
+    .reviewflow-feature-preview::before {
+      animation: reviewflow-light-scan 9s ease-in-out infinite;
+    }
+
+    .reviewflow-preview-bar,
+    .reviewflow-login-bar {
+      animation: reviewflow-bar-breathe 4.8s ease-in-out infinite;
+    }
+
+    .reviewflow-login-event {
+      animation: reviewflow-event-cycle 8s ease-out infinite both;
+    }
+
+    .reviewflow-login-topbar::after,
+    .reviewflow-login-analysis-card::before {
+      animation: reviewflow-light-scan 9s ease-in-out infinite;
+    }
+
+    .reviewflow-login-notification {
+      animation:
+        reviewflow-login-notification-enter 520ms ease-out both,
+        reviewflow-login-notification-drift 7s ease-in-out infinite;
+      animation-delay:
+        var(--login-delay, 0ms),
+        calc(600ms + var(--login-delay, 0ms));
+    }
+
+    .reviewflow-login-pulse-dot,
+    .reviewflow-login-response-cursor {
+      animation: reviewflow-live-pulse 2.8s ease-in-out infinite;
+    }
+
+    .reviewflow-login-ai-scan {
+      animation: reviewflow-kpi-enter 420ms ease-out both;
+      animation-delay: 160ms;
+    }
+
+    .reviewflow-login-graph-cursor {
+      animation: reviewflow-login-graph-cursor 6s ease-in-out infinite;
+    }
+
+    .reviewflow-login-metric-card,
+    .reviewflow-login-review-card,
+    .reviewflow-login-analysis-pill,
+    .reviewflow-login-ai-card {
+      animation: reviewflow-kpi-enter 360ms ease-out both;
+    }
+
+    .reviewflow-login-analysis-pill:nth-child(2) {
+      animation-delay: 90ms;
+    }
+
+    .reviewflow-login-analysis-pill:nth-child(3) {
+      animation-delay: 180ms;
+    }
+  }
+
+  @media (max-width: 1023px) {
+    .reviewflow-dashboard-shell {
+      transform: none;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .reviewflow-dashboard-shell,
+    .reviewflow-dashboard-screen::before,
+    .reviewflow-live-dot,
+    .reviewflow-line-column,
+    .reviewflow-volume-bar,
+    .reviewflow-demo-bar,
+    .reviewflow-depth-tooltip,
+    .reviewflow-demo-transition,
+    .reviewflow-kpi-shift,
+    .reviewflow-demo-chip,
+    .reviewflow-demo-title,
+    .reviewflow-demo-copy,
+    .reviewflow-demo-mini-kpi,
+    .reviewflow-demo-row,
+    .reviewflow-depth-card,
+    .reviewflow-feature-preview::before,
+    .reviewflow-preview-bar,
+    .reviewflow-login-bar,
+    .reviewflow-login-event,
+    .reviewflow-login-topbar::after,
+    .reviewflow-login-analysis-card::before,
+    .reviewflow-login-notification,
+    .reviewflow-login-pulse-dot,
+    .reviewflow-login-response-cursor,
+    .reviewflow-login-ai-scan,
+    .reviewflow-login-graph-cursor,
+    .reviewflow-login-metric-card,
+    .reviewflow-login-review-card,
+    .reviewflow-login-analysis-pill,
+    .reviewflow-login-ai-card {
+      animation: none !important;
+      will-change: auto;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reviewflow-dashboard-shell,
+    .reviewflow-dashboard-screen::before,
+    .reviewflow-float-card,
+    .reviewflow-live-dot,
+    .reviewflow-line-column,
+    .reviewflow-volume-bar,
+    .reviewflow-demo-bar,
+    .reviewflow-depth-tooltip,
+    .reviewflow-demo-transition,
+    .reviewflow-kpi-shift,
+    .reviewflow-demo-chip,
+    .reviewflow-demo-title,
+    .reviewflow-demo-copy,
+    .reviewflow-demo-mini-kpi,
+    .reviewflow-demo-row,
+    .reviewflow-depth-card,
+    .reviewflow-feature-preview::before,
+    .reviewflow-preview-bar,
+    .reviewflow-login-bar,
+    .reviewflow-login-event,
+    .reviewflow-login-topbar::after,
+    .reviewflow-login-analysis-card::before,
+    .reviewflow-login-notification,
+    .reviewflow-login-pulse-dot,
+    .reviewflow-login-response-cursor,
+    .reviewflow-login-ai-scan,
+    .reviewflow-login-graph-cursor,
+    .reviewflow-login-metric-card,
+    .reviewflow-login-review-card,
+    .reviewflow-login-analysis-pill,
+    .reviewflow-login-ai-card {
+      animation: none !important;
+    }
+  }
+}
+
+@keyframes reviewflow-stage-breathe {
+  0%,
+  100% {
+    transform: rotateX(1.5deg) rotateY(-2deg) translateY(0);
+  }
+  50% {
+    transform: rotateX(1.2deg) rotateY(-1.2deg) translateY(-6px);
+  }
+}
+
+@keyframes reviewflow-light-scan {
+  0%,
+  100% {
+    opacity: 0.42;
+    transform: translateX(-8%);
+  }
+  50% {
+    opacity: 0.68;
+    transform: translateX(8%);
+  }
+}
+
+@keyframes reviewflow-float-one {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 28px);
+  }
+  50% {
+    transform: translate3d(8px, -10px, 28px);
+  }
+}
+
+@keyframes reviewflow-float-two {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 34px);
+  }
+  50% {
+    transform: translate3d(-7px, 9px, 34px);
+  }
+}
+
+@keyframes reviewflow-live-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.72;
+  }
+}
+
+@keyframes reviewflow-bar-breathe {
+  0%,
+  100% {
+    transform: scaleY(0.96);
+    opacity: 0.92;
+  }
+  50% {
+    transform: scaleY(1.04);
+    opacity: 1;
+  }
+}
+
+@keyframes reviewflow-panel-enter {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0) scale(0.992);
+  }
+  58% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes reviewflow-kpi-enter {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.986);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes reviewflow-card-enter {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes reviewflow-demo-bar-grow {
+  0% {
+    opacity: 0.45;
+    transform: scaleY(0.34);
+  }
+  100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes reviewflow-card-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -3px, 0);
+  }
+}
+
+@keyframes reviewflow-event-cycle {
+  0%,
+  18% {
+    opacity: 0.68;
+    transform: translate3d(0, 3px, 0);
+  }
+  32%,
+  72% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    opacity: 0.72;
+    transform: translate3d(0, -2px, 0);
+  }
+}
+
+@keyframes reviewflow-tooltip-breathe {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.92;
+  }
+  50% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@keyframes reviewflow-login-notification-enter {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.988);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes reviewflow-login-notification-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.9;
+  }
+  50% {
+    transform: translate3d(0, -2px, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes reviewflow-login-graph-cursor {
+  0%,
+  100% {
+    transform: translate3d(-14px, 0, 0);
+    opacity: 0.42;
+  }
+  50% {
+    transform: translate3d(14px, 0, 0);
+    opacity: 0.9;
+  }
+}
+
 .premium-login-input {
-  height: 3rem;
+  height: 3.25rem;
   width: 100%;
   border-radius: 1rem;
-  border: 1px solid rgb(226 232 240);
-  background: #fff;
-  padding: 0 1rem;
+  border: 1px solid rgb(203 213 225);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 0 1.1rem;
   font-size: 0.875rem;
   color: rgb(15 23 42);
-  transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease;
 }
 
 .premium-login-input::placeholder {
