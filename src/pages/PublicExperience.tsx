@@ -1114,7 +1114,7 @@ const MarketingLandingPage = () => {
 
       <main>
         <section id="produit" className="premium-grid-background relative overflow-hidden border-b border-slate-200/70">
-          <div className="mx-auto grid max-w-7xl gap-14 px-4 py-[4.75rem] sm:gap-16 sm:px-6 sm:py-24 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)] lg:gap-16 lg:px-8 lg:py-28 xl:gap-20 xl:py-32">
+          <div className="mx-auto grid max-w-7xl gap-16 px-4 py-24 sm:gap-20 sm:px-6 sm:py-28 lg:min-h-[calc(100vh-4.5rem)] lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)] lg:items-center lg:gap-16 lg:px-8 lg:py-32 xl:min-h-[52rem] xl:gap-20 xl:py-36">
             <div className="flex min-w-0 flex-col justify-center">
               <div className="premium-eyebrow">
                 <Sparkles size={14} />

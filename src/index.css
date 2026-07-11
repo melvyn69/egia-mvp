@@ -87,7 +87,7 @@
   }
 
   .editorial-hero-title {
-    font-size: 3.45rem;
+    font-size: 3.75rem;
     font-weight: 600;
     line-height: 0.9;
   }
@@ -107,7 +107,7 @@
 
   @media (min-width: 640px) {
     .editorial-hero-title {
-      font-size: 4.7rem;
+      font-size: 5.1rem;
     }
 
     .editorial-section-title {
@@ -117,7 +117,7 @@
 
   @media (min-width: 1024px) {
     .editorial-hero-title {
-      font-size: 5.15rem;
+      font-size: 5.6rem;
     }
 
     .editorial-section-title {
@@ -127,7 +127,7 @@
 
   @media (min-width: 1280px) {
     .editorial-hero-title {
-      font-size: 5.55rem;
+      font-size: 6rem;
     }
   }
 
