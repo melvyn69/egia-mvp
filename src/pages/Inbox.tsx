@@ -1290,8 +1290,9 @@ const Inbox = () => {
       };
     },
     enabled: Boolean(supabase) && Boolean(sessionUserId) && Boolean(activeLocationId),
-    staleTime: 15000,
-    refetchInterval: 30000
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false
   });
 
   const aiStatusDisplay = useMemo(() => {

@@ -308,18 +308,22 @@ const SystemHealth = ({ session }: SystemHealthProps) => {
       .from("google_locations")
       .select("id, location_title, location_resource_name, last_synced_at")
       .eq("user_id", userId)
-      .order("location_title", { ascending: true });
+      .order("location_title", { ascending: true })
+      .limit(50);
 
     const { data: jobs } = await supabaseClient
       .from("job_queue")
       .select("status, last_error, updated_at")
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .limit(100);
 
     const { data: cronRows, error: cronError } = await supabaseClient
       .from("cron_state")
       .select("key, value, updated_at")
       .like("key", `ai_status_v1:${userId}:%`)
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .limit(50);
 
     const dynamicSupabaseClient = supabaseClient as unknown as {
       from: (table: string) => {
@@ -389,8 +393,6 @@ const SystemHealth = ({ session }: SystemHealthProps) => {
 
   useEffect(() => {
     void load();
-    const timer = window.setInterval(load, 30_000);
-    return () => window.clearInterval(timer);
   }, [load, refreshTick]);
 
   const locationLabelById = useMemo(() => {
