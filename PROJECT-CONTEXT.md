@@ -149,7 +149,7 @@ Ces limites appliquent ANES Founder Edition ; elles ne prétendent pas décrire 
 
 ## Goals actifs
 
-- `goals/active/GOAL-001-egia-readiness-audit.md` — `Draft` : établir l'état réel de préparation d'EGIA par un audit strictement en lecture seule.
+- `goals/active/GOAL-001-egia-readiness-audit.md` — `Ready` : établir l'état réel de préparation d'EGIA par un audit strictement en lecture seule ; audit non lancé.
 
 ## Historique Git
 
