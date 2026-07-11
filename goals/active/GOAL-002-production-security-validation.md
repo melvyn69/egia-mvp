@@ -3,7 +3,7 @@
 ## Métadonnées
 
 - **ID :** `GOAL-002`
-- **Statut :** `Ready`
+- **Statut :** `Blocked`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-11`
 - **Date de clôture :** `N/A`
@@ -23,7 +23,7 @@ Le rapport classe les constats en P0/P1/P2, contient une matrice complète `crit
 
 Le rapport de `GOAL-001` conclut que le code versionné comporte des garde-fous observables mais ne démontre pas l’état distant de Supabase, RLS/grants, Edge Functions, Vercel, Auth, crons ni des intégrations. Il relève notamment des fonctions Edge avec `verify_jwt = false` et/ou CORS permissif dans le dépôt, ainsi que des chemins parallèles Edge Functions et routes Vercel. Ces constats justifient une validation dédiée ; ils ne démontrent pas, à eux seuls, une vulnérabilité déployée.
 
-L’environnement inclus est **production**. Le Goal est `Ready`, mais aucun Run n’est lancé, aucun accès distant n’est effectué et aucun rapport n’est produit. Le premier Run réel effectue l’audit distant passif R2 autorisé, produit le rapport et soumet le Goal à `Review` ; il n’appelle aucun endpoint de production, n’exécute aucun test inter-tenant actif, ne modifie aucun environnement et ne modifie dans le dépôt que les artefacts documentaires explicitement autorisés.
+L’environnement inclus est **production**. Le Run 1 d’audit distant passif R2 a été exécuté puis interrompu dès la confirmation passive d’un P0 sur une fonction `SECURITY DEFINER` publiquement exécutable. Un rapport partiel est produit ; le verdict provisoire obligatoire est `non sûr`. Le Goal est `Blocked` jusqu’à correction du P0 puis vérification indépendante. Aucun endpoint de production n’a été appelé, aucun test inter-tenant actif n’a été exécuté, aucun environnement n’a été modifié et seuls les artefacts documentaires autorisés sont modifiés dans le dépôt.
 
 ## Sources de vérité
 
@@ -54,7 +54,7 @@ Une capture, une console, un log ou une configuration distante ne peut établir 
 - Examiner la configuration et le déploiement des Edge Functions : inventaire, version/déploiement, `verify_jwt`, secrets par **nom seulement**, méthodes, contrôles internes, CORS et réponses d’erreur.
 - Examiner les routes Vercel publiques/protégées, les réécritures, les déploiements concernés, la protection des routes cron, les variables d’environnement par nom et les écarts entre code versionné et configuration déployée.
 - Examiner, par règles de redaction, schémas, échantillons de métadonnées et recherche de signatures sensibles autorisés, les journaux susceptibles d’exposer des données, sans exporter de messages bruts ni de contenu utilisateur.
-- Le Run autorisé produit `audits/GOAL-002-production-security-validation.md` et ses Evidence redigées, puis soumet le Goal à `Review`.
+- Le Run 1 a produit `audits/GOAL-002-production-security-validation.md` et ses Evidence redigées, puis a été arrêté par condition d’arrêt P0 ; il ne passe pas à `Review`.
 
 ## Hors-scope
 
@@ -106,7 +106,7 @@ Une capture, une console, un log ou une configuration distante ne peut établir 
 | Deux comptes et deux tenants de test non sensibles | absente, non bloquante pour l’audit passif | VAL-04/EV-04 sont obligatoirement `non concluant — limite de vérification`; aucun substitut sur données réelles. |
 | Appels HTTP actifs vers endpoints de production | explicitement interdits au premier Run | Les validations HTTP actives sont exclues ; la revue reste passive. |
 | Méthode de collecte d’Evidence redigées et emplacement du rapport `audits/GOAL-002-production-security-validation.md` | satisfaite | Le Run autorisé produit le rapport sans valeur secrète ni donnée sensible. |
-| Revue indépendante Work et autorité de verdict du fondateur | requise pour `Done`, non bloquante pour l’audit | Le rapport produit est soumis à `Review` jusqu’au verdict applicable. |
+| Revue indépendante Work et autorité de verdict du fondateur | requise pour `Done`, non bloquante pour l’audit | Le Run a été arrêté par le P0 et le Goal reste `Blocked` ; aucune soumission à `Review` n’a eu lieu. |
 
 ## Décisions fondatrices requises avant `Draft → Ready`
 
@@ -229,6 +229,8 @@ Le Goal est `Done` seulement lorsque :
 | --- | --- | --- | --- |
 | `2026-07-11` | N/A → `Draft` | Codex | Création puis révision du contrat ; aucun Run, audit, accès distant, lecture de secret ou modification d’environnement n’est lancé. |
 | `2026-07-11` | `Draft` → `Ready` | Fondateur (Melvyn) | Readiness Check validé ; audit distant passif R2 autorisable dans un Run ultérieur. |
+| `2026-07-11` | `Ready` → `Running` | Fondateur (Melvyn) | Run 1 d’audit distant passif R2 autorisé. |
+| `2026-07-11` | `Running` → `Blocked` | Work | P0 confirmé sur une fonction SECURITY DEFINER publiquement exécutable ; Run arrêté conformément aux conditions d’arrêt. |
 
 ## Readiness Check
 
@@ -242,12 +244,12 @@ Le Goal est `Done` seulement lorsque :
 | Critères, validations et Evidence | oui | AC-01 à AC-11, VAL-01 à VAL-11 et EV-01 à EV-11 sont reliés. |
 | Conditions d’arrêt et Done | oui | Conditions et autorités de revue/clôture explicites. |
 
-**Résultat : Readiness Check validé.** Le Goal est `Ready` ; aucun Run n’est encore lancé, aucun accès distant n’est effectué et aucun rapport n’est produit. Le premier Run autorisé devra rester passif, produire le rapport prévu puis soumettre le Goal à `Review`.
+**Résultat : Readiness Check validé.** Le Run 1 autorisé a été exécuté passivement puis arrêté conformément à la condition d’arrêt P0. Le Goal est `Blocked` ; aucune transition vers `Review` n’a eu lieu.
 
 ## Livraison et clôture
 
-- **Artifacts livrés :** `N/A` — le Goal est `Ready`, mais aucun Run, audit ni rapport de sécurité n’est encore produit.
-- **Matrice réelle critère → validation → Evidence :** à compléter exclusivement dans le rapport d’audit autorisé.
-- **Risques résiduels :** état distant, isolation inter-tenant, RLS/grants, Edge/Vercel, Auth, crons, secrets et logs non vérifiés.
-- **Verdict de revue :** en attente.
-- **Décision de clôture :** en attente d’un Run autorisé, de la revue Work et du verdict du fondateur.
+- **Artifacts livrés :** audit partiel et rapport partiel : `audits/GOAL-002-production-security-validation.md`.
+- **Matrice réelle critère → validation → Evidence :** partielle, consignée dans le rapport ; le Run a été interrompu à la confirmation du P0.
+- **Risques résiduels :** P0 non corrigé sur une voie privilégiée publiquement exécutable, ainsi que les contrôles non conclus par interruption : isolation inter-tenant, RLS/grants, Edge/Vercel, Auth, crons, secrets et logs.
+- **Verdict provisoire obligatoire :** `non sûr`.
+- **Décision de clôture :** Goal `Blocked` jusqu’à correction du P0 et vérification indépendante ; date de clôture : `N/A`.
