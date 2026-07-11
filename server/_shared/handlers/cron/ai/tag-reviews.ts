@@ -82,6 +82,7 @@ type DynamicSupabaseClient = {
 };
 
 const CURSOR_KEY = "ai_tag_cursor_v2";
+const AI_TAG_VERSION = process.env.AI_TAG_VERSION || "v1";
 
 const getEnv = (keys: string[]) => {
   for (const key of keys) {
@@ -484,7 +485,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId = getRequestId(req);
   const start = Date.now();
   const MAX_MS = Number(process.env.CRON_MAX_MS ?? 24000);
-  const MAX_REVIEWS = Number(process.env.CRON_MAX_REVIEWS ?? 40);
+  const configuredMaxReviews = Number(process.env.CRON_MAX_REVIEWS ?? 10);
+  const MAX_REVIEWS = Math.min(
+    20,
+    Math.max(1, Number.isFinite(configuredMaxReviews) ? configuredMaxReviews : 10)
+  );
   const isProd = process.env.NODE_ENV === "production";
   const logInfo = (...args: unknown[]) => {
     if (!isProd) {
@@ -662,7 +667,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const limitParam = req.query?.limit;
     const limitValue = Array.isArray(limitParam) ? limitParam[0] : limitParam;
     const parsedLimit = Number(limitValue);
-    runLimit = Number.isFinite(parsedLimit) ? Math.max(1, Math.floor(parsedLimit)) : 0;
+    runLimit = Number.isFinite(parsedLimit)
+      ? Math.min(20, Math.max(1, Math.floor(parsedLimit)))
+      : 0;
     const forceParam = req.query?.force;
     force =
       forceParam === "1" || (Array.isArray(forceParam) && forceParam[0] === "1");
@@ -712,7 +719,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: staleStatusRowsRaw } = await dynamicCronTable
       .select("key, user_id, value")
       .like("key", "ai_status_v1:%")
-      .lt("updated_at", staleCutoff);
+      .lt("updated_at", staleCutoff)
+      .limit(50);
     const staleStatusRows = (staleStatusRowsRaw ?? []) as Array<{
       key?: string | null;
       user_id?: string | null;
@@ -737,7 +745,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: staleLocksRaw } = await dynamicCronTable
       .select("key, user_id")
       .like("key", "lock_ai_tag_v1:%")
-      .lt("updated_at", staleCutoff);
+      .lt("updated_at", staleCutoff)
+      .limit(50);
     const staleLocks = (staleLocksRaw ?? []) as Array<{
       key?: string | null;
       user_id?: string | null;
@@ -750,6 +759,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     logInfo("[ai-tag]", requestId, "cursor", cursor);
 
+    if (debugEnabled) {
     let totalWithTextQuery = supabaseAdmin
       .from("google_reviews")
       .select("id", { count: "exact", head: true })
@@ -772,7 +782,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const totalWithTextGlobal = backlogBaseResult.count ?? 0;
     const { data: backlogInsightRows } = await supabaseAdmin
       .from("review_ai_insights")
-      .select("review_pk, error, processed_at");
+      .select("review_pk, error, processed_at")
+      .order("processed_at", { ascending: false, nullsFirst: false })
+      .limit(20);
     const insightOk = new Set<string>();
     const insightMissingOrFailed = new Set<string>();
     (backlogInsightRows ?? []).forEach((row) => {
@@ -795,7 +807,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .not("comment", "is", null)
       .neq("comment", "")
       .not("location_id", "is", null)
-      .limit(2000);
+      .limit(20);
     if (targetLocationId) {
       textLocationsQuery = textLocationsQuery.eq("location_id", targetLocationId);
     }
@@ -805,6 +817,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         locationUserMap.set(String(row.location_id), String(row.user_id));
       }
     });
+    }
 
     const lastSourceTime = force
       ? "1970-01-01T00:00:00.000Z"
@@ -814,12 +827,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : cursor.last_review_pk ?? "00000000-0000-0000-0000-000000000000";
     const jobsTable = dynamicSupabase.from("ai_jobs");
     const loadCandidates = async () => {
-      const queueBatch = runLimit > 0 ? runLimit : 20;
-      const { data: pendingJobs, error: pendingError } = await jobsTable
-        .select("id, payload, created_at")
-        .eq("status", "pending")
-        .order("created_at", { ascending: true })
-        .limit(queueBatch);
+      const queueBatch = Math.min(20, runLimit > 0 ? runLimit : 10);
+      const { data: pendingJobs, error: pendingError } = await dynamicSupabase.rpc(
+        "claim_review_analyze_jobs",
+        { p_limit: queueBatch, p_user_id: null, p_location_id: targetLocationId }
+      );
       if (pendingError) {
         console.error("[ai-tag]", requestId, "ai_jobs pending query failed", pendingError);
       }
@@ -843,15 +855,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           limit: queueBatch
         };
 
-        const jobIds = (pendingJobs ?? []).map((job: { id: string }) => job.id);
-        await jobsTable
-          .update({
-            status: "processing",
-            started_at: new Date().toISOString()
-          })
-          .in("id", jobIds)
-          .eq("status", "pending");
-
         let queueQuery = supabaseAdmin
           .from("google_reviews")
           .select(
@@ -864,7 +867,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .not("user_id", "is", null)
           .order("update_time", { ascending: false, nullsFirst: false })
           .order("create_time", { ascending: false, nullsFirst: false })
-          .order("created_at", { ascending: false, nullsFirst: false });
+          .order("created_at", { ascending: false, nullsFirst: false })
+          .limit(queueBatch);
         if (targetLocationId) {
           queueQuery = queueQuery.eq("location_id", targetLocationId);
         }
@@ -916,7 +920,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .from("review_ai_insights")
           .select("review_pk, error, processed_at")
           .or("error.not.is.null,processed_at.is.null")
-          .limit(runLimit > 0 ? runLimit : 50);
+          .limit(runLimit > 0 ? runLimit : 20);
         const { data: retryRows, error: retryError } = await retryQuery;
         if (retryError) {
           console.error("[ai-tag]", requestId, "retry query failed", retryError);
@@ -958,9 +962,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         };
       }
 
+      if (runMode === "backlog" || runMode === "queue") {
+        const { data: claimedRows, error: claimError } = await dynamicSupabase.rpc(
+          "claim_ai_tag_candidates",
+          {
+            p_limit: MAX_REVIEWS,
+            p_version: AI_TAG_VERSION,
+            p_location_id: targetLocationId
+          }
+        );
+        return {
+          rows: (claimedRows ?? []) as Array<Record<string, unknown>>,
+          error: claimError,
+          queueJobs: [] as Array<Record<string, unknown>>
+        };
+      }
+
       const target = MAX_REVIEWS;
-      const pageSize = 250;
-      const maxPages = 10;
+      const pageSize = 20;
+      const maxPages = 1;
       const collected: Array<{
         id: string;
         review_id: string | null;
@@ -1130,7 +1150,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select("id, location_id, comment, review_id")
         .in("location_id", locationIds)
         .not("comment", "is", null)
-        .neq("comment", "");
+        .neq("comment", "")
+        .limit(20);
       if (targetLocationId) {
         textRowsQuery = textRowsQuery.eq("location_id", targetLocationId);
       }
@@ -1537,6 +1558,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           );
         }
         await markJobDone(reviewPk);
+        await dynamicSupabase
+          .from("google_reviews")
+          .update({
+            ai_tag_status: "done",
+            ai_tag_version: AI_TAG_VERSION,
+            ai_tagged_at: nowIso,
+            ai_tag_claimed_at: null
+          })
+          .eq("id", reviewPk);
         await saveCursor({
           last_source_time: effectiveUpdateTime,
           last_review_pk: reviewPk
@@ -1562,6 +1592,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           lastErrorByLocation.set(reviewLocationId, message);
         }
         await markJobError(reviewPk, message);
+        await dynamicSupabase
+          .from("google_reviews")
+          .update({ ai_tag_status: "error", ai_tag_claimed_at: null })
+          .eq("id", reviewPk);
         await saveCursor({
           last_source_time: effectiveUpdateTime ?? lastSourceTime,
           last_review_pk: reviewPk
@@ -1722,9 +1756,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       };
     }
 
+    const durationMs = Date.now() - start;
+    let approxBytes = 0;
+    for (const row of candidateRows) {
+      approxBytes += String(row.comment ?? "").length;
+    }
+    console.info("[ai-tag] run", {
+      requestId,
+      route: "/api/cron/ai/tag-reviews",
+      candidates: candidatesFound,
+      claimed: candidatesFound,
+      processed: reviewsProcessed,
+      inserted: 0,
+      updated: tagsUpserted,
+      skipped: Math.max(0, candidatesFound - reviewsProcessed),
+      failed: errors.length,
+      rowsRead: candidatesFound,
+      approxBytes,
+      durationMs
+    });
     return res.status(200).json({
       ok: true,
       requestId,
+      processed: reviewsProcessed,
+      reason: reviewsProcessed === 0 ? "no_candidates" : undefined,
+      durationMs,
       aborted,
       skipReason,
       debug,

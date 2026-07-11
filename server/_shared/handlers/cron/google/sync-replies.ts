@@ -9,11 +9,6 @@ import {
   logRequest
 } from "../../../api_utils.js";
 import { withRetry } from "../../../utils/withRetry.js";
-import {
-  clearGoogleReauthRequired,
-  isAuthReauthRequiredError,
-  setGoogleReauthRequired
-} from "../../../utils/googleAuthState.js";
 
 type GoogleReview = {
   reviewId?: string;
@@ -34,6 +29,11 @@ type GoogleReview = {
 type GoogleReviewUpsert =
   Database["public"]["Tables"]["google_reviews"]["Insert"];
 type JobQueueRow = Database["public"]["Tables"]["job_queue"]["Row"];
+type ClaimedGoogleConnection = {
+  user_id: string;
+  refresh_token: string;
+  sync_cursor: string | null;
+};
 
 const CURSOR_KEY = "google_sync_replies_cursor_v1";
 const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000;
@@ -235,7 +235,8 @@ const updateJob = async (
 };
 
 const processJobQueue = async (requestId?: string) => {
-  const maxJobs = Number(process.env.JOB_QUEUE_MAX ?? 50);
+  const configuredMax = Number(process.env.JOB_QUEUE_MAX ?? 25);
+  const maxJobs = Math.min(50, Math.max(1, Number.isFinite(configuredMax) ? configuredMax : 25));
   const jobs = await claimJobs(maxJobs, requestId);
   if (jobs.length === 0) {
     return { processed: 0, failed: 0, skipped: 0 };
@@ -249,7 +250,8 @@ const processJobQueue = async (requestId?: string) => {
         .from("job_queue")
         .select("id, user_id")
         .eq("status", "running")
-        .in("user_id", userIds),
+        .in("user_id", userIds)
+        .limit(100),
     {
       requestId,
       label: "job_queue.load_running"
@@ -396,12 +398,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let processedUsers = 0;
   let processedLocations = 0;
   let processedReviews = 0;
+  let reviewsUpdated = 0;
   let repliesUpserted = 0;
-  const isProd = process.env.NODE_ENV === "production";
-
   try {
+    const configuredConnectionBatch = Number(process.env.GOOGLE_SYNC_CONNECTION_BATCH ?? 5);
+    const connectionBatch = Math.min(
+      10,
+      Math.max(1, Number.isFinite(configuredConnectionBatch) ? configuredConnectionBatch : 5)
+    );
+    const claimConnections = supabaseAdmin.rpc as unknown as (
+      fn: string,
+      params: { p_limit: number }
+    ) => PromiseLike<{
+      data: ClaimedGoogleConnection[] | null;
+      error: { message: string } | null;
+    }>;
     const { data: connections, error: connectionsError } = await withSupabaseRetry(
-      () => supabaseAdmin.from("google_connections").select("user_id, refresh_token"),
+      () => claimConnections("claim_google_sync_connections", { p_limit: connectionBatch }),
       {
         requestId,
         label: "google_connections.load_for_cron"
@@ -425,64 +438,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     });
 
-    for (const userId of refreshTokenByUser.keys()) {
-      try {
-        const result = await syncGoogleReviewsForUser(
-          supabaseAdmin,
-          userId,
-          null,
-          requestId
-        );
-        if (result.locationsCount > 0) {
-          await clearGoogleReauthRequired(supabaseAdmin, {
-            userId,
-            requestId,
-            source: "sync_success"
-          });
-        }
-        if (!isProd) {
-          console.log("[sync] reviews synced", {
-            requestId,
-            userId,
-            locations: result.locationsCount,
-            reviews: result.reviewsCount
-          });
-        } else {
-          console.log("[sync] reviews synced", { userId });
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown error";
-        if (message.startsWith("reauth_required")) {
-          const reason =
-            message.includes("missing_refresh_token")
-              ? "missing_refresh_token"
-              : message.includes("token_revoked")
-                ? "token_revoked"
-                : "unknown";
-          if (
-            !isAuthReauthRequiredError({
-              status: null,
-              reason,
-              message
-            })
-          ) {
-            console.warn("[sync] reauth marker ignored (non-auth)", {
-              requestId,
-              userId,
-              message
-            });
-            continue;
-          }
-          await setGoogleReauthRequired(supabaseAdmin, {
-            userId,
-            reason,
-            message: "reconnexion_google_requise",
-            requestId
-          });
-          continue;
-        }
-        console.warn("[sync] reviews sync failed", { userId, message });
-      }
+    if (refreshTokenByUser.size === 0) {
+      const durationMs = Date.now() - start;
+      console.info("[sync] run", {
+        requestId,
+        route: CRON_SYNC_REPLIES_PATH,
+        candidates: 0,
+        claimed: 0,
+        processed: jobStats.processed,
+        inserted: 0,
+        updated: 0,
+        skipped: jobStats.skipped,
+        failed: jobStats.failed,
+        rowsRead: 0,
+        durationMs
+      });
+      return res.status(200).json({
+        ok: true,
+        requestId,
+        processed: 0,
+        reason: "no_candidates",
+        jobs: jobStats,
+        durationMs
+      });
     }
 
     const cursor = await loadCursor(requestId);
@@ -493,8 +471,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .select(
             "id, user_id, account_resource_name, location_resource_name, location_title"
           )
+          .in("user_id", Array.from(refreshTokenByUser.keys()))
           .order("id", { ascending: true })
-          .limit(1000),
+          .limit(25),
       {
         requestId,
         label: "google_locations.load_for_cron"
@@ -528,6 +507,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         supabaseAdmin
           .from("google_reviews")
           .select("location_id, update_time, status")
+          .in("user_id", Array.from(refreshTokenByUser.keys()))
           .or("status.is.null,status.neq.replied")
           .gte("update_time", recentSince)
           .order("update_time", { ascending: false })
@@ -592,6 +572,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             parent,
             pageToken ?? undefined
           );
+          const pageReviewNames = page.reviews
+            .map((review) => {
+              const name = review.name?.trim();
+              const id = review.reviewId?.trim();
+              if (name) return name;
+              if (!id) return null;
+              return id.includes("/reviews/")
+                ? id
+                : `${location.location_resource_name}/reviews/${id}`;
+            })
+            .filter((value): value is string => Boolean(value));
+          const existingByName = new Map<string, { last_synced_at: string | null; status: string | null }>();
+          if (pageReviewNames.length > 0) {
+            const { data: existingRows } = await withSupabaseRetry(
+              () => supabaseAdmin
+                .from("google_reviews")
+                .select("review_name, last_synced_at, status")
+                .eq("user_id", location.user_id)
+                .in("review_name", pageReviewNames)
+                .limit(50),
+              { requestId, label: "google_reviews.load_existing_page" }
+            );
+            for (const row of existingRows ?? []) {
+              if (row.review_name) existingByName.set(row.review_name, row);
+            }
+          }
           for (const review of page.reviews) {
             if (timeUp()) {
               break;
@@ -626,20 +632,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const nowIso = new Date().toISOString();
             const reviewUpdateTime = review.updateTime ?? null;
 
-            const { data: existingReview } = await withSupabaseRetry(
-              () =>
-                supabaseAdmin
-                  .from("google_reviews")
-                  .select("last_synced_at, status")
-                  .eq("user_id", location.user_id)
-                  .eq("location_id", location.location_resource_name)
-                  .eq("review_name", normalizedReviewName)
-                  .maybeSingle(),
-              {
-                requestId,
-                label: "google_reviews.load_existing_for_reply"
-              }
-            );
+            const existingReview = existingByName.get(normalizedReviewName);
 
             if (
               existingReview?.last_synced_at &&
@@ -700,6 +693,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               );
               continue;
             }
+            reviewsUpdated += 1;
             if (replyComment) {
               const reviewKey = String(upserted.id);
               const { data: existingSent } = await withSupabaseRetry(
@@ -814,7 +808,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     cursor.errors_count = errors.length;
     await saveCursor(cursor, requestId);
 
+    const nextSyncAt = new Date(
+      Date.now() + (reviewsUpdated === 0 ? 6 : 1) * 60 * 60 * 1000
+    ).toISOString();
+    const connectionsTable = supabaseAdmin.from("google_connections") as unknown as {
+      update: (values: Record<string, unknown>) => {
+        in: (column: string, values: string[]) => PromiseLike<unknown>;
+      };
+    };
+    await connectionsTable
+      .update({
+        sync_status: "idle",
+        sync_claimed_at: null,
+        last_synced_at: new Date().toISOString(),
+        next_sync_at: nextSyncAt,
+        updated_at: new Date().toISOString()
+      })
+      .in("user_id", Array.from(refreshTokenByUser.keys()));
+
     const aborted = timeUp();
+    const durationMs = Date.now() - start;
+    console.info("[sync] run", {
+      requestId,
+      route: CRON_SYNC_REPLIES_PATH,
+      candidates: connections?.length ?? 0,
+      claimed: refreshTokenByUser.size,
+      processed: processedReviews,
+      inserted: 0,
+      updated: reviewsUpdated + repliesUpserted,
+      skipped: 0,
+      failed: errors.length,
+      rowsRead: (locations?.length ?? 0) + processedReviews,
+      durationMs
+    });
     return res.status(200).json({
       ok: true,
       requestId,
@@ -824,8 +850,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         users: processedUsers,
         locations: processedLocations,
         reviewsScanned: processedReviews,
+        reviewsUpdated,
         repliesUpserted,
-        errors
+        errors,
+        durationMs
       }
     });
   } catch (error) {

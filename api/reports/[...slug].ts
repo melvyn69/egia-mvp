@@ -1703,6 +1703,7 @@ const handleAutomationsRun = async (
 ) => {
   const COOLDOWN_HOURS = 24;
   const requestId = getRequestId(req);
+  const startedAt = Date.now();
   if (req.method !== "POST") {
     return sendError(
       res,
@@ -1737,12 +1738,18 @@ const handleAutomationsRun = async (
       : null;
 
   let userIds: string[] = [];
+  let claimedWorkflowIds: string[] | null = null;
 
   if (cronSecret && cronSecret === process.env.CRON_SECRET) {
-    const { data: workflowUsers, error: usersError } = await supabaseAdmin
-      .from("automation_workflows")
-      .select("user_id")
-      .not("user_id", "is", null);
+    const configuredBatch = Number(process.env.AUTOMATIONS_BATCH_SIZE ?? 25);
+    const batchSize = Math.min(
+      50,
+      Math.max(1, Number.isFinite(configuredBatch) ? configuredBatch : 25)
+    );
+    const { data: workflowUsers, error: usersError } = await (supabaseAdmin.rpc as any)(
+      "claim_due_automation_workflows",
+      { p_limit: batchSize }
+    );
     if (usersError) {
       return sendError(
         res,
@@ -1754,6 +1761,7 @@ const handleAutomationsRun = async (
     userIds = Array.from(
       new Set((workflowUsers ?? []).map((row) => row.user_id))
     );
+    claimedWorkflowIds = (workflowUsers ?? []).map((row) => row.id);
   } else if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
     let authUser;
     try {
@@ -1776,13 +1784,42 @@ const handleAutomationsRun = async (
     );
   }
 
+  if (claimedWorkflowIds && claimedWorkflowIds.length === 0) {
+    const durationMs = Date.now() - startedAt;
+    console.info("[automations] run", {
+      requestId,
+      route: "/api/reports/automations",
+      candidates: 0,
+      claimed: 0,
+      processed: 0,
+      inserted: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      rowsRead: 0,
+      durationMs
+    });
+    return res.status(200).json({
+      ok: true,
+      requestId,
+      processed: 0,
+      reason: "no_candidates",
+      durationMs
+    });
+  }
+
   const runAutomationsForUser = async (userId: string) => {
-    const { data: workflows, error: wfError } = await supabaseAdmin
+    let workflowsQuery = supabaseAdmin
       .from("automation_workflows")
       .select("id,user_id,enabled,trigger,location_ids,name")
       .eq("enabled", true)
       .eq("trigger", "new_review")
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .limit(50);
+    if (claimedWorkflowIds) {
+      workflowsQuery = workflowsQuery.in("id", claimedWorkflowIds);
+    }
+    const { data: workflows, error: wfError } = await workflowsQuery;
     if (wfError || !workflows || workflows.length === 0) {
       return { processed: 0, inserted: 0, last_cursor: null as string | null };
     }
@@ -1826,14 +1863,18 @@ const handleAutomationsRun = async (
       (cronRow?.value as { last_processed_at?: string } | null)
         ?.last_processed_at ?? null;
 
-    const { data: reviews, error: reviewsError } = await supabaseAdmin
+    let reviewsQuery = supabaseAdmin
       .from("google_reviews")
       .select(
         "id,review_id,review_name,location_id,location_name,author_name,comment,owner_reply,reply_text,replied_at,rating,update_time,create_time,user_id"
       )
       .eq("user_id", userId)
       .order("update_time", { ascending: true, nullsFirst: true })
-      .limit(500);
+      .limit(50);
+    if (lastProcessed) {
+      reviewsQuery = reviewsQuery.gt("update_time", lastProcessed);
+    }
+    const { data: reviews, error: reviewsError } = await reviewsQuery;
     if (reviewsError) {
       return { processed: 0, inserted: 0, last_cursor: lastProcessed };
     }
@@ -1841,7 +1882,8 @@ const handleAutomationsRun = async (
     const { data: locationRows } = await supabaseAdmin
       .from("google_locations")
       .select("id,location_title,location_resource_name")
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .limit(50);
     const locationMap = new Map<string, string>();
     for (const row of locationRows ?? []) {
       if (row.location_title) {
@@ -2110,6 +2152,15 @@ const handleAutomationsRun = async (
       });
     }
 
+    await (supabaseAdmin.from("automation_workflows") as any)
+      .update({
+        run_status: "idle",
+        run_claimed_at: null,
+        next_run_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .in("id", (workflows ?? []).map((workflow) => workflow.id));
+
     return {
       processed,
       inserted,
@@ -2137,12 +2188,21 @@ const handleAutomationsRun = async (
   }
 
   console.info("[automations] run", {
+    requestId,
+    route: "/api/reports/automations",
+    candidates: claimedWorkflowIds?.length ?? userIds.length,
+    claimed: claimedWorkflowIds?.length ?? userIds.length,
     users: userIds.length,
     processed,
     inserted,
+    updated: 0,
+    skipped: skippedCooldown + skippedNoSentiment,
+    failed: 0,
+    rowsRead: processed,
     skippedCooldown,
     skippedNoSentiment,
-    last_cursor: lastCursor
+    last_cursor: lastCursor,
+    durationMs: Date.now() - startedAt
   });
 
   return res.status(200).json({
@@ -2152,6 +2212,7 @@ const handleAutomationsRun = async (
     skippedCooldown,
     skippedNoSentiment,
     last_cursor: lastCursor,
+    durationMs: Date.now() - startedAt,
     requestId
   });
 };

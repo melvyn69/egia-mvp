@@ -82,7 +82,8 @@ const loadLocations = async (userId: string) => {
   const { data } = await supabaseAdmin
     .from("google_locations")
     .select("id, location_resource_name")
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .limit(50);
   return data ?? [];
 };
 
@@ -104,6 +105,7 @@ const findExistingReport = async (
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId = getRequestId(req);
+  const startedAt = Date.now();
   res.setHeader("Cache-Control", "no-store");
   const method = req.method ?? "GET";
   const { now, isFirstDayUtc } = getNowUtcInfo();
@@ -170,9 +172,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     : runForUserParam;
   const cursorParam = req.query?.cursor;
   const cursor = Array.isArray(cursorParam) ? cursorParam[0] : cursorParam;
-  const batchSize = Math.max(
-    1,
-    Number(process.env.CRON_MONTHLY_BATCH ?? 20)
+  const configuredBatch = Number(process.env.CRON_MONTHLY_BATCH ?? 20);
+  const batchSize = Math.min(
+    20,
+    Math.max(1, Number.isFinite(configuredBatch) ? configuredBatch : 20)
   );
 
   if (!dryRun && !force && !isFirstDayUtc) {
@@ -214,6 +217,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const targets = (users ?? []) as Pick<SimpleAutomationRow, "user_id">[];
+  if (!dryRun && targets.length === 0) {
+    const durationMs = Date.now() - startedAt;
+    console.info("[cron-monthly] run", {
+      requestId,
+      route: "/api/cron/monthly-reports",
+      candidates: 0,
+      claimed: 0,
+      processed: 0,
+      inserted: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      rowsRead: 0,
+      durationMs
+    });
+    return res.status(200).json({
+      ok: true,
+      requestId,
+      processed: 0,
+      reason: "no_candidates",
+      durationMs
+    });
+  }
   if (dryRun) {
     return res.status(200).json({
       ok: true,
@@ -290,6 +316,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  const durationMs = Date.now() - startedAt;
+  console.info("[cron-monthly] run", {
+    requestId,
+    route: "/api/cron/monthly-reports",
+    candidates: targets.length,
+    claimed: targets.length,
+    processed: results.length,
+    inserted: results.filter((result) => result.status === "done").length,
+    updated: 0,
+    skipped: results.filter((result) => result.status.startsWith("skipped")).length,
+    failed: results.filter((result) => result.status.startsWith("failed")).length,
+    rowsRead: targets.length,
+    durationMs
+  });
   return res.status(200).json({
     ok: true,
     requestId,
@@ -297,6 +337,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     period: { from: fromIso, to: toIso, key: periodKey },
     now_utc: now.toISOString(),
     is_first_day_utc: isFirstDayUtc,
+    durationMs,
     next_cursor:
       targets.length === batchSize ? targets[targets.length - 1].user_id : null,
     results
