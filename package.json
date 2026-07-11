@@ -10,6 +10,8 @@
     "clean:weirdfiles": "node scripts/clean-weirdfiles.js",
     "build": "tsc -b && npm run build:server && vite build",
     "lint": "eslint .",
+    "typecheck": "tsc -b --pretty false",
+    "test": "node scripts/test-egress-guardrails.mjs",
     "smoke": "tsx scripts/smoke-api.ts",
     "test:google-connection-status": "tsc --target ES2022 --module CommonJS --moduleResolution node --outDir .tmp-tests scripts/test-google-connection-status.ts && node .tmp-tests/scripts/test-google-connection-status.js",
     "test:google-connection-status:clean": "rm -rf .tmp-tests",
