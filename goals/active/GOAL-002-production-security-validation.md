@@ -3,7 +3,7 @@
 ## Métadonnées
 
 - **ID :** `GOAL-002`
-- **Statut :** `Draft`
+- **Statut :** `Ready`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-11`
 - **Date de clôture :** `N/A`
@@ -23,7 +23,7 @@ Le rapport classe les constats en P0/P1/P2, contient une matrice complète `crit
 
 Le rapport de `GOAL-001` conclut que le code versionné comporte des garde-fous observables mais ne démontre pas l’état distant de Supabase, RLS/grants, Edge Functions, Vercel, Auth, crons ni des intégrations. Il relève notamment des fonctions Edge avec `verify_jwt = false` et/ou CORS permissif dans le dépôt, ainsi que des chemins parallèles Edge Functions et routes Vercel. Ces constats justifient une validation dédiée ; ils ne démontrent pas, à eux seuls, une vulnérabilité déployée.
 
-L’environnement inclus est **production**. Tant que ce Goal reste `Draft`, aucun Run n’est lancé, aucun accès distant n’est effectué et aucun rapport n’est produit. Après passage explicite à `Ready`, le premier Run réel effectue l’audit distant passif R2 autorisé, produit le rapport et soumet le Goal à `Review` ; il n’appelle aucun endpoint de production, n’exécute aucun test inter-tenant actif, ne modifie aucun environnement et ne modifie dans le dépôt que les artefacts documentaires explicitement autorisés.
+L’environnement inclus est **production**. Le Goal est `Ready`, mais aucun Run n’est lancé, aucun accès distant n’est effectué et aucun rapport n’est produit. Le premier Run réel effectue l’audit distant passif R2 autorisé, produit le rapport et soumet le Goal à `Review` ; il n’appelle aucun endpoint de production, n’exécute aucun test inter-tenant actif, ne modifie aucun environnement et ne modifie dans le dépôt que les artefacts documentaires explicitement autorisés.
 
 ## Sources de vérité
 
@@ -228,25 +228,26 @@ Le Goal est `Done` seulement lorsque :
 | Date | Transition | Auteur | Raison / référence |
 | --- | --- | --- | --- |
 | `2026-07-11` | N/A → `Draft` | Codex | Création puis révision du contrat ; aucun Run, audit, accès distant, lecture de secret ou modification d’environnement n’est lancé. |
+| `2026-07-11` | `Draft` → `Ready` | Fondateur (Melvyn) | Readiness Check validé ; audit distant passif R2 autorisable dans un Run ultérieur. |
 
 ## Readiness Check
 
 | Point 003 | État | Evidence / commentaire |
 | --- | --- | --- |
 | Identité, valeur business et résultat observable | oui | Métadonnées, valeur business et résultat attendu sont définis. |
-| Sources accessibles, cohérentes et suffisantes | oui | Sources versionnées identifiées ; production et mécanismes lecture seule GitHub/Supabase/Vercel autorisés, sans les consulter tant que le Goal est `Draft`. |
+| Sources accessibles, cohérentes et suffisantes | oui | Sources versionnées identifiées ; production et mécanismes lecture seule GitHub/Supabase/Vercel autorisés, sans accès distant avant le lancement d’un Run. |
 | Scope, hors-scope et décisions nécessaires | oui | Production, accès, secrets, rapport, Git, revue et interdits du premier Run sont décidés. |
 | Dépendances | oui | L’ordonnanceur est conditionnel et non bloquant ; l’absence de comptes/tenants borne uniquement VAL-04 comme limite de vérification. |
 | Risque, gates et autorisations | oui | R2, audit passif, branche documentaire après `Ready`, revue Work et verdict Fondateur sont définis. |
 | Critères, validations et Evidence | oui | AC-01 à AC-11, VAL-01 à VAL-11 et EV-01 à EV-11 sont reliés. |
 | Conditions d’arrêt et Done | oui | Conditions et autorités de revue/clôture explicites. |
 
-**Résultat : Readiness Check validé.** Le contrat peut passer à `Ready`, mais reste volontairement `Draft` jusqu’à transition explicite. Tant qu’il est `Draft`, aucun Run, accès distant ou rapport n’est produit.
+**Résultat : Readiness Check validé.** Le Goal est `Ready` ; aucun Run n’est encore lancé, aucun accès distant n’est effectué et aucun rapport n’est produit. Le premier Run autorisé devra rester passif, produire le rapport prévu puis soumettre le Goal à `Review`.
 
 ## Livraison et clôture
 
-- **Artifacts livrés :** `N/A` — le Goal est `Draft` ; aucun Run, audit ni rapport de sécurité n’est produit.
+- **Artifacts livrés :** `N/A` — le Goal est `Ready`, mais aucun Run, audit ni rapport de sécurité n’est encore produit.
 - **Matrice réelle critère → validation → Evidence :** à compléter exclusivement dans le rapport d’audit autorisé.
 - **Risques résiduels :** état distant, isolation inter-tenant, RLS/grants, Edge/Vercel, Auth, crons, secrets et logs non vérifiés.
 - **Verdict de revue :** en attente.
-- **Décision de clôture :** en attente du Readiness Check, d’un Run autorisé, de la revue Work et du verdict du fondateur.
+- **Décision de clôture :** en attente d’un Run autorisé, de la revue Work et du verdict du fondateur.
