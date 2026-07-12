@@ -96,8 +96,17 @@ Les options suivantes doivent être évaluées avec bénéfice, risque, précond
 
 ### Run 4 — Gate de production (autorisation fondatrice distincte)
 
-1. Présenter le Founder Brief avec opérations, ordre, arrêts, vérifications et récupération exacts. — **bloqué par autorisation**
-2. Exécuter uniquement les mutations explicitement autorisées. — **interdit avant autorisation**
+1. Présenter le Founder Brief avec opérations, ordre, arrêts, vérifications et récupération exacts. — **réalisé ; autorisation reçue**
+2. Exécuter uniquement les mutations explicitement autorisées. — **arrêté avant mutation : mécanisme incapable de préserver la version locale**
+3. Faire revoir indépendamment le blocage et le mécanisme corrigé. — **réalisé — `APPROVED FOR COMMIT`**
+
+### Blocage du gate de production
+
+Le préflight autorisé a confirmé le projet, les 97 entrées distantes, les cinq collisions, l’absence de `20260712120000`, la signature de la fonction et les grants vulnérables attendus. La migration locale et son SHA-256 correspondent au manifeste.
+
+Le MCP Supabase `apply_migration` disponible accepte seulement un nom et une requête ; il génère sa propre version distante. Il ne peut donc pas inscrire exactement `20260712120000`. L’utiliser créerait une nouvelle entrée `REMOTE_ONLY` et violerait l’objectif même de GOAL-005. Le Run s’est arrêté avant tout appel de mutation.
+
+Le mécanisme recommandé est désormais un `supabase db push --linked --dry-run` contrôlé, suivi du push réel seulement si la sortie propose exactement `20260712120000_secure_claim_review_analyze_jobs.sql` et aucune autre migration. Cette commande reste explicitement interdite par l’autorisation actuelle et exige une nouvelle autorisation fondatrice. Aucune réparation de ledger ne doit être autorisée.
 
 ## Readiness Check
 
@@ -106,11 +115,11 @@ Les options suivantes doivent être évaluées avec bénéfice, risque, précond
 | Projet unique | validé | `fhadiwkdznhuxtlgrwfd` / `egia-mvp` / production. |
 | Diagnostic GOAL-004 | validé | Rapport accepté et Goal clôturé. |
 | Données sensibles | exclues | Lecture limitée à l’historique et au catalogue système. |
-| Mutations de production | interdites | Gate fondateur explicite requis. |
+| Mutations de production | bloquées | Autorisation reçue, mais mécanisme autorisé incapable de préserver `20260712120000`; aucune mutation exécutée. |
 | Stratégie déterministe | validée localement | Hybride : baseline schema-only, ledger gelé et aucune réparation historique. |
 | Garde-fous automatisés | validés localement | Manifeste, validateur, baseline checksum et CI versionnés. |
 | Bootstrap isolé | validé localement | Baseline, 97 versions et GOAL-003 seule vérifiés dans une instance Docker distincte. |
-| Revue indépendante | validée | Verdict `APPROVED FOR PRODUCTION GATE` rendu ; aucune mutation de production autorisée par ce verdict. |
+| Revue indépendante | validée sur le blocage et le mécanisme corrigé | Verdict `APPROVED FOR COMMIT`; aucune mutation n’est autorisée par ce verdict. |
 
 ## Journal de statut
 

@@ -3,7 +3,7 @@
 ## Métadonnées
 
 - **ID :** `GOAL-003`
-- **Statut :** `Running`
+- **Statut :** `Blocked`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-12`
 - **Date de clôture :** `N/A`
@@ -29,7 +29,7 @@ Ce Goal est un contrat de remédiation ciblé. Il ne modifie pas l’état de `G
 
 Le Run 3 autorisé le `2026-07-12` a été arrêté avant toute DDL : le préflight passif a révélé une collision de version entre l’historique distant et les migrations locales à `20260219130000`. Le diagnostic est délégué à `GOAL-004`; aucune reprise directe du déploiement n’est autorisée.
 
-GOAL-004 est désormais `Done` et GOAL-005 a établi une stratégie hybride approuvée, sans réparation de l’historique de production. Le fondateur a autorisé le `2026-07-12` un nouveau Run 3 strictement limité au préflight passif, au passage `Blocked → Ready → Running`, à l’application de la migration `20260712120000_secure_claim_review_analyze_jobs.sql` et aux vérifications passives post-production. Le préflight de reprise est conforme ; aucune autre mutation n’est autorisée.
+GOAL-004 est désormais `Done` et GOAL-005 a établi une stratégie hybride approuvée, sans réparation de l’historique de production. Le fondateur a autorisé le `2026-07-12` un nouveau Run 3 strictement limité au préflight passif, au passage `Blocked → Ready → Running`, à l’application de la migration `20260712120000_secure_claim_review_analyze_jobs.sql` et aux vérifications passives post-production. Le préflight de reprise est conforme, mais le Run a été arrêté avant mutation : l’outil Supabase `apply_migration` disponible ne permet pas d’imposer la version `20260712120000` et créerait une nouvelle entrée distante orpheline. GOAL-003 est donc de nouveau `Blocked` jusqu’à autorisation d’un mécanisme qui préserve exactement la version locale.
 
 ## Sources de vérité
 
@@ -101,7 +101,7 @@ Cette conclusion est limitée au contrat local : elle confirme le rôle minimal 
 
 ## Contraintes
 
-- Le Goal est `Running`. GOAL-004 a conclu le diagnostic, GOAL-005 a produit les garde-fous de réconciliation et la revue indépendante a rendu `APPROVED FOR PRODUCTION GATE`. Le nouveau Run 3 est autorisé uniquement selon le gate versionné ; GOAL-003 reste `Running` après l’application jusqu’à la vérification finale.
+- Le Goal est `Blocked`. GOAL-004 a conclu le diagnostic et GOAL-005 a produit les garde-fous de réconciliation, mais le mécanisme `apply_migration` approuvé ne peut pas enregistrer la version locale exacte. Aucune migration ni DCL n’a été exécutée ; une nouvelle autorisation est requise pour tout mécanisme différent.
 - Le rôle minimal approuvé est `service_role`. Aucun grant ne doit être ajouté en dehors de la migration corrective autorisée au Run 1 et revue selon les gates du Goal ; un rôle serveur dédié ne peut pas être supposé sans décision ultérieure.
 - Aucun secret, jeton, valeur de configuration, payload métier ou donnée utilisateur ne doit être lu, copié ni inscrit dans les Evidence.
 - Toute validation distante est passive, limitée aux métadonnées nécessaires, redigée et ne peut commencer qu’au Run explicitement autorisé.
@@ -120,7 +120,7 @@ Cette conclusion est limitée au contrat local : elle confirme le rôle minimal 
 | `GOAL-005` — réconciliation de l’historique Supabase | satisfaite pour le gate — `Running` | Stratégie hybride, manifeste, baseline, validateur, runbook et bootstrap isolé approuvés. |
 | Revue indépendante Work | satisfaite avant production | Verdict `APPROVED FOR PRODUCTION GATE`; revue post-déploiement encore requise avant toute clôture. |
 | Autorisation fondatrice avant mutation de production | satisfaite pour ce Run 3 | Autorisation du `2026-07-12`, limitée à la migration et aux vérifications décrites dans le gate. |
-| Mécanisme exact de déploiement Supabase | approuvé sous contrôle | Migration Supabase versionnée, accès Supabase contrôlé au Run 3 et outil Supabase contrôlé disponible au moment du Run ; aucune commande locale implicite ni automatisation de production. |
+| Mécanisme exact de déploiement Supabase | bloqué | Le MCP `apply_migration` génère une version distante et n’accepte pas `20260712120000`; son utilisation recréerait une divergence. `db push` et toute réparation restent interdits sans nouvelle autorisation. |
 | Accès Supabase contrôlé pour déploiement et vérification | requis seulement aux Runs 3 et 4 | Déploiement et vérification distante impossibles. |
 
 ## Décisions fondatrices consignées pour `Draft → Ready`
@@ -245,6 +245,10 @@ Les Evidence et validations de production restent en attente : application de la
 - **Fonction avant correction :** une seule signature `public.claim_review_analyze_jobs(integer, text, text)`, arguments nommés attendus, retour `TABLE(id uuid, payload jsonb)`, propriétaire `postgres`, `SECURITY DEFINER`, `search_path=public`.
 - **Grants avant correction :** ACL directe `EXECUTE` pour `PUBLIC`, `postgres` et `service_role`; privilège effectif présent pour `anon`, `authenticated` et `service_role`, conforme au P0 validé.
 - **Portée des lectures :** métadonnées d’identité, historique et catalogue uniquement ; aucune ligne métier, payload, donnée utilisateur, valeur secrète, RPC, fonction, route, cron ou endpoint n’a été lu ou invoqué.
+- **Condition d’arrêt déclenchée :** le MCP `apply_migration` ne possède aucun paramètre de version et génère son propre timestamp distant. L’appliquer aurait produit une entrée `REMOTE_ONLY` au lieu de `20260712120000`, en contradiction directe avec le manifeste et le gate.
+- **Alternatives non exécutées :** `supabase db push`, `supabase migration repair`, écriture manuelle du ledger et application SQL directe sans ledger sont toutes hors de l’autorisation reçue.
+- **Absence de mutation :** aucun appel à `apply_migration`, aucune DCL, DDL, DML, migration, réparation ou modification distante n’a été effectué.
+- **Revue indépendante :** `APPROVED FOR COMMIT`; l’arrêt, les statuts, l’absence de mutation et la recommandation `db push --linked --dry-run` puis push réel conditionnel sont approuvés.
 
 ## Plan de Runs proposé
 
@@ -266,7 +270,7 @@ Les Evidence et validations de production restent en attente : application de la
 
 - Le premier essai a été arrêté avant toute DDL le `2026-07-12` à cause de la collision d’historique à `20260219130000`.
 - GOAL-004 et le gate GOAL-005 sont désormais satisfaits ; le fondateur a autorisé la reprise et les transitions `Blocked → Ready → Running`.
-- Le Run relancé applique uniquement la migration corrective après préflight conforme ; aucun rollback manuel n’est autorisé sans nouvelle autorisation fondatrice.
+- Le Run relancé a été arrêté avant mutation : `apply_migration` ne peut pas préserver la version locale. GOAL-003 repasse `Running → Blocked`; aucun rollback n’est nécessaire puisque la production est inchangée.
 
 ### Run 4 — Vérification post-déploiement
 
@@ -283,7 +287,7 @@ Les Evidence et validations de production restent en attente : application de la
 ## Autorisations d’environnement
 
 - **Run 1 autorisé :** lectures locales, migration et tests locaux strictement nécessaires ; aucune connexion distante, aucun déploiement, aucune mutation de production et aucun accès à une valeur secrète.
-- **Run 3 :** autorisé le `2026-07-12` après préflight conforme et reprise `Blocked → Ready → Running`; strictement limité aux quatre DCL de la migration versionnée et aux vérifications passives prévues.
+- **Run 3 :** autorisé le `2026-07-12`, puis arrêté avant mutation lorsque l’outil disponible s’est révélé incapable de préserver la version locale. Toute reprise exige une nouvelle autorisation explicite du mécanisme exact.
 - **Run 4 :** lecture passive post-déploiement uniquement, limitée aux métadonnées nécessaires et aux Evidence redigées.
 
 ## Conditions d’arrêt
@@ -322,6 +326,7 @@ Le Goal est `Done` seulement lorsque :
 | `2026-07-12` | `Running` → `Blocked` | Fondateur (Melvyn) | Run 3 arrêté avant toute DDL : collision entre l’historique distant Supabase et les migrations locales à la version 20260219130000. GOAL-004 requis avant toute reprise du déploiement. |
 | `2026-07-12` | `Blocked` → `Ready` | Fondateur (Melvyn) | GOAL-004 clôturé, stratégie GOAL-005 intégrée, tests et revue indépendante approuvés ; préflight de reprise conforme et Run 3 de production explicitement autorisé. |
 | `2026-07-12` | `Ready` → `Running` | Codex | Run 3 relancé dans le périmètre autorisé : migration unique puis vérifications passives, sans opération hors scope. |
+| `2026-07-12` | `Running` → `Blocked` | Codex | Arrêt avant mutation : `apply_migration` génère une version distante et ne peut pas inscrire exactement `20260712120000`; les mécanismes alternatifs ne sont pas autorisés. |
 
 ## Readiness Check
 
@@ -336,11 +341,11 @@ Le Goal est `Done` seulement lorsque :
 | Mécanisme de déploiement autorisé | oui — approuvé sous contrôle | Migration versionnée et outil Supabase contrôlé au Run 3, sans commande implicite ni automatisation ; autorisation de production distincte obligatoire. |
 | Risque, gates et autorités | oui | R3, revue Work, gates de Run et autorisations fondatrices distinctes sont définis ; seul le Run 1 local est autorisé. |
 
-**Résultat : reprise validée, Goal `Running`.** Le rôle minimal, le rollback, les validations, le mécanisme de déploiement contrôlé, GOAL-004 et le gate GOAL-005 sont satisfaits. Le préflight du nouveau Run 3 est conforme. Aucune transition vers `Review` ou `Done` n’a eu lieu.
+**Résultat : préflight conforme, exécution bloquée.** Le rôle minimal, le rollback, les validations, GOAL-004 et les garde-fous GOAL-005 sont satisfaits. Le mécanisme de déploiement ne garantit pas la version locale exacte ; le Goal est `Blocked` et aucune transition vers `Review` ou `Done` n’a eu lieu.
 
 ## Livraison et clôture
 
-- **Artifacts livrés à ce stade :** contrat `Running`, migration locale `20260712120000_secure_claim_review_analyze_jobs.sql`, test local `scripts/test-claim-review-analyze-jobs-security.mjs`, stratégie GOAL-005 intégrée et Evidence du préflight de reprise conforme.
-- **Décisions encore nécessaires :** aucune avant l’unique migration déjà autorisée. Après application, la vérification finale et la revue indépendante restent requises avant toute transition vers `Review`, `Done` ou reprise de GOAL-002.
+- **Artifacts livrés à ce stade :** contrat `Blocked`, migration locale `20260712120000_secure_claim_review_analyze_jobs.sql`, test local `scripts/test-claim-review-analyze-jobs-security.mjs`, stratégie GOAL-005 intégrée et Evidence du préflight conforme puis arrêté sans mutation.
+- **Décisions encore nécessaires :** autoriser un mécanisme qui préserve exactement `20260712120000`, recommandé sous forme d’un `supabase db push --linked --dry-run` contrôlé puis du push réel uniquement si une seule migration est proposée. Après application, la vérification finale et la revue indépendante restent requises avant toute transition vers `Review`, `Done` ou reprise de GOAL-002.
 - **État de `GOAL-002` :** demeure `Blocked`; aucune reprise n’est proposée avant correction vérifiée et revue indépendante.
 - **Décision de clôture :** `N/A` tant que les conditions de Done et les autorisations de Runs ne sont pas satisfaites.

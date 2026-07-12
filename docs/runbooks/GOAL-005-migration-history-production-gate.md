@@ -14,16 +14,25 @@ La chaîne de production existante conserve ses versions appliquées. La chaîne
 4. Vérifier au catalogue la signature exacte de `public.claim_review_analyze_jobs(integer, text, text)`, son état `SECURITY DEFINER`, son `search_path` et ses grants ; ne lire aucune ligne de table.
 5. Arrêter sans mutation si l’identité, l’historique, le baseline, le checksum de la migration GOAL-003 ou un prérequis diffère.
 
-## Mutations de production prévues après autorisation fondatrice distincte
+## Mécanisme de production et condition d’arrêt constatée
 
-Une seule migration est autorisable : `20260712120000_secure_claim_review_analyze_jobs.sql`. Elle doit être soumise à l’API de gestion Supabase **`apply_migration`**, avec ce nom de migration et les octets dont le SHA-256 est figé par le manifeste. Cette opération unique exécute la migration dans sa transaction et enregistre uniquement la version `20260712120000` dans le ledger ; l’opération s’arrête si elle ne peut pas garantir ce couple migration/version. Elle ne contient ni DDL ni DML et effectue exclusivement, sur la signature exacte :
+Une seule migration est autorisable : `20260712120000_secure_claim_review_analyze_jobs.sql`. Le préflight du `2026-07-12` a établi que le MCP Supabase **`apply_migration`** disponible ne peut pas l’appliquer en préservant sa version : l’outil accepte seulement `name` et `query`, puis génère sa propre version distante. Son utilisation créerait une entrée `REMOTE_ONLY` et est donc interdite par ce gate. Le Run a été arrêté avant mutation.
+
+Le mécanisme recommandé pour une nouvelle autorisation est :
+
+1. exécuter `supabase db push --linked --dry-run` et exiger qu’il propose exactement `20260712120000_secure_claim_review_analyze_jobs.sql`, sans autre migration ;
+2. arrêter sans mutation si le dry-run propose un autre fichier, une réparation, un changement historique ou une opération supplémentaire ;
+3. seulement après un dry-run exact et une autorisation fondatrice couvrant explicitement `db push`, exécuter le push lié ;
+4. relire immédiatement le ledger et exiger l’unique nouvelle version `20260712120000`.
+
+La migration ne contient ni DDL ni DML et effectue exclusivement, sur la signature exacte :
 
 1. `REVOKE EXECUTE` à `PUBLIC` ;
 2. `REVOKE EXECUTE` à `anon` ;
 3. `REVOKE EXECUTE` à `authenticated` ;
 4. `GRANT EXECUTE` à `service_role`.
 
-Il n’est prévu **aucun** `supabase migration repair`, `db push` global, changement de version historique, baseline appliqué à la production, modification de RLS, policy, fonction, contrainte, index, configuration ou donnée. Si l’API ne peut pas appliquer cette seule migration et enregistrer cette seule version, le Run s’arrête sans mutation.
+Il n’est prévu **aucun** `supabase migration repair`, `--include-all`, changement de version historique, baseline appliqué à la production, modification de RLS, policy, fonction, contrainte, index, configuration ou donnée. Une application SQL directe sans inscription correcte au ledger est également interdite. L’autorisation du `2026-07-12` interdisait tout `db push`; elle n’a donc permis que le préflight et s’est terminée sans mutation.
 
 ## Vérifications post-production
 

@@ -40,15 +40,19 @@ Deux no-op placeholders `remote_schema` existaient sous `supabase/migrations/` m
 
 ## Impact sur GOAL-003
 
-`20260712120000_secure_claim_review_analyze_jobs.sql` demeure immuable et `LOCAL_ONLY`. Le ledger, le baseline, le manifeste et le runbook permettent de préparer son application isolée : aucune réparation d’historique ni `db push` global n’est nécessaire ni autorisé. GOAL-003 reste `Blocked` jusqu’à la revue indépendante du présent Goal et au gate fondateur de production.
+`20260712120000_secure_claim_review_analyze_jobs.sql` demeure immuable et `LOCAL_ONLY`. Le ledger, le baseline, le manifeste et le runbook permettent de préparer son application isolée. GOAL-003 reste `Blocked` : le préflight de production est conforme, mais le MCP `apply_migration` ne peut pas préserver la version locale et son utilisation créerait une nouvelle entrée distante orpheline.
 
 ## Bootstrap isolé exécuté
 
 Le bootstrap a été exécuté dans une instance Supabase Docker distincte du projet local existant et de la production. Après chargement du baseline, les 97 versions ont été marquées `applied` une par une (le CLI 2.67 ne prend pas de liste de versions), puis `db push` n’a proposé et appliqué que `20260712120000_secure_claim_review_analyze_jobs.sql`. Le ledger isolé contient 98 versions, dont les cinq collisions et GOAL-003 une seule fois. Le catalogue isolé confirme `service_role` et le propriétaire `postgres` pour la fonction, sans `PUBLIC`, `anon` ni `authenticated`.
 
-## Plan de production préparé, non exécuté
+## Gate de production tenté, arrêté sans mutation
 
-Après préflight passif et autorisation distincte, l’unique mutation prévue est l’application de GOAL-003 par l’API de gestion `apply_migration`, avec son nom et son SHA-256 figés. Cette opération unique inscrit aussi la seule version `20260712120000` attendue. Le SQL effectue trois `REVOKE EXECUTE` (`PUBLIC`, `anon`, `authenticated`) puis un `GRANT EXECUTE` à `service_role`. Aucun DDL, DML, repair, baseline, autre historique, RLS, policy, fonction, donnée ou configuration ne fait partie du plan.
+Après autorisation distincte, le préflight passif a confirmé l’identité, les 97 versions distantes, les cinq collisions, l’absence de `20260712120000`, le SHA-256 local, la signature et les grants vulnérables attendus. Le MCP `apply_migration` disponible ne fournit toutefois aucun paramètre permettant d’inscrire `20260712120000`; il génère sa propre version distante. L’appel n’a pas été exécuté, car il aurait créé une entrée `REMOTE_ONLY`.
+
+Le mécanisme recommandé pour une autorisation ultérieure est un `supabase db push --linked --dry-run`, puis le push réel uniquement si le plan contient exactement `20260712120000_secure_claim_review_analyze_jobs.sql`. Cette commande était explicitement interdite par l’autorisation reçue. Aucun `db push`, `apply_migration`, repair, DCL, DDL, DML, changement de ledger, baseline, RLS, policy, fonction, donnée ou configuration n’a été exécuté.
+
+La revue indépendante du blocage et de la procédure corrigée a rendu `APPROVED FOR COMMIT`. Elle confirme l’absence de mutation, les statuts des quatre Goals et le caractère minimal du `db push --linked --dry-run` suivi d’un push uniquement si GOAL-003 est l’unique migration proposée.
 
 La récupération ne doit jamais rétablir un grant public. Un incident worker impose l’arrêt et une nouvelle autorisation fondatrice, avec Evidence conservées.
 
