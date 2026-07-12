@@ -3,7 +3,7 @@
 ## Métadonnées
 
 - **ID :** `GOAL-005`
-- **Statut :** `Running`
+- **Statut :** `Review`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-12`
 - **Date de clôture :** `N/A`
@@ -139,8 +139,8 @@ L’analyse a retenu une stratégie hybride sans réparation du ledger de produc
 1. Séparer le ledger historique gelé de la chaîne prospective afin que toute migration future soit réellement exécutée. — **réalisé**
 2. Bloquer modifications, suppressions, renommages, backdating, fichiers non suivis ou sans SQL et neutralisation des garde-fous. — **réalisé localement**
 3. Vérifier le bootstrap uniquement sur une base loopback vide, son dry-run exact et son ledger final. — **réalisé localement**
-4. Exécuter les contrôles CI depuis la branche de base de confiance et protéger `main` avec checks requis, historique linéaire, sans force-push ni suppression. — **protection configurée ; preuve par PR réelle en cours**
-5. Obtenir la revue indépendante, intégrer les changements et soumettre GOAL-005 au verdict fondateur. — **revue `APPROVED FOR INTEGRATION`; intégration en cours**
+4. Exécuter les contrôles CI depuis la branche de base de confiance et protéger `main` avec checks requis, historique linéaire, sans force-push ni suppression. — **réalisé ; PR #33 : `build` et `migration-history-guard` verts**
+5. Obtenir la revue indépendante, intégrer les changements et soumettre GOAL-005 au verdict fondateur. — **réalisé ; `APPROVED FOR INTEGRATION`, soumis en `Review`**
 
 ### Blocage du gate de production
 
@@ -162,7 +162,7 @@ Le mécanisme recommandé a ensuite été explicitement autorisé : `supabase db
 | Garde-fous automatisés | validés localement | Manifeste, validateur base-aware, guard lock, workflow de confiance et tests adversariaux versionnés. |
 | Bootstrap isolé | validé localement | 97 versions historiques séparées de GOAL-003 et des migrations futures ; base loopback vide et dry-run exact exigés. |
 | État GOAL-003 | clôturé | GOAL-003 est `Done` après application, vérification et verdict fondateur. |
-| Protection GitHub | configurée, preuve en cours | `main` exige branche à jour, checks `build` et `migration-history-guard`, y compris pour les administrateurs, historique linéaire ; force-push et suppression interdits. |
+| Protection GitHub | validée | `main` exige branche à jour, checks `build` et `migration-history-guard`, y compris pour les administrateurs, historique linéaire ; force-push et suppression interdits. PR #33 : deux checks requis verts. |
 | Revue indépendante Run 5 | validée | Verdict `APPROVED FOR INTEGRATION`; aucun P0/P1/P2 restant. |
 
 ## Journal de statut
@@ -172,6 +172,7 @@ Le mécanisme recommandé a ensuite été explicitement autorisé : `supabase db
 | `2026-07-12` | N/A → `Draft` | Fondateur (Melvyn) | GOAL-004 accepté ; création autorisée pour réconcilier l’historique sans mutation de production. |
 | `2026-07-12` | `Draft` → `Ready` | Codex | Contrat R3, scope, gates, AC/VAL/EV et conditions d’arrêt documentés. |
 | `2026-07-12` | `Ready` → `Running` | Codex | Reconstruction passive et implémentation locale autorisées jusqu’au gate de mutation. |
+| `2026-07-13` | `Running` → `Review` | Codex | Réconciliation et garde-fous durables intégrés ; revue indépendante approuvée ; protection de `main` et checks de confiance prouvés par la PR #33. Soumis au fondateur pour verdict final. |
 
 ## Définition de Done
 

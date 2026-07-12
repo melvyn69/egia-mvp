@@ -93,6 +93,8 @@ La revue indépendante du Run 5 a rendu `APPROVED FOR INTEGRATION`. Elle confirm
 
 Le lot revu a été intégré en fast-forward strict par la PR #32 au commit `978bfb5ed9e39435f168d0cc89a7480633b015e4`. La protection de `main` exige désormais une branche à jour, les checks `build` et `migration-history-guard`, y compris pour les administrateurs, ainsi qu’un historique linéaire ; force-push et suppression de branche sont interdits. Une PR documentaire distincte doit encore produire les deux checks verts sur cette configuration avant la transition vers `Review`.
 
+La PR documentaire #33 a ensuite fourni la preuve effective du gate : `CI / build` a réussi en `1m21s`, `Migration History Guard / migration-history-guard` a réussi en `12s` depuis la base de confiance, et Vercel ainsi que Vercel Preview Comments ont réussi. La réserve finale de la revue est donc levée et GOAL-005 peut être soumis au fondateur en `Review`.
+
 ## Limites explicitement conservées
 
 Le SQL distant de `20260221193000` reste indisponible. Le baseline réel et le ledger explicite rendent cette absence non bloquante pour le bootstrap, mais aucune attribution historique supplémentaire n’est affirmée. Le bootstrap de test ne constitue pas une autorisation de production.
