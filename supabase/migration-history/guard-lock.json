@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "lockedAt": "2026-07-12",
+  "purpose": "After this file reaches main, trusted migration guards may change only through an explicitly authorized administrative override.",
+  "paths": [
+    ".github/CODEOWNERS",
+    ".github/workflows/migration-history-guard.yml",
+    "scripts/bootstrap-goal-005-canonical.sh",
+    "scripts/plan-goal-005-canonical-bootstrap.mjs",
+    "scripts/validate-goal-005-dry-run.mjs",
+    "scripts/validate-supabase-migration-history.mjs",
+    "supabase/migration-history/canonical-manifest.json",
+    "supabase/migration-history/guard-lock.json"
+  ]
+}

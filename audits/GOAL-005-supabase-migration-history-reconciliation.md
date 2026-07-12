@@ -40,7 +40,7 @@ Deux no-op placeholders `remote_schema` existaient sous `supabase/migrations/` m
 
 ## Impact sur GOAL-003
 
-`20260712120000_secure_claim_review_analyze_jobs.sql` demeure immuable. Le manifeste conserve l’état capturé avant production (`LOCAL_ONLY`, 97 versions distantes). Après autorisation du mécanisme corrigé, la migration est présente une fois dans le ledger distant sous la version exacte `20260712120000`; GOAL-003 reste `Running` jusqu’à la vérification indépendante finale.
+`20260712120000_secure_claim_review_analyze_jobs.sql` demeure immuable. Le manifeste conserve explicitement l’état capturé avant production (`LOCAL_ONLY`, 97 versions distantes). Après autorisation du mécanisme corrigé, la migration est présente une fois dans le ledger distant sous la version exacte `20260712120000`; GOAL-003 est désormais `Done`.
 
 ## Bootstrap isolé exécuté
 
@@ -62,15 +62,34 @@ Le postflight passif établit 98 versions distantes et une seule nouvelle entré
 
 Aucune autre migration, réparation, écriture manuelle du ledger, DDL, DML, DCL, seed, rôle, configuration, endpoint ou donnée applicative n’a été touché. Aucun secret, token, mot de passe ou chaîne de connexion n’a été lu ou affiché.
 
-La vérification indépendante finale a rendu `APPROVED FOR FOUNDER CLOSURE` après correction de deux formulations documentaires obsolètes. Elle confirme les deux préflights, le dry-run unique, le ledger postflight, l’intégrité de la fonction, les grants, les chemins serveur statiques, l’absence d’opération hors scope et les statuts attendus. GOAL-003 passe en `Review`; GOAL-005 reste `Running`.
+La vérification indépendante finale a rendu `APPROVED FOR FOUNDER CLOSURE` après correction de deux formulations documentaires obsolètes. Elle confirme les deux préflights, le dry-run unique, le ledger postflight, l’intégrité de la fonction, les grants, les chemins serveur statiques et l’absence d’opération hors scope. Le fondateur a ensuite clôturé GOAL-003 en `Done`; GOAL-005 reste `Running` pendant le durcissement final des garde-fous.
 
 La récupération ne doit jamais rétablir un grant public. Un incident worker impose l’arrêt et une nouvelle autorisation fondatrice, avec Evidence conservées.
 
 ## Evidence locales
 
-- `node scripts/validate-supabase-migration-history.mjs` vérifie le baseline, les SHA-256, les collisions, les fichiers gelés, les noms réutilisés et les fichiers vides.
-- `.github/workflows/ci.yml` exécute ce validateur avec l’historique Git complet et la base de PR lorsque disponible.
+- `node scripts/validate-supabase-migration-history.mjs` vérifie baseline, SHA-256, collisions, fichiers gelés, migrations prospectives déjà fusionnées, versions/noms, fichiers réguliers suivis et migrations vides ou comment-only.
+- `npm run test:migration-history:adversarial` exécute 29 contrôles en clones Git jetables : future valide, SQL avec chaînes/dollar-quotes, fichier non suivi, doublon, nom réutilisé, vide/comment-only, casse/Unicode/espace, symlink/répertoire, edit/delete/rename historique et prospectif, backdating, manifeste/guards, baseline et plan prospectif.
+- `npm run test:canonical-bootstrap:guards` exécute 10 contrôles fail-closed sans base : marqueur isolé, ref production, hôte distant, schéma ou ledger non vide, liste prospective exacte/extra/manquante/désordonnée et portabilité Bash.
+- `.github/workflows/ci.yml` compare les PR à leur base et les pushes à leur parent, puis exécute les deux suites de garde.
+- `.github/workflows/migration-history-guard.yml` exécute le validateur de la branche de base de confiance contre le candidat, sans exécuter de code de la PR et avec permissions `contents: read`.
+- `supabase/migration-history/guard-lock.json` protège la surface de garde après intégration ; `CODEOWNERS` rattache migrations, baseline, manifeste et scripts au fondateur.
+- Le manifeste qualifie désormais ses 97 versions et l’état `not applied` comme snapshot historique ; l’état courant stable est 98 versions avec GOAL-003 appliquée une fois.
 - `docs/runbooks/GOAL-005-migration-history-production-gate.md` définit préflight, mutations exhaustives, arrêts, vérifications et récupération.
+- `docs/runbooks/GOAL-005-migration-authoring.md` définit la grammaire, l’append-only, les commandes et l’enforcement GitHub des migrations futures.
+
+## Durcissement prospectif final
+
+L’audit de clôture a découvert que le plan initial figeait par erreur toutes les migrations sauf GOAL-003 dans un ledger de 97 versions, ce qui bloquait les ajouts futurs ou aurait pu les marquer appliqués sans exécuter leur SQL. Le modèle corrigé sépare définitivement :
+
+1. `baselineLedgerVersions` — les 97 versions strictement antérieures à GOAL-003, matérialisées par la baseline ;
+2. `prospectiveMigrations` — GOAL-003 puis chaque migration future, réellement vérifiée et appliquée dans l’ordre.
+
+Une migration future valide est acceptée et ajoutée à la chaîne prospective. Dès qu’elle existe dans la branche de base, toute modification, suppression ou renommage échoue. Les noms doivent être lowercase ASCII canoniques, les fichiers réguliers et suivis, et une migration sans token SQL effectif est refusée.
+
+Le bootstrap réel est limité à une base loopback vide, avec ledger vide. Il refuse explicitement la référence de production, tout hôte distant et toute divergence entre dry-run, plan prospectif et ledger final. Sa récupération consiste à jeter la base isolée ; aucun repair de production n’est prévu.
+
+La revue indépendante du Run 5 a rendu `APPROVED FOR INTEGRATION`. Elle confirme la baseline schema-only, la séparation 97/prospective, l’append-only base-aware, le workflow exécuté depuis la base de confiance, l’import du commit de base pour les forks, le guard lock, le bootstrap fail-closed et les suites `29/29` et `10/10`. La protection effective de `main` reste le dernier gate à prouver par une PR réelle avant `Running → Review`.
 
 ## Limites explicitement conservées
 

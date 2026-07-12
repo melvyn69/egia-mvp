@@ -1,10 +1,11 @@
 {
   "schemaVersion": 1,
   "capturedAt": "2026-07-12",
+  "captureSemantics": "Counts, names and production state in this manifest are immutable evidence captured before GOAL-003 was applied; current state is recorded in the GOAL-005 audit.",
   "production": {
     "projectRef": "fhadiwkdznhuxtlgrwfd",
     "projectName": "egia-mvp",
-    "remoteMigrationCount": 97,
+    "remoteMigrationCountAtCapture": 97,
     "remoteNamesAreEvidenceOnly": true
   },
   "legacyLedger": {
@@ -94,6 +95,6 @@
     "name": "secure_claim_review_analyze_jobs",
     "path": "supabase/migrations/20260712120000_secure_claim_review_analyze_jobs.sql",
     "sha256": "a0cefdffdd4283d92f7a0e5b331f10c8474807a29824c5e0a77869e4ef55b491",
-    "productionState": "not applied"
+    "productionStateAtCapture": "not applied"
   }
 }

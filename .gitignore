@@ -28,8 +28,6 @@ server/_shared_dist/
 /-*
 server/_shared_dist__bak/
 
-# Supabase db pull snapshots
-supabase/migrations/*_remote_schema.sql
-supabase/migrations/*_tmp_check.sql
-!supabase/migrations/20260215220147_remote_schema.sql
-!supabase/migrations/20260215223247_remote_schema.sql
+# Supabase snapshots must live outside supabase/migrations so the CLI and Git
+# always see the same canonical migration inventory.
+supabase/snapshots/

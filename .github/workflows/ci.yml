@@ -29,12 +29,20 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             node scripts/validate-supabase-migration-history.mjs --base "${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            node scripts/validate-supabase-migration-history.mjs --base "${{ github.event.before }}"
           else
             node scripts/validate-supabase-migration-history.mjs
           fi
 
+      - name: Test migration-history guardrails
+        run: npm run test:migration-history:adversarial
+
       - name: Validate canonical bootstrap plan
         run: npm run test:canonical-bootstrap
+
+      - name: Test canonical bootstrap guardrails
+        run: npm run test:canonical-bootstrap:guards
 
       - name: Lint
         run: npm run lint

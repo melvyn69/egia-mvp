@@ -1,0 +1,9 @@
+# Migration history and its trusted enforcement surface require founder review.
+/supabase/migrations/ @melvyn69
+/supabase/baselines/ @melvyn69
+/supabase/migration-history/ @melvyn69
+/scripts/validate-supabase-migration-history.mjs @melvyn69
+/scripts/validate-goal-005-dry-run.mjs @melvyn69
+/scripts/plan-goal-005-canonical-bootstrap.mjs @melvyn69
+/scripts/bootstrap-goal-005-canonical.sh @melvyn69
+/.github/workflows/migration-history-guard.yml @melvyn69

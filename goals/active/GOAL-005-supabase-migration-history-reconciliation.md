@@ -15,7 +15,7 @@ Restaurer une source de vérité fiable entre le dépôt et Supabase afin de sé
 
 ## Résultat attendu
 
-À la clôture, les cinq collisions auront une stratégie déterministe documentée, les historiques local et distant auront une interprétation reproductible, les migrations existantes ne seront pas silencieusement réinterprétées et les futures PR ne pourront plus introduire de version dupliquée. Le dépôt contiendra un manifeste canonique, des contrôles automatisés, un runbook de préflight, un plan de récupération et une procédure de vérification post-production. GOAL-003 pourra passer de `Blocked` à `Ready` seulement si les Evidence établissent qu’il peut être appliqué sans masquer une divergence ; sinon le maintien de son blocage sera démontré.
+À la clôture, les cinq collisions ont une stratégie déterministe documentée, les historiques local et distant ont une interprétation reproductible, les migrations existantes ne peuvent pas être silencieusement réinterprétées et les futures PR ne peuvent plus introduire de collision ou contourner les garde-fous. Le dépôt contient un manifeste canonique, une baseline schema-only, un ledger historique gelé, des contrôles automatisés exécutés depuis une base de confiance, des runbooks de préflight et d’auteur, un plan de récupération et une procédure de vérification post-production. GOAL-003 a été appliqué, vérifié indépendamment puis clôturé en `Done`. La reprise de GOAL-002 peut être proposée au fondateur après clôture de GOAL-005.
 
 ## Contexte confirmé
 
@@ -43,9 +43,9 @@ Cette dernière ligne décrit l’état initial capturé par GOAL-004 et par le 
 
 Sont interdits avant le gate : lecture de lignes métier, payloads, contenus utilisateur, secrets, jetons, variables d’environnement, données Auth ou Storage sensibles ; DDL, DML, DCL, `db push`, `migration repair`, modification de l’historique, RPC, endpoint, Edge Function, cron, déploiement ou changement de configuration.
 
-## Stratégie à établir et décision
+## Stratégie retenue et décision
 
-Les options suivantes doivent être évaluées avec bénéfice, risque, préconditions, impact sur les futures migrations, réversibilité ou récupération et besoin d’accès production : absence de réparation, migration prospective seule, renommage local, baselining, réparation contrôlée de l’historique, stratégie hybride et nouvelle chaîne canonique fondée sur l’état réel. La stratégie retenue ne sera pas présumée être une réparation d’historique ; elle devra être déterministe, sans perte de données, reproductible sur un environnement neuf, automatiquement vérifiable et accompagnée d’un plan de récupération lorsque l’inversion stricte est impossible.
+L’analyse a retenu une stratégie hybride sans réparation du ledger de production : une baseline schema-only matérialise le schéma observé, 97 versions historiques antérieures à GOAL-003 forment le ledger de bootstrap gelé, et GOAL-003 puis chaque migration future constituent une chaîne prospective réellement exécutée dans l’ordre. Le manifeste conserve les faits et checksums capturés sans prétendre être un état distant vivant. Le validateur et le workflow de confiance rendent cette interprétation déterministe, reproductible et automatiquement vérifiable.
 
 ## Scope
 
@@ -72,10 +72,40 @@ Les options suivantes doivent être évaluées avec bénéfice, risque, précond
 | AC-04 | Les futures collisions, doublons, noms réutilisés et fichiers vides non déclarés échouent automatiquement. | VAL-04 | EV-04 |
 | AC-05 | Le plan de production est limité, ordonné, vérifiable et sans perte de données. | VAL-05 | EV-05 |
 | AC-06 | Un plan de rollback ou de récupération est documenté pour chaque mutation prévue. | VAL-06 | EV-06 |
-| AC-07 | GOAL-003 reste bloqué ou devient `Ready` sur Evidence explicite. | VAL-07 | EV-07 |
+| AC-07 | La migration GOAL-003 est appliquée et vérifiée, puis GOAL-003 est clôturé en `Done` sur Evidence explicite. | VAL-07 | EV-07 |
 | AC-08 | Tests projet et contrôles migration pertinents sont verts sans nouvelle erreur ou warning lié au changement. | VAL-08 | EV-08 |
-| AC-09 | Une revue indépendante approuve le gate de production. | VAL-09 | EV-09 |
+| AC-09 | Une revue indépendante approuve le durcissement final et le passage de GOAL-005 à `Review`. | VAL-09 | EV-09 |
 | AC-10 | Aucune mutation de production n’a eu lieu avant l’autorisation fondatrice. | VAL-10 | EV-10 |
+
+### Validations
+
+| ID | Méthode |
+| --- | --- |
+| VAL-01 | Comparer le manifeste, le rapport GOAL-004 et l’inventaire local ; vérifier les cinq collisions et la capture `LOCAL_ONLY` de GOAL-003. |
+| VAL-02 | Vérifier les checksums immuables du manifeste, son sens de snapshot et l’absence de réparation historique. |
+| VAL-03 | Générer le plan canonique ; vérifier 97 `baselineLedgerVersions`, la chaîne prospective ordonnée et les garde-fous loopback/base vide. |
+| VAL-04 | Exécuter les tests adversariaux du validateur et du bootstrap, incluant doublons, backdating, renommage, suppression, migrations sans SQL et neutralisation des contrôles. |
+| VAL-05 | Vérifier le dry-run historique, l’unique migration appliquée et le ledger post-production à 98 entrées. |
+| VAL-06 | Vérifier les procédures d’arrêt et de récupération sans repair ni restauration de grants publics. |
+| VAL-07 | Vérifier le journal et les Evidence de GOAL-003 jusqu’à sa clôture fondatrice en `Done`. |
+| VAL-08 | Exécuter les tests migration, tests projet, typecheck, lint, build et contrôles whitespace. |
+| VAL-09 | Obtenir une revue indépendante en lecture seule de l’ensemble des garde-fous et Evidence. |
+| VAL-10 | Vérifier la chronologie des autorisations et l’absence d’opération Supabase pendant le durcissement final. |
+
+### Evidence
+
+| ID | Preuve |
+| --- | --- |
+| EV-01 | `supabase/migration-history/canonical-manifest.json` et audit GOAL-005. |
+| EV-02 | Checksums du manifeste, baseline et migration GOAL-003 ; absence de `migration repair`. |
+| EV-03 | `scripts/plan-goal-005-canonical-bootstrap.mjs`, bootstrap canonique et runbook de production. |
+| EV-04 | Validateur, guard lock, workflow de confiance, `CODEOWNERS`, guide d’auteur et suites adversariales. |
+| EV-05 | Evidence de production documentée : dry-run exact, ledger à 98, signature et grants conformes. |
+| EV-06 | Sections arrêt/récupération des runbooks GOAL-005. |
+| EV-07 | GOAL-003 `Done` au `2026-07-12` après verdict `APPROVED FOR FOUNDER CLOSURE`. |
+| EV-08 | Sorties locales et checks GitHub consignés lors de l’intégration finale. |
+| EV-09 | Verdict de revue indépendante du durcissement final. |
+| EV-10 | Journal GOAL-005 et confirmation d’absence de nouvel accès Supabase pendant le Run 5. |
 
 ## Plan de Runs
 
@@ -104,6 +134,14 @@ Les options suivantes doivent être évaluées avec bénéfice, risque, précond
 4. Vérifier passivement l’application exacte, le ledger, la fonction et les grants. — **réalisé, conforme**
 5. Faire réaliser la vérification indépendante finale de production. — **réalisé — `APPROVED FOR FOUNDER CLOSURE`**
 
+### Run 5 — Durcissement durable et clôture technique
+
+1. Séparer le ledger historique gelé de la chaîne prospective afin que toute migration future soit réellement exécutée. — **réalisé**
+2. Bloquer modifications, suppressions, renommages, backdating, fichiers non suivis ou sans SQL et neutralisation des garde-fous. — **réalisé localement**
+3. Vérifier le bootstrap uniquement sur une base loopback vide, son dry-run exact et son ledger final. — **réalisé localement**
+4. Exécuter les contrôles CI depuis la branche de base de confiance et protéger `main` avec checks requis, historique linéaire, sans force-push ni suppression. — **à confirmer après intégration Git**
+5. Obtenir la revue indépendante, intégrer les changements et soumettre GOAL-005 au verdict fondateur. — **revue `APPROVED FOR INTEGRATION`; intégration en cours**
+
 ### Blocage du gate de production
 
 Le préflight autorisé a confirmé le projet, les 97 entrées distantes, les cinq collisions, l’absence de `20260712120000`, la signature de la fonction et les grants vulnérables attendus. La migration locale et son SHA-256 correspondent au manifeste.
@@ -121,9 +159,11 @@ Le mécanisme recommandé a ensuite été explicitement autorisé : `supabase db
 | Données sensibles | exclues | Lecture limitée à l’historique et au catalogue système. |
 | Mutations de production | réalisées dans le périmètre | Une seule migration appliquée sous `20260712120000`; quatre DCL autorisées, aucune autre entrée ni opération. |
 | Stratégie déterministe | validée localement | Hybride : baseline schema-only, ledger gelé et aucune réparation historique. |
-| Garde-fous automatisés | validés localement | Manifeste, validateur, baseline checksum et CI versionnés. |
-| Bootstrap isolé | validé localement | Baseline, 97 versions et GOAL-003 seule vérifiés dans une instance Docker distincte. |
-| Revue indépendante | finale validée | Verdict `APPROVED FOR FOUNDER CLOSURE`; GOAL-003 est soumis au fondateur en `Review`. |
+| Garde-fous automatisés | validés localement | Manifeste, validateur base-aware, guard lock, workflow de confiance et tests adversariaux versionnés. |
+| Bootstrap isolé | validé localement | 97 versions historiques séparées de GOAL-003 et des migrations futures ; base loopback vide et dry-run exact exigés. |
+| État GOAL-003 | clôturé | GOAL-003 est `Done` après application, vérification et verdict fondateur. |
+| Protection GitHub | en attente d’intégration | Checks `build` et `migration-history-guard`, historique linéaire, force-push et suppression interdits. |
+| Revue indépendante Run 5 | validée | Verdict `APPROVED FOR INTEGRATION`; aucun P0/P1/P2 restant. |
 
 ## Journal de statut
 
@@ -135,4 +175,4 @@ Le mécanisme recommandé a ensuite été explicitement autorisé : `supabase db
 
 ## Définition de Done
 
-GOAL-005 est `Done` seulement après réconciliation contrôlée autorisée, Evidence post-production, vérification indépendante, interprétation stable des historiques local et distant, contrôle automatisé des futures collisions et décision explicite sur la reprise de GOAL-003. Avant le gate, le Goal reste `Running`.
+GOAL-005 est `Done` seulement après réconciliation contrôlée autorisée, Evidence post-production, vérification indépendante, interprétation stable des historiques local et distant, contrôles durables des futures collisions depuis une base de confiance, protection effective de `main` et verdict fondateur explicite. GOAL-005 passe d’abord de `Running` à `Review`. Sa clôture peut ensuite proposer la reprise de GOAL-002 ; elle ne l’autorise pas implicitement.

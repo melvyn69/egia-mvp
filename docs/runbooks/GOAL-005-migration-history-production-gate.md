@@ -6,11 +6,11 @@ La stratégie est **hybride, sans réparation de l’historique de production** 
 
 La chaîne de production existante conserve ses versions appliquées. La chaîne de bootstrap est le baseline `supabase/baselines/20260712-production-public-schema.sql`, dont le checksum est contrôlé automatiquement ; elle ne contient aucune ligne applicative et n’est pas une migration à appliquer à la production.
 
-## Préflight obligatoire (lecture seule)
+## Préflight initial réalisé (trace historique)
 
 1. Vérifier l’identité `fhadiwkdznhuxtlgrwfd` / `egia-mvp` / production.
 2. Exécuter `node scripts/validate-supabase-migration-history.mjs` et exiger le checksum du baseline attendu.
-3. Lire l’historique distant complet et vérifier 97 entrées, les cinq collisions documentées et l’absence de `20260712120000`.
+3. Lire l’historique distant complet et vérifier les 97 entrées alors présentes, les cinq collisions documentées et l’absence initiale de `20260712120000`.
 4. Vérifier au catalogue la signature exacte de `public.claim_review_analyze_jobs(integer, text, text)`, son état `SECURITY DEFINER`, son `search_path` et ses grants ; ne lire aucune ligne de table.
 5. Arrêter sans mutation si l’identité, l’historique, le baseline, le checksum de la migration GOAL-003 ou un prérequis diffère.
 
@@ -52,7 +52,9 @@ Aucun `--include-all`, `--include-seed`, `--include-roles`, repair, autre migrat
 2. Relire les grants de la signature exacte : `service_role` seul ; absence de `PUBLIC`, `anon` et `authenticated`.
 3. Relire la signature, `SECURITY DEFINER` et `search_path` : aucun changement de corps ou paramètre n’est attendu.
 4. Vérifier les deux workers légitimes selon le contrat GOAL-003, sans RPC, endpoint ni lecture de payload.
-5. Conserver les Evidence et faire réaliser la revue post-déploiement indépendante avant toute reprise de GOAL-003.
+5. Conserver les Evidence et faire réaliser la revue post-déploiement indépendante avant clôture de GOAL-003.
+
+Ces cinq vérifications ont été réalisées. L’état stable documenté est désormais : 98 entrées distantes, `20260712120000` présente une fois, GOAL-003 `Done`, aucun grant effectif pour `PUBLIC`, `anon` ou `authenticated`, et `service_role` autorisé.
 
 ## Récupération et rollback
 
@@ -60,9 +62,16 @@ La migration de sécurité est une réduction de privilèges : son rollback ne d
 
 ## Bootstrap d’un environnement neuf
 
-1. Dans un environnement neuf et isolé, exécuter `npm run test:canonical-bootstrap` et exiger 97 versions, le hash de set `621e061b770369d578344a2d7e9bbd1825ee275bd2065a87834cc94ffde27d39` et le checksum du baseline.
-2. Pour un bootstrap réel, lancer `GOAL5_BOOTSTRAP_TARGET=isolated CANONICAL_DATABASE_URL="$CANONICAL_DATABASE_URL" bash scripts/bootstrap-goal-005-canonical.sh`. Le script charge le baseline, marque les 97 versions **une par une** et fait d’abord un `db push --dry-run`.
-3. Le script refuse toute proposition différente de `20260712120000_secure_claim_review_analyze_jobs.sql`, puis applique seulement cette migration. Toute écriture de ledger est interdite sur la production.
-4. Vérifier que le ledger contient exactement les 97 versions de baseline plus `20260712120000`, puis produire l’Evidence de catalogue. Les migrations futures sont ajoutées après cette version et soumises au validateur CI.
+1. Dans un environnement neuf et isolé, exécuter `npm run test:canonical-bootstrap` et exiger 97 `baselineLedgerVersions`, le hash `621e061b770369d578344a2d7e9bbd1825ee275bd2065a87834cc94ffde27d39`, le checksum du baseline et une liste `prospectiveMigrations` ordonnée.
+2. Pour un bootstrap réel, utiliser uniquement une base loopback vide et jetable avec `GOAL5_BOOTSTRAP_TARGET=isolated CANONICAL_DATABASE_URL="$CANONICAL_DATABASE_URL" bash scripts/bootstrap-goal-005-canonical.sh`.
+3. Le script refuse le projet de production connu, tout hôte distant, toute table `public` existante et tout ledger non vide. Il charge le baseline puis marque seulement les 97 versions matérialisées par celui-ci.
+4. Le dry-run doit correspondre exactement à toute la chaîne `prospectiveMigrations`, GOAL-003 puis les migrations futures. Ces migrations sont réellement appliquées dans l’ordre ; elles ne sont jamais masquées par un repair.
+5. Le ledger final doit correspondre exactement aux 97 versions baseline plus toutes les versions prospectives. En cas d’échec, jeter la base isolée et recommencer.
 
-Le bootstrap est une procédure distincte de la production existante : il ne prétend pas que les cinq migrations historiques ont le même contenu que les fichiers locaux actuels. Il initialise explicitement son ledger à partir du baseline réel afin qu’un futur `db push` ne rejoue jamais les 98 migrations legacy.
+Le bootstrap est une procédure distincte de la production existante : il ne prétend pas que les cinq migrations historiques ont le même contenu que les fichiers locaux actuels. Il initialise explicitement son ledger à partir du baseline réel afin qu’un futur `db push` ne rejoue jamais l’historique legacy, tout en exécutant réellement chaque migration prospective.
+
+## Steady state et garde CI
+
+Les migrations déjà fusionnées sont append-only. Le validateur compare tout l’arbre migrations de la branche de base au candidat, impose une version nouvelle supérieure au maximum de base et refuse doublon, nom réutilisé, fichier vide/comment-only, nom non canonique, symlink, fichier non suivi, modification, suppression ou renommage.
+
+Le workflow `Migration History Guard` exécute le validateur depuis la base de confiance, avec permissions GitHub en lecture seule. Le guard lock protège ensuite cette surface contre l’auto-neutralisation. Les règles détaillées et les commandes d’auteur sont dans `docs/runbooks/GOAL-005-migration-authoring.md`.

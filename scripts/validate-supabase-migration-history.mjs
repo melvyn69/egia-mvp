@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,8 +43,19 @@ const IMMUTABLE = {
 const EXPECTED_BOOTSTRAP_LEDGER_COUNT = 97;
 const EXPECTED_BOOTSTRAP_LEDGER_SHA256 = "621e061b770369d578344a2d7e9bbd1825ee275bd2065a87834cc94ffde27d39";
 const migrationDir = join(root, IMMUTABLE.legacyDirectory);
-const migrationPattern = /^(\d{14})_(.+)\.sql$/;
+const migrationPattern = /^(\d{14})_([a-z0-9]+(?:_[a-z0-9]+)*)\.sql$/;
 const errors = [];
+const TRUSTED_GUARD_LOCK_PATH = "supabase/migration-history/guard-lock.json";
+const TRUSTED_GUARD_PATHS = [
+  ".github/CODEOWNERS",
+  ".github/workflows/migration-history-guard.yml",
+  "scripts/bootstrap-goal-005-canonical.sh",
+  "scripts/plan-goal-005-canonical-bootstrap.mjs",
+  "scripts/validate-goal-005-dry-run.mjs",
+  "scripts/validate-supabase-migration-history.mjs",
+  TRUSTED_GUARD_LOCK_PATH,
+  "supabase/migration-history/canonical-manifest.json"
+];
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -52,6 +63,42 @@ function sha256(value) {
 
 function sameJson(actual, expected) {
   return JSON.stringify(actual) === JSON.stringify(expected);
+}
+
+function containsSqlToken(value) {
+  const text = value.replace(/^\uFEFF/, "");
+  let index = 0;
+  while (index < text.length) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (/\s/.test(char) || char === ";") {
+      index += 1;
+      continue;
+    }
+    if (char === "-" && next === "-") {
+      index += 2;
+      while (index < text.length && text[index] !== "\n" && text[index] !== "\r") index += 1;
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      index += 2;
+      let depth = 1;
+      while (index < text.length && depth > 0) {
+        if (text[index] === "/" && text[index + 1] === "*") {
+          depth += 1;
+          index += 2;
+        } else if (text[index] === "*" && text[index + 1] === "/") {
+          depth -= 1;
+          index += 2;
+        } else {
+          index += 1;
+        }
+      }
+      continue;
+    }
+    return true;
+  }
+  return false;
 }
 
 const manifestCollisions = manifest.versionCollisions.map(({ version, localName, remoteName, localPath, localSha256, attribution }) =>
@@ -91,27 +138,44 @@ function gitFileExists(ref, path) {
   }
 }
 
-const files = readdirSync(migrationDir)
-  .filter((file) => file.endsWith(".sql"))
-  .sort();
+const entries = readdirSync(migrationDir, { withFileTypes: true })
+  .filter(({ name }) => name.toLowerCase().endsWith(".sql"))
+  .sort((left, right) => left.name.localeCompare(right.name));
 const migrations = [];
 
-for (const file of files) {
+for (const entry of entries) {
+  const file = entry.name;
   const match = file.match(migrationPattern);
   if (!match) {
     errors.push(`Invalid migration filename: ${file}`);
     continue;
   }
   const path = join(migrationDir, file);
+  const metadata = lstatSync(path);
+  if (!entry.isFile() || !metadata.isFile() || metadata.isSymbolicLink()) {
+    errors.push(`Migration path is not a regular file: ${file}`);
+    continue;
+  }
   migrations.push({
     file,
     path,
     relativePath: relative(root, path).replaceAll("\\", "/"),
     version: match[1],
     name: match[2],
-    bytes: statSync(path).size,
+    bytes: metadata.size,
     sha256: sha256(readFileSync(path))
   });
+}
+
+const trackedBuffer = gitBuffer(["ls-files", "--", IMMUTABLE.legacyDirectory]);
+if (trackedBuffer) {
+  const tracked = new Set(trackedBuffer.toString().trim().split("\n").filter((path) => path.endsWith(".sql")));
+  for (const migration of migrations) {
+    if (!tracked.has(migration.relativePath)) errors.push(`Migration is not tracked by Git: ${migration.relativePath}`);
+  }
+  for (const trackedPath of tracked) {
+    if (!existsSync(join(root, trackedPath))) errors.push(`Tracked migration is missing from the working tree: ${trackedPath}`);
+  }
 }
 
 const byVersion = new Map();
@@ -147,8 +211,8 @@ for (const migration of migrations) {
   if (migration.bytes === 0 && !IMMUTABLE.allowedEmptyVersions.includes(migration.version)) {
     errors.push(`Empty migration is not allowlisted: ${migration.file}`);
   }
-  if (migration.version <= IMMUTABLE.frozenThroughVersion && !migration.file) {
-    errors.push(`Invalid frozen migration entry: ${migration.version}`);
+  if (migration.version > IMMUTABLE.frozenThroughVersion && !containsSqlToken(readFileSync(migration.path, "utf8"))) {
+    errors.push(`Prospective migration has no executable SQL: ${migration.file}`);
   }
 }
 
@@ -202,7 +266,7 @@ if (!localOnly || localOnly.sha256 !== localOnlyHash) {
 }
 const bootstrapLedger = migrations
   .map(({ version }) => version)
-  .filter((version) => version !== IMMUTABLE.localOnly[0])
+  .filter((version) => version < IMMUTABLE.localOnly[0])
   .sort();
 const bootstrapLedgerHash = sha256(`${bootstrapLedger.join("\n")}\n`);
 if (bootstrapLedger.length !== EXPECTED_BOOTSTRAP_LEDGER_COUNT || bootstrapLedgerHash !== EXPECTED_BOOTSTRAP_LEDGER_SHA256) {
@@ -216,7 +280,7 @@ if (!existsSync(baselinePath)) {
   const baseline = readFileSync(baselinePath);
   if (sha256(baseline) !== IMMUTABLE.baseline.sha256) errors.push(`Baseline checksum mismatch: ${IMMUTABLE.baseline.path}`);
   const text = baseline.toString("utf8");
-  if (/^-- Data for Name:|^\s*COPY\s+"?public"?\./im.test(text)) {
+  if (/^-- Data for Name:|^(?:COPY|\\copy)\s+"?public"?\.|^INSERT INTO\s+"?public"?\.|^SELECT pg_catalog\.setval\b/m.test(text)) {
     errors.push(`Baseline contains exported public-schema rows: ${IMMUTABLE.baseline.path}`);
   }
 }
@@ -225,6 +289,35 @@ const baseFlag = args.indexOf("--base");
 if (baseFlag >= 0) {
   const base = args[baseFlag + 1];
   const changed = gitBuffer(["diff", "--name-only", `${base}...HEAD`]);
+  const baseMigrationPathsBuffer = gitBuffer(["ls-tree", "-r", "--name-only", `${base}:${IMMUTABLE.legacyDirectory}`]);
+  if (baseMigrationPathsBuffer) {
+    const baseMigrationPaths = baseMigrationPathsBuffer.toString().trim().split("\n").filter((path) => path.endsWith(".sql"));
+    const basePaths = new Set(baseMigrationPaths.map((path) => `${IMMUTABLE.legacyDirectory}/${path}`));
+    const baseVersions = baseMigrationPaths
+      .map((path) => path.match(migrationPattern)?.[1])
+      .filter(Boolean)
+      .sort();
+    const baseMaxVersion = baseVersions.at(-1);
+
+    for (const basePath of basePaths) {
+      const currentPath = join(root, basePath);
+      if (!existsSync(currentPath)) {
+        errors.push(`Previously committed migration removed or renamed: ${basePath}`);
+        continue;
+      }
+      const metadata = lstatSync(currentPath);
+      const expected = gitBuffer(["show", `${base}:${basePath}`]);
+      if (!metadata.isFile() || metadata.isSymbolicLink() || (expected && sha256(expected) !== sha256(readFileSync(currentPath)))) {
+        errors.push(`Previously committed migration changed: ${basePath}`);
+      }
+    }
+
+    for (const migration of migrations) {
+      if (!basePaths.has(migration.relativePath) && baseMaxVersion && migration.version <= baseMaxVersion) {
+        errors.push(`New migration is not newer than base maximum ${baseMaxVersion}: ${migration.file}`);
+      }
+    }
+  }
   if (changed) {
     for (const file of changed.toString().trim().split("\n").filter(Boolean)) {
       const match = file.match(/^supabase\/migrations\/(\d{14})_.+\.sql$/);
@@ -236,9 +329,12 @@ if (baseFlag >= 0) {
         }
       }
     }
-    const manifestExistsInBase = gitFileExists(base, "supabase/migration-history/canonical-manifest.json");
-    if (manifestExistsInBase && changed.toString().split("\n").includes("supabase/migration-history/canonical-manifest.json")) {
-      errors.push("PR changes the immutable canonical migration manifest");
+    if (gitFileExists(base, TRUSTED_GUARD_LOCK_PATH)) {
+      for (const trustedPath of TRUSTED_GUARD_PATHS) {
+        if (gitFileExists(base, trustedPath) && changed.toString().split("\n").includes(trustedPath)) {
+          errors.push(`PR changes a trusted migration guard: ${trustedPath}`);
+        }
+      }
     }
   }
 }
