@@ -40,19 +40,29 @@ Deux no-op placeholders `remote_schema` existaient sous `supabase/migrations/` m
 
 ## Impact sur GOAL-003
 
-`20260712120000_secure_claim_review_analyze_jobs.sql` demeure immuable et `LOCAL_ONLY`. Le ledger, le baseline, le manifeste et le runbook permettent de préparer son application isolée. GOAL-003 reste `Blocked` : le préflight de production est conforme, mais le MCP `apply_migration` ne peut pas préserver la version locale et son utilisation créerait une nouvelle entrée distante orpheline.
+`20260712120000_secure_claim_review_analyze_jobs.sql` demeure immuable. Le manifeste conserve l’état capturé avant production (`LOCAL_ONLY`, 97 versions distantes). Après autorisation du mécanisme corrigé, la migration est présente une fois dans le ledger distant sous la version exacte `20260712120000`; GOAL-003 reste `Running` jusqu’à la vérification indépendante finale.
 
 ## Bootstrap isolé exécuté
 
 Le bootstrap a été exécuté dans une instance Supabase Docker distincte du projet local existant et de la production. Après chargement du baseline, les 97 versions ont été marquées `applied` une par une (le CLI 2.67 ne prend pas de liste de versions), puis `db push` n’a proposé et appliqué que `20260712120000_secure_claim_review_analyze_jobs.sql`. Le ledger isolé contient 98 versions, dont les cinq collisions et GOAL-003 une seule fois. Le catalogue isolé confirme `service_role` et le propriétaire `postgres` pour la fonction, sans `PUBLIC`, `anon` ni `authenticated`.
 
-## Gate de production tenté, arrêté sans mutation
+## Première tentative du gate, arrêtée sans mutation
 
 Après autorisation distincte, le préflight passif a confirmé l’identité, les 97 versions distantes, les cinq collisions, l’absence de `20260712120000`, le SHA-256 local, la signature et les grants vulnérables attendus. Le MCP `apply_migration` disponible ne fournit toutefois aucun paramètre permettant d’inscrire `20260712120000`; il génère sa propre version distante. L’appel n’a pas été exécuté, car il aurait créé une entrée `REMOTE_ONLY`.
 
 Le mécanisme recommandé pour une autorisation ultérieure est un `supabase db push --linked --dry-run`, puis le push réel uniquement si le plan contient exactement `20260712120000_secure_claim_review_analyze_jobs.sql`. Cette commande était explicitement interdite par l’autorisation reçue. Aucun `db push`, `apply_migration`, repair, DCL, DDL, DML, changement de ledger, baseline, RLS, policy, fonction, donnée ou configuration n’a été exécuté.
 
 La revue indépendante du blocage et de la procédure corrigée a rendu `APPROVED FOR COMMIT`. Elle confirme l’absence de mutation, les statuts des quatre Goals et le caractère minimal du `db push --linked --dry-run` suivi d’un push uniquement si GOAL-003 est l’unique migration proposée.
+
+## Reprise autorisée et application conforme
+
+Une nouvelle autorisation fondatrice a permis le mécanisme corrigé. Le projet, le SHA de `main`, le lien CLI, les 97 versions distantes, la signature, les grants et le checksum de la migration ont été contrôlés. `supabase db push --linked --dry-run` n’a proposé que `20260712120000_secure_claim_review_analyze_jobs.sql`. Après transition GOAL-003 `Blocked → Ready → Running`, un second préflight identique a précédé `supabase db push --linked`, sans flag supplémentaire.
+
+Le postflight passif établit 98 versions distantes et une seule nouvelle entrée `20260712120000` / `secure_claim_review_analyze_jobs`. La signature, le propriétaire, `SECURITY DEFINER`, `search_path=public`, le retour et l’empreinte du corps MD5 `507ffaa9b4d88569b6e9124c1c0770b8` sont inchangés. `PUBLIC` n’a plus d’ACL `EXECUTE`; `anon` et `authenticated` ont un privilège effectif `false`; `service_role` conserve `EXECUTE`. Le test statique 28/28 confirme les deux chemins serveur sans invocation de RPC ou de worker.
+
+Aucune autre migration, réparation, écriture manuelle du ledger, DDL, DML, DCL, seed, rôle, configuration, endpoint ou donnée applicative n’a été touché. Aucun secret, token, mot de passe ou chaîne de connexion n’a été lu ou affiché.
+
+La vérification indépendante finale a rendu `APPROVED FOR FOUNDER CLOSURE` après correction de deux formulations documentaires obsolètes. Elle confirme les deux préflights, le dry-run unique, le ledger postflight, l’intégrité de la fonction, les grants, les chemins serveur statiques, l’absence d’opération hors scope et les statuts attendus. GOAL-003 passe en `Review`; GOAL-005 reste `Running`.
 
 La récupération ne doit jamais rétablir un grant public. Un incident worker impose l’arrêt et une nouvelle autorisation fondatrice, avec Evidence conservées.
 

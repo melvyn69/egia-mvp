@@ -3,7 +3,7 @@
 ## Métadonnées
 
 - **ID :** `GOAL-003`
-- **Statut :** `Blocked`
+- **Statut :** `Review`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-12`
 - **Date de clôture :** `N/A`
@@ -30,6 +30,8 @@ Ce Goal est un contrat de remédiation ciblé. Il ne modifie pas l’état de `G
 Le Run 3 autorisé le `2026-07-12` a été arrêté avant toute DDL : le préflight passif a révélé une collision de version entre l’historique distant et les migrations locales à `20260219130000`. Le diagnostic est délégué à `GOAL-004`; aucune reprise directe du déploiement n’est autorisée.
 
 GOAL-004 est désormais `Done` et GOAL-005 a établi une stratégie hybride approuvée, sans réparation de l’historique de production. Le fondateur a autorisé le `2026-07-12` un nouveau Run 3 strictement limité au préflight passif, au passage `Blocked → Ready → Running`, à l’application de la migration `20260712120000_secure_claim_review_analyze_jobs.sql` et aux vérifications passives post-production. Le préflight de reprise est conforme, mais le Run a été arrêté avant mutation : l’outil Supabase `apply_migration` disponible ne permet pas d’imposer la version `20260712120000` et créerait une nouvelle entrée distante orpheline. GOAL-003 est donc de nouveau `Blocked` jusqu’à autorisation d’un mécanisme qui préserve exactement la version locale.
+
+Le fondateur a ensuite autorisé explicitement un `supabase db push --linked --dry-run`, puis le push réel uniquement si GOAL-003 est l’unique migration proposée sous la version `20260712120000`. Le dry-run du `2026-07-12` satisfait exactement cette condition. GOAL-003 passe donc `Blocked → Ready → Running` avant le second préflight et la mutation contrôlée.
 
 ## Sources de vérité
 
@@ -101,7 +103,7 @@ Cette conclusion est limitée au contrat local : elle confirme le rôle minimal 
 
 ## Contraintes
 
-- Le Goal est `Blocked`. GOAL-004 a conclu le diagnostic et GOAL-005 a produit les garde-fous de réconciliation, mais le mécanisme `apply_migration` approuvé ne peut pas enregistrer la version locale exacte. Aucune migration ni DCL n’a été exécutée ; une nouvelle autorisation est requise pour tout mécanisme différent.
+- Le Goal est `Review`. Le mécanisme corrigé `db push --linked` a appliqué uniquement `20260712120000_secure_claim_review_analyze_jobs.sql` après deux préflights identiques et un dry-run exact. Les Evidence post-production sont conformes et la vérification indépendante finale a rendu `APPROVED FOR FOUNDER CLOSURE`; la clôture appartient au fondateur.
 - Le rôle minimal approuvé est `service_role`. Aucun grant ne doit être ajouté en dehors de la migration corrective autorisée au Run 1 et revue selon les gates du Goal ; un rôle serveur dédié ne peut pas être supposé sans décision ultérieure.
 - Aucun secret, jeton, valeur de configuration, payload métier ou donnée utilisateur ne doit être lu, copié ni inscrit dans les Evidence.
 - Toute validation distante est passive, limitée aux métadonnées nécessaires, redigée et ne peut commencer qu’au Run explicitement autorisé.
@@ -120,14 +122,14 @@ Cette conclusion est limitée au contrat local : elle confirme le rôle minimal 
 | `GOAL-005` — réconciliation de l’historique Supabase | satisfaite pour le gate — `Running` | Stratégie hybride, manifeste, baseline, validateur, runbook et bootstrap isolé approuvés. |
 | Revue indépendante Work | satisfaite avant production | Verdict `APPROVED FOR PRODUCTION GATE`; revue post-déploiement encore requise avant toute clôture. |
 | Autorisation fondatrice avant mutation de production | satisfaite pour ce Run 3 | Autorisation du `2026-07-12`, limitée à la migration et aux vérifications décrites dans le gate. |
-| Mécanisme exact de déploiement Supabase | bloqué | Le MCP `apply_migration` génère une version distante et n’accepte pas `20260712120000`; son utilisation recréerait une divergence. `db push` et toute réparation restent interdits sans nouvelle autorisation. |
-| Accès Supabase contrôlé pour déploiement et vérification | requis seulement aux Runs 3 et 4 | Déploiement et vérification distante impossibles. |
+| Mécanisme exact de déploiement Supabase | exécuté conformément | Le dry-run a proposé uniquement GOAL-003, le second préflight est resté identique, puis `supabase db push --linked` a appliqué cette seule migration sous `20260712120000`. |
+| Accès Supabase contrôlé pour déploiement et vérification | utilisé conformément aux Runs 3 et 4 | Migration unique appliquée et métadonnées post-production vérifiées ; aucune donnée applicative ni valeur secrète lue. |
 
 ## Décisions fondatrices consignées pour `Draft → Ready`
 
-1. **Rôle minimal approuvé :** `service_role confirmé comme rôle minimal`. `supabase/functions/process-review-analyze/index.ts` utilise un client construit avec `SERVICE_ROLE_KEY`; `/api/cron/ai/tag-reviews` passe par `api/cron/[...slug].ts` puis `server/_shared/handlers/cron/ai/tag-reviews.ts`, qui utilise `SUPABASE_SERVICE_ROLE_KEY`. Aucun chemin légitime local utilisant `anon` ou `authenticated` n’a été identifié. La présence effective de la bonne clé reste à vérifier seulement dans le Run distant autorisé concerné.
+1. **Rôle minimal approuvé :** `service_role confirmé comme rôle minimal`. `supabase/functions/process-review-analyze/index.ts` utilise un client construit avec `SERVICE_ROLE_KEY`; `/api/cron/ai/tag-reviews` passe par `api/cron/[...slug].ts` puis `server/_shared/handlers/cron/ai/tag-reviews.ts`, qui utilise `SUPABASE_SERVICE_ROLE_KEY`. Aucun chemin légitime local utilisant `anon` ou `authenticated` n’a été identifié. La vérification post-production est restée strictement statique sur ces chemins : aucune valeur de clé n’a été lue et aucune configuration secrète n’est affirmée.
 2. **Rollback approuvé :** restauration minimale du fonctionnement du worker et des seuls grants serveur strictement nécessaires ; interdiction absolue de rétablir `EXECUTE` à `PUBLIC`, `anon` ou `authenticated`; vérification des grants et du worker après rollback ; arrêt immédiat si le service ne peut être rétabli sans rouvrir l’exposition publique.
-3. **Mécanisme de déploiement approuvé :** correctif sous forme de migration Supabase versionnée. Le Run 3 utilisera un accès Supabase contrôlé pour l’appliquer. Aucune commande locale implicite ni déploiement automatique n’est autorisé ; l’application de production exige une autorisation fondatrice distincte. La méthode exacte pourra être l’outil Supabase contrôlé disponible au Run 3 et aucun secret ne doit être affiché ou lu.
+3. **Mécanisme de déploiement approuvé :** correctif sous forme de migration Supabase versionnée. Après les autorisations fondatrices distinctes, le Run 3 a utilisé `supabase db push --linked`, précédé d’un dry-run exact et de deux préflights identiques. Aucun déploiement automatique, secret affiché ou autre migration n’a été impliqué.
 4. **Autorisation Run 1 :** création de branche dédiée, migration corrective idempotente, test de non-régression, inspection/adaptation locale des deux chemins serveur légitimes si nécessaire et exécution des tests locaux pertinents. Toute connexion distante, déploiement, changement de production, accès à un secret, commit, push ou PR reste interdit sans autorisation ultérieure.
 5. **Gates suivants :** revue Work obligatoire avant le Run 3 ; accès Supabase contrôlé, créneau, migration ciblée et vérification passive nécessitent une autorisation explicite distincte du fondateur.
 
@@ -214,20 +216,20 @@ Une vérification SQL de catalogue, sans données métier, sera préparée pour 
 
 - Le véhicule de changement prévu est une migration Supabase versionnée dans `supabase/migrations/`; `supabase/config.toml:51-53` active les migrations et indique qu’elles sont utilisées lors d’un `db push` ou d’un `db reset`.
 - Le dépôt ne contient ni script npm, ni workflow CI, ni procédure README qui exécute `supabase db push` vers production. `.github/workflows/ci.yml` ne lance que l’installation, le lint et le build ; aucun déploiement automatique n’est autorisé.
-- L’environnement cible est production, car le P0 confirmé concerne production. Le correctif est approuvé sous forme de migration versionnée ; le Run 3 utilisera l’outil Supabase contrôlé disponible au moment du Run, avec accès contrôlé et autorisation fondatrice explicite distincte. Aucune commande locale implicite ne peut appliquer la migration.
-- La vérification post-déploiement est techniquement possible par lecture passive des métadonnées Supabase : définition de la fonction, propriétaire, `search_path` et grants de la signature, sans aucune lecture de `ai_jobs` ni de payload. Cet accès reste soumis à autorisation distincte.
+- L’environnement cible est production, car le P0 confirmé concerne production. Le correctif a été appliqué sous forme de migration versionnée par `supabase db push --linked`, après autorisation explicite, dry-run exact et second préflight conforme.
+- La vérification post-déploiement a lu passivement la définition, le propriétaire, le `search_path`, l’empreinte du corps et les grants de la signature, sans aucune lecture de `ai_jobs` ni de payload.
 
 ## Evidence locales du Run 1
 
 | Élément | Evidence locale / résultat | État |
 | --- | --- | --- |
-| Migration corrective | `supabase/migrations/20260712120000_secure_claim_review_analyze_jobs.sql` : `REVOKE EXECUTE` à `PUBLIC`, `anon` et `authenticated`, puis `GRANT EXECUTE` à `service_role`, sur la signature exacte. Aucun corps de fonction, paramètre ou retour n’est modifié. | Créée localement, non appliquée. |
+| Migration corrective | `supabase/migrations/20260712120000_secure_claim_review_analyze_jobs.sql` : `REVOKE EXECUTE` à `PUBLIC`, `anon` et `authenticated`, puis `GRANT EXECUTE` à `service_role`, sur la signature exacte. Aucun corps de fonction, paramètre ou retour n’est modifié. | Créée localement au Run 1 ; application de production documentée séparément ci-dessous. |
 | Chemins serveur légitimes | `supabase/functions/process-review-analyze/index.ts` utilise `SERVICE_ROLE_KEY`; `api/cron/[...slug].ts` route vers `server/_shared/handlers/cron/ai/tag-reviews.ts`, qui utilise `SUPABASE_SERVICE_ROLE_KEY`. Le test ne détecte aucun autre appel canonique local à la RPC. | Confirmé localement. |
 | Test de non-régression | `scripts/test-claim-review-analyze-jobs-security.mjs`. | Renforcé et relancé avec succès : 28 contrôles, incluant les variantes `int`/`int4`, `GRANT ALL`, `GRANT ALL PRIVILEGES`, listes de rôles, identifiants/rôles cités, rôle non approuvé, grant commenté, commentaire inter-token, plusieurs statements, bloc dollar-quoted et chaînes contenant des marqueurs de commentaire ; les contrôles TypeScript excluent aussi commentaires et chaînes leurres. |
 | Commandes exécutées | `node scripts/test-claim-review-analyze-jobs-security.mjs`; `git diff --check`; `git diff --no-index --check /dev/null` pour chacun des trois artifacts non suivis ; `npm run lint`; `npm run typecheck`; `npm test`. | Test ciblé (28 contrôles), `git diff --check`, les trois contrôles `--no-index --check`, typecheck et test existant réussis. Les commandes `--no-index` retournent `1` uniquement parce qu’un diff existe, sans diagnostic `--check`. Lint : 0 erreur, 1 warning préexistant `react-hooks/exhaustive-deps` dans `src/services/coach/useCoachResult.ts:227`. |
 | Sécurité d’exécution | Aucun accès Supabase, Vercel ou GitHub distant, aucune lecture de secret, aucune invocation RPC/endpoint, aucune donnée utilisateur, aucun déploiement ni application de migration. | Confirmé pour ce Run local. |
 
-Les Evidence et validations de production restent en attente : application de la migration, vérification distante des grants et de la clé configurée, vérification post-déploiement du worker et proposition de reprise de `GOAL-002`.
+À la clôture du Run 1 local, les Evidence de production restaient en attente. Elles sont désormais complétées ci-dessous pour l’application, le ledger, la signature, l’empreinte du corps, les grants et les chemins serveur statiques ; la revue indépendante finale et la proposition concernant `GOAL-002` restent en attente.
 
 ## Evidence du Run 3 — préflight arrêté
 
@@ -250,6 +252,24 @@ Les Evidence et validations de production restent en attente : application de la
 - **Absence de mutation :** aucun appel à `apply_migration`, aucune DCL, DDL, DML, migration, réparation ou modification distante n’a été effectué.
 - **Revue indépendante :** `APPROVED FOR COMMIT`; l’arrêt, les statuts, l’absence de mutation et la recommandation `db push --linked --dry-run` puis push réel conditionnel sont approuvés.
 
+## Evidence du Run 3 relancé — dry-run lié exact
+
+- **CLI et lien :** Supabase CLI 2.67.1, projet lié `fhadiwkdznhuxtlgrwfd`; aucun mot de passe, token ou chaîne de connexion n’a été lu ou affiché.
+- **Commande autorisée :** `supabase db push --linked --dry-run`, code de sortie `0`.
+- **Plan retourné :** une seule migration, `20260712120000_secure_claim_review_analyze_jobs.sql`; aucun autre fichier, seed, rôle, repair ou flag supplémentaire.
+- **Absence de mutation :** le dry-run indique explicitement que les migrations ne sont pas poussées ; le ledger et les grants restent inchangés à cette étape.
+
+## Evidence du Run 3 relancé — application et postflight conformes
+
+- **Second préflight :** projet `fhadiwkdznhuxtlgrwfd` / `egia-mvp` toujours `ACTIVE_HEALTHY`; `main`, `origin/main` et `HEAD` au SHA autorisé `05c29d8d557c2338417ee4f99c06e1b98a5f798b`; checksum migration inchangé `a0cefdffdd4283d92f7a0e5b331f10c8474807a29824c5e0a77869e4ef55b491`; historique encore à 97 entrées et grants pré-correction identiques.
+- **Application :** `supabase db push --linked`, sans `--include-all`, `--include-seed`, `--include-roles` ni autre flag ; confirmation limitée à l’unique fichier `20260712120000_secure_claim_review_analyze_jobs.sql`; code de sortie `0`.
+- **Ledger après application :** 98 entrées, avec une unique nouvelle entrée `20260712120000` / `secure_claim_review_analyze_jobs`; aucune autre entrée créée.
+- **Fonction inchangée :** une seule signature `public.claim_review_analyze_jobs(integer, text, text)`, mêmes arguments nommés, retour `TABLE(id uuid, payload jsonb)`, propriétaire `postgres`, `SECURITY DEFINER`, `search_path=public`; empreinte du corps identique avant/après, MD5 `507ffaa9b4d88569b6e9124c1c0770b8`.
+- **Grants après application :** ACL directe `EXECUTE` uniquement pour `postgres` et `service_role`; aucun grant `PUBLIC`; privilège effectif `false` pour `anon` et `authenticated`, `true` pour `service_role`.
+- **Chemins serveur :** le test statique 28/28 confirme toujours `SERVICE_ROLE_KEY` pour `process-review-analyze`, `SUPABASE_SERVICE_ROLE_KEY` pour le cron `ai/tag-reviews` et l’absence d’appel via le client bearer utilisateur. Aucune RPC, Edge Function, route, cron ou endpoint n’a été invoqué.
+- **Données et secrets :** aucune ligne applicative, payload, donnée utilisateur, valeur de secret, token, mot de passe ou chaîne de connexion n’a été lue ou affichée.
+- **État après revue :** verdict indépendant `APPROVED FOR FOUNDER CLOSURE`; GOAL-003 passe `Running → Review`, GOAL-002 reste `Blocked` et GOAL-005 reste `Running`.
+
 ## Plan de Runs proposé
 
 ### Run 1 — Analyse et correctif local
@@ -270,13 +290,13 @@ Les Evidence et validations de production restent en attente : application de la
 
 - Le premier essai a été arrêté avant toute DDL le `2026-07-12` à cause de la collision d’historique à `20260219130000`.
 - GOAL-004 et le gate GOAL-005 sont désormais satisfaits ; le fondateur a autorisé la reprise et les transitions `Blocked → Ready → Running`.
-- Le Run relancé a été arrêté avant mutation : `apply_migration` ne peut pas préserver la version locale. GOAL-003 repasse `Running → Blocked`; aucun rollback n’est nécessaire puisque la production est inchangée.
+- Après l’arrêt du mécanisme `apply_migration`, une nouvelle autorisation a permis le dry-run lié exact, le second préflight identique et l’application de la seule migration GOAL-003. GOAL-003 reste `Running` pendant la vérification indépendante finale.
 
 ### Run 4 — Vérification post-déploiement
 
-- Vérifier passivement les grants et la définition de la fonction.
-- Vérifier le chemin serveur autorisé par les mécanismes approuvés, sans donnée réelle ni invocation publique.
-- Produire des Evidence redigées et proposer la reprise de `GOAL-002` à Work puis au fondateur.
+- Vérifier passivement le ledger, les grants, la signature, l’empreinte du corps et la configuration de la fonction. — **réalisé, conforme**
+- Vérifier statiquement le chemin serveur autorisé, sans donnée réelle ni invocation publique. — **réalisé, 28/28**
+- Produire des Evidence redigées et obtenir la revue indépendante finale avant proposition concernant `GOAL-002`. — **réalisé — `APPROVED FOR FOUNDER CLOSURE`**
 
 ## Autorisations Git
 
@@ -287,8 +307,8 @@ Les Evidence et validations de production restent en attente : application de la
 ## Autorisations d’environnement
 
 - **Run 1 autorisé :** lectures locales, migration et tests locaux strictement nécessaires ; aucune connexion distante, aucun déploiement, aucune mutation de production et aucun accès à une valeur secrète.
-- **Run 3 :** autorisé le `2026-07-12`, puis arrêté avant mutation lorsque l’outil disponible s’est révélé incapable de préserver la version locale. Toute reprise exige une nouvelle autorisation explicite du mécanisme exact.
-- **Run 4 :** lecture passive post-déploiement uniquement, limitée aux métadonnées nécessaires et aux Evidence redigées.
+- **Run 3 :** repris le `2026-07-12` avec autorisation explicite de `db push --linked`; dry-run, second préflight et application unique réalisés conformément.
+- **Run 4 :** lecture passive post-déploiement et vérification statique des workers réalisées ; aucune RPC ni donnée applicative.
 
 ## Conditions d’arrêt
 
@@ -327,6 +347,9 @@ Le Goal est `Done` seulement lorsque :
 | `2026-07-12` | `Blocked` → `Ready` | Fondateur (Melvyn) | GOAL-004 clôturé, stratégie GOAL-005 intégrée, tests et revue indépendante approuvés ; préflight de reprise conforme et Run 3 de production explicitement autorisé. |
 | `2026-07-12` | `Ready` → `Running` | Codex | Run 3 relancé dans le périmètre autorisé : migration unique puis vérifications passives, sans opération hors scope. |
 | `2026-07-12` | `Running` → `Blocked` | Codex | Arrêt avant mutation : `apply_migration` génère une version distante et ne peut pas inscrire exactement `20260712120000`; les mécanismes alternatifs ne sont pas autorisés. |
+| `2026-07-12` | `Blocked` → `Ready` | Fondateur (Melvyn) | Autorisation explicite du mécanisme `db push --linked`; préflight passif et dry-run exact limités à GOAL-003 réussis. |
+| `2026-07-12` | `Ready` → `Running` | Codex | Dry-run conforme : seule `20260712120000_secure_claim_review_analyze_jobs.sql` est proposée sous la version attendue ; second préflight puis push contrôlé engagés. |
+| `2026-07-12` | `Running` → `Review` | Codex | Migration unique appliquée et postflight conforme ; test 28/28 et validateur réussis ; revue indépendante finale `APPROVED FOR FOUNDER CLOSURE`. Soumis au fondateur pour décision de clôture. |
 
 ## Readiness Check
 
@@ -335,17 +358,17 @@ Le Goal est `Done` seulement lorsque :
 | Identité, valeur business et P0 source | oui | P0 et objectif de réduction de privilège sont rattachés à `GOAL-002` et son rapport. |
 | Scope et hors-scope | oui | Correction ciblée sur une fonction, ses grants et son chemin serveur ; surfaces P1/P2 exclues. |
 | Chemin d’appel légitime exact | oui — local | Deux appels directs établis : `process-review-analyze` et `/api/cron/ai/tag-reviews`; leurs fichiers et rôles sont consignés dans l’analyse locale. |
-| Rôle minimal requis | oui — approuvé | `service_role confirmé comme rôle minimal` pour les deux clients versionnés ; la clé déployée reste à vérifier uniquement dans le Run distant autorisé concerné. |
+| Rôle minimal requis | oui — approuvé et vérifié statiquement | `service_role` est le seul rôle effectif autorisé après migration ; les deux clients versionnés utilisent les variables serveur attendues, sans lecture de leur valeur. |
 | Stratégie de rollback | oui — approuvée | Restauration minimale du worker et des grants serveur, jamais d’accès public par défaut ; arrêt obligatoire si ce principe ne suffit pas. |
-| Validations de non-régression | oui — approuvées | Test statique/SQL et emplacement probable définis ; création et exécution autorisées au seul Run 1. |
-| Mécanisme de déploiement autorisé | oui — approuvé sous contrôle | Migration versionnée et outil Supabase contrôlé au Run 3, sans commande implicite ni automatisation ; autorisation de production distincte obligatoire. |
-| Risque, gates et autorités | oui | R3, revue Work, gates de Run et autorisations fondatrices distinctes sont définis ; seul le Run 1 local est autorisé. |
+| Validations de non-régression | oui — exécutées | Test 28/28 exécuté au Run 1 et après production ; validateur d’historique également réussi. |
+| Mécanisme de déploiement autorisé | oui — exécuté sous contrôle | Dry-run exact, second préflight puis migration unique appliquée sous `20260712120000`, sans automatisation ni flag supplémentaire. |
+| Risque, gates et autorités | oui | R3, autorisations fondatrices, arrêts successifs, reprise contrôlée et Evidence post-production sont tracés ; revue indépendante finale en cours. |
 
-**Résultat : préflight conforme, exécution bloquée.** Le rôle minimal, le rollback, les validations, GOAL-004 et les garde-fous GOAL-005 sont satisfaits. Le mécanisme de déploiement ne garantit pas la version locale exacte ; le Goal est `Blocked` et aucune transition vers `Review` ou `Done` n’a eu lieu.
+**Résultat : production conforme, Goal `Review`.** Le ledger, la signature, le corps, les grants et les chemins serveur statiques satisfont le contrat. La revue indépendante finale a rendu `APPROVED FOR FOUNDER CLOSURE`; aucune transition vers `Done` n’a eu lieu.
 
 ## Livraison et clôture
 
-- **Artifacts livrés à ce stade :** contrat `Blocked`, migration locale `20260712120000_secure_claim_review_analyze_jobs.sql`, test local `scripts/test-claim-review-analyze-jobs-security.mjs`, stratégie GOAL-005 intégrée et Evidence du préflight conforme puis arrêté sans mutation.
-- **Décisions encore nécessaires :** autoriser un mécanisme qui préserve exactement `20260712120000`, recommandé sous forme d’un `supabase db push --linked --dry-run` contrôlé puis du push réel uniquement si une seule migration est proposée. Après application, la vérification finale et la revue indépendante restent requises avant toute transition vers `Review`, `Done` ou reprise de GOAL-002.
+- **Artifacts livrés à ce stade :** contrat `Review`, migration appliquée sous sa version exacte, test 28/28, stratégie GOAL-005, deux préflights conformes, dry-run exact, Evidence post-production redigées et verdict indépendant final.
+- **Décisions encore nécessaires :** décision fondatrice `Review → Done` et décision séparée sur la reprise de GOAL-002.
 - **État de `GOAL-002` :** demeure `Blocked`; aucune reprise n’est proposée avant correction vérifiée et revue indépendante.
 - **Décision de clôture :** `N/A` tant que les conditions de Done et les autorisations de Runs ne sont pas satisfaites.

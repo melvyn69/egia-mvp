@@ -30,6 +30,8 @@ GOAL-004, clôturé le `2026-07-12`, a établi passivement sur le projet unique 
 | `20260221193000` | `remote_history_placeholder` | `fix_rpc_ai_jobs_user_filter` | collision confirmée |
 | `20260712120000` | `secure_claim_review_analyze_jobs` | — | `LOCAL_ONLY`, GOAL-003 non appliqué |
 
+Cette dernière ligne décrit l’état initial capturé par GOAL-004 et par le manifeste du `2026-07-12`. Après le Run de production autorisé, la version `20260712120000` est présente une fois dans le ledger distant sous le nom `secure_claim_review_analyze_jobs`.
+
 ## Sources de vérité et limites
 
 | Source | Usage autorisé |
@@ -97,8 +99,10 @@ Les options suivantes doivent être évaluées avec bénéfice, risque, précond
 ### Run 4 — Gate de production (autorisation fondatrice distincte)
 
 1. Présenter le Founder Brief avec opérations, ordre, arrêts, vérifications et récupération exacts. — **réalisé ; autorisation reçue**
-2. Exécuter uniquement les mutations explicitement autorisées. — **arrêté avant mutation : mécanisme incapable de préserver la version locale**
+2. Exécuter uniquement les mutations explicitement autorisées. — **premier mécanisme arrêté avant mutation ; reprise `db push --linked` autorisée et réalisée conformément**
 3. Faire revoir indépendamment le blocage et le mécanisme corrigé. — **réalisé — `APPROVED FOR COMMIT`**
+4. Vérifier passivement l’application exacte, le ledger, la fonction et les grants. — **réalisé, conforme**
+5. Faire réaliser la vérification indépendante finale de production. — **réalisé — `APPROVED FOR FOUNDER CLOSURE`**
 
 ### Blocage du gate de production
 
@@ -106,7 +110,7 @@ Le préflight autorisé a confirmé le projet, les 97 entrées distantes, les ci
 
 Le MCP Supabase `apply_migration` disponible accepte seulement un nom et une requête ; il génère sa propre version distante. Il ne peut donc pas inscrire exactement `20260712120000`. L’utiliser créerait une nouvelle entrée `REMOTE_ONLY` et violerait l’objectif même de GOAL-005. Le Run s’est arrêté avant tout appel de mutation.
 
-Le mécanisme recommandé est désormais un `supabase db push --linked --dry-run` contrôlé, suivi du push réel seulement si la sortie propose exactement `20260712120000_secure_claim_review_analyze_jobs.sql` et aucune autre migration. Cette commande reste explicitement interdite par l’autorisation actuelle et exige une nouvelle autorisation fondatrice. Aucune réparation de ledger ne doit être autorisée.
+Le mécanisme recommandé a ensuite été explicitement autorisé : `supabase db push --linked --dry-run` a proposé uniquement `20260712120000_secure_claim_review_analyze_jobs.sql`, puis un second préflight identique a précédé le push réel. Le ledger contient maintenant 98 entrées avec cette unique nouvelle version. Aucune réparation de ledger n’a été réalisée.
 
 ## Readiness Check
 
@@ -115,11 +119,11 @@ Le mécanisme recommandé est désormais un `supabase db push --linked --dry-run
 | Projet unique | validé | `fhadiwkdznhuxtlgrwfd` / `egia-mvp` / production. |
 | Diagnostic GOAL-004 | validé | Rapport accepté et Goal clôturé. |
 | Données sensibles | exclues | Lecture limitée à l’historique et au catalogue système. |
-| Mutations de production | bloquées | Autorisation reçue, mais mécanisme autorisé incapable de préserver `20260712120000`; aucune mutation exécutée. |
+| Mutations de production | réalisées dans le périmètre | Une seule migration appliquée sous `20260712120000`; quatre DCL autorisées, aucune autre entrée ni opération. |
 | Stratégie déterministe | validée localement | Hybride : baseline schema-only, ledger gelé et aucune réparation historique. |
 | Garde-fous automatisés | validés localement | Manifeste, validateur, baseline checksum et CI versionnés. |
 | Bootstrap isolé | validé localement | Baseline, 97 versions et GOAL-003 seule vérifiés dans une instance Docker distincte. |
-| Revue indépendante | validée sur le blocage et le mécanisme corrigé | Verdict `APPROVED FOR COMMIT`; aucune mutation n’est autorisée par ce verdict. |
+| Revue indépendante | finale validée | Verdict `APPROVED FOR FOUNDER CLOSURE`; GOAL-003 est soumis au fondateur en `Review`. |
 
 ## Journal de statut
 

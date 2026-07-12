@@ -34,6 +34,18 @@ La migration ne contient ni DDL ni DML et effectue exclusivement, sur la signatu
 
 Il n’est prévu **aucun** `supabase migration repair`, `--include-all`, changement de version historique, baseline appliqué à la production, modification de RLS, policy, fonction, contrainte, index, configuration ou donnée. Une application SQL directe sans inscription correcte au ledger est également interdite. L’autorisation du `2026-07-12` interdisait tout `db push`; elle n’a donc permis que le préflight et s’est terminée sans mutation.
 
+## Exécution contrôlée réalisée
+
+Une autorisation fondatrice ultérieure a couvert explicitement le mécanisme corrigé. Le `2026-07-12` :
+
+1. le préflight a confirmé le projet, 97 versions, l’absence de `20260712120000`, la signature, l’empreinte du corps et les grants attendus ;
+2. `supabase db push --linked --dry-run` a proposé uniquement `20260712120000_secure_claim_review_analyze_jobs.sql` ;
+3. après transition GOAL-003 `Blocked → Ready → Running`, un second préflight identique a été réalisé ;
+4. `supabase db push --linked`, sans aucun flag supplémentaire, a appliqué ce seul fichier ;
+5. le postflight a confirmé 98 versions, une seule nouvelle entrée `20260712120000`, un corps inchangé et les grants attendus.
+
+Aucun `--include-all`, `--include-seed`, `--include-roles`, repair, autre migration ou opération hors scope n’a été exécuté.
+
 ## Vérifications post-production
 
 1. Relire passivement l’historique : `20260712120000` doit apparaître une seule fois.
