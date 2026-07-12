@@ -1,0 +1,5 @@
+-- Canonical no-op placeholder for an already-applied remote migration version.
+--
+-- This file intentionally contains no SQL. It preserves the version observed
+-- in the production migration ledger without treating a removed schema dump as
+-- an executable migration. Its checksum is enforced by GOAL-005 validation.

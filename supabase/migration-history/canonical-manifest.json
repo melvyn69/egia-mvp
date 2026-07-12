@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-07-12",
+  "production": {
+    "projectRef": "fhadiwkdznhuxtlgrwfd",
+    "projectName": "egia-mvp",
+    "remoteMigrationCount": 97,
+    "remoteNamesAreEvidenceOnly": true
+  },
+  "legacyLedger": {
+    "directory": "supabase/migrations",
+    "anchorCommit": "6f05626c7edb77b375281f0e316659478a790dec",
+    "frozenThroughVersion": "20260712120000",
+    "rule": "All migration files at or before frozenThroughVersion are immutable. New migrations must use a strictly greater unused 14-digit version."
+  },
+  "baseline": {
+    "path": "supabase/baselines/20260712-production-public-schema.sql",
+    "sha256": "d2fb33345efcb5ed28e999c93fcf99a19cbd0a313d33be56e76ac11d7a1592d0",
+    "scope": "public schema only; schema-only pg_dump; never application rows",
+    "role": "Canonical bootstrap reference for a new environment. It is not an executable production migration."
+  },
+  "allowedEmptyVersions": [
+    "20260106115555",
+    "20260106120512",
+    "20260116113628"
+  ],
+  "allowedReusedNames": {
+    "google_reviews_add_raw_jsonb": ["20260106114914", "20260106115555"],
+    "business_settings_monthly_report_enabled": ["20260214100000", "20260219141000"],
+    "remote_schema": ["20260215220147", "20260215223247"],
+    "review_replies_unified": ["20260216093653", "20260220155000"]
+  },
+  "admittedFrozenFiles": [
+    {
+      "path": "supabase/migrations/20260215220147_remote_schema.sql",
+      "sha256": "2799491d63aa560c6c181950b3731913b97e085036c97705d8bbfc243faa7e4e",
+      "reason": "Version observed in the remote ledger; historical schema dump removed from Git."
+    },
+    {
+      "path": "supabase/migrations/20260215223247_remote_schema.sql",
+      "sha256": "2799491d63aa560c6c181950b3731913b97e085036c97705d8bbfc243faa7e4e",
+      "reason": "Version observed in the remote ledger; historical schema dump removed from Git."
+    }
+  ],
+  "versionCollisions": [
+    {
+      "version": "20260219120000",
+      "localName": "ai_run_history_rls",
+      "remoteName": "automation_rules_schema",
+      "localPath": "supabase/migrations/20260219120000_ai_run_history_rls.sql",
+      "localSha256": "db558bb724c54d7e4b648fee00df61b2f0d23ae8ba1d8ec83af9b7bf1f27eb72",
+      "remoteGitEvidence": "8dcdb04cee57b6fe695098ef698fea4eb9686b86:fa109e1d84fab9586d9aad48f2192ff09eb88966",
+      "attribution": "non determinable"
+    },
+    {
+      "version": "20260219123000",
+      "localName": "automation_rules_schema",
+      "remoteName": "fix_cron_state_rls",
+      "localPath": "supabase/migrations/20260219123000_automation_rules_schema.sql",
+      "localSha256": "c15a92f7d667f6bf8e93995b27f9e6b000d5c6e58eacaef9476c07d0aff526d4",
+      "remoteGitEvidence": "1a373380e7466cee84ef03d2e4a58365e140eb2e:a1631f95a80b1c033e684b74e07210bc3f337978",
+      "attribution": "non determinable"
+    },
+    {
+      "version": "20260219130000",
+      "localName": "ai_jobs_queue",
+      "remoteName": "drop_alerts_unique_rule_per_review",
+      "localPath": "supabase/migrations/20260219130000_ai_jobs_queue.sql",
+      "localSha256": "50733ccc4603c21f0378305f9d30b3f54f787f3e663e2a1b78af2aee3679f42e",
+      "remoteGitEvidence": "751f422c64caaeeda7c16e9d3769fb95c43fc2be:061cac8ce7bcfef46207f32a08e12b7a5a1bc305",
+      "attribution": "ambiguë"
+    },
+    {
+      "version": "20260219133000",
+      "localName": "drop_alerts_unique_rule_per_review",
+      "remoteName": "user_roles_is_admin",
+      "localPath": "supabase/migrations/20260219133000_drop_alerts_unique_rule_per_review.sql",
+      "localSha256": "f94a5f52e6fdee93579e4834db8456060166766f73695f7e665fa1f6c0affab2",
+      "remoteGitEvidence": "ea767ee307d35252b86f646da0f1ae2b66f10e9f:67a1a137b63ac715cb5a901928f6b039ac465bd4",
+      "attribution": "ambiguë"
+    },
+    {
+      "version": "20260221193000",
+      "localName": "remote_history_placeholder",
+      "remoteName": "fix_rpc_ai_jobs_user_filter",
+      "localPath": "supabase/migrations/20260221193000_remote_history_placeholder.sql",
+      "localSha256": "3d96840638c706033e4c6e4a6e0b1bfd44843fe6b9b3a1e5db959487dc0b4e0c",
+      "remoteGitEvidence": "No reachable Git object contains the remote SQL.",
+      "attribution": "non determinable"
+    }
+  ],
+  "localOnly": {
+    "version": "20260712120000",
+    "name": "secure_claim_review_analyze_jobs",
+    "path": "supabase/migrations/20260712120000_secure_claim_review_analyze_jobs.sql",
+    "sha256": "a0cefdffdd4283d92f7a0e5b331f10c8474807a29824c5e0a77869e4ef55b491",
+    "productionState": "not applied"
+  }
+}

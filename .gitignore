@@ -31,3 +31,5 @@ server/_shared_dist__bak/
 # Supabase db pull snapshots
 supabase/migrations/*_remote_schema.sql
 supabase/migrations/*_tmp_check.sql
+!supabase/migrations/20260215220147_remote_schema.sql
+!supabase/migrations/20260215223247_remote_schema.sql

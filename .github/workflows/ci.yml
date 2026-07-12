@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -22,6 +24,17 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Validate Supabase migration history
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            node scripts/validate-supabase-migration-history.mjs --base "${{ github.event.pull_request.base.sha }}"
+          else
+            node scripts/validate-supabase-migration-history.mjs
+          fi
+
+      - name: Validate canonical bootstrap plan
+        run: npm run test:canonical-bootstrap
 
       - name: Lint
         run: npm run lint
