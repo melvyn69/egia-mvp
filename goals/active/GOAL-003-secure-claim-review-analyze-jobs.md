@@ -3,10 +3,10 @@
 ## Métadonnées
 
 - **ID :** `GOAL-003`
-- **Statut :** `Review`
+- **Statut :** `Done`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-12`
-- **Date de clôture :** `N/A`
+- **Date de clôture :** `2026-07-12`
 - **Niveau de risque proposé :** `R3` — correction d’un P0 de sécurité en production, impliquant potentiellement une fonction, ses grants et une migration. La validation distante, le déploiement et un rollback peuvent être nécessaires. Aucune exécution ne commence sans autorisation explicite du fondateur.
 
 ## Valeur business
@@ -103,7 +103,7 @@ Cette conclusion est limitée au contrat local : elle confirme le rôle minimal 
 
 ## Contraintes
 
-- Le Goal est `Review`. Le mécanisme corrigé `db push --linked` a appliqué uniquement `20260712120000_secure_claim_review_analyze_jobs.sql` après deux préflights identiques et un dry-run exact. Les Evidence post-production sont conformes et la vérification indépendante finale a rendu `APPROVED FOR FOUNDER CLOSURE`; la clôture appartient au fondateur.
+- Le Goal est `Done`. Le mécanisme corrigé `db push --linked` a appliqué uniquement `20260712120000_secure_claim_review_analyze_jobs.sql` après deux préflights identiques et un dry-run exact. Les Evidence post-production sont conformes, la vérification indépendante finale a rendu `APPROVED FOR FOUNDER CLOSURE` et le fondateur a autorisé la clôture documentaire le `2026-07-12`.
 - Le rôle minimal approuvé est `service_role`. Aucun grant ne doit être ajouté en dehors de la migration corrective autorisée au Run 1 et revue selon les gates du Goal ; un rôle serveur dédié ne peut pas être supposé sans décision ultérieure.
 - Aucun secret, jeton, valeur de configuration, payload métier ou donnée utilisateur ne doit être lu, copié ni inscrit dans les Evidence.
 - Toute validation distante est passive, limitée aux métadonnées nécessaires, redigée et ne peut commencer qu’au Run explicitement autorisé.
@@ -268,7 +268,7 @@ Une vérification SQL de catalogue, sans données métier, sera préparée pour 
 - **Grants après application :** ACL directe `EXECUTE` uniquement pour `postgres` et `service_role`; aucun grant `PUBLIC`; privilège effectif `false` pour `anon` et `authenticated`, `true` pour `service_role`.
 - **Chemins serveur :** le test statique 28/28 confirme toujours `SERVICE_ROLE_KEY` pour `process-review-analyze`, `SUPABASE_SERVICE_ROLE_KEY` pour le cron `ai/tag-reviews` et l’absence d’appel via le client bearer utilisateur. Aucune RPC, Edge Function, route, cron ou endpoint n’a été invoqué.
 - **Données et secrets :** aucune ligne applicative, payload, donnée utilisateur, valeur de secret, token, mot de passe ou chaîne de connexion n’a été lue ou affichée.
-- **État après revue :** verdict indépendant `APPROVED FOR FOUNDER CLOSURE`; GOAL-003 passe `Running → Review`, GOAL-002 reste `Blocked` et GOAL-005 reste `Running`.
+- **État après verdict fondateur :** GOAL-003 passe `Review → Done` le `2026-07-12`; GOAL-002 reste `Blocked`, GOAL-004 reste `Done` et GOAL-005 reste `Running`. Cette clôture n’autorise aucune nouvelle opération de production.
 
 ## Plan de Runs proposé
 
@@ -333,7 +333,7 @@ Le Goal est `Done` seulement lorsque :
 - la décision sur `SECURITY DEFINER` et le `search_path` fixe est justifiée ;
 - la migration idempotente et son rollback ont été revus puis déployés avec les autorisations requises ;
 - les tests de non-régression et la vérification passive post-déploiement sont concluants, sans exposition de données ;
-- Work a rendu sa revue indépendante et le fondateur a autorisé la proposition de reprise de `GOAL-002` ;
+- Work a rendu sa revue indépendante finale et le fondateur a autorisé la clôture de GOAL-003 ; toute reprise de `GOAL-002` demeure une décision séparée ;
 - aucun autre composant hors scope n’a été modifié sans Goal et autorisation distincts.
 
 ## Journal de statut
@@ -350,6 +350,7 @@ Le Goal est `Done` seulement lorsque :
 | `2026-07-12` | `Blocked` → `Ready` | Fondateur (Melvyn) | Autorisation explicite du mécanisme `db push --linked`; préflight passif et dry-run exact limités à GOAL-003 réussis. |
 | `2026-07-12` | `Ready` → `Running` | Codex | Dry-run conforme : seule `20260712120000_secure_claim_review_analyze_jobs.sql` est proposée sous la version attendue ; second préflight puis push contrôlé engagés. |
 | `2026-07-12` | `Running` → `Review` | Codex | Migration unique appliquée et postflight conforme ; test 28/28 et validateur réussis ; revue indépendante finale `APPROVED FOR FOUNDER CLOSURE`. Soumis au fondateur pour décision de clôture. |
+| `2026-07-12` | `Review` → `Done` | Fondateur (Melvyn) | Verdict final accepté et clôture documentaire autorisée. GOAL-002 reste `Blocked`, GOAL-004 reste `Done`, GOAL-005 reste `Running`; aucune nouvelle opération de production n’est autorisée. |
 
 ## Readiness Check
 
@@ -362,13 +363,13 @@ Le Goal est `Done` seulement lorsque :
 | Stratégie de rollback | oui — approuvée | Restauration minimale du worker et des grants serveur, jamais d’accès public par défaut ; arrêt obligatoire si ce principe ne suffit pas. |
 | Validations de non-régression | oui — exécutées | Test 28/28 exécuté au Run 1 et après production ; validateur d’historique également réussi. |
 | Mécanisme de déploiement autorisé | oui — exécuté sous contrôle | Dry-run exact, second préflight puis migration unique appliquée sous `20260712120000`, sans automatisation ni flag supplémentaire. |
-| Risque, gates et autorités | oui | R3, autorisations fondatrices, arrêts successifs, reprise contrôlée et Evidence post-production sont tracés ; revue indépendante finale en cours. |
+| Risque, gates et autorités | oui | R3, autorisations fondatrices, arrêts successifs, reprise contrôlée, Evidence post-production, revue indépendante finale et décision de clôture sont tracés. |
 
-**Résultat : production conforme, Goal `Review`.** Le ledger, la signature, le corps, les grants et les chemins serveur statiques satisfont le contrat. La revue indépendante finale a rendu `APPROVED FOR FOUNDER CLOSURE`; aucune transition vers `Done` n’a eu lieu.
+**Résultat : production conforme, Goal `Done`.** Le ledger, la signature, le corps, les grants et les chemins serveur statiques satisfont le contrat. La revue indépendante finale a rendu `APPROVED FOR FOUNDER CLOSURE` et le fondateur a autorisé `Review → Done`.
 
 ## Livraison et clôture
 
-- **Artifacts livrés à ce stade :** contrat `Review`, migration appliquée sous sa version exacte, test 28/28, stratégie GOAL-005, deux préflights conformes, dry-run exact, Evidence post-production redigées et verdict indépendant final.
-- **Décisions encore nécessaires :** décision fondatrice `Review → Done` et décision séparée sur la reprise de GOAL-002.
+- **Artifacts livrés :** contrat `Done`, migration appliquée sous sa version exacte, test 28/28, stratégie GOAL-005, deux préflights conformes, dry-run exact, Evidence post-production redigées, verdict indépendant final et décision fondatrice de clôture.
+- **Décisions encore nécessaires :** décision séparée sur la reprise de GOAL-002 ; elle n’est pas incluse dans la clôture de GOAL-003.
 - **État de `GOAL-002` :** demeure `Blocked`; aucune reprise n’est proposée avant correction vérifiée et revue indépendante.
-- **Décision de clôture :** `N/A` tant que les conditions de Done et les autorisations de Runs ne sont pas satisfaites.
+- **Décision de clôture :** fondateur — `Review → Done` autorisé le `2026-07-12`; aucune nouvelle opération Supabase ou de production autorisée.
