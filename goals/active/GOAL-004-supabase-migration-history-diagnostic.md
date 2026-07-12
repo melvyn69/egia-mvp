@@ -3,7 +3,7 @@
 ## Métadonnées
 
 - **ID :** `GOAL-004`
-- **Statut :** `Ready`
+- **Statut :** `Running`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-12`
 - **Date de clôture :** `N/A`
@@ -156,19 +156,32 @@ Le rapport ne doit jamais contenir de secret, jeton, valeur d’environnement, p
 
 ### Run 1 — Diagnostic passif
 
-1. Confirmer le projet exact.
-2. Produire l’inventaire local complet.
-3. Lire passivement l’historique distant complet.
-4. Comparer version par version.
-5. Arrêter si l’historique distant est partiel.
-6. Identifier toutes les collisions et absences.
-7. Analyser les effets de catalogue liés aux divergences.
-8. Rechercher les migrations potentiellement appliquées sous une autre version.
-9. Analyser l’impact sur GOAL-003.
-10. Produire le rapport.
-11. Ne proposer aucune correction avant la revue indépendante.
+1. Confirmer le projet exact. — **réalisé**
+2. Produire l’inventaire local complet. — **réalisé**
+3. Lire passivement l’historique distant complet. — **réalisé**
+4. Comparer version par version. — **réalisé**
+5. Arrêter si l’historique distant est partiel. — **non déclenché**
+6. Identifier toutes les collisions et absences. — **réalisé**
+7. Analyser les effets de catalogue liés aux divergences. — **réalisé, attribution partiellement ambiguë**
+8. Rechercher les migrations potentiellement appliquées sous une autre version. — **réalisé**
+9. Analyser l’impact sur GOAL-003. — **réalisé**
+10. Produire le rapport. — **réalisé**
+11. Ne proposer aucune correction avant la revue indépendante. — **respecté**
 
 `supabase migration repair`, `db push`, `migration up`, SQL de mutation et tout changement d’historique sont interdits.
+
+## Evidence du Run 1 passif
+
+- Le projet vérifié correspond exactement à `fhadiwkdznhuxtlgrwfd` / `egia-mvp` / production, avec l’état observé `ACTIVE_HEALTHY`.
+- L’inventaire local contient 98 migrations SQL conformes avec taille et empreintes SHA-256 exactes/LF; l’historique distant contient 97 entrées passivement retournées.
+- La comparaison établit 92 `MATCH_VERSION_NAME`, 5 `VERSION_COLLISION`, 1 `LOCAL_ONLY` et aucun `REMOTE_ONLY`. La migration GOAL-003 `20260712120000_secure_claim_review_analyze_jobs` est `LOCAL_ONLY` et n’est donc pas appliquée.
+- Les cinq collisions `20260219120000`, `20260219123000`, `20260219130000`, `20260219133000` et `20260221193000` disposent chacune d’une fiche : version, noms local/distant, effets locaux explicitement extraits, métadonnées réellement observées et attribution qualifiée sans inférer le SQL distant.
+- Le catalogue confirme des effets liés à `ai_jobs` et l’absence de l’index/contrainte `alerts_unique_rule_per_review`, mais leur attribution à une migration précise reste `CATALOG_EFFECT_AMBIGUOUS` lorsque le contenu distant n’est pas exposé.
+- Le rapport compare les options R3 (inaction, migration prospective seule, renommage local, baselining, réparation d’historique et stratégie hybride) selon leurs bénéfices, risques, préconditions, impact futur, réversibilité et besoin d’accès production.
+- **Décision du Run 1 :** `Goal correctif R3 requis`. GOAL-003 ne peut pas reprendre ni appliquer sa migration tant qu’une stratégie de réconciliation de l’historique n’est pas approuvée et vérifiée.
+- Les métadonnées système nécessaires ont été lues passivement : noms et définitions techniques, grants, états RLS, policies, fonctions, contraintes, index, triggers et autres propriétés de schéma. Aucune ligne de table applicative, payload métier, contenu utilisateur, secret, jeton, valeur d’environnement, ni donnée Auth ou Storage sensible n’a été lue.
+- Aucune DDL, DML, DCL, application de migration, réparation d’historique, modification de grant, policy, fonction, RLS, contrainte, index, configuration ou historique de migration n’a été effectuée ; aucune RPC, Edge Function, route, cron ou endpoint n’a été invoqué.
+- Contrôles locaux exécutés sans nouvel accès distant : recalcul du manifeste et des empreintes (98 entrées conformes), `git diff --check` et vérification whitespace du nouveau rapport.
 
 ### Run 2 — Revue indépendante
 
@@ -190,7 +203,7 @@ Le rapport ne doit jamais contenir de secret, jeton, valeur d’environnement, p
 
 Le fondateur confirme que le seul projet autorisé pour le futur Run 1 est `fhadiwkdznhuxtlgrwfd`, nommé `egia-mvp`, en environnement **production**. Aucun autre projet, branche Supabase, environnement preview ou projet de staging n’est inclus. Le futur Run s’arrête immédiatement si l’identité du projet ne correspond plus exactement à ces trois éléments.
 
-Le blocker **« Autorisation fondatrice explicite du Run 1 distant passif »** reste ouvert et n’est pas accordé dans cette étape. Cette autorisation devra limiter le Run au projet unique `fhadiwkdznhuxtlgrwfd`, à la lecture passive de l’historique des migrations et du catalogue, sans donnée applicative ni mutation, avec arrêt immédiat en cas de projet ambigu ou d’historique incomplet. Le contrat peut être `Ready`, mais aucun accès Supabase supplémentaire ne peut commencer avant cette autorisation distincte.
+L’autorisation fondatrice explicite du Run 1 distant passif est accordée le `2026-07-12`, uniquement pour le projet confirmé, la lecture passive de l’historique des migrations et du catalogue nécessaire au diagnostic, sans donnée applicative ni mutation. Le Run s’arrête immédiatement en cas de projet ambigu, d’historique incomplet, de nécessité de lire une donnée applicative ou de mutation. Aucune autorisation de réparation, migration, DDL, DML, DCL, RPC, endpoint ou correction de production n’est accordée.
 
 ## Readiness Check
 
@@ -201,10 +214,10 @@ Le blocker **« Autorisation fondatrice explicite du Run 1 distant passif »** r
 | Evidence redigées | résolue | Contenu autorisé, interdit et redaction définis. |
 | Procédure de diagnostic | résolue | Ordre du Run 1, catalogue passif et conditions d’arrêt définis. |
 | Projet concerné | validé | Seul `fhadiwkdznhuxtlgrwfd` / `egia-mvp` / production est autorisé pour le futur Run 1. |
-| Run 1 passif | en attente | Autorisation fondatrice explicite distante passive distincte requise. |
+| Run 1 passif | réalisé — revue Work requise | Périmètre limité au projet unique, à l’historique distant et au catalogue passif ; aucune mutation n’a été effectuée. |
 | Mutation distante | interdite | Aucun DDL, DML, DCL, repair ou baselining n’est autorisé. |
 
-**Résultat : Readiness Check validé.** Les méthodes d’inventaire, comparaison, catalogue passif, Evidence, AC/VAL/EV, scope, hors-scope et conditions d’arrêt sont validés, de même que le projet unique. GOAL-004 est `Ready`; le Run 1 distant passif reste non autorisé et aucun passage vers `Running` n’est effectué.
+**Résultat : Readiness Check validé.** Les méthodes d’inventaire, comparaison, catalogue passif, Evidence, AC/VAL/EV, scope, hors-scope et conditions d’arrêt sont validés, de même que le projet unique. GOAL-004 est `Running` pour le seul Run 1 passif autorisé; aucune mutation n’est permise.
 
 ## Journal de statut
 
@@ -212,6 +225,7 @@ Le blocker **« Autorisation fondatrice explicite du Run 1 distant passif »** r
 | --- | --- | --- | --- |
 | `2026-07-12` | N/A → `Draft` | Fondateur (Melvyn) | Diagnostic R2 créé à la suite du blocage préflight de GOAL-003; aucune mutation distante n’est autorisée. |
 | `2026-07-12` | `Draft` → `Ready` | Fondateur (Melvyn) | Projet Supabase unique confirmé ; méthodes de comparaison, Evidence, AC/VAL/EV, limites et conditions d’arrêt validées. Le Run 1 distant passif reste soumis à une autorisation fondatrice séparée. |
+| `2026-07-12` | `Ready` → `Running` | Fondateur (Melvyn) | Run 1 distant passif autorisé uniquement pour l’historique des migrations et le catalogue du projet `fhadiwkdznhuxtlgrwfd`, sans donnée applicative ni mutation. |
 
 ## Définition de Done
 
