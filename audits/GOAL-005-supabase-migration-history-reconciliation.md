@@ -91,6 +91,8 @@ Le bootstrap réel est limité à une base loopback vide, avec ledger vide. Il r
 
 La revue indépendante du Run 5 a rendu `APPROVED FOR INTEGRATION`. Elle confirme la baseline schema-only, la séparation 97/prospective, l’append-only base-aware, le workflow exécuté depuis la base de confiance, l’import du commit de base pour les forks, le guard lock, le bootstrap fail-closed et les suites `29/29` et `10/10`. La protection effective de `main` reste le dernier gate à prouver par une PR réelle avant `Running → Review`.
 
+Le lot revu a été intégré en fast-forward strict par la PR #32 au commit `978bfb5ed9e39435f168d0cc89a7480633b015e4`. La protection de `main` exige désormais une branche à jour, les checks `build` et `migration-history-guard`, y compris pour les administrateurs, ainsi qu’un historique linéaire ; force-push et suppression de branche sont interdits. Une PR documentaire distincte doit encore produire les deux checks verts sur cette configuration avant la transition vers `Review`.
+
 ## Limites explicitement conservées
 
 Le SQL distant de `20260221193000` reste indisponible. Le baseline réel et le ledger explicite rendent cette absence non bloquante pour le bootstrap, mais aucune attribution historique supplémentaire n’est affirmée. Le bootstrap de test ne constitue pas une autorisation de production.

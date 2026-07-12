@@ -139,7 +139,7 @@ L’analyse a retenu une stratégie hybride sans réparation du ledger de produc
 1. Séparer le ledger historique gelé de la chaîne prospective afin que toute migration future soit réellement exécutée. — **réalisé**
 2. Bloquer modifications, suppressions, renommages, backdating, fichiers non suivis ou sans SQL et neutralisation des garde-fous. — **réalisé localement**
 3. Vérifier le bootstrap uniquement sur une base loopback vide, son dry-run exact et son ledger final. — **réalisé localement**
-4. Exécuter les contrôles CI depuis la branche de base de confiance et protéger `main` avec checks requis, historique linéaire, sans force-push ni suppression. — **à confirmer après intégration Git**
+4. Exécuter les contrôles CI depuis la branche de base de confiance et protéger `main` avec checks requis, historique linéaire, sans force-push ni suppression. — **protection configurée ; preuve par PR réelle en cours**
 5. Obtenir la revue indépendante, intégrer les changements et soumettre GOAL-005 au verdict fondateur. — **revue `APPROVED FOR INTEGRATION`; intégration en cours**
 
 ### Blocage du gate de production
@@ -162,7 +162,7 @@ Le mécanisme recommandé a ensuite été explicitement autorisé : `supabase db
 | Garde-fous automatisés | validés localement | Manifeste, validateur base-aware, guard lock, workflow de confiance et tests adversariaux versionnés. |
 | Bootstrap isolé | validé localement | 97 versions historiques séparées de GOAL-003 et des migrations futures ; base loopback vide et dry-run exact exigés. |
 | État GOAL-003 | clôturé | GOAL-003 est `Done` après application, vérification et verdict fondateur. |
-| Protection GitHub | en attente d’intégration | Checks `build` et `migration-history-guard`, historique linéaire, force-push et suppression interdits. |
+| Protection GitHub | configurée, preuve en cours | `main` exige branche à jour, checks `build` et `migration-history-guard`, y compris pour les administrateurs, historique linéaire ; force-push et suppression interdits. |
 | Revue indépendante Run 5 | validée | Verdict `APPROVED FOR INTEGRATION`; aucun P0/P1/P2 restant. |
 
 ## Journal de statut
