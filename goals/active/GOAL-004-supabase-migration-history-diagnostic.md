@@ -3,7 +3,7 @@
 ## Métadonnées
 
 - **ID :** `GOAL-004`
-- **Statut :** `Running`
+- **Statut :** `Review`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-12`
 - **Date de clôture :** `N/A`
@@ -182,6 +182,7 @@ Le rapport ne doit jamais contenir de secret, jeton, valeur d’environnement, p
 - Les métadonnées système nécessaires ont été lues passivement : noms et définitions techniques, grants, états RLS, policies, fonctions, contraintes, index, triggers et autres propriétés de schéma. Aucune ligne de table applicative, payload métier, contenu utilisateur, secret, jeton, valeur d’environnement, ni donnée Auth ou Storage sensible n’a été lue.
 - Aucune DDL, DML, DCL, application de migration, réparation d’historique, modification de grant, policy, fonction, RLS, contrainte, index, configuration ou historique de migration n’a été effectuée ; aucune RPC, Edge Function, route, cron ou endpoint n’a été invoqué.
 - Contrôles locaux exécutés sans nouvel accès distant : recalcul du manifeste et des empreintes (98 entrées conformes), `git diff --check` et vérification whitespace du nouveau rapport.
+- GOAL-004 est soumis au fondateur en `Review`, sans passage à `Done` : le verdict final et la clôture lui appartiennent. Le rapport recommande un Goal correctif R3, mais aucun Goal R3 n’est créé dans cette étape ; GOAL-002 et GOAL-003 restent `Blocked` et aucune correction Supabase n’a été réalisée.
 
 ### Run 2 — Revue indépendante
 
@@ -217,7 +218,7 @@ L’autorisation fondatrice explicite du Run 1 distant passif est accordée le `
 | Run 1 passif | réalisé — revue Work requise | Périmètre limité au projet unique, à l’historique distant et au catalogue passif ; aucune mutation n’a été effectuée. |
 | Mutation distante | interdite | Aucun DDL, DML, DCL, repair ou baselining n’est autorisé. |
 
-**Résultat : Readiness Check validé.** Les méthodes d’inventaire, comparaison, catalogue passif, Evidence, AC/VAL/EV, scope, hors-scope et conditions d’arrêt sont validés, de même que le projet unique. GOAL-004 est `Running` pour le seul Run 1 passif autorisé; aucune mutation n’est permise.
+**Résultat : Readiness Check validé.** Les méthodes d’inventaire, comparaison, catalogue passif, Evidence, AC/VAL/EV, scope, hors-scope et conditions d’arrêt sont validés, de même que le projet unique. GOAL-004 est `Review` : le Run 1 passif est terminé, la revue Work est approuvée et le verdict final du fondateur reste requis ; aucune mutation n’est permise.
 
 ## Journal de statut
 
@@ -226,6 +227,7 @@ L’autorisation fondatrice explicite du Run 1 distant passif est accordée le `
 | `2026-07-12` | N/A → `Draft` | Fondateur (Melvyn) | Diagnostic R2 créé à la suite du blocage préflight de GOAL-003; aucune mutation distante n’est autorisée. |
 | `2026-07-12` | `Draft` → `Ready` | Fondateur (Melvyn) | Projet Supabase unique confirmé ; méthodes de comparaison, Evidence, AC/VAL/EV, limites et conditions d’arrêt validées. Le Run 1 distant passif reste soumis à une autorisation fondatrice séparée. |
 | `2026-07-12` | `Ready` → `Running` | Fondateur (Melvyn) | Run 1 distant passif autorisé uniquement pour l’historique des migrations et le catalogue du projet `fhadiwkdznhuxtlgrwfd`, sans donnée applicative ni mutation. |
+| `2026-07-12` | `Running` → `Review` | Codex | Run 1 passif terminé ; rapport et Evidence produits ; revue Work indépendante approuvée. Soumis au fondateur pour verdict final. |
 
 ## Définition de Done
 
