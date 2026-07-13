@@ -8,6 +8,16 @@
 alter default privileges for role postgres in schema public
   revoke execute on functions from public, anon, authenticated;
 
+-- A legacy permissive SELECT policy exposed every tenant's cron metadata to
+-- any authenticated account and overrode the later user-scoped policy.
+drop policy if exists "cron_state_select_auth" on public.cron_state;
+drop policy if exists "cron_state_select_own" on public.cron_state;
+create policy "cron_state_select_own"
+  on public.cron_state
+  for select
+  to authenticated
+  using (user_id = auth.uid());
+
 -- Trigger and worker helpers are not public RPC APIs.
 revoke execute on function public.audit_draft_changes() from public, anon, authenticated;
 revoke execute on function public.enqueue_ai_job_for_review() from public, anon, authenticated;

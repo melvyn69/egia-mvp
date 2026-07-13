@@ -877,26 +877,6 @@ const Inbox = () => {
         .eq("key", CRON_CURSOR_KEY)
         .eq("user_id", sessionUserId)
         .maybeSingle();
-      if (!data) {
-        const { data: fallback } = await supabase
-          .from("cron_state")
-          .select("updated_at, value")
-          .eq("key", CRON_CURSOR_KEY)
-          .is("user_id", null)
-          .maybeSingle();
-        if (fallback) {
-          const errorsCountFallback = (
-            fallback?.value as { errors_count?: number; at?: string } | null
-          )?.errors_count;
-          const atFallback = (
-            fallback?.value as { at?: string } | null
-          )?.at;
-          return {
-            updatedAt: atFallback ?? fallback.updated_at ?? null,
-            errorsCount: Number(errorsCountFallback ?? 0)
-          };
-        }
-      }
       const errorsCount = (data?.value as { errors_count?: number } | null)
         ?.errors_count;
       const at = (data?.value as { at?: string } | null)?.at;

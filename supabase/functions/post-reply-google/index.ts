@@ -6,6 +6,9 @@ type PostReplyPayload = {
   replyText?: string;
 };
 
+const MAX_REVIEW_NAME_LENGTH = 2048;
+const MAX_REPLY_TEXT_LENGTH = 4096;
+
 const configuredOrigin = (() => {
   const value = Deno.env.get("ALLOWED_ORIGIN") ?? Deno.env.get("APP_BASE_URL") ?? "";
   try {
@@ -101,14 +104,44 @@ Deno.serve(async (req) => {
       });
     }
 
-    const payload = (await req.json()) as PostReplyPayload;
-    if (!payload.reviewId || !payload.replyText) {
+    let rawPayload: unknown;
+    try {
+      rawPayload = await req.json();
+    } catch {
+      return jsonWithCors(400, {
+        error: "Invalid JSON body.",
+        code: "INVALID_JSON",
+        requestId
+      });
+    }
+    if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) {
+      return jsonWithCors(400, {
+        error: "Invalid JSON body.",
+        code: "INVALID_PAYLOAD",
+        requestId
+      });
+    }
+    const input = rawPayload as PostReplyPayload;
+    const reviewId = typeof input.reviewId === "string" ? input.reviewId.trim() : "";
+    const replyText = typeof input.replyText === "string" ? input.replyText.trim() : "";
+    if (!reviewId || !replyText) {
       return jsonWithCors(400, {
         error: "Missing required fields: reviewId, replyText.",
         code: "MISSING_FIELDS",
         requestId
       });
     }
+    if (
+      reviewId.length > MAX_REVIEW_NAME_LENGTH ||
+      replyText.length > MAX_REPLY_TEXT_LENGTH
+    ) {
+      return jsonWithCors(400, {
+        error: "Payload field too long.",
+        code: "PAYLOAD_TOO_LARGE",
+        requestId
+      });
+    }
+    const payload = { reviewId, replyText };
 
     const userToken = authHeader.slice("Bearer ".length).trim();
     const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);

@@ -83,6 +83,25 @@ insert into public.user_roles (user_id, role)
 values ('20000000-0000-4000-8000-000000000002', 'admin')
 on conflict (user_id) do update set role = excluded.role;
 
+insert into public.cron_state (key, value, user_id, updated_at)
+values
+  (
+    'goal002:user-a:status',
+    '{"status":"ok"}'::jsonb,
+    '10000000-0000-4000-8000-000000000001',
+    now()
+  ),
+  (
+    'goal002:user-b:status',
+    '{"status":"private"}'::jsonb,
+    '20000000-0000-4000-8000-000000000002',
+    now()
+  )
+on conflict (key) do update set
+  value = excluded.value,
+  user_id = excluded.user_id,
+  updated_at = excluded.updated_at;
+
 insert into public.loyalty_programs (
   id,
   user_id,
@@ -123,17 +142,105 @@ values (
 )
 on conflict (id) do nothing;
 
+-- Catalog-wide invariants for the exposed public schema.
+do $$
+declare
+  violations integer;
+begin
+  select count(*) into violations
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public'
+    and c.relkind in ('r', 'p')
+    and not c.relrowsecurity;
+  if violations <> 0 then
+    raise exception 'public schema contains tables without RLS: %', violations;
+  end if;
+
+  select count(*) into violations
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public'
+    and c.relkind = 'v'
+    and not coalesce(c.reloptions @> array['security_invoker=true'], false);
+  if violations <> 0 then
+    raise exception 'public schema contains non-security-invoker views: %', violations;
+  end if;
+
+  if exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'cron_state'
+      and policyname = 'cron_state_select_auth'
+  ) then
+    raise exception 'broad cron_state policy still exists';
+  end if;
+
+  select count(*) into violations
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.prosecdef
+    and p.proconfig is null;
+  if violations <> 0 then
+    raise exception 'SECURITY DEFINER functions without fixed config: %', violations;
+  end if;
+
+  select count(*) into violations
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.prosecdef
+    and has_function_privilege('anon', p.oid, 'EXECUTE')
+    and p.oid::regprocedure::text not in (
+      'get_public_loyalty_program(uuid)',
+      'join_loyalty_program(uuid,text,text)'
+    );
+  if violations <> 0 then
+    raise exception 'anon can execute unexpected SECURITY DEFINER functions: %', violations;
+  end if;
+
+  select count(*) into violations
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.prosecdef
+    and has_function_privilege('authenticated', p.oid, 'EXECUTE')
+    and p.oid::regprocedure::text not in (
+      'ensure_profile()',
+      'get_public_loyalty_program(uuid)',
+      'is_admin()',
+      'join_loyalty_program(uuid,text,text)',
+      'record_loyalty_visit(uuid,text,uuid,text)'
+    );
+  if violations <> 0 then
+    raise exception 'authenticated can execute unexpected SECURITY DEFINER functions: %', violations;
+  end if;
+end;
+$$;
+
 -- Anonymous callers have table grants for PostgREST compatibility, but RLS
 -- must still expose no tenant rows and sensitive RPCs must not be executable.
 set local role anon;
 do $$
 declare
   visible_reviews integer;
+  visible_cron_rows integer;
 begin
   select count(*) into visible_reviews from public.google_reviews;
   if visible_reviews <> 0 then
     raise exception 'anonymous caller can read reviews';
   end if;
+  begin
+    select count(*) into visible_cron_rows from public.cron_state;
+    if visible_cron_rows <> 0 then
+      raise exception 'anonymous caller can read cron state';
+    end if;
+  exception
+    when insufficient_privilege then
+      null;
+  end;
   if has_function_privilege('anon', 'public.claim_review_analyze_jobs(integer,text,text)', 'EXECUTE') then
     raise exception 'anon can claim review analysis jobs';
   end if;
@@ -192,6 +299,8 @@ declare
   own_reviews integer;
   foreign_reviews integer;
   foreign_locations integer;
+  own_cron_rows integer;
+  foreign_cron_rows integer;
   changed integer;
 begin
   select count(*) into own_reviews
@@ -215,12 +324,34 @@ begin
     raise exception 'user A can read a foreign establishment';
   end if;
 
+  select count(*) into own_cron_rows
+  from public.cron_state
+  where user_id = '10000000-0000-4000-8000-000000000001';
+  if own_cron_rows <> 1 then
+    raise exception 'user A cannot read own cron state';
+  end if;
+
+  select count(*) into foreign_cron_rows
+  from public.cron_state
+  where user_id = '20000000-0000-4000-8000-000000000002';
+  if foreign_cron_rows <> 0 then
+    raise exception 'user A can read user B cron state';
+  end if;
+
   update public.google_reviews
   set comment = 'tampered'
   where id = '22200000-0000-4000-8000-000000000002';
   get diagnostics changed = row_count;
   if changed <> 0 then
     raise exception 'user A can modify user B review';
+  end if;
+
+  update public.cron_state
+  set value = '{"status":"tampered"}'::jsonb
+  where key = 'goal002:user-b:status';
+  get diagnostics changed = row_count;
+  if changed <> 0 then
+    raise exception 'user A can modify user B cron state';
   end if;
 
   if public.is_admin() then

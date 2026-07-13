@@ -41,6 +41,9 @@ const googleClientSecret = getEnv([
 const openaiApiKey = process.env.OPENAI_API_KEY ?? "";
 const openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const internalApiKey = (process.env.INTERNAL_API_KEY ?? "").trim();
+const MAX_REPLY_REQUEST_BYTES = 32 * 1024;
+const MAX_REVIEW_TEXT_LENGTH = 1200;
+const MAX_REPLY_TEXT_LENGTH = 4096;
 
 const getMissingEnv = (mode: "reply" | "draft" | "test" | "automation") => {
   const missing = [];
@@ -288,6 +291,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         payload = {};
       }
     }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return res.status(400).json({ error: "Invalid JSON body" });
+    }
+    if (Buffer.byteLength(JSON.stringify(payload), "utf8") > MAX_REPLY_REQUEST_BYTES) {
+      return res.status(413).json({ error: "Payload too large" });
+    }
     const mode =
       payload?.mode === "draft" ||
       payload?.mode === "test" ||
@@ -364,6 +373,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         brand_voice_override?: unknown;
         allow_identity_override?: boolean;
       };
+
+    const boundedIdentifiers: Array<[unknown, number]> = [
+      [id, 128],
+      [reviewId, 2048],
+      [review_id, 2048],
+      [review_name, 2048],
+      [location_id, 2048],
+      [draftReplyId, 128],
+      [googleReviewId, 2048]
+    ];
+    if (
+      boundedIdentifiers.some(
+        ([value, limit]) =>
+          value !== undefined &&
+          (typeof value !== "string" || value.length > limit)
+      ) ||
+      (review_text !== undefined &&
+        (typeof review_text !== "string" ||
+          review_text.length > MAX_REVIEW_TEXT_LENGTH)) ||
+      (replyText !== undefined &&
+        (typeof replyText !== "string" ||
+          replyText.length > MAX_REPLY_TEXT_LENGTH)) ||
+      (rating !== undefined &&
+        (typeof rating !== "number" ||
+          !Number.isFinite(rating) ||
+          rating < 1 ||
+          rating > 5))
+    ) {
+      return res.status(400).json({ error: "Invalid payload fields" });
+    }
 
     if (mode === "test") {
       const safeText =
@@ -618,7 +657,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { error: draftUpdateError } = await supabaseAdmin
         .from("review_replies")
         .update({ status: "sent", sent_at: sentAt })
-        .eq("id", draftReplyId);
+        .eq("id", draftReplyId)
+        .eq("user_id", userId);
       if (draftUpdateError) {
         console.error("[reply]", requestId, "review_replies update failed", draftUpdateError);
       }

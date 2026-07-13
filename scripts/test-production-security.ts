@@ -32,22 +32,28 @@ const edgeUserFunctions = [
 
 check("all user Edge Functions require gateway JWT verification", () => {
   const rootConfig = read("supabase/config.toml");
-  assert.match(rootConfig, /\[functions\.generate-reply\]\s*verify_jwt\s*=\s*true/s);
-  for (const name of edgeUserFunctions.slice(1)) {
+  for (const name of edgeUserFunctions) {
     assert.match(
-      read(`supabase/functions/${name}/config.toml`),
-      /verify_jwt\s*=\s*true/,
+      rootConfig,
+      new RegExp(
+        `\\[functions\\.${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\s*verify_jwt\\s*=\\s*true`,
+        "s"
+      ),
       name
     );
   }
+  assert.match(rootConfig, /\[functions\.process-review-analyze\]\s*verify_jwt\s*=\s*false/s);
+  assert.match(rootConfig, /\[functions\.google_oauth_callback\]\s*verify_jwt\s*=\s*false/s);
 });
 
 check("generate-reply authenticates the JWT and denies a foreign business", () => {
   const source = read("supabase/functions/generate-reply/index.ts");
   assert.match(source, /auth\.getUser\(userToken\)/);
-  assert.match(source, /payload\.businessId\s*!==\s*userId/);
+  assert.match(source, /businessId\s*!==\s*userId/);
   assert.match(source, /jsonWithCors\(403,\s*\{ error: "Forbidden"/);
   assert.match(source, /req\.method\s*!==\s*"POST"/);
+  assert.match(source, /MAX_REQUEST_BYTES = 32 \* 1024/);
+  assert.match(source, /Invalid payload fields/);
   assert.doesNotMatch(source, /decodeJwtPayload|jwt_prefix|slice\(0,\s*20\)/);
 });
 
@@ -72,7 +78,35 @@ check("Google reply checks review ownership before token refresh or posting", ()
   assert.match(source, /\.eq\("user_id", userId\)/);
   assert.match(source, /\.eq\("review_name", payload\.reviewId\)/);
   assert.match(source, /code: "REVIEW_NOT_FOUND"/);
+  assert.match(source, /MAX_REPLY_TEXT_LENGTH = 4096/);
+  assert.match(source, /code: "INVALID_JSON"/);
   assert.doesNotMatch(source, /userToken\??:/);
+});
+
+check("OAuth state is atomically consumed before the Edge token exchange", () => {
+  const source = read("supabase/functions/google_oauth_exchange/index.ts");
+  const consume = source.indexOf("const consumedAt");
+  const clearState = source.indexOf("oauth_state: null", consume);
+  const matchState = source.indexOf('.eq("oauth_state", state)', clearState);
+  const tokenExchange = source.indexOf('fetch("https://oauth2.googleapis.com/token"');
+  assert.ok(
+    consume >= 0 &&
+      consume < clearState &&
+      clearState < matchState &&
+      matchState < tokenExchange
+  );
+  assert.match(source, /\.gte\("oauth_state_expires_at", consumedAt\)/);
+});
+
+check("Google reply cannot update a foreign draft through service-role", () => {
+  const source = read("server/_shared/handlers/google/reply.ts");
+  const branchStart = source.indexOf("if (draftReplyId)");
+  const branchEnd = source.indexOf("} else {", branchStart);
+  assert.ok(branchStart >= 0 && branchEnd > branchStart);
+  const draftUpdate = source.slice(branchStart, branchEnd);
+  assert.match(draftUpdate, /\.eq\("id", draftReplyId\)/);
+  assert.match(draftUpdate, /\.eq\("user_id", userId\)/);
+  assert.match(source, /MAX_REPLY_REQUEST_BYTES = 32 \* 1024/);
 });
 
 check("SQL hardening removes public privileged RPC access", () => {
@@ -82,6 +116,8 @@ check("SQL hardening removes public privileged RPC access", () => {
   assert.match(sql, /ensure_user_profile\(uuid, text\) from public, anon, authenticated/i);
   assert.match(sql, /is_admin\(\) from public, anon/i);
   assert.match(sql, /set search_path = pg_catalog, public, auth/i);
+  assert.match(sql, /drop policy if exists "cron_state_select_auth"/i);
+  assert.match(sql, /create policy "cron_state_select_own"[\s\S]*using \(user_id = auth\.uid\(\)\)/i);
   assert.match(claimSql, /claim_review_analyze_jobs/i);
   for (const role of ["public", "anon", "authenticated"]) {
     assert.match(claimSql, new RegExp(`from\\s+${role}\\s*;`, "i"));

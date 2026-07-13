@@ -393,5 +393,14 @@ verify_jwt = true
 [functions.google_gbp_sync_all]
 verify_jwt = true
 
+[functions.google_gbp_sync_locations]
+verify_jwt = true
+
+[functions.post-reply-google]
+verify_jwt = true
+
+[functions.google_oauth_callback]
+verify_jwt = false
+
 [functions.process-review-analyze]
 verify_jwt = false

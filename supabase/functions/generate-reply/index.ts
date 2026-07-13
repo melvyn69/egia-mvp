@@ -64,6 +64,8 @@ const corsHeaders = {
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX = 30;
+const MAX_REQUEST_BYTES = 32 * 1024;
+const MAX_REVIEW_TEXT_LENGTH = 1200;
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const APP_GLOBAL = "00000000-0000-0000-0000-000000000001";
 const DEBUG_MEMORY = Deno.env.get("DEBUG_MEMORY") === "true";
@@ -347,15 +349,58 @@ Deno.serve(async (req) => {
   rateLimitMap.set(ip, { count: nextCount, resetAt: nextReset });
 
   try {
-    const payload = (await req.json()) as GenerateReplyPayload;
-    if (!payload.businessId) {
+    let rawPayload: unknown;
+    try {
+      rawPayload = await req.json();
+    } catch {
+      return jsonWithCors(400, { error: "Invalid JSON body", requestId });
+    }
+    if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) {
+      return jsonWithCors(400, { error: "Invalid JSON body", requestId });
+    }
+    if (new TextEncoder().encode(JSON.stringify(rawPayload)).byteLength > MAX_REQUEST_BYTES) {
+      return jsonWithCors(413, { error: "Payload too large", requestId });
+    }
+
+    const payload = rawPayload as GenerateReplyPayload;
+    const businessId =
+      typeof payload.businessId === "string" ? payload.businessId.trim() : "";
+    const reviewText =
+      typeof payload.reviewText === "string" ? payload.reviewText.trim() : "";
+    const boundedTextFields: Array<[unknown, number]> = [
+      [payload.reviewId, 2048],
+      [payload.authorName, 256],
+      [payload.businessName, 256],
+      [payload.locationName, 256],
+      [payload.platform, 64],
+      [payload.source, 64],
+      [payload.tone, 64],
+      [payload.length, 64],
+      [payload.signature, 512]
+    ];
+    if (
+      boundedTextFields.some(
+        ([value, limit]) =>
+          value !== undefined &&
+          (typeof value !== "string" || value.length > limit)
+      ) ||
+      (payload.memory !== undefined &&
+        (!Array.isArray(payload.memory) ||
+          payload.memory.length > 10 ||
+          payload.memory.some(
+            (item) => typeof item !== "string" || item.length > 512
+          )))
+    ) {
+      return jsonWithCors(400, { error: "Invalid payload fields", requestId });
+    }
+
+    if (!businessId) {
       return jsonWithCors(400, { error: "Missing businessId.", requestId });
     }
-    if (payload.businessId !== userId) {
+    if (businessId !== userId) {
       return jsonWithCors(403, { error: "Forbidden", requestId });
     }
-    const reviewText = payload.reviewText ?? "";
-    if (reviewText.length > 1200) {
+    if (reviewText.length > MAX_REVIEW_TEXT_LENGTH) {
       console.log(
         JSON.stringify({
           requestId,
@@ -371,7 +416,7 @@ Deno.serve(async (req) => {
     }
 
     if (
-      !payload.reviewText ||
+      !reviewText ||
       typeof payload.rating !== "number" ||
       !Number.isFinite(payload.rating) ||
       payload.rating < 1 ||
@@ -382,6 +427,11 @@ Deno.serve(async (req) => {
         requestId
       });
     }
+    const normalizedPayload: GenerateReplyPayload = {
+      ...payload,
+      businessId,
+      reviewText
+    };
 
     const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) {
@@ -402,7 +452,7 @@ Deno.serve(async (req) => {
         ? []
         : await getEffectiveBusinessMemory(
             supabase,
-            payload.businessId,
+            businessId,
             effectiveUserId
           );
     const settingsRow =
@@ -410,7 +460,7 @@ Deno.serve(async (req) => {
         ? null
         : await getEffectiveBusinessSettings(
             supabase,
-            payload.businessId,
+            businessId,
             effectiveUserId
           );
 
@@ -444,7 +494,7 @@ Deno.serve(async (req) => {
           },
           {
             role: "user",
-            content: [{ type: "input_text", text: buildUserPrompt(payload) }]
+            content: [{ type: "input_text", text: buildUserPrompt(normalizedPayload) }]
           }
         ]
       });
