@@ -108,8 +108,13 @@ La présence et la portée des variables réellement configurées, les logs hist
 | `npm run build` | réussi ; avertissements non bloquants sur Browserslist et la taille du bundle. |
 | `npm audit --omit=dev` | 0 vulnérabilité. |
 | `npm audit` | 0 vulnérabilité. |
-| `git diff --check` | réussi à l’étape intermédiaire ; à répéter après documentation. |
+| `git diff --check` | réussi après documentation. |
 | recherche frontend des secrets serveur | aucune occurrence ; seules URL et clé anonyme Supabase sont attendues. |
+
+## Publication et CI
+
+- Pull request brouillon : [#35 — security: validate production trust boundaries](https://github.com/melvyn69/egia-mvp/pull/35), vers `main`, sans fusion autonome.
+- Contrôles de la pull request : CI build, Migration History Guard, Vercel et Vercel Preview Comments réussis, `4/4`.
 
 ## Matrice des tests d’abus
 
