@@ -149,7 +149,7 @@ Futurs Goals proposés, sans création : (1) déploiement contrôlé et vérific
 ## Publication et CI
 
 - Pull request brouillon : [#35 — security: validate production trust boundaries](https://github.com/melvyn69/egia-mvp/pull/35), vers `main`, sans fusion autonome.
-- Le commit `8044d85` et le présent complément d’Evidence doivent être publiés sur cette même branche ; les contrôles GitHub/Vercel sont à relancer sur le nouveau head avant de considérer la publication vérifiée.
+- Commits publiés : correctif approfondi `8044d85`, puis matrice d’Evidence `0a8164b`. Sur le head `0a8164bd7abd8f5041024758bf90f80452b2efd7`, CI build, Migration History Guard, Vercel et Vercel Preview Comments ont réussi, `4/4`.
 
 ## Matrice des tests d’abus
 
