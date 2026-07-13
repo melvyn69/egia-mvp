@@ -3,10 +3,10 @@
 ## Métadonnées
 
 - **ID :** `GOAL-005`
-- **Statut :** `Review`
+- **Statut :** `Done`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-12`
-- **Date de clôture :** `N/A`
+- **Date de clôture :** `2026-07-13`
 - **Niveau de risque :** `R3` — la préparation est locale ou passive ; toute mutation de production exige une autorisation fondatrice distincte après revue indépendante.
 
 ## Valeur business
@@ -173,7 +173,8 @@ Le mécanisme recommandé a ensuite été explicitement autorisé : `supabase db
 | `2026-07-12` | `Draft` → `Ready` | Codex | Contrat R3, scope, gates, AC/VAL/EV et conditions d’arrêt documentés. |
 | `2026-07-12` | `Ready` → `Running` | Codex | Reconstruction passive et implémentation locale autorisées jusqu’au gate de mutation. |
 | `2026-07-13` | `Running` → `Review` | Codex | Réconciliation et garde-fous durables intégrés ; revue indépendante approuvée ; protection de `main` et checks de confiance prouvés par la PR #33. Soumis au fondateur pour verdict final. |
+| `2026-07-13` | `Review` → `Done` | Fondateur (Melvyn) | Verdict final accepté ; clôture documentaire autorisée. GOAL-002 reste `Blocked`, GOAL-003 et GOAL-004 restent `Done` ; aucune nouvelle opération Supabase ou de production n’est autorisée. |
 
 ## Définition de Done
 
-GOAL-005 est `Done` seulement après réconciliation contrôlée autorisée, Evidence post-production, vérification indépendante, interprétation stable des historiques local et distant, contrôles durables des futures collisions depuis une base de confiance, protection effective de `main` et verdict fondateur explicite. GOAL-005 passe d’abord de `Running` à `Review`. Sa clôture peut ensuite proposer la reprise de GOAL-002 ; elle ne l’autorise pas implicitement.
+**Résultat : Goal clôturé.** La réconciliation contrôlée, les Evidence post-production, la vérification indépendante, l’interprétation stable des historiques, les contrôles durables depuis une base de confiance et la protection effective de `main` sont validés. Le verdict fondateur du `2026-07-13` clôt GOAL-005 après la transition canonique `Running → Review → Done`. La reprise de GOAL-002 peut désormais être proposée, mais reste soumise à une autorisation séparée.
