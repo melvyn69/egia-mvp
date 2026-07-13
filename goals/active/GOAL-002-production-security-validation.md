@@ -3,11 +3,11 @@
 ## Métadonnées
 
 - **ID :** `GOAL-002`
-- **Statut :** `Blocked`
+- **Statut :** `Running`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-11`
 - **Date de clôture :** `N/A`
-- **Niveau de risque :** `R2` — audit à accès distant contrôlé, fondé sur des métadonnées en lecture seule et des contrôles d’autorisation inter-tenant non mutants. Bien qu’aucune correction ni configuration partagée ne soit autorisée, les droits d’accès, données et mécanismes d’authentification sont examinés ; une revue indépendante Work est donc requise avant clôture, ainsi que le verdict du fondateur.
+- **Niveau de risque :** `R2` — le Run 2 autorise des corrections locales, une migration prospective non destructive, des tests d’abus locaux et une PR, sans mutation distante. Une revue indépendante Work, le déploiement explicitement autorisé et le verdict du fondateur restent requis avant clôture.
 
 ## Valeur business
 
@@ -24,6 +24,18 @@ Le rapport classe les constats en P0/P1/P2, contient une matrice complète `crit
 Le rapport de `GOAL-001` conclut que le code versionné comporte des garde-fous observables mais ne démontre pas l’état distant de Supabase, RLS/grants, Edge Functions, Vercel, Auth, crons ni des intégrations. Il relève notamment des fonctions Edge avec `verify_jwt = false` et/ou CORS permissif dans le dépôt, ainsi que des chemins parallèles Edge Functions et routes Vercel. Ces constats justifient une validation dédiée ; ils ne démontrent pas, à eux seuls, une vulnérabilité déployée.
 
 L’environnement inclus est **production**. Le Run 1 d’audit distant passif R2 a été exécuté puis interrompu dès la confirmation passive d’un P0 sur une fonction `SECURITY DEFINER` publiquement exécutable. Un rapport partiel est produit ; le verdict provisoire obligatoire est `non sûr`. Le Goal est `Blocked` jusqu’à correction du P0 puis vérification indépendante. Aucun endpoint de production n’a été appelé, aucun test inter-tenant actif n’a été exécuté, aucun environnement n’a été modifié et seuls les artefacts documentaires autorisés sont modifiés dans le dépôt.
+
+### Avenant fondateur — Run 2 du 2026-07-13
+
+La directive fondatrice du `2026-07-13` reprend ce Goal après la clôture de GOAL-005 et remplace, pour le Run 2, les limitations devenues obsolètes du contrat initial. En cas de contradiction avec les sections historiques ci-dessous, le présent avenant prévaut.
+
+- Les corrections locales d’écarts de sécurité démontrés, les tests d’abus, une migration prospective additive/restrictive, la documentation, une branche dédiée, des commits, un push et une pull request sont autorisés.
+- Aucun accès, déploiement, test HTTP ou changement Supabase/Vercel distant n’est autorisé sans nouvel accord explicite. Aucun merge dans `main` n’est autorisé.
+- Les tests peuvent utiliser uniquement des handlers locaux avec valeurs factices et une base PostgreSQL locale isolée issue de la baseline canonique, sans suppression de données ni réinitialisation de la base existante.
+- La décision `Done` exige lint, typecheck, tests, build, audit de dépendances, contrôles de secrets, Evidence d’isolation A/B et absence de vulnérabilité critique/élevée dans la production réellement déployée. Une validation locale seule ne suffit pas.
+- Le rapport principal du Run 2 est `docs/PRODUCTION_SECURITY_VALIDATION.md`. Le rapport `audits/GOAL-002-production-security-validation.md` demeure l’Evidence historique immuable du Run 1.
+
+Le P0 historique `claim_review_analyze_jobs` a été corrigé et vérifié par GOAL-003. GOAL-005 a ensuite établi le gate de migration canonique. Le Run 2 passe donc `Blocked → Running`, audite l’état courant du dépôt et prépare un candidat correctif sans présumer son déploiement.
 
 ## Sources de vérité
 
@@ -231,6 +243,7 @@ Le Goal est `Done` seulement lorsque :
 | `2026-07-11` | `Draft` → `Ready` | Fondateur (Melvyn) | Readiness Check validé ; audit distant passif R2 autorisable dans un Run ultérieur. |
 | `2026-07-11` | `Ready` → `Running` | Fondateur (Melvyn) | Run 1 d’audit distant passif R2 autorisé. |
 | `2026-07-11` | `Running` → `Blocked` | Work | P0 confirmé sur une fonction SECURITY DEFINER publiquement exécutable ; Run arrêté conformément aux conditions d’arrêt. |
+| `2026-07-13` | `Blocked` → `Running` | Fondateur (Melvyn) | GOAL-003 et GOAL-005 terminés ; Run 2 local correctif, tests d’abus, branche/commits/push/PR autorisés, sans accès ni mutation distante. |
 
 ## Readiness Check
 
@@ -244,12 +257,12 @@ Le Goal est `Done` seulement lorsque :
 | Critères, validations et Evidence | oui | AC-01 à AC-11, VAL-01 à VAL-11 et EV-01 à EV-11 sont reliés. |
 | Conditions d’arrêt et Done | oui | Conditions et autorités de revue/clôture explicites. |
 
-**Résultat : Readiness Check validé.** Le Run 1 autorisé a été exécuté passivement puis arrêté conformément à la condition d’arrêt P0. Le Goal est `Blocked` ; aucune transition vers `Review` n’a eu lieu.
+**Résultat : Readiness Check du Run 2 validé par l’avenant fondateur.** Le Run local peut corriger et vérifier le candidat ; la production distante reste hors accès et empêche `Done` jusqu’à autorisation, déploiement et vérification.
 
 ## Livraison et clôture
 
-- **Artifacts livrés :** audit partiel et rapport partiel : `audits/GOAL-002-production-security-validation.md`.
-- **Matrice réelle critère → validation → Evidence :** partielle, consignée dans le rapport ; le Run a été interrompu à la confirmation du P0.
-- **Risques résiduels :** P0 non corrigé sur une voie privilégiée publiquement exécutable, ainsi que les contrôles non conclus par interruption : isolation inter-tenant, RLS/grants, Edge/Vercel, Auth, crons, secrets et logs.
-- **Verdict provisoire obligatoire :** `non sûr`.
-- **Décision de clôture :** Goal `Blocked` jusqu’à correction du P0 et vérification indépendante ; date de clôture : `N/A`.
+- **Artifacts livrés :** Evidence historique Run 1 `audits/GOAL-002-production-security-validation.md`; rapport du candidat Run 2 `docs/PRODUCTION_SECURITY_VALIDATION.md`; migration restrictive et tests d’abus locaux référencés dans ce rapport.
+- **Matrice réelle critère → validation → Evidence :** complétée pour le candidat local dans `docs/PRODUCTION_SECURITY_VALIDATION.md`; état déployé, Auth distante et tests synthétiques en production restent non conclus.
+- **Risques résiduels :** le candidat n’est pas déployé ; la migration/grants, les Edge Functions, Vercel, Auth, variables et logs de production ne sont pas vérifiés. L’inscription fidélité publique ne vérifie pas encore la possession de l’e-mail, sans divulguer désormais les capacités existantes.
+- **Verdict provisoire obligatoire :** candidat local prêt pour revue ; production `non sûr` jusqu’au déploiement et à la vérification autorisés.
+- **Décision de clôture :** Goal `Running`; date de clôture : `N/A`. Ne pas passer `Done` sans Evidence distante et revue indépendante.
