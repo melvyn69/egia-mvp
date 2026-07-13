@@ -3,7 +3,7 @@
 ## Métadonnées
 
 - **ID :** `GOAL-002`
-- **Statut :** `Running`
+- **Statut :** `Blocked`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-11`
 - **Date de clôture :** `N/A`
@@ -244,6 +244,7 @@ Le Goal est `Done` seulement lorsque :
 | `2026-07-11` | `Ready` → `Running` | Fondateur (Melvyn) | Run 1 d’audit distant passif R2 autorisé. |
 | `2026-07-11` | `Running` → `Blocked` | Work | P0 confirmé sur une fonction SECURITY DEFINER publiquement exécutable ; Run arrêté conformément aux conditions d’arrêt. |
 | `2026-07-13` | `Blocked` → `Running` | Fondateur (Melvyn) | GOAL-003 et GOAL-005 terminés ; Run 2 local correctif, tests d’abus, branche/commits/push/PR autorisés, sans accès ni mutation distante. |
+| `2026-07-13` | `Running` → `Blocked` | Codex | Tout le travail local autorisé, la publication et la CI sont terminés. Pour la troisième continuation consécutive, `Done` reste impossible sans autorisation de déployer puis vérifier la production, tests A/B synthétiques, revue Work et verdict fondateur. Aucun accès distant n’est tenté. |
 
 ## Readiness Check
 
@@ -267,4 +268,4 @@ Le Goal est `Done` seulement lorsque :
 - **Publication vérifiée :** PR brouillon [#35](https://github.com/melvyn69/egia-mvp/pull/35), head d’Evidence `0a8164bd7abd8f5041024758bf90f80452b2efd7`, vers `main`, sans merge ; CI build, Migration History Guard, Vercel et Vercel Preview Comments réussis `4/4`.
 - **Risques résiduels :** le candidat n’est pas déployé ; la migration/grants, les Edge Functions, Vercel, Auth, variables et logs de production ne sont pas vérifiés. Le P0 historique ne peut donc pas être fermé en production. L’inscription fidélité publique ne vérifie pas encore la possession de l’e-mail, sans divulguer désormais les capacités existantes.
 - **Verdict provisoire obligatoire :** candidat local prêt pour revue ; production `non sûr` jusqu’au déploiement et à la vérification autorisés.
-- **Décision de clôture :** Goal `Running`; date de clôture : `N/A`. Ne pas passer `Done` sans Evidence distante et revue indépendante.
+- **Décision de clôture :** Goal `Blocked`; date de clôture : `N/A`. Reprendre uniquement après autorisation explicite de déploiement/vérification distante et disponibilité des revues requises ; ne pas passer `Done` sans Evidence de production.

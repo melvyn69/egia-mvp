@@ -182,4 +182,4 @@ Futurs Goals proposés, sans création : (1) déploiement contrôlé et vérific
 **Candidat local : prêt pour revue et déploiement contrôlé.**
 **Production : `non sûr` tant que le candidat n’est pas déployé et vérifié.**
 
-GOAL-002 doit rester en cours/revue, jamais `Done`, jusqu’à la réalisation des actions 1 à 4 et à l’absence confirmée de vulnérabilité critique ou élevée dans l’environnement réellement déployé.
+GOAL-002 est `Blocked`, jamais `Done`, jusqu’à autorisation puis réalisation des actions 1 à 4 et à l’absence confirmée de vulnérabilité critique ou élevée dans l’environnement réellement déployé.
