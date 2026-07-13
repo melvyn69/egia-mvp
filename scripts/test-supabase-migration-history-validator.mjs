@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -33,8 +34,19 @@ const trustedGuardRelativePaths = [
   "supabase/migration-history/guard-lock.json"
 ];
 const goal003Migration = "20260712120000_secure_claim_review_analyze_jobs.sql";
-const validFutureMigration = "20260713000000_future_valid.sql";
 const frozenMigration = "20260219120000_ai_run_history_rls.sql";
+const migrationVersions = readdirSync(join(root, migrationsRelativePath))
+  .map((filename) => filename.match(/^(\d{14})_.+\.sql$/)?.[1])
+  .filter(Boolean)
+  .sort();
+const currentMaxVersion = migrationVersions.at(-1);
+if (!currentMaxVersion) throw new Error("migration fixture requires at least one canonical migration");
+
+function futureMigrationFilename(offset, name) {
+  return `${BigInt(currentMaxVersion) + BigInt(offset)}_${name}.sql`;
+}
+
+const validFutureMigration = futureMigrationFilename(1, "future_valid");
 const gitIdentity = {
   ...process.env,
   GIT_AUTHOR_NAME: "GOAL-005 adversarial test",
@@ -114,7 +126,7 @@ function assertValidatorFails(label, cwd, base, evidence) {
   console.log(`ok ${checks} - ${label}`);
 }
 
-function prepareFutureInBase(name, filename = "20260714000000_base_future.sql") {
+function prepareFutureInBase(name, filename = futureMigrationFilename(100, "base_future")) {
   const cwd = cloneCase(name);
   const originalBase = git(cwd, ["rev-parse", "HEAD"]);
   writeMigration(cwd, filename);
@@ -165,7 +177,7 @@ try {
     const base = git(cwd, ["rev-parse", "HEAD"]);
     writeMigration(
       cwd,
-      "20260713001000_valid_comment_markers.sql",
+      futureMigrationFilename(2, "valid_comment_markers"),
       "select '-- string, not a comment', '/* string, not a comment */', $body$-- dollar-quoted text\n/* still text */$body$;\n"
     );
     commitAll(cwd, "test: add valid SQL with comment markers in literals");
@@ -264,14 +276,14 @@ try {
 
   {
     const { cwd, futureBase, filename } = prepareFutureInBase("future-base-rename");
-    renameSync(migrationPath(cwd, filename), migrationPath(cwd, "20260714000001_base_future_renamed.sql"));
+    renameSync(migrationPath(cwd, filename), migrationPath(cwd, futureMigrationFilename(101, "base_future_renamed")));
     commitAll(cwd, "test: rename migration present in base");
     assertValidatorFails("rename of future migration already in base", cwd, futureBase, new RegExp(filename));
   }
 
   {
-    const { cwd, futureBase } = prepareFutureInBase("backdated-addition", "20260715000000_base_max.sql");
-    writeMigration(cwd, "20260714000000_backdated.sql");
+    const { cwd, futureBase } = prepareFutureInBase("backdated-addition", futureMigrationFilename(200, "base_max"));
+    writeMigration(cwd, futureMigrationFilename(199, "backdated"));
     commitAll(cwd, "test: add backdated migration");
     assertValidatorFails("backdated version below base maximum", cwd, futureBase, /backdated|not strictly newer|base maximum/i);
   }
@@ -333,7 +345,12 @@ try {
       throw new Error(`prospective plan: expected success, got ${result.status}\n${combinedOutput(result)}`);
     }
     const plan = parsePlan(result.stdout, "prospective plan");
-    const expected = [goal003Migration, validFutureMigration];
+    const expected = [
+      ...readdirSync(join(root, migrationsRelativePath))
+        .filter((filename) => /^\d{14}_.+\.sql$/.test(filename) && filename >= goal003Migration)
+        .sort(),
+      validFutureMigration
+    ];
     if (plan.baselineLedgerVersionCount !== 97 || JSON.stringify(plan.prospectiveMigrations) !== JSON.stringify(expected)) {
       throw new Error(`prospective plan: unexpected ledger/prospective set\n${result.stdout}`);
     }
