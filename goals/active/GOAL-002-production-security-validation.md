@@ -261,8 +261,9 @@ Le Goal est `Done` seulement lorsque :
 
 ## Livraison et clôture
 
-- **Artifacts livrés :** Evidence historique Run 1 `audits/GOAL-002-production-security-validation.md`; rapport du candidat Run 2 `docs/PRODUCTION_SECURITY_VALIDATION.md`; migration restrictive et tests d’abus locaux référencés dans ce rapport.
-- **Matrice réelle critère → validation → Evidence :** complétée pour le candidat local dans `docs/PRODUCTION_SECURITY_VALIDATION.md`; état déployé, Auth distante et tests synthétiques en production restent non conclus.
-- **Risques résiduels :** le candidat n’est pas déployé ; la migration/grants, les Edge Functions, Vercel, Auth, variables et logs de production ne sont pas vérifiés. L’inscription fidélité publique ne vérifie pas encore la possession de l’e-mail, sans divulguer désormais les capacités existantes.
+- **Artifacts livrés :** Evidence historique Run 1 `audits/GOAL-002-production-security-validation.md`; rapport du candidat Run 2 `docs/PRODUCTION_SECURITY_VALIDATION.md`; migration restrictive ; 14 contrôles statiques/HTTP locaux ; test SQL d’abus et d’invariants catalogue rejoué depuis une base isolée neuve.
+- **Matrice réelle critère → validation → Evidence :** AC-01 à AC-11 sont reliés explicitement à VAL-01 à VAL-11 et EV-01 à EV-11 dans `docs/PRODUCTION_SECURITY_VALIDATION.md`; état déployé, Auth distante et tests synthétiques en production restent non conclus.
+- **Correctifs approfondis :** commit `8044d85` — policy `cron_state` inter-tenant supprimée, mutation de brouillon `service_role` liée au propriétaire, état OAuth Edge consommé atomiquement, déclarations JWT racine complétées et payloads bornés.
+- **Risques résiduels :** le candidat n’est pas déployé ; la migration/grants, les Edge Functions, Vercel, Auth, variables et logs de production ne sont pas vérifiés. Le P0 historique ne peut donc pas être fermé en production. L’inscription fidélité publique ne vérifie pas encore la possession de l’e-mail, sans divulguer désormais les capacités existantes.
 - **Verdict provisoire obligatoire :** candidat local prêt pour revue ; production `non sûr` jusqu’au déploiement et à la vérification autorisés.
 - **Décision de clôture :** Goal `Running`; date de clôture : `N/A`. Ne pas passer `Done` sans Evidence distante et revue indépendante.
