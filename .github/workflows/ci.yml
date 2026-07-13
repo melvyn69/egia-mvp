@@ -44,6 +44,12 @@ jobs:
       - name: Test canonical bootstrap guardrails
         run: npm run test:canonical-bootstrap:guards
 
+      - name: Test production security guardrails
+        run: npm run test:production-security
+
+      - name: Typecheck Edge Functions
+        run: npm run test:edge-types
+
       - name: Lint
         run: npm run lint
 

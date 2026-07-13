@@ -2,8 +2,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type"
+  "Access-Control-Allow-Headers": "content-type, x-process-secret",
+  "Access-Control-Allow-Methods": "POST, OPTIONS"
 };
 
 const json = (status: number, body: Record<string, unknown>) =>
@@ -87,17 +87,16 @@ const invokeAutomationReply = async (params: {
       user_id: params.userId
     })
   });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`automation reply failed (${response.status})`);
+  }
   const responseText = await response.text();
   let parsed: Record<string, unknown> | null = null;
   try {
     parsed = responseText ? (JSON.parse(responseText) as Record<string, unknown>) : null;
   } catch {
     parsed = null;
-  }
-  if (!response.ok) {
-    const detail =
-      (parsed && typeof parsed.error === "string" ? parsed.error : responseText)?.slice(0, 500);
-    throw new Error(`automation reply failed (${response.status}): ${detail || "unknown error"}`);
   }
   const draftText =
     parsed && typeof parsed.draft_text === "string" ? parsed.draft_text.trim() : "";
@@ -113,16 +112,21 @@ const invokeAutomationReply = async (params: {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  if (req.method !== "POST") {
+    return json(405, { ok: false, error: "Method not allowed" });
   }
 
   try {
-    const processSecret = Deno.env.get("PROCESS_REVIEW_ANALYZE_SECRET");
-    if (processSecret) {
-      const header = req.headers.get("x-process-secret");
-      if (header !== processSecret) {
-        return json(401, { ok: false, error: "Unauthorized" });
-      }
+    const processSecret = (Deno.env.get("PROCESS_REVIEW_ANALYZE_SECRET") ?? "").trim();
+    const providedSecret = (req.headers.get("x-process-secret") ?? "").trim();
+    if (!processSecret) {
+      return json(500, { ok: false, error: "Server misconfigured" });
+    }
+    if (!providedSecret || providedSecret !== processSecret) {
+      return json(401, { ok: false, error: "Unauthorized" });
     }
     const key = (Deno.env.get("SERVICE_ROLE_KEY") ?? "").trim();
     const present = Boolean(key);
@@ -131,19 +135,22 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({
           ok: false,
-          error: "SERVICE_ROLE_KEY missing/invalid format",
-          debug: { present, looksLikeJwt }
+          error: "Server misconfigured"
         }),
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
     const supabaseAdmin = getSupabaseAdmin();
-    const payload = req.method === "POST" ? await req.json().catch(() => ({})) : {};
-    const limitRaw = (payload as { limit?: number }).limit ?? 10;
+    const payload = await req.json().catch(() => null);
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return json(400, { ok: false, error: "Invalid JSON body" });
+    }
+    const input = payload as Record<string, unknown>;
+    const limitRaw = input.limit ?? 10;
     const limit = Math.min(50, Math.max(1, Number(limitRaw) || 10));
-    const userId = typeof payload.user_id === "string" ? payload.user_id : null;
+    const userId = typeof input.user_id === "string" ? input.user_id : null;
     const locationId =
-      typeof payload.location_id === "string" ? payload.location_id : null;
+      typeof input.location_id === "string" ? input.location_id : null;
 
     const { data: jobs, error: claimError } = await supabaseAdmin.rpc(
       "claim_review_analyze_jobs",
@@ -158,12 +165,7 @@ Deno.serve(async (req) => {
         JSON.stringify({
           ok: false,
           error: "Failed to claim jobs",
-          details: {
-            message: claimError.message,
-            code: (claimError as unknown as { code?: string }).code,
-            hint: (claimError as unknown as { hint?: string }).hint,
-            details: (claimError as unknown as { details?: string }).details
-          }
+          requestId: crypto.randomUUID()
         }),
         { status: 500, headers: { "Content-Type": "application/json" } }
       );

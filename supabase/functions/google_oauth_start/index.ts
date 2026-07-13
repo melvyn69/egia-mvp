@@ -36,7 +36,7 @@ const getCorsHeaders = (origin: string | null) => {
 
 const jsonResponse = (
   status: number,
-  payload: Record<string, string>,
+  payload: Record<string, unknown>,
   origin: string | null
 ) =>
   new Response(JSON.stringify(payload), {
@@ -58,24 +58,9 @@ const getRedirectUrl = () => {
 serve(async (req) => {
   const origin = req.headers.get("origin");
   const authHeader = req.headers.get("authorization") ?? "";
-  const apiKeyHeader = req.headers.get("apikey");
-  const hasAuth = Boolean(authHeader);
-  const hasApiKey = Boolean(apiKeyHeader);
-
   if (req.method === "OPTIONS") {
-    console.log("oauth_start options:", {
-      origin,
-      hasAuth,
-      hasApiKey
-    });
     return new Response(null, { status: 204, headers: getCorsHeaders(origin) });
   }
-
-  console.log("oauth_start post:", {
-    origin,
-    hasAuth,
-    hasApiKey
-  });
 
   if (req.method !== "POST") {
     return jsonResponse(405, { error: "Method not allowed" }, origin);
@@ -99,9 +84,6 @@ serve(async (req) => {
     return jsonResponse(401, { code: 401, message: "Missing JWT" }, origin);
   }
 
-  const jwtPreview = `${jwt.slice(0, 12)}...${jwt.slice(-6)}`;
-  console.log("oauth_start jwt preview:", jwtPreview);
-
   const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
     auth: { persistSession: false }
   });
@@ -110,11 +92,9 @@ serve(async (req) => {
   const user = authData?.user;
 
   if (authError || !user) {
-    const preview = `${jwt.slice(0, 12)}...${jwt.slice(-6)}`;
-    console.error("Invalid user JWT:", preview, authError?.message);
     return jsonResponse(
       401,
-      { code: 401, message: "Invalid JWT", details: authError?.message },
+      { code: 401, message: "Invalid JWT" },
       origin
     );
   }
@@ -145,7 +125,7 @@ serve(async (req) => {
     );
 
   if (stateError) {
-    console.error("Failed to store oauth state:", stateError);
+    console.error("Failed to store oauth state");
     return jsonResponse(500, { error: "Failed to store oauth state" }, origin);
   }
 

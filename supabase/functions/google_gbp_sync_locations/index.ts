@@ -82,7 +82,7 @@ const fetchAllPages = async <T>(
     }
 
     if (!res || !res.ok) {
-      throw new Error(`Google API error ${res?.status}: ${lastBody}`);
+      throw new Error(`Google API request failed (${res?.status ?? 502})`);
     }
 
     const json = JSON.parse(lastBody);
@@ -98,23 +98,9 @@ serve(async (req) => {
   try {
     const origin = req.headers.get("origin");
     const authHeader = req.headers.get("authorization") ?? "";
-    const apiKeyHeader = req.headers.get("apikey");
-    const hasAuth = Boolean(authHeader);
-    const hasApiKey = Boolean(apiKeyHeader);
     if (req.method === "OPTIONS") {
-      console.log("gbp_sync_locations options:", {
-        origin,
-        hasAuth,
-        hasApiKey
-      });
       return new Response(null, { status: 204, headers: getCorsHeaders(origin) });
     }
-
-    console.log("gbp_sync_locations post:", {
-      origin,
-      hasAuth,
-      hasApiKey
-    });
 
     if (req.method !== "POST") {
       return jsonResponse(405, { error: "Method not allowed" }, origin);
@@ -149,7 +135,7 @@ serve(async (req) => {
     if (authError || !user) {
       return jsonResponse(
         401,
-        { code: 401, message: "Invalid JWT", details: authError?.message },
+        { code: 401, message: "Invalid JWT" },
         origin
       );
     }
@@ -201,8 +187,8 @@ serve(async (req) => {
       );
 
       if (!refreshResponse.ok) {
-        const body = await refreshResponse.text();
-        console.error("Google refresh failed:", refreshResponse.status, body);
+        await refreshResponse.body?.cancel();
+        console.error("Google refresh failed", { status: refreshResponse.status });
         return jsonResponse(401, { error: "Failed to refresh access token" }, origin);
       }
 
@@ -302,7 +288,9 @@ serve(async (req) => {
       locationsCount
     }, origin);
   } catch (error) {
-    console.error("google_gbp_sync_locations fatal:", error);
+    console.error("google_gbp_sync_locations fatal", {
+      errorType: error instanceof Error ? error.name : "unknown"
+    });
     return jsonResponse(500, { error: "Sync failed (see logs)" }, null);
   }
 });

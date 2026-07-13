@@ -384,8 +384,8 @@ const analyzeReview = async (
     }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`OpenAI error: ${errorText.slice(0, 200)}`);
+      await response.body?.cancel();
+      throw new Error(`OpenAI request failed (${response.status})`);
     }
 
     const payload = await response.json();
@@ -514,20 +514,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
   }
 
-  const missingEnv = getMissingEnv();
-  if (missingEnv.length) {
-    console.error("[ai]", requestId, "missing env:", missingEnv);
-    return sendError(
-      res,
-      requestId,
-      {
-        code: "INTERNAL",
-        message: `Missing env: ${missingEnv.join(", ")}`
-      },
-      500
-    );
-  }
-
   const { expected, provided } = getCronSecrets(req);
   const bearerToken = getBearerToken(req);
   if (!expected || !provided || provided !== expected) {
@@ -576,6 +562,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         401
       );
     }
+  }
+
+  const missingEnv = getMissingEnv();
+  if (missingEnv.length) {
+    console.error("[ai]", requestId, "server misconfigured");
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Server misconfigured" },
+      500
+    );
   }
 
   if (method === "GET") {

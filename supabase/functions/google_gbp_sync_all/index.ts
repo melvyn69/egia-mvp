@@ -51,12 +51,10 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 class GoogleApiError extends Error {
   status: number;
-  body: string;
 
-  constructor(status: number, body: string) {
+  constructor(status: number) {
     super(`Google API error ${status}`);
     this.status = status;
-    this.body = body;
   }
 }
 
@@ -94,9 +92,9 @@ const fetchAllPages = async <T>(
 
     if (!res || !res.ok) {
       if (res?.status === 401 || res?.status === 403) {
-        throw new GoogleApiError(res.status, lastBody);
+        throw new GoogleApiError(res.status);
       }
-      throw new Error(`Google API error ${res?.status}: ${lastBody}`);
+      throw new Error(`Google API request failed (${res?.status ?? 502})`);
     }
 
     const json = JSON.parse(lastBody);
@@ -128,24 +126,9 @@ const starRatingToInt = (starRating: string | undefined) => {
 serve(async (req) => {
   const origin = req.headers.get("origin");
   const authHeader = req.headers.get("authorization") ?? "";
-  const apiKeyHeader = req.headers.get("apikey");
-  const hasAuth = Boolean(authHeader);
-  const hasApiKey = Boolean(apiKeyHeader);
-
   if (req.method === "OPTIONS") {
-    console.log("gbp_sync_all options:", {
-      origin,
-      hasAuth,
-      hasApiKey
-    });
     return new Response(null, { status: 204, headers: getCorsHeaders(origin) });
   }
-
-  console.log("gbp_sync_all post:", {
-    origin,
-    hasAuth,
-    hasApiKey
-  });
 
   if (req.method !== "POST") {
     return jsonResponse(405, { error: "Method not allowed" }, origin);
@@ -168,8 +151,6 @@ serve(async (req) => {
   if (!jwt) {
     return jsonResponse(401, { code: 401, message: "Missing JWT" }, origin);
   }
-  console.log("has_jwt", !!jwt, "jwt_prefix", jwt?.slice(0, 20));
-
   const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
     auth: { persistSession: false },
   });
@@ -178,10 +159,9 @@ serve(async (req) => {
   const user = userData?.user;
 
   if (userError || !user) {
-    console.error("JWT invalid:", userError);
     return jsonResponse(
       401,
-      { code: 401, message: "Invalid JWT", details: userError?.message ?? null },
+      { code: 401, message: "Invalid JWT" },
       origin
     );
   }
@@ -227,9 +207,9 @@ serve(async (req) => {
       }),
     });
 
-    const refreshBody = await refreshResponse.text();
     if (!refreshResponse.ok) {
-      console.error("Google refresh failed:", refreshResponse.status, refreshBody);
+      await refreshResponse.body?.cancel();
+      console.error("Google refresh failed", { status: refreshResponse.status });
       return jsonResponse(
         401,
         { error: "Failed to refresh Google access token", status: refreshResponse.status },
@@ -237,7 +217,7 @@ serve(async (req) => {
       );
     }
 
-    const refreshData = JSON.parse(refreshBody) as Record<string, unknown>;
+    const refreshData = await refreshResponse.json() as Record<string, unknown>;
     accessToken = (refreshData.access_token as string | undefined) ?? accessToken;
     const refreshExpiresIn = Number(refreshData.expires_in ?? 0);
     const newExpiresAt = new Date(now + refreshExpiresIn * 1000).toISOString();
@@ -321,7 +301,8 @@ serve(async (req) => {
               address_json: (location.storefrontAddress ?? null) as
                 | Record<string, unknown>
                 | null,
-              phone: (location.phoneNumbers?.primaryPhone ?? null) as
+              phone: ((location.phoneNumbers as { primaryPhone?: string } | null)
+                ?.primaryPhone ?? null) as
                 | string
                 | null,
               website_uri: (location.websiteUri ?? null) as string | null,
@@ -358,7 +339,8 @@ serve(async (req) => {
                 user_id: user.id,
                 location_id: locationResourceName,
                 review_id: reviewId,
-                author_name: (review.reviewer?.displayName ?? null) as
+                author_name: ((review.reviewer as { displayName?: string } | null)
+                  ?.displayName ?? null) as
                   | string
                   | null,
                 rating,
@@ -386,18 +368,19 @@ serve(async (req) => {
     );
   } catch (error) {
     if (error instanceof GoogleApiError) {
-      console.error("google_gbp_sync_all google error:", error.status, error.body);
+      console.error("google_gbp_sync_all google error", { status: error.status });
       return jsonResponse(
         error.status,
         {
           error: "Google permission error",
-          status: error.status,
-          body: error.body,
+          status: error.status
         },
         origin
       );
     }
-    console.error("google_gbp_sync_all failed:", error);
+    console.error("google_gbp_sync_all failed", {
+      errorType: error instanceof Error ? error.name : "unknown"
+    });
     return jsonResponse(500, { error: "Sync failed (see logs)" }, origin);
   }
 });

@@ -4,7 +4,10 @@
 
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  createClient,
+  type SupabaseClient
+} from "https://esm.sh/@supabase/supabase-js@2";
 
 type GenerateReplyPayload = {
   businessId?: string;
@@ -43,8 +46,17 @@ type BusinessSettingsRow = {
   updated_at: string;
 };
 
+const configuredOrigin = (() => {
+  const value = Deno.env.get("ALLOWED_ORIGIN") ?? Deno.env.get("APP_BASE_URL") ?? "";
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "https://egia-six.vercel.app";
+  }
+})();
+
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": configuredOrigin,
   "Access-Control-Allow-Headers":
     "authorization, apikey, content-type, x-client-info",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -129,7 +141,7 @@ const getSettingsPriority = (
 };
 
 const getEffectiveBusinessMemory = async (
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient<any>,
   businessId: string,
   userId: string
 ): Promise<BusinessMemoryRow[]> => {
@@ -144,7 +156,8 @@ const getEffectiveBusinessMemory = async (
     }
     return [];
   }
-  const filtered = data.filter(
+  const rows = data as unknown as BusinessMemoryRow[];
+  const filtered = rows.filter(
     (row) => row.user_id === userId || row.user_id === null
   ) as BusinessMemoryRow[];
   return dedupeByPriority(
@@ -156,7 +169,7 @@ const getEffectiveBusinessMemory = async (
 };
 
 const getEffectiveBusinessSettings = async (
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient<any>,
   businessId: string,
   userId: string
 ): Promise<BusinessSettingsRow | null> => {
@@ -172,7 +185,8 @@ const getEffectiveBusinessSettings = async (
     }
     return null;
   }
-  const filtered = data.filter(
+  const rows = data as unknown as BusinessSettingsRow[];
+  const filtered = rows.filter(
     (row) => row.user_id === userId || row.user_id === null
   ) as BusinessSettingsRow[];
   const sorted = filtered
@@ -256,26 +270,6 @@ const getClientIp = (req: Request): string => {
   return "unknown";
 };
 
-const getUserIdFromJwt = (req: Request): string | null => {
-  const authHeader =
-    req.headers.get("authorization") ?? req.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return null;
-  }
-  const token = authHeader.slice("Bearer ".length).trim();
-  const parts = token.split(".");
-  if (parts.length !== 3) {
-    return null;
-  }
-  try {
-    const payloadJson = atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"));
-    const payload = JSON.parse(payloadJson) as { sub?: string };
-    return payload.sub ?? null;
-  } catch {
-    return null;
-  }
-};
-
 const jsonWithCors = (status: number, body: Record<string, unknown>) =>
   new Response(JSON.stringify(body), {
     status,
@@ -294,8 +288,34 @@ Deno.serve(async (req) => {
     });
   }
 
+  if (req.method !== "POST") {
+    return jsonWithCors(405, { error: "Method not allowed", requestId });
+  }
+
+  const authHeader =
+    req.headers.get("authorization") ?? req.headers.get("Authorization") ?? "";
+  const userToken = authHeader.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length).trim()
+    : "";
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return jsonWithCors(500, { error: "Server misconfigured", requestId });
+  }
+  if (!userToken) {
+    return jsonWithCors(401, { error: "Unauthorized", requestId });
+  }
+  const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false }
+  });
+  const { data: authData, error: authError } =
+    await supabaseAuth.auth.getUser(userToken);
+  const userId = authData?.user?.id ?? null;
+  if (authError || !userId) {
+    return jsonWithCors(401, { error: "Unauthorized", requestId });
+  }
+
   const ip = getClientIp(req);
-  const userId = getUserIdFromJwt(req);
   const apiKeyHeader = req.headers.get("apikey");
   if (!apiKeyHeader) {
     return jsonWithCors(401, { error: "Unauthorized", requestId });
@@ -331,6 +351,9 @@ Deno.serve(async (req) => {
     if (!payload.businessId) {
       return jsonWithCors(400, { error: "Missing businessId.", requestId });
     }
+    if (payload.businessId !== userId) {
+      return jsonWithCors(403, { error: "Forbidden", requestId });
+    }
     const reviewText = payload.reviewText ?? "";
     if (reviewText.length > 1200) {
       console.log(
@@ -347,7 +370,13 @@ Deno.serve(async (req) => {
       return jsonWithCors(400, { error: "Review text too long", requestId });
     }
 
-    if (!payload.reviewText || typeof payload.rating !== "number") {
+    if (
+      !payload.reviewText ||
+      typeof payload.rating !== "number" ||
+      !Number.isFinite(payload.rating) ||
+      payload.rating < 1 ||
+      payload.rating > 5
+    ) {
       return jsonWithCors(400, {
         error: "Missing required fields: reviewText, rating.",
         requestId
@@ -359,12 +388,6 @@ Deno.serve(async (req) => {
       return jsonWithCors(500, { error: "OpenAI key missing.", requestId });
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
-    if (!supabaseUrl || !supabaseAnonKey) {
-      return jsonWithCors(500, { error: "Supabase env missing.", requestId });
-    }
-
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: {
@@ -373,7 +396,7 @@ Deno.serve(async (req) => {
       }
     });
 
-    const effectiveUserId = userId ?? "";
+    const effectiveUserId = userId;
     const memoryRows =
       effectiveUserId === ""
         ? []
@@ -449,8 +472,8 @@ Deno.serve(async (req) => {
 
     const openAiDurationMs = Date.now() - openAiStart;
     if (!response.ok) {
-      const errText = await response.text();
-      console.error("OpenAI error:", response.status, errText);
+      await response.body?.cancel();
+      console.error("OpenAI request failed", { requestId, status: response.status });
       console.log(
         JSON.stringify({
           requestId,
@@ -472,10 +495,7 @@ Deno.serve(async (req) => {
         ?.find((c: any) => c.type === "output_text")?.text;
 
     if (!reply) {
-      console.error(
-        "OpenAI response (no reply):",
-        JSON.stringify(json).slice(0, 2000)
-      );
+      console.error("OpenAI response missing output", { requestId });
       console.log(
         JSON.stringify({
           requestId,
@@ -503,13 +523,16 @@ Deno.serve(async (req) => {
     );
     return jsonWithCors(200, { reply, requestId });
   } catch (error) {
-    console.error(error);
+    console.error("generate-reply failed", {
+      requestId,
+      error: error instanceof Error ? error.name : "unknown"
+    });
     console.log(
       JSON.stringify({
         requestId,
         method: req.method,
         ip: getClientIp(req),
-        userId: getUserIdFromJwt(req),
+        userId,
         status: 500
       })
     );
@@ -523,7 +546,7 @@ Deno.serve(async (req) => {
   2. Make an HTTP request:
 
   curl -i --location --request POST 'http://127.0.0.1:54321/functions/v1/generate-reply' \
-    --header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0' \
+    --header 'Authorization: Bearer <local-user-jwt>' \
     --header 'Content-Type: application/json' \
     --data '{"name":"Functions"}'
 

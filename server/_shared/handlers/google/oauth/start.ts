@@ -73,8 +73,10 @@ const handler = async (req: IncomingMessage, res: ServerResponse) => {
 
     sendJson(res, 200, { ok: true, url: authUrl.toString() });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Server error.";
-    sendJson(res, 500, { ok: false, error: message });
+    console.error("[google-oauth-start] failed", {
+      errorType: error instanceof Error ? error.name : "unknown"
+    });
+    sendJson(res, 500, { ok: false, error: "Server error." });
   }
 };
 

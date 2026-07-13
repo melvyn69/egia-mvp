@@ -706,8 +706,8 @@ const sendResendEmail = async (params: {
     body: JSON.stringify(body)
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Resend error: ${text.slice(0, 200)}`);
+    await response.body?.cancel();
+    throw new Error(`Resend request failed (${response.status})`);
   }
   return response.json().catch(() => ({}));
 };
@@ -854,7 +854,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       createdReport?: boolean;
       rendered?: boolean;
       emailed?: boolean;
-      recipients?: string[];
+      recipientsCount?: number;
       reason?: string;
       error?: string;
     }> = [];
@@ -1057,7 +1057,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               : await resolveEmailBranding(supabaseAdmin, userId);
             const attachmentContent = await fetchPdfAsBase64(reportUrl);
             for (const recipient of recipients) {
-              console.log("[monthly-report] sending email to:", recipient.email);
+              console.log("[monthly-report] sending email", { requestId });
               const html = buildMonthlyReportEmailHtml({
                 firstName: recipient.firstName,
                 periodLabel,
@@ -1096,7 +1096,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         createdReport,
         rendered,
         emailed,
-        recipients: recipients.map((r) => r.email),
+        recipientsCount: recipients.length,
         reason
       });
     };
@@ -1172,11 +1172,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       results
     });
   } catch (error) {
-    console.error("[cron][monthly-reports] fatal", error);
+    console.error("[cron][monthly-reports] fatal", {
+      requestId,
+      errorType: error instanceof Error ? error.name : "unknown"
+    });
     return respondJson(res, 500, {
       ok: false,
       error: {
-        message: error instanceof Error ? error.message : "Unknown error",
+        message: "Monthly report run failed",
         code: "INTERNAL"
       },
       requestId

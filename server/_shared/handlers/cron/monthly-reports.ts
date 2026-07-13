@@ -125,19 +125,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
   }
 
-  const missingEnv = getMissingEnv();
-  if (missingEnv.length) {
-    return sendError(
-      res,
-      requestId,
-      {
-        code: "INTERNAL",
-        message: `Missing env: ${missingEnv.join(", ")}`
-      },
-      500
-    );
-  }
-
   const { expected, provided } = getCronSecrets(req);
   if (!expected || !provided || provided !== expected) {
     return sendError(
@@ -145,6 +132,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       requestId,
       { code: "FORBIDDEN", message: "Unauthorized" },
       403
+    );
+  }
+
+  const missingEnv = getMissingEnv();
+  if (missingEnv.length) {
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Server misconfigured" },
+      500
     );
   }
 

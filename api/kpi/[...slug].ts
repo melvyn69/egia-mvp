@@ -972,8 +972,8 @@ const requestAiInsights = async (
         body: buildBody(prompt)
       });
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`OpenAI error: ${errorText.slice(0, 200)}`);
+        await response.body?.cancel();
+        throw new Error(`OpenAI request failed (${response.status})`);
       }
       const payload = await response.json();
       const outputText = extractOpenAiText(payload);

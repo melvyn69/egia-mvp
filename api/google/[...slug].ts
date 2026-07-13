@@ -69,7 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   console.log("[api/google]", {
     method: req.method ?? "GET",
-    url: req.url ?? null,
+    path: new URL(req.url ?? "/api/google", "http://localhost").pathname,
     parts,
     routeKey,
     requestId

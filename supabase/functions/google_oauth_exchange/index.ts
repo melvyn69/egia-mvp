@@ -56,24 +56,9 @@ const getRedirectUrl = () => {
 serve(async (req) => {
   const origin = req.headers.get("origin");
   const authHeader = req.headers.get("authorization") ?? "";
-  const apiKeyHeader = req.headers.get("apikey");
-  const hasAuth = Boolean(authHeader);
-  const hasApiKey = Boolean(apiKeyHeader);
-
   if (req.method === "OPTIONS") {
-    console.log("oauth_exchange options:", {
-      origin,
-      hasAuth,
-      hasApiKey
-    });
     return new Response(null, { status: 204, headers: getCorsHeaders(origin) });
   }
-
-  console.log("oauth_exchange post:", {
-    origin,
-    hasAuth,
-    hasApiKey
-  });
 
   if (req.method !== "POST") {
     return jsonResponse(405, { error: "Method not allowed" }, origin);
@@ -117,7 +102,7 @@ serve(async (req) => {
   if (userError || !user) {
     return jsonResponse(
       401,
-      { code: 401, message: "Invalid JWT", details: userError?.message },
+      { code: 401, message: "Invalid JWT" },
       origin
     );
   }
@@ -139,7 +124,7 @@ serve(async (req) => {
       .maybeSingle();
 
   if (stateLookupError) {
-    console.error("Failed to load oauth state:", stateLookupError);
+    console.error("Failed to load oauth state");
     return jsonResponse(500, { error: "Failed to load oauth state" }, origin);
   }
 
@@ -175,11 +160,11 @@ serve(async (req) => {
   });
 
   if (!tokenResponse.ok) {
-    const errorText = await tokenResponse.text();
-    console.error("Token exchange failed:", tokenResponse.status, errorText);
+    await tokenResponse.body?.cancel();
+    console.error("Token exchange failed", { status: tokenResponse.status });
     return jsonResponse(
       500,
-      { error: "Token exchange failed", details: errorText },
+      { error: "Token exchange failed" },
       origin
     );
   }
@@ -209,12 +194,11 @@ serve(async (req) => {
     );
 
   if (upsertError) {
-    console.error("Upsert failed:", upsertError);
+    console.error("Failed to store OAuth tokens");
     return jsonResponse(
       500,
       {
         error: "Failed to store tokens",
-        details: upsertError.message ?? String(upsertError),
       },
       origin
     );

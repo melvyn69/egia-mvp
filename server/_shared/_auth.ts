@@ -30,7 +30,11 @@ const requireUser = async (req: VercelRequest, res: VercelResponse) => {
     userId: data.user.id,
     route: req.url ?? ""
   });
-  return { userId: data.user.id, supabaseAdmin };
+  return {
+    userId: data.user.id,
+    userEmail: data.user.email?.trim().toLowerCase() ?? null,
+    supabaseAdmin
+  };
 };
 
 export { requireUser };

@@ -539,8 +539,8 @@ export const generateAiReply = async ({
     });
 
     if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`OpenAI error: ${text}`);
+      await response.body?.cancel();
+      throw new Error(`OpenAI request failed (${response.status})`);
     }
 
     const json = (await response.json()) as {

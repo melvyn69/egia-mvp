@@ -157,8 +157,8 @@ const refreshGoogleAccessToken = async (refreshToken: string) => {
   });
 
   if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Google token refresh failed: ${txt}`);
+    await res.body?.cancel();
+    throw new Error(`Google token refresh failed (${res.status})`);
   }
 
   const json = await res.json();
@@ -181,10 +181,11 @@ const listReviewsPage = async (
   const response = await fetch(url.toString(), {
     headers: { Authorization: `Bearer ${accessToken}` }
   });
-  const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data?.error?.message ?? "Google API error");
+    await response.body?.cancel();
+    throw new Error(`Google API request failed (${response.status})`);
   }
+  const data = await response.json().catch(() => null);
 
   return {
     reviews: (data?.reviews ?? []) as GoogleReview[],
@@ -319,13 +320,13 @@ const processJobQueue = async (requestId?: string) => {
         );
         failed += 1;
       }
-    } catch (error) {
+    } catch {
       await updateJob(
         job.id,
         {
           status: "failed",
           attempts,
-          last_error: error instanceof Error ? error.message : "Job failed",
+          last_error: "Job failed",
           updated_at: new Date().toISOString()
         },
         requestId
@@ -360,25 +361,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
   }
 
-  const missingEnv = getMissingEnv();
-  if (missingEnv.length) {
-    console.error("[sync]", requestId, "missing env:", missingEnv);
-    return sendError(
-      res,
-      requestId,
-      { code: "INTERNAL", message: `Missing env: ${missingEnv.join(", ")}` },
-      500
-    );
-  }
-
   const { expected, provided } = getCronSecrets(req);
   if (!expected || !provided || provided !== expected) {
-    console.error("[sync]", requestId, "invalid cron secret");
     return sendError(
       res,
       requestId,
       { code: "FORBIDDEN", message: "Unauthorized" },
       403
+    );
+  }
+
+  const missingEnv = getMissingEnv();
+  if (missingEnv.length) {
+    console.error("[sync]", requestId, "server misconfigured");
+    return sendError(
+      res,
+      requestId,
+      { code: "INTERNAL", message: "Server misconfigured" },
+      500
     );
   }
 
@@ -559,7 +559,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           accessToken = await refreshGoogleAccessToken(refreshToken);
           accessTokenByUser.set(location.user_id, accessToken);
         } catch (error) {
-          console.error("[sync]", requestId, "token refresh failed", error);
+          console.error("[sync]", requestId, "token refresh failed", {
+            errorType: error instanceof Error ? error.name : "unknown"
+          });
           return;
         }
       }
@@ -764,8 +766,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
           pageToken = page.nextPageToken;
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown error";
+      } catch {
+        const message = "Google location sync failed";
         errors.push({
           locationId: location.location_resource_name,
           message
@@ -857,12 +859,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    console.error("[sync]", requestId, "fatal error", message);
+    console.error("[sync]", requestId, "fatal error", {
+      errorType: error instanceof Error ? error.name : "unknown"
+    });
     return sendError(
       res,
       requestId,
-      { code: "INTERNAL", message },
+      { code: "INTERNAL", message: "Google sync failed" },
       500
     );
   }

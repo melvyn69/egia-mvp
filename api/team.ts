@@ -4,8 +4,16 @@ import { requireUser } from "../server/_shared_dist/_auth.js";
 
 type Action = "invite" | "accept" | "resend" | "cancel";
 
-const parseBody = (req: VercelRequest) =>
-  typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
+const parseBody = (req: VercelRequest) => {
+  if (typeof req.body !== "string") {
+    return req.body ?? {};
+  }
+  try {
+    return JSON.parse(req.body);
+  } catch {
+    return {};
+  }
+};
 
 const isEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
@@ -39,8 +47,8 @@ const sendResendEmail = async (params: {
     })
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Resend error: ${text.slice(0, 200)}`);
+    await response.body?.cancel();
+    throw new Error(`Resend request failed (${response.status})`);
   }
 };
 
@@ -152,13 +160,12 @@ const handleInvite = async (
   } catch (error) {
     console.error("[team/invite] resend_failed", {
       ownerUserId,
-      email,
-      err: String(error)
+      error: error instanceof Error ? error.name : "unknown"
     });
     return res.status(200).json({
       ok: true,
       emailSent: false,
-      warning: error instanceof Error ? error.message : "Email send failed"
+      warning: "Email send failed"
     });
   }
 
@@ -169,6 +176,7 @@ const handleAccept = async (
   req: VercelRequest,
   res: VercelResponse,
   authUserId: string,
+  authUserEmail: string | null,
   supabaseAdmin: any
 ) => {
   const payload = parseBody(req);
@@ -195,6 +203,9 @@ const handleAccept = async (
 
   const ownerUserId = invitation.owner_user_id as string;
   const email = invitation.email as string;
+  if (!authUserEmail || authUserEmail !== email.trim().toLowerCase()) {
+    return res.status(403).json({ error: "Invitation belongs to another email" });
+  }
   const firstName = invitation.first_name as string | null;
   const role = invitation.role as string | null;
   const receiveMonthly = Boolean(invitation.receive_monthly_reports);
@@ -293,7 +304,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!auth) {
     return;
   }
-  const { userId, supabaseAdmin } = auth;
+  const { userId, userEmail, supabaseAdmin } = auth;
 
   const payload = parseBody(req);
   const action = String(payload.action ?? "").trim() as Action;
@@ -306,7 +317,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return handleInvite(req, res, userId, supabaseAdmin);
   }
   if (action === "accept") {
-    return handleAccept(req, res, userId, supabaseAdmin);
+    return handleAccept(req, res, userId, userEmail, supabaseAdmin);
   }
   if (action === "cancel") {
     return handleCancel(req, res, userId, supabaseAdmin);

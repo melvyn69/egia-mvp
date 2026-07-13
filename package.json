@@ -12,6 +12,8 @@
     "lint": "eslint .",
     "typecheck": "tsc -b --pretty false",
     "test": "node scripts/test-egress-guardrails.mjs",
+    "test:production-security": "tsx scripts/test-production-security.ts",
+    "test:edge-types": "npx --yes deno@2.9.2 check --no-lock --node-modules-dir=none supabase/functions/generate-reply/index.ts supabase/functions/google_gbp_sync_all/index.ts supabase/functions/google_gbp_sync_locations/index.ts supabase/functions/google_oauth_exchange/index.ts supabase/functions/google_oauth_start/index.ts supabase/functions/post-reply-google/index.ts supabase/functions/process-review-analyze/index.ts",
     "test:migration-history": "node scripts/validate-supabase-migration-history.mjs",
     "test:migration-history:adversarial": "node scripts/test-supabase-migration-history-validator.mjs",
     "test:canonical-bootstrap-plan": "node scripts/plan-goal-005-canonical-bootstrap.mjs",
@@ -63,5 +65,16 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4"
+  },
+  "overrides": {
+    "@vercel/static-config": {
+      "ajv": "^8.18.0"
+    },
+    "joi": "^17.13.4",
+    "js-yaml": "^4.1.2",
+    "minimatch": "^10.2.3",
+    "path-to-regexp": "^6.3.0",
+    "smol-toml": "^1.6.1",
+    "undici": "^6.27.0"
   }
 }

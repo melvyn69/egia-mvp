@@ -28,7 +28,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
   const missingEnv = getMissingEnv();
   if (missingEnv.length) {
-    res.status(500).send(`Missing env: ${missingEnv.join(", ")}`);
+    res.status(500).send("Server misconfigured");
     return;
   }
 
@@ -69,6 +69,18 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     }
   }
 
+  const { data: consumedState, error: consumeError } = await supabaseAdmin
+    .from("google_oauth_states")
+    .delete()
+    .eq("state", state)
+    .eq("user_id", oauthState.user_id)
+    .select("state")
+    .maybeSingle();
+  if (consumeError || !consumedState) {
+    res.redirect(buildAppRedirect(appBaseUrl, "error"));
+    return;
+  }
+
   const redirectUri = `${appBaseUrl.replace(/\/$/, "")}/api/google/oauth/callback`;
   const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -83,6 +95,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
   });
 
   if (!tokenResponse.ok) {
+    await tokenResponse.body?.cancel();
     res.redirect(buildAppRedirect(appBaseUrl, "error"));
     return;
   }
@@ -124,11 +137,6 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     userId: oauthState.user_id,
     source: "oauth_callback"
   });
-
-  await supabaseAdmin
-    .from("google_oauth_states")
-    .delete()
-    .eq("state", state);
 
   res.redirect(buildAppRedirect(appBaseUrl, "success"));
 };

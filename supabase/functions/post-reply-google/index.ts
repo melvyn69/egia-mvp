@@ -4,11 +4,19 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 type PostReplyPayload = {
   reviewId?: string;
   replyText?: string;
-  userToken?: string;
 };
 
+const configuredOrigin = (() => {
+  const value = Deno.env.get("ALLOWED_ORIGIN") ?? Deno.env.get("APP_BASE_URL") ?? "";
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "https://egia-six.vercel.app";
+  }
+})();
+
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": configuredOrigin,
   "Access-Control-Allow-Headers":
     "authorization, apikey, content-type, x-client-info",
   "Access-Control-Allow-Methods": "POST, OPTIONS"
@@ -35,13 +43,12 @@ const safeJsonParse = async (
   const contentType = response.headers.get("content-type") ?? "";
   const isJson = contentType.toLowerCase().includes("application/json");
   if (!isJson) {
-    const text = await response.text();
+    await response.body?.cancel();
     logEvent({
       requestId,
       step,
       upstreamStatus: response.status,
-      upstreamContentType: contentType,
-      upstreamSnippet: text.slice(0, 200)
+      upstreamContentType: contentType
     });
     return { json: null, isJson: false };
   }
@@ -59,8 +66,13 @@ const safeJsonParse = async (
 Deno.serve(async (req) => {
   const requestId = crypto.randomUUID();
   const stepBase = "post_reply_google";
+  let userId: string | null = null;
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  if (req.method !== "POST") {
+    return jsonWithCors(405, { error: "Method not allowed", requestId });
   }
 
   const apiKeyHeader = req.headers.get("apikey");
@@ -68,22 +80,9 @@ Deno.serve(async (req) => {
     return jsonWithCors(401, { error: "Unauthorized", requestId });
   }
 
-  logEvent({
-    requestId,
-    step: `${stepBase}:headers_debug`,
-    hasAuthLower: Boolean(req.headers.get("authorization")),
-    hasAuthUpper: Boolean(req.headers.get("Authorization")),
-    hasApikey: Boolean(req.headers.get("apikey"))
-  });
-
   const authHeader =
     req.headers.get("authorization") || req.headers.get("Authorization") || "";
-  logEvent({
-    requestId,
-    step: `${stepBase}:auth`,
-    hasAuthHeader: Boolean(authHeader)
-  });
-  if (!authHeader) {
+  if (!authHeader.startsWith("Bearer ")) {
     return jsonWithCors(401, {
       error: "Unauthorized",
       code: "MISSING_AUTH_HEADER",
@@ -103,26 +102,26 @@ Deno.serve(async (req) => {
     }
 
     const payload = (await req.json()) as PostReplyPayload;
-    if (!payload.reviewId || !payload.replyText || !payload.userToken) {
+    if (!payload.reviewId || !payload.replyText) {
       return jsonWithCors(400, {
-        error: "Missing required fields: reviewId, replyText, userToken.",
+        error: "Missing required fields: reviewId, replyText.",
         code: "MISSING_FIELDS",
         requestId
       });
     }
 
-    const userToken = payload.userToken;
+    const userToken = authHeader.slice("Bearer ".length).trim();
     const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);
     const { data: userData, error: userError } = await supabaseAuth.auth.getUser(
       userToken
     );
-    const userId = userData?.user?.id ?? null;
+    userId = userData?.user?.id ?? null;
     if (userError || !userId) {
       logEvent({
         requestId,
         step: `${stepBase}:auth_user`,
         upstreamStatus: userError?.status ?? null,
-        error: userError?.message ?? "user_not_found"
+        error: userError ? "invalid_jwt" : "user_not_found"
       });
       return jsonWithCors(401, {
         error: "Unauthorized",
@@ -151,11 +150,32 @@ Deno.serve(async (req) => {
         requestId,
         step: `${stepBase}:connection`,
         userId,
-        error: connectionError?.message ?? "missing_refresh_token"
+        error: connectionError ? "connection_lookup_failed" : "missing_refresh_token"
       });
       return jsonWithCors(400, {
         error: "Missing Google connection.",
         code: "MISSING_GOOGLE_CONNECTION",
+        requestId
+      });
+    }
+
+    const { data: ownedReview, error: reviewError } = await supabaseDb
+      .from("google_reviews")
+      .select("review_name")
+      .eq("user_id", userId)
+      .eq("review_name", payload.reviewId)
+      .maybeSingle();
+
+    if (reviewError || !ownedReview?.review_name) {
+      logEvent({
+        requestId,
+        step: `${stepBase}:review_ownership`,
+        userId,
+        error: reviewError ? "review_lookup_failed" : "review_not_owned"
+      });
+      return jsonWithCors(404, {
+        error: "Review not found.",
+        code: "REVIEW_NOT_FOUND",
         requestId
       });
     }
@@ -185,14 +205,13 @@ Deno.serve(async (req) => {
 
     if (!tokenResponse.ok) {
       const contentType = tokenResponse.headers.get("content-type") ?? "";
-      const text = await tokenResponse.text();
+      await tokenResponse.body?.cancel();
       logEvent({
         requestId,
         step: `${stepBase}:google_token`,
         userId,
         upstreamStatus: tokenResponse.status,
-        upstreamContentType: contentType,
-        upstreamSnippet: text.slice(0, 200)
+        upstreamContentType: contentType
       });
       return jsonWithCors(500, {
         error: "Google token failed.",
@@ -221,7 +240,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const replyUrl = `https://mybusiness.googleapis.com/v4/${payload.reviewId}/reply`;
+    const replyUrl = `https://mybusiness.googleapis.com/v4/${ownedReview.review_name}/reply`;
     const gbpStart = Date.now();
     const gbpResponse = await fetch(replyUrl, {
       method: "POST",
@@ -235,7 +254,7 @@ Deno.serve(async (req) => {
     const gbpContentType = gbpResponse.headers.get("content-type") ?? "";
 
     if (!gbpResponse.ok) {
-      const gbpText = await gbpResponse.text();
+      await gbpResponse.body?.cancel();
       logEvent({
         requestId,
         step: `${stepBase}:gbp_reply`,
@@ -243,7 +262,6 @@ Deno.serve(async (req) => {
         reviewId: payload.reviewId,
         upstreamStatus: gbpResponse.status,
         upstreamContentType: gbpContentType,
-        upstreamSnippet: gbpText.slice(0, 200),
         durationMs: gbpDurationMs
       });
       const code = gbpResponse.status === 401
@@ -281,12 +299,15 @@ Deno.serve(async (req) => {
       requestId
     });
   } catch (error) {
-    console.error("post-reply-google error:", error);
+    console.error("post-reply-google failed", {
+      requestId,
+      error: error instanceof Error ? error.name : "unknown"
+    });
     logEvent({
       requestId,
       step: `${stepBase}:exception`,
       userId,
-      error: error instanceof Error ? error.message : "unknown"
+      error: error instanceof Error ? error.name : "unknown"
     });
     return jsonWithCors(500, {
       error: "Unexpected error.",

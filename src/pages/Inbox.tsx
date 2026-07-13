@@ -2251,20 +2251,6 @@ const Inbox = () => {
     try {
       const userJwt = await getAccessToken(supabaseClient);
       // TODO: publish_reply_to_google(review)
-      const projectRef = getProjectRef(supabaseUrl);
-      if (import.meta.env.DEV) {
-        console.log("projectRef", projectRef ?? "—");
-        console.log(
-          "access_token parts/len",
-          userJwt.split(".").length,
-          userJwt.length
-        );
-        const { data: userData } = await supabaseClient.auth.getUser();
-        console.log("post-reply-google userId", userData.user?.id ?? "null");
-        console.log("post-reply-google: invoking", {
-          reviewId: selectedReview.reviewId
-        });
-      }
       const response = await fetch("/api/google/reply", {
         method: "POST",
         headers: {
@@ -2309,9 +2295,6 @@ const Inbox = () => {
       if (response.status === 502) {
         setGenerationError("Google a refusé la réponse.");
         return;
-      }
-      if (import.meta.env.DEV) {
-        console.log("post-reply-google: response", { data, error });
       }
       if (error || !data?.ok) {
         setGenerationError("Impossible d'envoyer la réponse.");

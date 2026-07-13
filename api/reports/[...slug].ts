@@ -820,9 +820,13 @@ const refreshGoogleAccessToken = async (refreshToken: string) => {
       refresh_token: refreshToken
     })
   });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`Google token refresh failed (${response.status})`);
+  }
   const payload = await response.json().catch(() => null);
-  if (!response.ok || payload?.error) {
-    throw new Error(payload?.error_description ?? "Token refresh failed.");
+  if (!payload?.access_token) {
+    throw new Error("Google token refresh returned no access token");
   }
   return payload as {
     access_token: string;
@@ -1716,13 +1720,13 @@ const handleAutomationsRun = async (
   let supabaseAdmin;
   try {
     supabaseAdmin = createSupabaseAdmin();
-  } catch (error) {
+  } catch {
     return sendError(
       res,
       requestId,
       {
         code: "INTERNAL",
-        message: error instanceof Error ? error.message : "Missing env"
+        message: "Server misconfigured"
       },
       500
     );
@@ -1774,7 +1778,10 @@ const handleAutomationsRun = async (
         401
       );
     }
-    userIds = [authUser.id];
+    if (!authUser) {
+      return;
+    }
+    userIds = [authUser.userId];
   } else {
     return sendError(
       res,

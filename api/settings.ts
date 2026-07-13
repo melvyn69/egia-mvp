@@ -6,8 +6,35 @@ import {
 } from "../server/_shared_dist/google/_utils.js";
 import { getRequestId } from "../server/_shared_dist/api_utils.js";
 
-const parseBody = (req: VercelRequest) =>
-  typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
+const parseBody = (req: VercelRequest) => {
+  if (typeof req.body !== "string") return req.body ?? {};
+  try {
+    return JSON.parse(req.body);
+  } catch {
+    return {};
+  }
+};
+
+const MAX_LOGO_BYTES = 5 * 1024 * 1024;
+const LOGO_TYPES = new Map([
+  ["image/png", "png"],
+  ["image/jpeg", "jpg"],
+  ["image/webp", "webp"]
+]);
+
+const hasExpectedImageSignature = (buffer: Buffer, contentType: string) => {
+  if (contentType === "image/png") {
+    return buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  }
+  if (contentType === "image/jpeg") {
+    return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  }
+  if (contentType === "image/webp") {
+    return buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
+      buffer.subarray(8, 12).toString("ascii") === "WEBP";
+  }
+  return false;
+};
 
 const readAction = (req: VercelRequest) => {
   const actionParam = req.query?.action;
@@ -93,10 +120,8 @@ const logError = (
   console.error("[settings]", {
     requestId,
     action,
-    message: err?.message ?? String(error),
-    code: err?.code,
-    details: err?.details,
-    hint: err?.hint
+    errorType: error instanceof Error ? error.name : "upstream_error",
+    code: err?.code
   });
 };
 
@@ -120,7 +145,6 @@ const createSupabaseUserClient = (token: string | null): any => {
   const anonKey =
     process.env.SUPABASE_ANON_KEY ??
     process.env.VITE_SUPABASE_ANON_KEY ??
-    process.env.SUPABASE_SERVICE_ROLE_KEY ??
     "";
   if (!supabaseUrl || !anonKey) {
     throw new Error("Missing Supabase anon key");
@@ -574,6 +598,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!entityId || !filename || !fileBase64) {
       return sendError(res, 400, "Missing payload", requestId, "BAD_REQUEST");
     }
+    const normalizedContentType = contentType.toLowerCase();
+    const extension = LOGO_TYPES.get(normalizedContentType);
+    if (!extension) {
+      return sendError(res, 400, "Unsupported image type", requestId, "BAD_REQUEST");
+    }
 
     const { data: entityRow, error: entityError } = await supabaseAdmin
       .from("legal_entities")
@@ -594,19 +623,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const cleanBase64 = fileBase64.includes(",")
       ? fileBase64.split(",").pop() ?? ""
       : fileBase64;
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(cleanBase64) || cleanBase64.length % 4 !== 0) {
+      return sendError(res, 400, "Invalid file encoding", requestId, "BAD_REQUEST");
+    }
     let buffer: Buffer;
     try {
       buffer = Buffer.from(cleanBase64, "base64");
     } catch {
       return sendError(res, 400, "Invalid file encoding", requestId, "BAD_REQUEST");
     }
+    if (
+      buffer.length === 0 ||
+      buffer.length > MAX_LOGO_BYTES ||
+      !hasExpectedImageSignature(buffer, normalizedContentType)
+    ) {
+      return sendError(res, 400, "Invalid image file", requestId, "BAD_REQUEST");
+    }
 
-    const ext =
-      filename.includes(".") ? filename.split(".").pop() ?? "png" : "png";
-    const path = `business/${businessId}/legal_entities/${entityId}/logo.${ext}`;
+    const path = `business/${businessId}/legal_entities/${entityId}/logo.${extension}`;
     const uploadResult = await supabaseAdmin.storage
       .from("brand-assets")
-      .upload(path, buffer, { upsert: true, contentType: contentType || undefined });
+      .upload(path, buffer, { upsert: true, contentType: normalizedContentType });
     if (uploadResult.error) {
       logError(requestId, "legal_entities_logo_upload", uploadResult.error);
       return sendError(

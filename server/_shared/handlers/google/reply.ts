@@ -95,8 +95,8 @@ const refreshGoogleAccessToken = async (refreshToken: string) => {
   });
 
   if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Google token refresh failed: ${txt}`);
+    await res.body?.cancel();
+    throw new Error(`Google token refresh failed (${res.status})`);
   }
 
   const json = await res.json();
@@ -586,7 +586,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       accessToken = await refreshGoogleAccessToken(conn.refresh_token);
     } catch (error) {
-      console.error("[reply]", requestId, "token refresh failed", error);
+      console.error("[reply]", requestId, "token refresh failed", {
+        errorType: error instanceof Error ? error.name : "unknown"
+      });
       return res.status(502).json({ error: "Google token refresh failed" });
     }
     const googleReviewName = reviewRecord.reviewName;
@@ -604,9 +606,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
 
     if (!googleRes.ok) {
-      const txt = await googleRes.text();
-      console.error("[reply]", requestId, "google reply failed", txt);
-      return res.status(502).json({ error: `Google reply failed: ${txt}` });
+      await googleRes.body?.cancel();
+      console.error("[reply]", requestId, "google reply failed", {
+        upstreamStatus: googleRes.status
+      });
+      return res.status(502).json({ error: "Google reply failed" });
     }
 
     const sentAt = new Date().toISOString();
