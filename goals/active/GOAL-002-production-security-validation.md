@@ -331,7 +331,7 @@ Le Goal est `Done` seulement lorsque :
   `HARDENING_ONLY` reste fail-closed et ne permet qu'un roll-forward vers la
   seconde migration.
 - **Release exécutable :**
-  `2682f6cdf13296744d1d79ad0aa272d8c5c4b965`, descendant de `main`
+  `73c40836b58f5663e810de70a169c39ab9627745`, descendant de `main`
   `198aea23...`; le commit documentaire enfant ne modifie aucun artefact
   applicatif, Edge, migration ou recovery.
 - **Risques résiduels :** le candidat n’est pas déployé ; la migration/grants, les Edge Functions, Vercel, Auth, variables et logs de production ne sont pas vérifiés. Le P0 historique ne peut donc pas être fermé en production.

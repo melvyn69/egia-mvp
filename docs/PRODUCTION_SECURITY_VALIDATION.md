@@ -7,7 +7,7 @@ Baseline applicative historique : `cb82cc5495a8c298e5dc79fcf33d920609644330`
 `main` avant réconciliation de la PR #36 :
 `198aea23fbba9154327453507c010299f28e1da6`
 Release exécutable réconcilié :
-`2682f6cdf13296744d1d79ad0aa272d8c5c4b965`
+`73c40836b58f5663e810de70a169c39ab9627745`
 Commit correctif approfondi : `8044d85` (`security: close remaining tenant and oauth gaps`)
 
 ## Décision

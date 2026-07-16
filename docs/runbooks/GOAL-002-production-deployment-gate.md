@@ -10,7 +10,7 @@ mutation par lui-même.
   équipe `team_zfHqQFVkGjeOVDHZTYvfkMmW`.
 - GitHub : `melvyn69/egia-mvp`.
 - Release exécutable approuvé :
-  `2682f6cdf13296744d1d79ad0aa272d8c5c4b965`, descendant de
+  `73c40836b58f5663e810de70a169c39ab9627745`, descendant de
   `198aea23fbba9154327453507c010299f28e1da6`, contenant le correctif
   `queue_analysis`, le correctif GOAL-006, le watchdog à deux migrations et les
   artefacts de récupération.
@@ -440,9 +440,9 @@ doit créer aucun déploiement, car `git.deploymentEnabled.main=false`.
 
 | Numéro | Source attendue | Target | Effet exact sur l'alias Production | Condition de succès | Nécessité |
 | ---: | --- | --- | --- | --- | --- |
-| 1 | Paquet `recovery/goal-002/vercel-maintenance` du SHA `2682f6cdf13296744d1d79ad0aa272d8c5c4b965`, hashes préflight identiques | `production` | L'alias canonique du projet `egia` pointe vers la maintenance globale `503` | Deployment ID capturé; `/`, fidélité et quatre routes cron = `503`; `no-store`; `Retry-After: 120` | Empêche l'ancien frontend d'utiliser le backend pendant les états incompatibles. |
-| 2 | Application sécurisée du SHA `2682f6cdf13296744d1d79ad0aa272d8c5c4b965`, construite et déployée manuellement avec `--prebuilt --prod` | `production` | Le même alias quitte la maintenance et pointe vers le release sécurisé | Deployment ID/SHA exacts; deux migrations et sept Edge vérifiées; smoke tests synthétiques verts; aucune `5xx` persistante | Restaure le service seulement après base durcie, correctif GOAL-006 et sept Edge sécurisées. |
-| 3 | Commit enfant de réactivation dont l'unique diff supprime `git.deploymentEnabled.main`; contenu applicatif identique au SHA `2682f6cdf13296744d1d79ad0aa272d8c5c4b965` | `production`, automatique après fusion sur `main` | L'alias est réassigné au build Git du release sécurisé avec l'auto-déploiement de `main` restauré | Exactement un nouveau Deployment ID; CI verte; diff limité; probes identiques au déploiement 2 | Rétablit le contrat Git/Vercel durable; le déploiement manuel 2 ne réactive pas à lui seul les futurs déploiements de `main`. |
+| 1 | Paquet `recovery/goal-002/vercel-maintenance` du SHA `73c40836b58f5663e810de70a169c39ab9627745`, hashes préflight identiques | `production` | L'alias canonique du projet `egia` pointe vers la maintenance globale `503` | Deployment ID capturé; `/`, fidélité et quatre routes cron = `503`; `no-store`; `Retry-After: 120` | Empêche l'ancien frontend d'utiliser le backend pendant les états incompatibles. |
+| 2 | Application sécurisée du SHA `73c40836b58f5663e810de70a169c39ab9627745`, construite et déployée manuellement avec `--prebuilt --prod` | `production` | Le même alias quitte la maintenance et pointe vers le release sécurisé | Deployment ID/SHA exacts; deux migrations et sept Edge vérifiées; smoke tests synthétiques verts; aucune `5xx` persistante | Restaure le service seulement après base durcie, correctif GOAL-006 et sept Edge sécurisées. |
+| 3 | Commit enfant de réactivation dont l'unique diff supprime `git.deploymentEnabled.main`; contenu applicatif identique au SHA `73c40836b58f5663e810de70a169c39ab9627745` | `production`, automatique après fusion sur `main` | L'alias est réassigné au build Git du release sécurisé avec l'auto-déploiement de `main` restauré | Exactement un nouveau Deployment ID; CI verte; diff limité; probes identiques au déploiement 2 | Rétablit le contrat Git/Vercel durable; le déploiement manuel 2 ne réactive pas à lui seul les futurs déploiements de `main`. |
 
 Zéro Preview est attendu. Un quatrième déploiement Production, l'absence de
 l'un des trois, un target différent ou une source différente arrête le Run.
@@ -677,7 +677,7 @@ un droit ou une fonction vulnérable.
 
 ### Résultat préparé
 
-- Release exécutable : `2682f6cdf13296744d1d79ad0aa272d8c5c4b965`.
+- Release exécutable : `73c40836b58f5663e810de70a169c39ab9627745`.
 - Supabase : `fhadiwkdznhuxtlgrwfd` / `egia-mvp`.
 - Vercel : `prj_GoGCD7ICIfemLSlegN4Tc8JcoxrT` / `egia`.
 - Quatre crons identifiés et gérés par le helper versionné redigé.
@@ -688,7 +688,7 @@ un droit ou une fonction vulnérable.
 1. snapshot redigé puis suspension `enabled=false` des crons Google, IA,
    Automations, Monthly reports;
 2. déploiement Vercel Production no 1 : maintenance du release
-   `2682f6cdf13296744d1d79ad0aa272d8c5c4b965`;
+   `73c40836b58f5663e810de70a169c39ab9627745`;
 3. safe-deny, dans l'ordre : `process-review-analyze`,
    `generate-reply`, `post-reply-google`, `google_oauth_start`,
    `google_oauth_exchange`;
@@ -698,7 +698,7 @@ un droit ou une fonction vulnérable.
 5. safe-deny : `google_gbp_sync_locations`, puis `google_gbp_sync_all`;
 6. déploiement des sept Edge Functions sécurisées dans l'ordre versionné;
 7. déploiement Vercel Production no 2 : application du release
-   `2682f6cdf13296744d1d79ad0aa272d8c5c4b965`;
+   `73c40836b58f5663e810de70a169c39ab9627745`;
 8. tests `GOAL002_SYNTH`;
 9. réactivation `enabled=true` des crons Monthly reports, Automations, IA,
    Google, sans modifier leur autre configuration;
@@ -729,7 +729,7 @@ autorisation.
 > J'autorise le Run de production GOAL-002 sur Supabase
 > `fhadiwkdznhuxtlgrwfd` / `egia-mvp` et Vercel
 > `prj_GoGCD7ICIfemLSlegN4Tc8JcoxrT` / `egia`, exclusivement depuis le release
-> `2682f6cdf13296744d1d79ad0aa272d8c5c4b965`. J'autorise la suspension puis la
+> `73c40836b58f5663e810de70a169c39ab9627745`. J'autorise la suspension puis la
 > réactivation `enabled` des quatre cronjobs identifiés, sans modification de
 > leurs URL, méthodes, timezones, cadences, headers ou autres champs;
 > exactement trois déploiements Vercel Production et zéro Preview; les cinq
