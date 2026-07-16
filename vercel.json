@@ -3,6 +3,7 @@
   "git": {
     "deploymentEnabled": {
       "security/goal-002-production-validation": false,
+      "codex/goal-006-fix-pgcrypto-digest": false,
       "main": false
     }
   },
