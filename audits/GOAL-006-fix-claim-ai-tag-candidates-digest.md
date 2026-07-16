@@ -71,3 +71,29 @@ aucune récupération distante n'est nécessaire. Après une future application,
 la récupération sûre est un roll-forward qui conserve la qualification
 `extensions.digest` et les révocations publiques; l'ancienne définition
 défaillante ne doit pas être restaurée.
+
+## Clôture fondatrice
+
+GOAL-006 est clôturé `Done` le `2026-07-16`.
+
+- PR #37 fusionnée en fast-forward;
+- SHA intégré dans `main` :
+  `1bb8048d643369d6f880bb72563426c1da2878c1`;
+- CI de la PR et du push `main` entièrement verte;
+- revue indépendante finale `APPROVED`;
+- dépôt propre après suppression de la branche;
+- aucun déploiement Vercel créé après le gate;
+- aucune mutation Supabase, Edge Function, cron-job.org, secret, fixture ou
+  donnée de production.
+
+GOAL-002 reste `Blocked`. Son prochain Founder Brief doit autoriser
+explicitement les deux migrations suivantes, sans en intercaler une autre :
+
+1. `20260713073853_production_security_hardening.sql`;
+2. `20260716142352_fix_claim_ai_tag_candidates_digest.sql`.
+
+La deuxième migration est un roll-forward fonctionnel et de sécurité de la
+première chaîne prospective. Après application de la première migration,
+aucune récupération ne doit restaurer la définition non qualifiée de
+`claim_ai_tag_candidates`, élargir son `search_path` ou rendre ses droits
+publics.

@@ -3,9 +3,10 @@
 ## Métadonnées
 
 - **ID :** `GOAL-006`
-- **Statut :** `Review`
+- **Statut :** `Done`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-16`
+- **Date de clôture :** `2026-07-16`
 - **Risque :** `R2` — correctif SQL local et versionné, sans mutation distante.
 
 ## Valeur business
@@ -76,7 +77,8 @@ et fonctionnelle; elle ne doit être ni déplacée, ni recréée.
 ## Dépendances
 
 - GOAL-005 : `Done`; baseline et chaîne prospective disponibles.
-- GOAL-002 : reste `Blocked` uniquement jusqu'à la clôture de GOAL-006.
+- GOAL-002 : reste `Blocked`; sa reprise et toute mutation de production
+  exigent une autorisation fondatrice distincte.
 - Autorisation de production : absente et non nécessaire pour ce Goal.
 
 ## Journal de statut
@@ -87,10 +89,19 @@ et fonctionnelle; elle ne doit être ni déplacée, ni recréée.
 | `2026-07-16` | `Draft` → `Ready` | Cause reproductible, scope et interdictions établis. |
 | `2026-07-16` | `Ready` → `Running` | Implémentation locale, tests, revue et intégration Git autorisés. |
 | `2026-07-16` | `Running` → `Review` | Correctif local vert et revue indépendante `APPROVED`; soumis au verdict fondateur après intégration Git. |
+| `2026-07-16` | `Review` → `Done` | Verdict fondateur : PR #37 fusionnée en fast-forward au SHA `1bb8048d643369d6f880bb72563426c1da2878c1`, CI verte, aucune mutation de production et aucun nouveau déploiement Vercel après le gate. |
 
 ## Définition de Done
 
-Le fondateur peut décider `Review → Done` après fusion dans `main`, CI verte,
-diagnostic exact et revue indépendante approuvée. Cette transition autorise
-ensuite la proposition de reprise de GOAL-002, mais aucune mutation de
-production par elle-même.
+**Résultat : Goal clôturé.** Le diagnostic, la migration prospective, les tests
+de non-régression et d'abus, la revue indépendante, la CI et l'intégration
+fast-forward sont validés. Aucune mutation distante n'a été effectuée.
+
+La reprise de GOAL-002 peut être proposée avec les deux migrations de
+production, dans cet ordre strict :
+
+1. `20260713073853_production_security_hardening.sql`;
+2. `20260716142352_fix_claim_ai_tag_candidates_digest.sql`.
+
+Cette clôture n'autorise ni leur application ni aucune autre opération de
+production.
