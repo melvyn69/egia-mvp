@@ -861,11 +861,12 @@ check("production recovery artifacts fail closed without vulnerable rollback", (
   assert.match(runbook, /"enabled":true/);
   assert.match(runbook, /CRON_JOB_ORG_API_KEY/);
   assert.match(runbook, /requestMethod = 1/);
+  assert.match(runbook, /timezone `Europe\/Paris`/);
   for (const [path, cadence] of [
     ["/api/cron/google/sync-replies", "0 \\* \\* \\* \\*"],
-    ["/api/cron/ai/tag-reviews", "10 \\*/2 \\* \\* \\*"],
-    ["/api/reports/automations", "20,50 \\* \\* \\* \\*"],
-    ["/api/cron/monthly-reports", "0 6 1 \\* \\*"]
+    ["/api/cron/ai/tag-reviews", "0 \\*/2 \\* \\* \\*"],
+    ["/api/reports/automations", "0,30 \\* \\* \\* \\*"],
+    ["/api/cron/monthly-reports", "0 8 1 \\* \\*"]
   ]) {
     assert.match(runbook, new RegExp(`${path}[\\s\\S]*${cadence}`));
   }

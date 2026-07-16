@@ -67,11 +67,13 @@ uniquement la méthode `POST` et transmet `CRON_SECRET` soit dans
 `GET` et les jetons utilisateur/admin ne déclenchent aucun traitement cron.
 
 - Google — URL `/api/cron/google/sync-replies`, expression `0 * * * *` (toutes les heures).
-- IA — URL `/api/cron/ai/tag-reviews`, expression `10 */2 * * *` (toutes les deux heures).
-- Automatisations — URL `/api/reports/automations`, expression `20,50 * * * *` (toutes les 30 minutes, décalé).
-- Rapports mensuels — URL `/api/cron/monthly-reports`, expression `0 6 1 * *` (premier jour du mois à 06:00).
+- IA — URL `/api/cron/ai/tag-reviews`, expression `0 */2 * * *` (toutes les deux heures paires).
+- Automatisations — URL `/api/reports/automations`, expression `0,30 * * * *` (toutes les 30 minutes).
+- Rapports mensuels — URL `/api/cron/monthly-reports`, expression `0 8 1 * *` (premier jour du mois à 08:00).
 
-Conserver la méthode POST et l'en-tête secret actuel. Ne pas placer le secret dans l'URL.
+Ces quatre tâches utilisent la timezone `Europe/Paris`. Conserver exactement
+les cadences, la méthode POST et l'en-tête secret actuels. Ne pas placer le
+secret dans l'URL.
 
 ## 10. Surveillance après réactivation
 

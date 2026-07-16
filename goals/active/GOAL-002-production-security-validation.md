@@ -49,6 +49,22 @@ Le fondateur tranche le choix produit qui avait arrêté le Run : l'inscription 
 
 Cette décision autorise les corrections locales, tests, revues, commits, push, mise à jour et fusion de la PR #35. Elle n'autorise toujours aucune migration distante, aucun déploiement Edge/Vercel, aucune modification de secret/configuration et aucune opération de production. Le blocage produit est levé sans modifier le gate de production.
 
+### Avenant fondateur — dépendance GOAL-006 du 2026-07-16
+
+Le préflight passif a confirmé que la configuration réellement déployée des
+quatre tâches cron-job.org est la source de vérité du Run : méthode `POST`,
+timezone `Europe/Paris`, URLs et cadences consignées dans
+`docs/runbooks/GOAL-002-production-deployment-gate.md`. Aucune modification de
+ces champs n'est autorisée; seul `enabled` peut être suspendu puis réactivé.
+L'état cible est actif pour les quatre tâches, indépendamment d'une suspension
+temporaire observée avant le rétablissement de Supabase.
+
+Le même préflight a reproduit l'échec de
+`public.claim_ai_tag_candidates(integer, text, text)` sur l'appel non qualifié
+à `digest`. La correction relève du Goal séparé `GOAL-006`. GOAL-002 reste
+`Blocked` uniquement jusqu'à la clôture de GOAL-006 et ne reprend pas avant
+une décision fondatrice explicite.
+
 ## Sources de vérité
 
 | Source | Portée / règle applicable |

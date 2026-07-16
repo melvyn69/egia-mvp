@@ -86,14 +86,21 @@ l'ordonnanceur externe `cron-job.org`. Leur suspension ne requiert aucune
 modification du projet Vercel, aucun déploiement, aucune variable Vercel ou
 Supabase, ni aucune modification de `vercel.json` ou d'un autre fichier.
 
-Contrat exact, timezone `UTC`, méthode `POST` (`requestMethod = 1`) :
+La configuration distante observée le `2026-07-16` est la source de vérité
+immuable de ce Run. Le Run ne modifie ni timezone, ni cadence, ni URL, ni
+méthode. Les quatre tâches utilisent la timezone `Europe/Paris` et la méthode
+`POST` (`requestMethod = 1`) :
 
-| Ordre de suspension | Nom canonique | Cible exacte sur `APP_BASE_URL` | Cadence | Objet `schedule` cron-job.org |
-| ---: | --- | --- | --- | --- |
-| 1 | Google — synchronisation des réponses | `/api/cron/google/sync-replies` | `0 * * * *`, toutes les heures à `:00` | `timezone=UTC`, `expiresAt=0`, `hours=[-1]`, `minutes=[0]`, `mdays=[-1]`, `months=[-1]`, `wdays=[-1]` |
-| 2 | IA — étiquetage des avis | `/api/cron/ai/tag-reviews` | `10 */2 * * *`, toutes les deux heures à `:10` | `timezone=UTC`, `expiresAt=0`, `hours=[0,2,4,6,8,10,12,14,16,18,20,22]`, `minutes=[10]`, `mdays=[-1]`, `months=[-1]`, `wdays=[-1]` |
-| 3 | Automatisations de réponses | `/api/reports/automations` | `20,50 * * * *`, deux fois par heure | `timezone=UTC`, `expiresAt=0`, `hours=[-1]`, `minutes=[20,50]`, `mdays=[-1]`, `months=[-1]`, `wdays=[-1]` |
-| 4 | Rapports mensuels | `/api/cron/monthly-reports` | `0 6 1 * *`, premier jour du mois à `06:00 UTC` | `timezone=UTC`, `expiresAt=0`, `hours=[6]`, `minutes=[0]`, `mdays=[1]`, `months=[-1]`, `wdays=[-1]` |
+| Ordre de suspension | `jobId` | Nom canonique | URL exacte | Cadence | Objet `schedule` cron-job.org |
+| ---: | ---: | --- | --- | --- | --- |
+| 1 | `7132230` | Google — synchronisation des réponses | `https://egia-six.vercel.app/api/cron/google/sync-replies` | `0 * * * *`, toutes les heures à `:00` | `timezone=Europe/Paris`, `expiresAt=0`, `hours=[-1]`, `minutes=[0]`, `mdays=[-1]`, `months=[-1]`, `wdays=[-1]` |
+| 2 | `7133264` | IA — étiquetage des avis | `https://egia-six.vercel.app/api/cron/ai/tag-reviews` | `0 */2 * * *`, toutes les deux heures paires à `:00` | `timezone=Europe/Paris`, `expiresAt=0`, `hours=[0,2,4,6,8,10,12,14,16,18,20,22]`, `minutes=[0]`, `mdays=[-1]`, `months=[-1]`, `wdays=[-1]` |
+| 3 | `7201111` | Automatisations de réponses | `https://egia-six.vercel.app/api/reports/automations` | `0,30 * * * *`, deux fois par heure | `timezone=Europe/Paris`, `expiresAt=0`, `hours=[-1]`, `minutes=[0,30]`, `mdays=[-1]`, `months=[-1]`, `wdays=[-1]` |
+| 4 | `7155832` | Rapports mensuels | `https://egia-six.vercel.app/api/cron/monthly-reports` | `0 8 1 * *`, premier jour du mois à `08:00 Europe/Paris` | `timezone=Europe/Paris`, `expiresAt=0`, `hours=[8]`, `minutes=[0]`, `mdays=[1]`, `months=[-1]`, `wdays=[-1]` |
+
+L'état `enabled` observé avant le Run peut refléter la suspension temporaire
+des accès Supabase et n'appartient pas à cette configuration immuable. L'état
+cible après succès est `enabled=true` pour les quatre tâches.
 
 Avant la première modification, pour chacun des quatre `jobId`, exécuter
 `GET https://api.cron-job.org/jobs/<jobId>` avec le secret nommé
