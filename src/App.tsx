@@ -17,6 +17,7 @@ import { Progress } from "./pages/Progress";
 import { Loyalty } from "./pages/Loyalty";
 import { LoyaltyScanner } from "./pages/LoyaltyScanner";
 import { LoyaltyJoin } from "./pages/LoyaltyJoin";
+import { LoyaltyVerify } from "./pages/LoyaltyVerify";
 import { Onboarding } from "./pages/Onboarding";
 import { Automation } from "./pages/Automation";
 import { AutomationBuilder } from "./pages/AutomationBuilder";
@@ -157,9 +158,15 @@ const App = () => {
   const isCallbackPath =
     location.pathname === "/google_oauth_callback" ||
     location.pathname === "/auth/callback";
-  const isPublicLoyaltyPath = location.pathname.startsWith("/loyalty/join/");
+  const isPublicLoyaltyPath =
+    location.pathname.startsWith("/loyalty/join/") ||
+    location.pathname === "/loyalty/verify";
+  const isPublicInvitePath = location.pathname === "/invite";
   const showsPublicExperience =
-    !session && !isCallbackPath && !isPublicLoyaltyPath;
+    !session &&
+    !isCallbackPath &&
+    !isPublicLoyaltyPath &&
+    !isPublicInvitePath;
   const showsMarketingLanding =
     showsPublicExperience && location.pathname === "/";
   const usesAppShell = !isPublicLoyaltyPath && !showsPublicExperience;
@@ -1200,6 +1207,7 @@ const App = () => {
             ) : (
               <Routes>
                 <Route path="/loyalty/join/:publicToken" element={<LoyaltyJoin />} />
+                <Route path="/loyalty/verify" element={<LoyaltyVerify />} />
                 <Route path="/login" element={<Navigate to="/" replace />} />
                 <Route
                   path="/"

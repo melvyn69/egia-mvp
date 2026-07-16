@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.110.2";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -123,27 +123,34 @@ serve(async (req) => {
   // Consume the state atomically before exchanging the authorization code.
   // This closes both replay after an upstream failure and concurrent reuse.
   const consumedAt = new Date().toISOString();
-  const { data: consumedConnection, error: stateConsumeError } =
+  const { data: consumedState, error: stateConsumeError } =
     await supabaseAdmin
-      .from("google_connections")
-      .update({
-        oauth_state: null,
-        oauth_state_expires_at: null,
-        updated_at: consumedAt,
-      })
+      .from("google_oauth_states")
+      .delete()
       .eq("user_id", user.id)
-      .eq("provider", "google")
-      .eq("oauth_state", state)
-      .gte("oauth_state_expires_at", consumedAt)
-      .select("refresh_token")
+      .eq("state", state)
+      .gte("expires_at", consumedAt)
+      .select("state")
       .maybeSingle();
 
   if (stateConsumeError) {
     console.error("Failed to consume oauth state");
     return jsonResponse(500, { error: "Failed to consume oauth state" }, origin);
   }
-  if (!consumedConnection) {
+  if (!consumedState) {
     return jsonResponse(401, { error: "Invalid or expired OAuth state" }, origin);
+  }
+
+  const { data: existingConnection, error: connectionError } =
+    await supabaseAdmin
+      .from("google_connections")
+      .select("refresh_token")
+      .eq("user_id", user.id)
+      .eq("provider", "google")
+      .maybeSingle();
+  if (connectionError) {
+    console.error("Failed to load existing OAuth connection");
+    return jsonResponse(500, { error: "Failed to load OAuth connection" }, origin);
   }
 
   const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
@@ -172,7 +179,10 @@ serve(async (req) => {
   const expiresIn = Number(tokenData.expires_in ?? 0);
   const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
   const refreshToken =
-    tokenData.refresh_token ?? consumedConnection.refresh_token ?? null;
+    tokenData.refresh_token ?? existingConnection?.refresh_token ?? null;
+  if (!refreshToken) {
+    return jsonResponse(502, { error: "Google refresh token missing" }, origin);
+  }
 
   const { error: upsertError } = await supabaseAdmin
     .from("google_connections")

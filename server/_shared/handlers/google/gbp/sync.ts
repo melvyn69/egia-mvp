@@ -19,6 +19,9 @@ import {
   isAuthReauthRequiredError,
   setGoogleReauthRequired
 } from "../../../utils/googleAuthState";
+import { createProductionSafeConsole } from "../../../safe_console";
+
+const console = createProductionSafeConsole("/api/google/gbp/sync");
 
 type GoogleAccount = {
   name: string;
@@ -40,7 +43,7 @@ type SyncFailure = {
   step: "list_accounts" | "list_locations" | "upsert_location";
   account_resource_name: string | null;
   location_resource_name: string | null;
-  message: string;
+  code: string;
   status: number | null;
 };
 
@@ -73,12 +76,23 @@ const AUTH_REAUTH_SIGNAL_TTL_MS = Number(
 
 class GoogleHttpError extends Error {
   status: number;
-  body: string;
+  reason: string;
 
   constructor(status: number, body: string) {
     super(`Google API error ${status}`);
     this.status = status;
-    this.body = body;
+    const normalized = body.toLowerCase();
+    this.reason = normalized.includes("invalid_grant")
+      ? "invalid_grant"
+      : normalized.includes("revoked") || normalized.includes("expired")
+        ? "credential_expired"
+        : status === 429
+          ? "rate_limited"
+          : status === 401 || status === 403
+            ? "permission_denied"
+            : status >= 500
+              ? "upstream_unavailable"
+              : "upstream_rejected";
   }
 }
 
@@ -147,22 +161,6 @@ const bumpHttpStatus = (map: Record<string, number>, status: number) => {
   map[key] = (map[key] ?? 0) + 1;
 };
 
-const parseGoogleErrorMessage = (body: string) => {
-  if (!body) {
-    return "Google API error";
-  }
-  try {
-    const parsed = JSON.parse(body) as { error?: { message?: string } };
-    const message = parsed?.error?.message;
-    if (typeof message === "string" && message.trim().length > 0) {
-      return message;
-    }
-  } catch {
-    // body is not JSON
-  }
-  return body.slice(0, 300);
-};
-
 const fetchGoogleJsonWithRetry = async (
   url: string,
   accessToken: string,
@@ -228,8 +226,13 @@ const createSyncRun = async (
       started_at: nowIso,
       meta: payload.meta ?? {}
     });
-  } catch (error) {
-    console.error("google_sync_runs insert failed:", getErrorMessage(error));
+  } catch {
+    console.error("[gbp_locations_sync]", {
+      requestId: null,
+      status: "error",
+      code: "sync_run_insert_failed",
+      count: 1
+    });
   }
   return runId;
 };
@@ -254,8 +257,13 @@ const finishSyncRun = async (
         meta: payload.meta ?? {}
       })
       .eq("id", payload.runId);
-  } catch (error) {
-    console.error("google_sync_runs update failed:", getErrorMessage(error));
+  } catch {
+    console.error("[gbp_locations_sync]", {
+      requestId: null,
+      status: "error",
+      code: "sync_run_update_failed",
+      count: 1
+    });
   }
 };
 
@@ -273,13 +281,17 @@ const refreshAccessToken = async (refreshToken: string) => {
     })
   });
 
-  const tokenData = await tokenResponse.json();
+  const tokenBody = await tokenResponse.text();
+  let tokenData: Record<string, unknown> = {};
+  if (tokenBody) {
+    try {
+      tokenData = JSON.parse(tokenBody) as Record<string, unknown>;
+    } catch {
+      throw new GoogleHttpError(tokenResponse.status, "invalid_response");
+    }
+  }
   if (!tokenResponse.ok || tokenData.error) {
-    const refreshError = new Error(
-      tokenData.error_description ?? "Token refresh failed."
-    ) as Error & { code?: string };
-    refreshError.code = tokenData.error;
-    throw refreshError;
+    throw new GoogleHttpError(tokenResponse.status, tokenBody);
   }
 
   return tokenData as {
@@ -429,7 +441,7 @@ export const syncGoogleLocationsForUser = async (
             step: "list_accounts",
             account_resource_name: null,
             location_resource_name: null,
-            message: "Google not connected",
+            code: "google_not_connected",
             status: null
           }
         ]
@@ -471,7 +483,7 @@ export const syncGoogleLocationsForUser = async (
               step: "list_accounts",
               account_resource_name: null,
               location_resource_name: null,
-              message: "Missing Google refresh token",
+              code: "missing_refresh_token",
               status: null
             }
           ]
@@ -484,10 +496,12 @@ export const syncGoogleLocationsForUser = async (
     try {
       refreshed = await refreshAccessToken(connection.refresh_token);
     } catch (error) {
-      const refreshError = error as Error & { code?: string };
+      const refreshError = error as GoogleHttpError;
       const reauthRequired =
-        refreshError.code === "invalid_grant" ||
-        /expired or revoked/i.test(refreshError.message);
+        refreshError instanceof GoogleHttpError &&
+        (refreshError.reason === "invalid_grant" ||
+          refreshError.reason === "credential_expired" ||
+          refreshError.status === 401);
       if (reauthRequired) {
         authStatusForMeta = {
           status: "reauth_required",
@@ -500,7 +514,7 @@ export const syncGoogleLocationsForUser = async (
           reason: "token_revoked",
           message: "google_token_revoked_or_expired",
           requestId,
-          errCode: refreshError.code ?? null
+          errCode: refreshError.reason
         });
 
         await finishSyncRun(supabaseAdmin, {
@@ -516,7 +530,7 @@ export const syncGoogleLocationsForUser = async (
                 step: "list_accounts",
                 account_resource_name: null,
                 location_resource_name: null,
-                message: "Google token revoked or expired",
+                code: "token_revoked",
                 status: null
               }
             ]
@@ -528,13 +542,13 @@ export const syncGoogleLocationsForUser = async (
       await finishSyncRun(supabaseAdmin, {
         runId,
         status: "error",
-        error: getErrorMessage(error),
+        error: "token_refresh_failed",
         meta: {
           started_at: startedAt,
           auth_status: {
             status: "unknown",
             reason: "unknown",
-            lastError: getErrorMessage(error),
+            lastError: "token_refresh_failed",
             lastCheckedAt: new Date().toISOString()
           },
           failures_count: 1,
@@ -543,8 +557,8 @@ export const syncGoogleLocationsForUser = async (
               step: "list_accounts",
               account_resource_name: null,
               location_resource_name: null,
-              message: getErrorMessage(error),
-              status: null
+              code: "token_refresh_failed",
+              status: error instanceof GoogleHttpError ? error.status : null
             }
           ]
         }
@@ -580,9 +594,7 @@ export const syncGoogleLocationsForUser = async (
     googleApiCallSucceeded = true;
   } catch (error) {
     const googleErrorMessage =
-      error instanceof GoogleHttpError
-        ? parseGoogleErrorMessage(error.body)
-        : getErrorMessage(error);
+      error instanceof GoogleHttpError ? error.reason : "operation_failed";
     if (
       error instanceof GoogleHttpError &&
       isAuthReauthRequiredError({
@@ -617,7 +629,7 @@ export const syncGoogleLocationsForUser = async (
               step: "list_accounts",
               account_resource_name: null,
               location_resource_name: null,
-              message: "Google permission denied",
+              code: "permission_denied",
               status: error.status
             }
           ],
@@ -631,7 +643,7 @@ export const syncGoogleLocationsForUser = async (
       step: "list_accounts",
       account_resource_name: null,
       location_resource_name: null,
-      message: googleErrorMessage,
+      code: googleErrorMessage,
       status: error instanceof GoogleHttpError ? error.status : null
     });
   }
@@ -659,10 +671,7 @@ export const syncGoogleLocationsForUser = async (
         step: "list_locations",
         account_resource_name: account.name,
         location_resource_name: null,
-        message:
-          error instanceof GoogleHttpError
-            ? parseGoogleErrorMessage(error.body)
-            : getErrorMessage(error),
+        code: error instanceof GoogleHttpError ? error.reason : "operation_failed",
         status: error instanceof GoogleHttpError ? error.status : null
       });
       continue;
@@ -698,7 +707,7 @@ export const syncGoogleLocationsForUser = async (
           step: "upsert_location",
           account_resource_name: account.name,
           location_resource_name: location.name,
-          message: upsertError.message ?? "Failed to upsert location.",
+          code: "database_write_failed",
           status: null
         });
         continue;
@@ -737,10 +746,10 @@ export const syncGoogleLocationsForUser = async (
   }
 
   console.log("[gbp_locations_sync]", {
-    user_id: userId,
-    accounts_count: accountsCount,
-    locations_count: locationsUpserted,
-    failures_count: failures.length
+    requestId,
+    status: runStatus,
+    code: failures.length > 0 ? "sync_partial_failure" : "sync_complete",
+    count: locationsUpserted
   });
 
   return {

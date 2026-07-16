@@ -17,13 +17,18 @@ const Invite = ({ session }: InviteProps) => {
   const [status, setStatus] = useState<"idle" | "sending" | "accepted">("idle");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [accountMismatch, setAccountMismatch] = useState(false);
 
   const hasSession = Boolean(session?.access_token);
 
+  const invitePath = useMemo(
+    () => `/invite?token=${encodeURIComponent(token)}`,
+    [token]
+  );
   const inviteUrl = useMemo(() => {
     const base = window.location.origin;
-    return `${base}/invite?token=${encodeURIComponent(token)}`;
-  }, [token]);
+    return `${base}${invitePath}`;
+  }, [invitePath]);
 
   const handleLogin = async () => {
     if (!supabase) return;
@@ -48,6 +53,7 @@ const Invite = ({ session }: InviteProps) => {
     if (!session?.access_token) return;
     setError(null);
     setMessage(null);
+    setAccountMismatch(false);
     setStatus("sending");
     try {
       const response = await fetch("/api/team", {
@@ -58,6 +64,14 @@ const Invite = ({ session }: InviteProps) => {
         },
         body: JSON.stringify({ action: "accept", token })
       });
+      if (response.status === 403) {
+        setAccountMismatch(true);
+        setError(
+          "Cette invitation ne peut pas être acceptée avec le compte actuellement connecté."
+        );
+        setStatus("idle");
+        return;
+      }
       if (!response.ok) {
         const text = await response.text();
         setError(text || "Impossible d'accepter l'invitation.");
@@ -71,6 +85,24 @@ const Invite = ({ session }: InviteProps) => {
       setError("Impossible d'accepter l'invitation.");
       setStatus("idle");
     }
+  };
+
+  const handleSwitchAccount = async () => {
+    if (!supabase) return;
+    setError(null);
+    setMessage(null);
+    setStatus("sending");
+    const { error: signOutError } = await supabase.auth.signOut({
+      scope: "local"
+    });
+    if (signOutError) {
+      setError("Impossible de changer de compte. Réessayez.");
+      setStatus("idle");
+      return;
+    }
+    setAccountMismatch(false);
+    setStatus("idle");
+    navigate(invitePath, { replace: true });
   };
 
   return (
@@ -108,11 +140,23 @@ const Invite = ({ session }: InviteProps) => {
           {token && hasSession && (
             <>
               <p className="text-sm text-slate-600">
-                Cliquez pour accepter l'invitation.
+                {accountMismatch
+                  ? "Reconnectez-vous avec le compte destinataire de l'invitation."
+                  : "Cliquez pour accepter l'invitation."}
               </p>
-              <Button onClick={handleAccept} disabled={status === "sending"}>
-                Accepter l'invitation
-              </Button>
+              {accountMismatch ? (
+                <Button
+                  variant="outline"
+                  onClick={handleSwitchAccount}
+                  disabled={status === "sending"}
+                >
+                  Se connecter avec un autre compte
+                </Button>
+              ) : (
+                <Button onClick={handleAccept} disabled={status === "sending"}>
+                  Accepter l'invitation
+                </Button>
+              )}
             </>
           )}
 

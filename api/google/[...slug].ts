@@ -4,6 +4,9 @@ import handleGbpReviewsSync from "../../server/_shared/handlers/google/gbp/revie
 import handleOAuthStart from "../../server/_shared/handlers/google/oauth/start";
 import handleOAuthCallback from "../../server/_shared/handlers/google/oauth/callback";
 import handleReply from "../../server/_shared/handlers/google/reply";
+import { createProductionSafeConsole } from "../../server/_shared/safe_console";
+
+const console = createProductionSafeConsole("/api/google");
 
 const GOOGLE_ROUTES = {
   "gbp/sync": handleGbpSync,

@@ -5,6 +5,9 @@ import {
   generateAiReply,
   isMissingAiIdentityError
 } from "../../ai_reply";
+import { createProductionSafeConsole } from "../../safe_console";
+
+const console = createProductionSafeConsole("/api/google/reply");
 
 type BrandVoiceTone = Database["public"]["Enums"]["brand_voice_tone"];
 type BrandVoiceLanguageLevel =
@@ -271,15 +274,29 @@ const fetchAiInsights = async (reviewPk: string) => {
   };
 };
 
+const sendPublicError = (
+  res: VercelResponse,
+  requestId: string,
+  status: number,
+  code: string,
+  extra?: Record<string, unknown>
+) =>
+  res.status(status).json({
+    ok: false,
+    error: "Request failed",
+    code,
+    requestId,
+    ...extra
+  });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
   const requestId =
     req.headers["x-request-id"]?.toString() ??
     `req_${crypto.randomUUID()}`;
+
+  if (req.method !== "POST") {
+    return sendPublicError(res, requestId, 405, "METHOD_NOT_ALLOWED");
+  }
 
   try {
     let payload = req.body ?? {};
@@ -292,10 +309,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-      return res.status(400).json({ error: "Invalid JSON body" });
+      return sendPublicError(res, requestId, 400, "INVALID_JSON");
     }
     if (Buffer.byteLength(JSON.stringify(payload), "utf8") > MAX_REPLY_REQUEST_BYTES) {
-      return res.status(413).json({ error: "Payload too large" });
+      return sendPublicError(res, requestId, 413, "PAYLOAD_TOO_LARGE");
     }
     const mode =
       payload?.mode === "draft" ||
@@ -318,7 +335,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ? (payload as { user_id: string }).user_id.trim()
           : "";
       if (!internalUserId) {
-        return res.status(400).json({ error: "Missing user_id for internal automation" });
+        return sendPublicError(res, requestId, 400, "INVALID_AUTOMATION_REQUEST");
       }
       userId = internalUserId;
     } else {
@@ -326,21 +343,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const jwt = auth.startsWith("Bearer ") ? auth.slice(7) : "";
       if (!jwt) {
         console.error("[reply]", requestId, "missing bearer token");
-        return res.status(401).json({ error: "Missing Authorization Bearer token" });
+        return sendPublicError(res, requestId, 401, "UNAUTHORIZED");
       }
       userId = await getUserIdFromJwt(jwt);
     }
     const missingEnv = getMissingEnv(mode);
     if (missingEnv.length) {
-      console.error("[reply]", requestId, "missing env:", missingEnv);
-      return res
-        .status(500)
-        .json({ error: `Missing env: ${missingEnv.join(", ")}` });
+      console.error("[reply]", {
+        requestId,
+        route: "/api/google/reply",
+        status: 500,
+        code: "SERVER_MISCONFIGURED",
+        count: missingEnv.length
+      });
+      return sendPublicError(res, requestId, 500, "SERVER_MISCONFIGURED");
     }
     if (mode === "automation" && !isInternalAutomationRequest) {
       const isAdmin = await isAdminUser(userId);
       if (!isAdmin) {
-        return res.status(403).json({ error: "Admin role required" });
+        return sendPublicError(res, requestId, 403, "FORBIDDEN");
       }
     }
 
@@ -401,14 +422,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           rating < 1 ||
           rating > 5))
     ) {
-      return res.status(400).json({ error: "Invalid payload fields" });
+      return sendPublicError(res, requestId, 400, "INVALID_PAYLOAD");
     }
 
     if (mode === "test") {
       const safeText =
         typeof review_text === "string" ? review_text.trim() : "";
       if (!safeText) {
-        return res.status(400).json({ error: "Missing review_text" });
+        return sendPublicError(res, requestId, 400, "INVALID_PAYLOAD");
       }
       try {
         const aiResult = await generateAiReply({
@@ -441,18 +462,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             userId,
             locationId: typeof location_id === "string" ? location_id : null
           });
-          return res.status(422).json({
-            error: "missing_ai_identity",
-            failed_reason: "missing_ai_identity",
-            meta: error.meta
+          return sendPublicError(res, requestId, 422, "MISSING_AI_IDENTITY", {
+            failed_reason: "missing_ai_identity"
           });
         }
         if ((error as Error).name === "AbortError") {
           console.error("[reply]", requestId, "test openai timeout");
-          return res.status(504).json({ error: "OpenAI request timeout" });
+          return sendPublicError(res, requestId, 504, "UPSTREAM_TIMEOUT");
         }
         console.error("[reply]", requestId, "test openai error", error);
-        return res.status(502).json({ error: "OpenAI request failed" });
+        return sendPublicError(res, requestId, 502, "UPSTREAM_FAILED");
       }
     }
 
@@ -471,7 +490,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     if (!resolvedId && !resolvedReviewId && !resolvedReviewName) {
       console.error("[reply]", requestId, "missing review identifiers");
-      return res.status(400).json({ error: "Missing review identifiers" });
+      return sendPublicError(res, requestId, 400, "INVALID_PAYLOAD");
     }
 
     if (mode === "draft" || mode === "automation") {
@@ -484,20 +503,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
       if (lookupError) {
         console.error("[reply]", requestId, "draft lookup error", lookupError);
-        return res.status(500).json({ error: "Review lookup failed" });
+        return sendPublicError(res, requestId, 500, "LOOKUP_FAILED");
       }
       if (!review) {
-        return res.status(404).json({
-          error: "Review not found",
-          user_id: userId,
-          lookup: {
-            id: resolvedId,
-            review_id: resolvedReviewId,
-            review_name: resolvedReviewName,
-            location_id,
-            lookup_path: lookupPath
-          }
-        });
+        return sendPublicError(res, requestId, 404, "NOT_FOUND");
       }
       const reviewText = typeof review.comment === "string" ? review.comment : "";
       try {
@@ -546,18 +555,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             locationId:
               review.location_id ?? (typeof location_id === "string" ? location_id : null)
           });
-          return res.status(422).json({
-            error: "missing_ai_identity",
-            failed_reason: "missing_ai_identity",
-            meta: error.meta
+          return sendPublicError(res, requestId, 422, "MISSING_AI_IDENTITY", {
+            failed_reason: "missing_ai_identity"
           });
         }
         if ((error as Error).name === "AbortError") {
           console.error("[reply]", requestId, "draft openai timeout");
-          return res.status(504).json({ error: "OpenAI request timeout" });
+          return sendPublicError(res, requestId, 504, "UPSTREAM_TIMEOUT");
         }
         console.error("[reply]", requestId, "draft openai error", error);
-        return res.status(502).json({ error: "OpenAI request failed" });
+        return sendPublicError(res, requestId, 502, "UPSTREAM_FAILED");
       }
     }
 
@@ -565,7 +572,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error("[reply]", requestId, "missing replyText", {
         hasReplyText: Boolean(replyText)
       });
-      return res.status(400).json({ error: "Missing replyText" });
+      return sendPublicError(res, requestId, 400, "INVALID_PAYLOAD");
     }
 
     console.log("[reply]", requestId, "lookup", lookupPath);
@@ -578,34 +585,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     if (reviewLookupError) {
       console.error("[reply]", requestId, "reply lookup error", reviewLookupError);
-      return res.status(500).json({ error: "Review lookup failed" });
+      return sendPublicError(res, requestId, 500, "LOOKUP_FAILED");
     }
     if (!reviewRecord) {
-      return res.status(404).json({
-        error: "Review not found",
-        user_id: userId,
-        lookup: {
-          id: resolvedId,
-          review_id: resolvedReviewId,
-          review_name: resolvedReviewName,
-          location_id,
-          lookup_path: lookupPath
-        }
-      });
+      return sendPublicError(res, requestId, 404, "NOT_FOUND");
     }
     if (reviewRecord.status === "replied") {
       console.error("[reply]", requestId, "already replied", {
         reviewId: resolvedReviewId,
         googleReviewId: resolvedId
       });
-      return res.status(409).json({ error: "already_replied" });
+      return sendPublicError(res, requestId, 409, "ALREADY_REPLIED");
     }
     if (!reviewRecord.reviewName) {
       console.error("[reply]", requestId, "review name missing", {
         reviewId: resolvedReviewId,
         googleReviewId: resolvedId
       });
-      return res.status(400).json({ error: "Review name not found" });
+      return sendPublicError(res, requestId, 400, "INVALID_REVIEW");
     }
 
     const { data: conn, error: connErr } = await supabaseAdmin
@@ -616,9 +613,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (connErr || !conn?.refresh_token) {
       console.error("[reply]", requestId, "missing refresh token", connErr);
-      return res
-        .status(400)
-        .json({ error: "Google not connected (missing refresh token)" });
+      return sendPublicError(res, requestId, 400, "GOOGLE_CONNECTION_REQUIRED");
     }
 
     let accessToken: string;
@@ -628,7 +623,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error("[reply]", requestId, "token refresh failed", {
         errorType: error instanceof Error ? error.name : "unknown"
       });
-      return res.status(502).json({ error: "Google token refresh failed" });
+      return sendPublicError(res, requestId, 502, "UPSTREAM_AUTH_FAILED");
     }
     const googleReviewName = reviewRecord.reviewName;
 
@@ -649,7 +644,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error("[reply]", requestId, "google reply failed", {
         upstreamStatus: googleRes.status
       });
-      return res.status(502).json({ error: "Google reply failed" });
+      return sendPublicError(res, requestId, 502, "UPSTREAM_FAILED");
     }
 
     const sentAt = new Date().toISOString();
@@ -694,9 +689,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({ ok: true, requestId, sentAt });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    const status = msg === "Unauthorized" ? 401 : 500;
-    console.error("[reply]", requestId, "unhandled error", msg);
-    return res.status(status).json({ error: msg });
+    const status = e instanceof Error && e.message === "Unauthorized" ? 401 : 500;
+    console.error("[reply]", {
+      requestId,
+      route: "/api/google/reply",
+      status,
+      code: status === 401 ? "UNAUTHORIZED" : "INTERNAL",
+      count: 1
+    });
+    return sendPublicError(
+      res,
+      requestId,
+      status,
+      status === 401 ? "UNAUTHORIZED" : "INTERNAL"
+    );
   }
 }

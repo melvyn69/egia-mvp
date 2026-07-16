@@ -423,22 +423,56 @@ export const getPublicLoyaltyProgram = async (
   return (row ?? null) as PublicLoyaltyProgram | null;
 };
 
-export const joinLoyaltyProgram = async (params: {
+const parseLoyaltyApiError = async (
+  response: Response,
+  fallback: string
+): Promise<Error> => {
+  const payload = (await response.json().catch(() => null)) as
+    | { error?: { code?: string; message?: string } }
+    | null;
+  const code = payload?.error?.code?.trim();
+  return new Error(code || fallback);
+};
+
+export const requestLoyaltyEnrollment = async (params: {
   publicToken: string;
   firstName: string;
   email: string;
-}): Promise<JoinLoyaltyResult> => {
-  const { data, error } = await sb.rpc("join_loyalty_program", {
-    p_public_token: params.publicToken,
-    p_first_name: params.firstName,
-    p_email: params.email
+  company?: string;
+}): Promise<void> => {
+  const response = await fetch("/api/loyalty/join", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      public_token: params.publicToken,
+      first_name: params.firstName,
+      email: params.email,
+      company: params.company ?? ""
+    })
   });
-  if (error) throw error;
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row) {
-    throw new Error("Inscription impossible.");
+  if (!response.ok) {
+    throw await parseLoyaltyApiError(response, "ENROLLMENT_UNAVAILABLE");
   }
-  return row as JoinLoyaltyResult;
+};
+
+export const verifyLoyaltyEnrollment = async (
+  token: string
+): Promise<JoinLoyaltyResult> => {
+  const response = await fetch("/api/loyalty/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token })
+  });
+  if (!response.ok) {
+    throw await parseLoyaltyApiError(response, "INVALID_TOKEN");
+  }
+  const payload = (await response.json()) as {
+    data?: JoinLoyaltyResult;
+  };
+  if (!payload.data) {
+    throw new Error("INVALID_TOKEN");
+  }
+  return payload.data;
 };
 
 export const getAppleWalletStatus = async (

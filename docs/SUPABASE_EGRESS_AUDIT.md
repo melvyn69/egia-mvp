@@ -61,6 +61,11 @@ Les index existants `job_queue_status_run_at_idx` et `ai_jobs_status_created_at_
 
 ## 9. Fréquences cron à saisir dans cron-job.org
 
+L'orchestrateur actuellement retenu est **cron-job.org**. Chaque tâche appelle
+uniquement la méthode `POST` et transmet `CRON_SECRET` soit dans
+`x-cron-secret`, soit dans `Authorization: Bearer <CRON_SECRET>`. Les requêtes
+`GET` et les jetons utilisateur/admin ne déclenchent aucun traitement cron.
+
 - Google — URL `/api/cron/google/sync-replies`, expression `0 * * * *` (toutes les heures).
 - IA — URL `/api/cron/ai/tag-reviews`, expression `10 */2 * * *` (toutes les deux heures).
 - Automatisations — URL `/api/reports/automations`, expression `20,50 * * * *` (toutes les 30 minutes, décalé).

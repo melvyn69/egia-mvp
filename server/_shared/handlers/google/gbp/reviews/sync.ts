@@ -18,6 +18,9 @@ import {
   isAuthReauthRequiredError,
   setGoogleReauthRequired
 } from "../../../../utils/googleAuthState";
+import { createProductionSafeConsole } from "../../../../safe_console";
+
+const console = createProductionSafeConsole("/api/google/gbp/reviews/sync");
 
 type GoogleReview = {
   reviewId?: string;
@@ -107,7 +110,7 @@ type AuthStatusSummary = {
   status: "connected" | "reauth_required" | "disconnected" | "unknown";
   reason: AuthStatusReason;
   last_checked_at: string;
-  message: string | null;
+  code: string | null;
 };
 
 type LocationSyncResult = {
@@ -291,6 +294,20 @@ const getErrorMessage = (err: unknown): string =>
       ? err
       : JSON.stringify(err);
 
+const toSafeErrorCode = (error: unknown, fallback = "operation_failed") => {
+  if (error instanceof GoogleReviewsFetchError) {
+    return error.message;
+  }
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String((error as { code?: unknown }).code ?? "").trim()
+      : "";
+  if (/^[A-Za-z0-9_-]{1,64}$/.test(code)) {
+    return `database_${code.toLowerCase()}`;
+  }
+  return fallback;
+};
+
 const legacyAlertKey = (alert: Pick<AlertInsert, "rule_code" | "review_id">) =>
   `${alert.rule_code}\u0000${alert.review_id}`;
 
@@ -449,20 +466,16 @@ const bumpHttpStatus = (map: Record<string, number>, status: number) => {
   map[key] = (map[key] ?? 0) + 1;
 };
 
-const extractGoogleErrorMessage = (body: string) => {
-  if (!body) {
-    return "Google API error";
+const classifyGoogleError = (status: number, body: string) => {
+  const normalized = body.toLowerCase();
+  if (normalized.includes("invalid_grant")) return "invalid_grant";
+  if (normalized.includes("revoked") || normalized.includes("expired")) {
+    return "credential_expired";
   }
-  try {
-    const parsed = JSON.parse(body) as { error?: { message?: string } };
-    const message = parsed?.error?.message;
-    if (typeof message === "string" && message.trim().length > 0) {
-      return message;
-    }
-  } catch {
-    // ignore JSON parse failures
-  }
-  return body.slice(0, 300);
+  if (status === 429) return "rate_limited";
+  if (status === 401 || status === 403) return "permission_denied";
+  if (status >= 500) return "upstream_unavailable";
+  return "upstream_rejected";
 };
 
 const mapRating = (starRating?: string): number | null => {
@@ -632,8 +645,8 @@ const sendResendEmail = async (params: {
     })
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Resend error: ${text.slice(0, 200)}`);
+    await response.body?.cancel();
+    throw new Error(`Resend request failed (${response.status})`);
   }
 };
 
@@ -776,7 +789,7 @@ const sendPendingAlerts = async (params: {
     } catch (error) {
       console.error("[alerts] send failed", {
         alertId: (alert as PendingAlertRow).id,
-        err: String(error)
+        errorType: error instanceof Error ? error.name : "unknown"
       });
     }
   }
@@ -913,13 +926,27 @@ const refreshAccessToken = async (refreshToken: string) => {
     })
   });
 
-  const tokenData = await tokenResponse.json();
+  const tokenBody = await tokenResponse.text();
+  let tokenData: Record<string, unknown> = {};
+  if (tokenBody) {
+    try {
+      tokenData = JSON.parse(tokenBody) as Record<string, unknown>;
+    } catch {
+      throw new GoogleReviewsFetchError(
+        "invalid_response",
+        tokenResponse.status,
+        { [String(tokenResponse.status)]: 1 },
+        0
+      );
+    }
+  }
   if (!tokenResponse.ok || tokenData.error) {
-    const refreshError = new Error(
-      tokenData.error_description ?? "Token refresh failed."
-    ) as Error & { code?: string };
-    refreshError.code = tokenData.error;
-    throw refreshError;
+    throw new GoogleReviewsFetchError(
+      classifyGoogleError(tokenResponse.status, tokenBody),
+      tokenResponse.status,
+      { [String(tokenResponse.status)]: 1 },
+      0
+    );
   }
 
   return tokenData as {
@@ -1005,7 +1032,7 @@ const listReviewsForLocation = async (
 
     if (!response) {
       throw new GoogleReviewsFetchError(
-        "No response from Google reviews API.",
+        "upstream_no_response",
         null,
         httpStatuses,
         pages
@@ -1024,7 +1051,7 @@ const listReviewsForLocation = async (
 
     if (!response.ok) {
       throw new GoogleReviewsFetchError(
-        extractGoogleErrorMessage(responseBody),
+        classifyGoogleError(response.status, responseBody),
         response.status,
         httpStatuses,
         pages
@@ -1037,7 +1064,7 @@ const listReviewsForLocation = async (
         data = JSON.parse(responseBody) as Record<string, unknown>;
       } catch {
         throw new GoogleReviewsFetchError(
-          "Google reviews response parse failed.",
+          "invalid_response",
           response.status,
           httpStatuses,
           pages
@@ -1213,15 +1240,16 @@ export const syncGoogleReviewsForUser = async (
     try {
       refreshed = await refreshAccessToken(connection.refresh_token);
     } catch (error: unknown) {
-      const refreshError = error as Error & { code?: string };
-      const refreshMessage = getErrorMessage(error);
+      const refreshError = error as GoogleReviewsFetchError;
       const reauthRequired =
-        refreshError.code === "invalid_grant" ||
-        /expired or revoked/i.test(refreshMessage);
+        refreshError instanceof GoogleReviewsFetchError &&
+        (refreshError.message === "invalid_grant" ||
+          refreshError.message === "credential_expired" ||
+          refreshError.status === 401);
       if (reauthRequired) {
         throw new Error("reauth_required:token_revoked");
       }
-      throw error;
+      throw new Error("token_refresh_failed");
     }
     refreshSucceeded = true;
     accessToken = refreshed.access_token;
@@ -1289,13 +1317,12 @@ export const syncGoogleReviewsForUser = async (
   const locationResults: LocationSyncResult[] = [];
 
   for (const location of locationList) {
-    const locationStart = Date.now();
     const runStartedAt = new Date().toISOString();
     const runAuthStatus: AuthStatusSummary = {
       status: "connected",
       reason: "ok",
       last_checked_at: runStartedAt,
-      message: null
+      code: null
     };
     const runId = await createSyncRun(supabaseAdmin, {
       userId,
@@ -1344,7 +1371,7 @@ export const syncGoogleReviewsForUser = async (
 
       if (result.notFound) {
         locationsFailed += 1;
-        const notFoundMessage = "Location not found on Google.";
+        const notFoundCode = "location_not_found";
         await upsertImportStatus(
           supabaseAdmin,
           userId,
@@ -1357,14 +1384,14 @@ export const syncGoogleReviewsForUser = async (
             pages_exhausted: pagesExhausted,
             stats: { scanned: 0, upserted: 0 },
             errors_count: 1,
-            last_error: notFoundMessage
+            last_error: notFoundCode
           },
           requestId
         );
         await finishSyncRun(supabaseAdmin, {
           runId,
           status: "error",
-          error: notFoundMessage,
+          error: notFoundCode,
           meta: {
             auth_status: runAuthStatus,
             inserted: 0,
@@ -1386,7 +1413,7 @@ export const syncGoogleReviewsForUser = async (
           pages,
           pages_exhausted: pagesExhausted,
           http_statuses: httpStatuses,
-          error: notFoundMessage,
+          error: notFoundCode,
           warnings: [],
           run_id: runId
         });
@@ -1503,7 +1530,7 @@ export const syncGoogleReviewsForUser = async (
             reply_text: review.reviewReply?.comment ?? null,
             replied_at: review.reviewReply?.updateTime ?? null,
             last_synced_at: nowIso,
-            raw: review
+            raw: null
           } as ReviewRowForAlert & { [key: string]: unknown };
         })
         .filter((row): row is ReviewRowForAlert & { [key: string]: unknown } =>
@@ -1574,7 +1601,9 @@ export const syncGoogleReviewsForUser = async (
       );
 
       if (upsertError) {
-        throw new Error(upsertError.message ?? "Upsert failed.");
+        throw Object.assign(new Error("database_write_failed"), {
+          code: upsertError.code ?? null
+        });
       }
 
       reviewsUpsertedCount += inserted + updated;
@@ -1758,24 +1787,14 @@ export const syncGoogleReviewsForUser = async (
 
       console.log("[gbp_reviews]", {
         requestId: requestId ?? runId,
-        user_id: userId,
-        location_id: location.location_resource_name,
-        conflictKey,
-        existing_load_failed: existingLoadFailed,
-        fetched: reviews.length,
-        deduped: dedupedRows.length,
-        inserted,
-        updated,
-        skipped,
-        duration_ms: Date.now() - locationStart
+        status: existingLoadFailed ? "warning" : "ok",
+        code: existingLoadFailed ? "existing_load_failed" : "sync_complete",
+        count: inserted + updated + skipped
       });
     } catch (error: unknown) {
       locationsFailed += 1;
 
-      const message =
-        error instanceof GoogleReviewsFetchError
-          ? error.message
-          : getErrorMessage(error);
+      const errorCode = toSafeErrorCode(error);
       const failedPages =
         error instanceof GoogleReviewsFetchError ? error.pages : pages;
       const failedStatuses =
@@ -1788,20 +1807,20 @@ export const syncGoogleReviewsForUser = async (
         isAuthReauthRequiredError({
           status: error.status,
           reason: null,
-          message
+          message: errorCode
         });
       const failedAuthStatus: AuthStatusSummary = isConfirmedAuthFailure
         ? {
             status: "reauth_required",
-            reason: deriveReauthReasonFromMessage(message),
+            reason: deriveReauthReasonFromMessage(errorCode),
             last_checked_at: new Date().toISOString(),
-            message
+            code: errorCode
           }
         : {
             status: "unknown",
             reason: "unknown",
             last_checked_at: new Date().toISOString(),
-            message
+            code: errorCode
           };
 
       await upsertImportStatus(
@@ -1816,7 +1835,7 @@ export const syncGoogleReviewsForUser = async (
           pages_exhausted: failedPagesExhausted,
           stats: { scanned: 0, upserted: 0 },
           errors_count: 1,
-          last_error: message
+          last_error: errorCode
         },
         requestId
       );
@@ -1824,7 +1843,7 @@ export const syncGoogleReviewsForUser = async (
       await finishSyncRun(supabaseAdmin, {
         runId,
         status: "error",
-        error: message,
+        error: errorCode,
         meta: {
           auth_status: failedAuthStatus,
           inserted: 0,
@@ -1847,24 +1866,26 @@ export const syncGoogleReviewsForUser = async (
         pages: failedPages,
         pages_exhausted: failedPagesExhausted,
         http_statuses: failedStatuses,
-        error: message,
+        error: errorCode,
         warnings: [],
         run_id: runId
       });
 
       console.warn("[gbp_reviews] location failed", {
-        user_id: userId,
-        location_id: location.location_resource_name,
-        message
+        requestId,
+        status: failedStatuses,
+        code: errorCode,
+        count: 1
       });
       continue;
     }
   }
 
-  console.log("gbp reviews sync:", {
-    userId,
-    locationsCount: locationList.length,
-    reviewsUpsertedCount
+  console.log("[gbp_reviews]", {
+    requestId,
+    status: locationsFailed > 0 ? "warning" : "ok",
+    code: locationsFailed > 0 ? "sync_partial_failure" : "sync_complete",
+    count: reviewsUpsertedCount
   });
 
   if (locationList.length > 0) {

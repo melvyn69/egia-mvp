@@ -1,5 +1,5 @@
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import "jsr:@supabase/functions-js@2.110.2/edge-runtime.d.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.110.2";
 
 type PostReplyPayload = {
   reviewId?: string;
@@ -35,7 +35,13 @@ const jsonWithCors = (status: number, body: Record<string, unknown>) =>
   });
 
 const logEvent = (payload: Record<string, unknown>) => {
-  console.log(JSON.stringify(payload));
+  console.log(JSON.stringify({
+    requestId: payload.requestId ?? null,
+    step: payload.step ?? "unknown",
+    status: payload.status ?? payload.upstreamStatus ?? "info",
+    error: payload.error ?? null,
+    durationMs: payload.durationMs ?? null
+  }));
 };
 
 const safeJsonParse = async (
@@ -96,7 +102,10 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
-    if (!supabaseUrl || !supabaseAnonKey) {
+    const serviceRoleKey =
+      Deno.env.get("SERVICE_ROLE_KEY") ??
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !supabaseAnonKey || !serviceRoleKey) {
       return jsonWithCors(500, {
         error: "Supabase env missing.",
         code: "MISSING_SECRET",
@@ -171,27 +180,6 @@ Deno.serve(async (req) => {
       }
     });
 
-    const { data: connection, error: connectionError } = await supabaseDb
-      .from("google_connections")
-      .select("refresh_token")
-      .eq("user_id", userId)
-      .eq("provider", "google")
-      .maybeSingle();
-
-    if (connectionError || !connection?.refresh_token) {
-      logEvent({
-        requestId,
-        step: `${stepBase}:connection`,
-        userId,
-        error: connectionError ? "connection_lookup_failed" : "missing_refresh_token"
-      });
-      return jsonWithCors(400, {
-        error: "Missing Google connection.",
-        code: "MISSING_GOOGLE_CONNECTION",
-        requestId
-      });
-    }
-
     const { data: ownedReview, error: reviewError } = await supabaseDb
       .from("google_reviews")
       .select("review_name")
@@ -203,12 +191,34 @@ Deno.serve(async (req) => {
       logEvent({
         requestId,
         step: `${stepBase}:review_ownership`,
-        userId,
         error: reviewError ? "review_lookup_failed" : "review_not_owned"
       });
       return jsonWithCors(404, {
         error: "Review not found.",
         code: "REVIEW_NOT_FOUND",
+        requestId
+      });
+    }
+
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false }
+    });
+    const { data: connection, error: connectionError } = await supabaseAdmin
+      .from("google_connections")
+      .select("refresh_token")
+      .eq("user_id", userId)
+      .eq("provider", "google")
+      .maybeSingle();
+
+    if (connectionError || !connection?.refresh_token) {
+      logEvent({
+        requestId,
+        step: `${stepBase}:connection`,
+        error: connectionError ? "connection_lookup_failed" : "missing_refresh_token"
+      });
+      return jsonWithCors(400, {
+        error: "Missing Google connection.",
+        code: "MISSING_GOOGLE_CONNECTION",
         requestId
       });
     }
@@ -242,7 +252,6 @@ Deno.serve(async (req) => {
       logEvent({
         requestId,
         step: `${stepBase}:google_token`,
-        userId,
         upstreamStatus: tokenResponse.status,
         upstreamContentType: contentType
       });
@@ -291,8 +300,6 @@ Deno.serve(async (req) => {
       logEvent({
         requestId,
         step: `${stepBase}:gbp_reply`,
-        userId,
-        reviewId: payload.reviewId,
         upstreamStatus: gbpResponse.status,
         upstreamContentType: gbpContentType,
         durationMs: gbpDurationMs
@@ -305,7 +312,7 @@ Deno.serve(async (req) => {
       return jsonWithCors(502, { error: "Google reply failed.", code, requestId });
     }
 
-    const { json: gbpPayload, isJson: gbpIsJson } = await safeJsonParse(
+    const { isJson: gbpIsJson } = await safeJsonParse(
       gbpResponse,
       requestId,
       `${stepBase}:gbp_reply_parse`
@@ -321,14 +328,11 @@ Deno.serve(async (req) => {
     logEvent({
       requestId,
       step: `${stepBase}:success`,
-      userId,
-      reviewId: payload.reviewId,
       status: 200,
       durationMs: gbpDurationMs
     });
     return jsonWithCors(200, {
       ok: true,
-      googleResponse: gbpPayload,
       requestId
     });
   } catch (error) {
@@ -339,7 +343,6 @@ Deno.serve(async (req) => {
     logEvent({
       requestId,
       step: `${stepBase}:exception`,
-      userId,
       error: error instanceof Error ? error.name : "unknown"
     });
     return jsonWithCors(500, {

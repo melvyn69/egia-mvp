@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { randomUUID } from "crypto";
+import { createProductionSafeConsole } from "./safe_console";
 
 type ErrorCode =
   | "UNAUTHORIZED"
@@ -62,7 +63,7 @@ const getParam = (params: QueryParams, key: string) => {
 };
 
 const logRequest = (label: string, payload: Record<string, unknown>) => {
-  console.log(label, payload);
+  createProductionSafeConsole(label).log(label, payload);
 };
 
 export { getRequestId, sendError, parseQuery, getParam, logRequest };

@@ -16,6 +16,40 @@ values
   ('20000000-0000-4000-8000-000000000002', 'google', 'fixture-b')
 on conflict (user_id, provider) do update set refresh_token = excluded.refresh_token;
 
+insert into public.business_settings (business_id, business_name, user_id)
+values
+  ('12000000-0000-4000-8000-000000000001', 'GOAL-002 business A', '10000000-0000-4000-8000-000000000001'),
+  ('23000000-0000-4000-8000-000000000002', 'GOAL-002 business B', '20000000-0000-4000-8000-000000000002')
+on conflict (business_id) do update set
+  business_name = excluded.business_name,
+  user_id = excluded.user_id;
+
+insert into public.legal_entities (
+  id,
+  business_id,
+  company_name,
+  logo_path,
+  logo_url
+)
+values
+  (
+    '12100000-0000-4000-8000-000000000001',
+    '12000000-0000-4000-8000-000000000001',
+    'GOAL-002 entity A',
+    'business/12000000-0000-4000-8000-000000000001/legal_entities/12100000-0000-4000-8000-000000000001/logo.png',
+    'https://attacker.invalid/a.png'
+  ),
+  (
+    '23200000-0000-4000-8000-000000000002',
+    '23000000-0000-4000-8000-000000000002',
+    'GOAL-002 entity B',
+    'business/23000000-0000-4000-8000-000000000002/legal_entities/23200000-0000-4000-8000-000000000002/logo.png',
+    'https://attacker.invalid/b.png'
+  )
+on conflict (id) do update set
+  logo_path = excluded.logo_path,
+  logo_url = excluded.logo_url;
+
 insert into public.google_locations (
   id,
   user_id,
@@ -110,13 +144,22 @@ insert into public.loyalty_programs (
   name,
   public_token
 )
-values (
+values
+(
   '33000000-0000-4000-8000-000000000003',
   '10000000-0000-4000-8000-000000000001',
   '11000000-0000-4000-8000-000000000001',
   true,
-  'GOAL-002 fixture',
+  'GOAL-002 fixture A',
   '33300000-0000-4000-8000-000000000003'
+),
+(
+  '55000000-0000-4000-8000-000000000005',
+  '20000000-0000-4000-8000-000000000002',
+  '22000000-0000-4000-8000-000000000002',
+  true,
+  'GOAL-002 fixture B',
+  '55500000-0000-4000-8000-000000000005'
 )
 on conflict (id) do nothing;
 
@@ -130,7 +173,8 @@ insert into public.loyalty_members (
   member_code,
   qr_token
 )
-values (
+values
+(
   '44000000-0000-4000-8000-000000000004',
   '33000000-0000-4000-8000-000000000003',
   '10000000-0000-4000-8000-000000000001',
@@ -139,6 +183,16 @@ values (
   'existing@example.invalid',
   'EGEXISTING',
   '44400000-0000-4000-8000-000000000004'
+),
+(
+  '66000000-0000-4000-8000-000000000006',
+  '55000000-0000-4000-8000-000000000005',
+  '20000000-0000-4000-8000-000000000002',
+  '22000000-0000-4000-8000-000000000002',
+  'Foreign',
+  'foreign@example.invalid',
+  'EGFOREIGN',
+  '66600000-0000-4000-8000-000000000006'
 )
 on conflict (id) do nothing;
 
@@ -194,8 +248,7 @@ begin
     and p.prosecdef
     and has_function_privilege('anon', p.oid, 'EXECUTE')
     and p.oid::regprocedure::text not in (
-      'get_public_loyalty_program(uuid)',
-      'join_loyalty_program(uuid,text,text)'
+      'get_public_loyalty_program(uuid)'
     );
   if violations <> 0 then
     raise exception 'anon can execute unexpected SECURITY DEFINER functions: %', violations;
@@ -211,11 +264,140 @@ begin
       'ensure_profile()',
       'get_public_loyalty_program(uuid)',
       'is_admin()',
-      'join_loyalty_program(uuid,text,text)',
       'record_loyalty_visit(uuid,text,uuid,text)'
     );
   if violations <> 0 then
     raise exception 'authenticated can execute unexpected SECURITY DEFINER functions: %', violations;
+  end if;
+
+  select count(*) into violations
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public'
+    and c.relkind in ('r', 'p')
+    and (
+      has_table_privilege('anon', c.oid, 'TRUNCATE')
+      or has_table_privilege('anon', c.oid, 'REFERENCES')
+      or has_table_privilege('anon', c.oid, 'TRIGGER')
+      or has_table_privilege('authenticated', c.oid, 'TRUNCATE')
+      or has_table_privilege('authenticated', c.oid, 'REFERENCES')
+      or has_table_privilege('authenticated', c.oid, 'TRIGGER')
+    );
+  if violations <> 0 then
+    raise exception 'Data API roles retain schema-management table privileges: %', violations;
+  end if;
+
+  if has_table_privilege('anon', 'public.google_connections', 'SELECT,INSERT,UPDATE,DELETE') then
+    raise exception 'anonymous caller retains google_connections access';
+  end if;
+  if has_table_privilege('authenticated', 'public.google_connections', 'INSERT,UPDATE,DELETE') then
+    raise exception 'authenticated caller can mutate google_connections';
+  end if;
+  if has_column_privilege('authenticated', 'public.google_connections', 'refresh_token', 'SELECT')
+    or has_column_privilege('authenticated', 'public.google_connections', 'access_token', 'SELECT')
+    or has_column_privilege('authenticated', 'public.google_connections', 'oauth_state', 'SELECT') then
+    raise exception 'authenticated caller can read OAuth credentials/state';
+  end if;
+  if not has_column_privilege('authenticated', 'public.google_connections', 'sync_status', 'SELECT') then
+    raise exception 'authenticated caller lost safe Google status projection';
+  end if;
+
+  if has_table_privilege('authenticated', 'public.legal_entities', 'INSERT,UPDATE,DELETE') then
+    raise exception 'authenticated caller can mutate legal_entities directly';
+  end if;
+  if has_column_privilege('authenticated', 'public.legal_entities', 'logo_url', 'SELECT') then
+    raise exception 'authenticated caller can read deprecated external logo URL';
+  end if;
+  if not has_column_privilege('authenticated', 'public.legal_entities', 'logo_path', 'SELECT') then
+    raise exception 'authenticated caller lost canonical logo path projection';
+  end if;
+
+  if has_table_privilege(
+    'anon',
+    'public.loyalty_enrollment_requests',
+    'SELECT,INSERT,UPDATE,DELETE'
+  ) or has_table_privilege(
+    'authenticated',
+    'public.loyalty_enrollment_requests',
+    'SELECT,INSERT,UPDATE,DELETE'
+  ) then
+    raise exception 'browser role can access loyalty enrollment requests';
+  end if;
+  if has_table_privilege(
+    'anon',
+    'public.security_rate_limits',
+    'SELECT,INSERT,UPDATE,DELETE'
+  ) or has_table_privilege(
+    'authenticated',
+    'public.security_rate_limits',
+    'SELECT,INSERT,UPDATE,DELETE'
+  ) then
+    raise exception 'browser role can access durable rate-limit state';
+  end if;
+  if has_function_privilege(
+    'anon',
+    'public.join_loyalty_program(uuid,text,text)',
+    'EXECUTE'
+  ) or has_function_privilege(
+    'authenticated',
+    'public.join_loyalty_program(uuid,text,text)',
+    'EXECUTE'
+  ) then
+    raise exception 'browser role can create or recover loyalty membership';
+  end if;
+  if has_function_privilege(
+    'anon',
+    'public.finalize_loyalty_enrollment(text)',
+    'EXECUTE'
+  ) or has_function_privilege(
+    'authenticated',
+    'public.finalize_loyalty_enrollment(text)',
+    'EXECUTE'
+  ) then
+    raise exception 'browser role can finalize loyalty enrollment';
+  end if;
+  if has_function_privilege(
+    'anon',
+    'public.consume_security_rate_limit(text,integer,integer,integer)',
+    'EXECUTE'
+  ) or has_function_privilege(
+    'authenticated',
+    'public.consume_security_rate_limit(text,integer,integer,integer)',
+    'EXECUTE'
+  ) then
+    raise exception 'browser role can mutate durable rate-limit state';
+  end if;
+  if has_table_privilege('authenticated', 'public.loyalty_visits', 'INSERT')
+    or has_table_privilege('authenticated', 'public.loyalty_rewards', 'INSERT,UPDATE,DELETE')
+    or has_table_privilege('authenticated', 'public.wallet_passes', 'SELECT,INSERT,UPDATE,DELETE') then
+    raise exception 'authenticated role retains direct loyalty capability mutation';
+  end if;
+  if (
+    select count(*)
+    from pg_constraint
+    where conname in (
+      'loyalty_programs_scope_unique',
+      'loyalty_members_scope_unique',
+      'loyalty_members_program_scope_fk',
+      'loyalty_visits_member_scope_fk',
+      'loyalty_rewards_member_scope_fk',
+      'wallet_passes_member_scope_fk'
+    )
+      and convalidated
+  ) <> 6 then
+    raise exception 'loyalty member-scope constraints are missing or unvalidated';
+  end if;
+
+  if not exists (
+    select 1
+    from storage.buckets
+    where id = 'brand-assets'
+      and public = false
+      and file_size_limit = 3145728
+      and allowed_mime_types @> array['image/png', 'image/jpeg', 'image/webp']::text[]
+      and cardinality(allowed_mime_types) = 3
+  ) then
+    raise exception 'brand-assets bucket security configuration is missing';
   end if;
 end;
 $$;
@@ -254,33 +436,6 @@ begin
     raise exception 'anon can execute record_loyalty_visit';
   end if;
 
-  begin
-    perform *
-    from public.join_loyalty_program(
-      '33300000-0000-4000-8000-000000000003',
-      'Attacker',
-      'existing@example.invalid'
-    );
-    raise exception 'existing loyalty credentials were returned';
-  exception
-    when others then
-      if sqlerrm = 'existing loyalty credentials were returned' then
-        raise;
-      end if;
-      if position('loyalty_member_already_registered' in sqlerrm) = 0 then
-        raise exception 'unexpected repeated-enrollment result: %', sqlerrm;
-      end if;
-  end;
-
-  perform *
-  from public.join_loyalty_program(
-    '33300000-0000-4000-8000-000000000003',
-    'New member',
-    'new-member@example.invalid'
-  );
-  if not found then
-    raise exception 'new loyalty enrollment no longer works';
-  end if;
 end;
 $$;
 reset role;
@@ -301,6 +456,10 @@ declare
   foreign_locations integer;
   own_cron_rows integer;
   foreign_cron_rows integer;
+  own_connections integer;
+  foreign_connections integer;
+  own_entities integer;
+  foreign_entities integer;
   changed integer;
 begin
   select count(*) into own_reviews
@@ -338,6 +497,54 @@ begin
     raise exception 'user A can read user B cron state';
   end if;
 
+  select count(id) into own_connections
+  from public.google_connections
+  where user_id = '10000000-0000-4000-8000-000000000001';
+  if own_connections <> 1 then
+    raise exception 'user A cannot read own safe Google connection status';
+  end if;
+
+  select count(id) into foreign_connections
+  from public.google_connections
+  where user_id = '20000000-0000-4000-8000-000000000002';
+  if foreign_connections <> 0 then
+    raise exception 'user A can read user B Google connection status';
+  end if;
+
+  begin
+    perform refresh_token
+    from public.google_connections
+    where user_id = '10000000-0000-4000-8000-000000000001';
+    raise exception 'user A can read own Google refresh token';
+  exception
+    when insufficient_privilege then
+      null;
+  end;
+
+  select count(id) into own_entities
+  from public.legal_entities
+  where business_id = '12000000-0000-4000-8000-000000000001';
+  if own_entities <> 1 then
+    raise exception 'user A cannot read own legal entity';
+  end if;
+
+  select count(id) into foreign_entities
+  from public.legal_entities
+  where business_id = '23000000-0000-4000-8000-000000000002';
+  if foreign_entities <> 0 then
+    raise exception 'user A can read user B legal entity';
+  end if;
+
+  begin
+    update public.legal_entities
+    set logo_path = 'business/23000000-0000-4000-8000-000000000002/legal_entities/23200000-0000-4000-8000-000000000002/logo.png'
+    where id = '12100000-0000-4000-8000-000000000001';
+    raise exception 'user A can forge own logo path';
+  exception
+    when insufficient_privilege then
+      null;
+  end;
+
   update public.google_reviews
   set comment = 'tampered'
   where id = '22200000-0000-4000-8000-000000000002';
@@ -363,13 +570,37 @@ begin
   if has_function_privilege('authenticated', 'public.ensure_user_profile(uuid,text)', 'EXECUTE') then
     raise exception 'authenticated caller can execute inner profile definer';
   end if;
+  if has_function_privilege(
+    'authenticated',
+    'public.join_loyalty_program(uuid,text,text)',
+    'EXECUTE'
+  ) then
+    raise exception 'authenticated caller can bypass loyalty e-mail proof';
+  end if;
 end;
 $$;
 reset role;
 
 -- The worker capability remains available only to service_role.
+set local role service_role;
 do $$
+declare
+  token text;
+  new_member_id uuid;
+  existing_member_id uuid;
+  recovered_member_id uuid;
+  reused_token_rejected boolean := false;
+  forged_member_rejected boolean := false;
+  forged_visit_rejected boolean := false;
+  forged_reward_rejected boolean := false;
+  forged_wallet_rejected boolean := false;
 begin
+  select refresh_token into token
+  from public.google_connections
+  where user_id = '10000000-0000-4000-8000-000000000001';
+  if token <> 'fixture-a' then
+    raise exception 'service_role lost Google credential access';
+  end if;
   if not has_function_privilege(
     'service_role',
     'public.claim_review_analyze_jobs(integer,text,text)',
@@ -384,7 +615,207 @@ begin
   ) then
     raise exception 'authenticated caller can execute server-only KPI RPC';
   end if;
+
+  if not has_function_privilege(
+    'service_role',
+    'public.join_loyalty_program(uuid,text,text)',
+    'EXECUTE'
+  ) or not has_function_privilege(
+    'service_role',
+    'public.finalize_loyalty_enrollment(text)',
+    'EXECUTE'
+  ) or not has_function_privilege(
+    'service_role',
+    'public.consume_security_rate_limit(text,integer,integer,integer)',
+    'EXECUTE'
+  ) then
+    raise exception 'service_role lost a required server-only capability';
+  end if;
+
+  if not public.consume_security_rate_limit(
+    repeat('9', 64),
+    2,
+    3600,
+    1
+  ) or not public.consume_security_rate_limit(
+    repeat('9', 64),
+    2,
+    3600,
+    1
+  ) or public.consume_security_rate_limit(
+    repeat('9', 64),
+    2,
+    3600,
+    1
+  ) then
+    raise exception 'durable rate limit is not atomic and bounded';
+  end if;
+
+  insert into public.loyalty_enrollment_requests (
+    public_token,
+    first_name,
+    email,
+    token_hash,
+    expires_at
+  )
+  values (
+    '33300000-0000-4000-8000-000000000003',
+    'New member',
+    'new-member@example.invalid',
+    repeat('a', 64),
+    now() + interval '15 minutes'
+  );
+
+  select member_id into new_member_id
+  from public.finalize_loyalty_enrollment(repeat('a', 64));
+  if new_member_id is null then
+    raise exception 'verified new loyalty enrollment did not create a member';
+  end if;
+
+  insert into public.loyalty_enrollment_requests (
+    public_token,
+    first_name,
+    email,
+    token_hash,
+    expires_at
+  )
+  values (
+    '33300000-0000-4000-8000-000000000003',
+    'Existing',
+    'existing@example.invalid',
+    repeat('b', 64),
+    now() + interval '15 minutes'
+  );
+
+  select member_id into existing_member_id
+  from public.finalize_loyalty_enrollment(repeat('b', 64));
+  if existing_member_id <> '44000000-0000-4000-8000-000000000004' then
+    raise exception 'verified existing member recovery returned a foreign member';
+  end if;
+
+  insert into public.loyalty_enrollment_requests (
+    public_token,
+    first_name,
+    email,
+    token_hash,
+    expires_at
+  )
+  values (
+    '33300000-0000-4000-8000-000000000003',
+    'Existing',
+    'existing@example.invalid',
+    repeat('c', 64),
+    now() + interval '15 minutes'
+  );
+
+  select member_id into recovered_member_id
+  from public.finalize_loyalty_enrollment(repeat('c', 64));
+  if recovered_member_id <> existing_member_id then
+    raise exception 'existing-member recovery is not stable';
+  end if;
+
+  begin
+    perform *
+    from public.finalize_loyalty_enrollment(repeat('b', 64));
+  exception
+    when others then
+      reused_token_rejected :=
+        position('invalid_or_expired_enrollment_token' in sqlerrm) > 0;
+  end;
+  if not reused_token_rejected then
+    raise exception 'a loyalty verification token can be reused';
+  end if;
+
+  begin
+    insert into public.loyalty_members (
+      program_id,
+      user_id,
+      location_id,
+      first_name,
+      email
+    )
+    values (
+      '33000000-0000-4000-8000-000000000003',
+      '20000000-0000-4000-8000-000000000002',
+      '22000000-0000-4000-8000-000000000002',
+      'Forged',
+      'forged-member@example.invalid'
+    );
+  exception
+    when foreign_key_violation then
+      forged_member_rejected := true;
+  end;
+
+  begin
+    insert into public.loyalty_visits (
+      program_id,
+      member_id,
+      user_id,
+      location_id,
+      points_added
+    )
+    values (
+      '33000000-0000-4000-8000-000000000003',
+      '66000000-0000-4000-8000-000000000006',
+      '10000000-0000-4000-8000-000000000001',
+      '11000000-0000-4000-8000-000000000001',
+      10
+    );
+  exception
+    when foreign_key_violation then
+      forged_visit_rejected := true;
+  end;
+
+  begin
+    insert into public.loyalty_rewards (
+      program_id,
+      member_id,
+      user_id,
+      location_id,
+      threshold_points,
+      reward_label
+    )
+    values (
+      '33000000-0000-4000-8000-000000000003',
+      '66000000-0000-4000-8000-000000000006',
+      '10000000-0000-4000-8000-000000000001',
+      '11000000-0000-4000-8000-000000000001',
+      100,
+      'Forged'
+    );
+  exception
+    when foreign_key_violation then
+      forged_reward_rejected := true;
+  end;
+
+  begin
+    insert into public.wallet_passes (
+      program_id,
+      member_id,
+      user_id,
+      location_id,
+      provider
+    )
+    values (
+      '33000000-0000-4000-8000-000000000003',
+      '66000000-0000-4000-8000-000000000006',
+      '10000000-0000-4000-8000-000000000001',
+      '11000000-0000-4000-8000-000000000001',
+      'generic'
+    );
+  exception
+    when foreign_key_violation then
+      forged_wallet_rejected := true;
+  end;
+
+  if not forged_member_rejected
+    or not forged_visit_rejected
+    or not forged_reward_rejected
+    or not forged_wallet_rejected then
+    raise exception 'a loyalty member or child row can reference a foreign scope';
+  end if;
 end;
 $$;
+reset role;
 
 rollback;

@@ -1,3 +1,7 @@
+import { createProductionSafeConsole } from "../safe_console.js";
+
+const console = createProductionSafeConsole("/api/upstream-retry");
+
 type RetryOptions = {
   tries?: number;
   baseMs?: number;
@@ -189,10 +193,9 @@ const sanitizeFinalErrorMessage = (error: RetryError) => {
   const status = error.status ?? null;
   const contentType = toLower(error.contentType ?? null);
   const statusLabel = status === null ? "status=unknown" : `status=${status}`;
-  const rawMessage = truncate(toErrorMessage(error), ERROR_MESSAGE_MAX);
 
   if (status === 520 || message.includes("cloudflare")) {
-    return `Transient upstream error after retries (${statusLabel}, hint=cloudflare_520): ${rawMessage}`;
+    return `Transient upstream error after retries (${statusLabel}, hint=cloudflare_520)`;
   }
   if (
     (contentType.length > 0 && !contentType.includes("application/json")) ||
@@ -201,7 +204,7 @@ const sanitizeFinalErrorMessage = (error: RetryError) => {
     message.includes("<!doctype html") ||
     message.includes("unexpected token <")
   ) {
-    return `Unexpected non-JSON upstream response after retries (${statusLabel}, hint=html_response): ${rawMessage}`;
+    return `Unexpected non-JSON upstream response after retries (${statusLabel}, hint=html_response)`;
   }
   if (
     message.includes("fetch failed") ||
@@ -213,9 +216,9 @@ const sanitizeFinalErrorMessage = (error: RetryError) => {
     message.includes("socket hang up") ||
     message.includes("eai_again")
   ) {
-    return `Transient network error after retries (${statusLabel}, hint=network): ${rawMessage}`;
+    return `Transient network error after retries (${statusLabel}, hint=network)`;
   }
-  return `${statusLabel}: ${rawMessage}`;
+  return `Upstream request failed after retries (${statusLabel})`;
 };
 
 const withRetry = async <T>(

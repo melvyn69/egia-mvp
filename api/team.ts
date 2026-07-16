@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { randomBytes } from "crypto";
+import { createHmac, randomBytes } from "crypto";
 import { requireUser } from "../server/_shared_dist/_auth.js";
 
 type Action = "invite" | "accept" | "resend" | "cancel";
@@ -17,13 +17,70 @@ const parseBody = (req: VercelRequest) => {
 
 const isEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
-const getBaseUrl = (req: VercelRequest) => {
-  const appUrl = process.env.APP_URL?.trim();
-  if (appUrl) return appUrl.replace(/\/+$/, "");
-  const proto =
-    (req.headers["x-forwarded-proto"] as string | undefined) ?? "https";
-  const host = req.headers.host ?? "";
-  return host ? `${proto}://${host}` : "";
+const getBaseUrl = () => {
+  const configured =
+    process.env.APP_URL?.trim() ?? process.env.APP_BASE_URL?.trim() ?? "";
+  if (!configured) return "";
+  try {
+    const url = new URL(
+      configured.startsWith("http") ? configured : `https://${configured}`
+    );
+    return url.origin;
+  } catch {
+    return "";
+  }
+};
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const consumeInvitationRateLimit = async (params: {
+  supabaseAdmin: any;
+  ownerUserId: string;
+  email: string;
+}) => {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? "";
+  if (!serviceRoleKey) {
+    throw new Error("rate_limit_unavailable");
+  }
+  const bucket = (material: string) =>
+    createHmac("sha256", serviceRoleKey).update(material).digest("hex");
+  const requests = [
+    {
+      p_bucket_key: bucket(`team-invite:owner:${params.ownerUserId}`),
+      p_limit: 30,
+      p_window_seconds: 3600,
+      p_cost: 1
+    },
+    {
+      p_bucket_key: bucket(
+        `team-invite:owner-email:${params.ownerUserId}:${params.email}`
+      ),
+      p_limit: 5,
+      p_window_seconds: 3600,
+      p_cost: 1
+    },
+    {
+      p_bucket_key: bucket(`team-invite:email:${params.email}`),
+      p_limit: 10,
+      p_window_seconds: 86400,
+      p_cost: 1
+    }
+  ];
+  const results = await Promise.all(
+    requests.map((args) =>
+      params.supabaseAdmin.rpc("consume_security_rate_limit", args)
+    )
+  );
+  if (results.some((result) => result.error)) {
+    throw new Error("rate_limit_unavailable");
+  }
+  return results.every((result) => result.data === true);
 };
 
 const sendResendEmail = async (params: {
@@ -59,13 +116,40 @@ const handleInvite = async (
   supabaseAdmin: any
 ) => {
   const payload = parseBody(req);
-  const firstName = String(payload.first_name ?? "").trim() || null;
+  const firstNameValue = String(payload.first_name ?? "").trim();
+  const firstName = firstNameValue || null;
   const email = String(payload.email ?? "").trim().toLowerCase();
   const role = String(payload.role ?? "editor");
   const receiveMonthly = Boolean(payload.receive_monthly_reports);
 
-  if (!email || !isEmail(email)) {
-    return res.status(400).json({ error: "Invalid email" });
+  if (
+    firstNameValue.length > 100 ||
+    !email ||
+    email.length > 320 ||
+    !isEmail(email) ||
+    !["admin", "editor"].includes(role)
+  ) {
+    return res.status(400).json({ error: "Invalid invitation" });
+  }
+
+  const resendKey = process.env.RESEND_API_KEY?.trim() ?? "";
+  const emailFrom = process.env.EMAIL_FROM?.trim() ?? "";
+  const baseUrl = getBaseUrl();
+  if (!resendKey || !emailFrom || !baseUrl) {
+    return res.status(503).json({ error: "Service unavailable" });
+  }
+
+  try {
+    const quotaAllowed = await consumeInvitationRateLimit({
+      supabaseAdmin,
+      ownerUserId,
+      email
+    });
+    if (!quotaAllowed) {
+      return res.status(429).json({ error: "Try again later" });
+    }
+  } catch {
+    return res.status(503).json({ error: "Service unavailable" });
   }
 
   const token = randomBytes(24).toString("hex");
@@ -121,15 +205,14 @@ const handleInvite = async (
     }
   }
 
-  const resendKey = process.env.RESEND_API_KEY ?? "";
-  const emailFrom = process.env.EMAIL_FROM ?? "";
-  if (!resendKey || !emailFrom) {
-    return res.status(500).json({ error: "Missing email configuration" });
-  }
-
-  const baseUrl = getBaseUrl(req);
-  const inviteUrl = baseUrl ? `${baseUrl}/invite?token=${token}` : "";
-  const hello = firstName ? `Bonjour ${firstName},` : "Bonjour,";
+  const inviteUrl = new URL(
+    `/invite?token=${encodeURIComponent(token)}`,
+    baseUrl
+  ).toString();
+  const hello = firstName
+    ? `Bonjour ${escapeHtml(firstName)},`
+    : "Bonjour,";
+  const safeInviteUrl = escapeHtml(inviteUrl);
   const html = `
     <div style="font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f6f7fb;padding:24px;">
       <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:14px;padding:24px;border:1px solid #e9ebf3;">
@@ -142,7 +225,7 @@ const handleInvite = async (
         <p style="margin:0 0 16px 0;color:#111827;font-size:14px;line-height:1.6;">
           Vous avez ete invite a rejoindre EGIA. Cliquez sur le bouton ci-dessous pour accepter.
         </p>
-        <a href="${inviteUrl}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:10px 16px;border-radius:10px;font-size:14px;">
+        <a href="${safeInviteUrl}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:10px 16px;border-radius:10px;font-size:14px;">
           Accepter l'invitation
         </a>
       </div>
@@ -159,7 +242,6 @@ const handleInvite = async (
     });
   } catch (error) {
     console.error("[team/invite] resend_failed", {
-      ownerUserId,
       error: error instanceof Error ? error.name : "unknown"
     });
     return res.status(200).json({

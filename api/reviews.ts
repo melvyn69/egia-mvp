@@ -1,8 +1,11 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { randomUUID } from "crypto";
+import { createProductionSafeConsole } from "../server/_shared/safe_console";
 import { resolveDateRange } from "../server/_shared_dist/_date.js";
 import { buildPromptContext } from "../server/_shared_dist/ai_reply.js";
 import { requireUser } from "../server/_shared_dist/_auth.js";
+
+const console = createProductionSafeConsole("/api/reviews");
 
 type Cursor = { source_time: string; id: string };
 
@@ -89,6 +92,7 @@ type ResolvedDraftLocation = {
   googleLocationResource: string | null;
   googleLocationId: string | null;
   businessId: string | null;
+  accessConfirmed: boolean;
 };
 
 type ExistingDraftResult = {
@@ -229,24 +233,21 @@ const resolveDraftLocation = async (params: {
 
   let googleLocationResource: string | null = null;
   let googleLocationId: string | null = null;
+  let requestedLocationRow: GoogleLocationRow | null = null;
 
   if (requestedLocationId) {
     if (isUuid(requestedLocationId)) {
-      const locationRow = await fetchGoogleLocation("id", requestedLocationId);
-      googleLocationId = locationRow?.id ?? requestedLocationId;
-      googleLocationResource = locationRow?.location_resource_name ?? null;
+      requestedLocationRow = await fetchGoogleLocation("id", requestedLocationId);
     } else {
-      const locationRow = await fetchGoogleLocation(
+      requestedLocationRow = await fetchGoogleLocation(
         "location_resource_name",
         requestedLocationId
       );
-      googleLocationId = locationRow?.id ?? null;
-      googleLocationResource =
-        locationRow?.location_resource_name ?? requestedLocationId;
     }
   }
 
-  if (!googleLocationResource && params.reviewId) {
+  let reviewLocationRow: GoogleLocationRow | null = null;
+  if (params.reviewId) {
     const { data: reviewRow, error: reviewError } = await (params.supabaseAdmin as any)
       .from("google_reviews")
       .select("location_id")
@@ -264,22 +265,30 @@ const resolveDraftLocation = async (params: {
     }
     const reviewLocation = normalizeStringId(reviewRow?.location_id);
     if (reviewLocation) {
-      googleLocationResource = reviewLocation;
-      if (!googleLocationId) {
-        const locationRow = await fetchGoogleLocation(
-          "location_resource_name",
-          reviewLocation
-        );
-        googleLocationId = locationRow?.id ?? null;
-      }
+      reviewLocationRow = isUuid(reviewLocation)
+        ? await fetchGoogleLocation("id", reviewLocation)
+        : await fetchGoogleLocation("location_resource_name", reviewLocation);
     }
+  }
+
+  const locationsMatch =
+    !requestedLocationRow ||
+    !reviewLocationRow ||
+    requestedLocationRow.id === reviewLocationRow.id;
+  const resolvedLocationRow = params.reviewId
+    ? reviewLocationRow
+    : requestedLocationRow;
+  if (locationsMatch && resolvedLocationRow) {
+    googleLocationId = resolvedLocationRow.id;
+    googleLocationResource = resolvedLocationRow.location_resource_name;
   }
 
   return {
     requestedLocationId,
     googleLocationResource,
     googleLocationId,
-    businessId: googleLocationId
+    businessId: googleLocationId,
+    accessConfirmed: Boolean(resolvedLocationRow && locationsMatch)
   };
 };
 
@@ -347,6 +356,7 @@ const getInFlightReviewJob = async (
   const { data, error } = await (supabaseAdmin as any)
     .from("ai_jobs")
     .select("id, status, payload")
+    .filter("payload->>user_id", "eq", userId)
     .filter("payload->>review_id", "eq", reviewId)
     .in("status", AI_JOB_IN_FLIGHT_STATUSES)
     .limit(1);
@@ -566,12 +576,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
       const missingEnv = isMissingEnvError(err);
       console.error("[reviews] auth error", {
         route,
-        req_url: req.url ?? null,
-        query: parsedQuery,
         reason: missingEnv ? "missing_env" : undefined,
         error: {
-          message: err instanceof Error ? err.message : String(err),
-          stack: err instanceof Error ? err.stack : null
+          name: err instanceof Error ? err.name : "UnknownError"
         },
         requestId
       });
@@ -682,6 +689,13 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         action: "ensure_draft",
         requestId
       });
+      if (
+        !locationContext.accessConfirmed ||
+        !locationContext.googleLocationId ||
+        !locationContext.googleLocationResource
+      ) {
+        return res.status(404).json({ error: "Review or location not found" });
+      }
 
       const existingDraft = await getExistingDraftForReview(
         supabaseAdmin,
@@ -987,10 +1001,15 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         action: "prepare_drafts",
         requestId
       });
-      const reviewFilterLocationId =
-        locationContext.googleLocationResource ?? locationId;
-      const draftLocationId =
-        locationContext.googleLocationId ?? reviewFilterLocationId;
+      if (
+        !locationContext.accessConfirmed ||
+        !locationContext.googleLocationId ||
+        !locationContext.googleLocationResource
+      ) {
+        return res.status(404).json({ error: "Review or location not found" });
+      }
+      const reviewFilterLocationId = locationContext.googleLocationResource;
+      const draftLocationId = locationContext.googleLocationId;
 
       const activeIds = await fetchActiveLocationIds(supabaseAdmin, userId);
       if (
@@ -2209,14 +2228,9 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     const missingEnv = isMissingEnvError(err);
     console.error("[reviews] error", {
       route,
-      req_url: req.url ?? null,
-      query: parsedQuery,
-      userId,
-      location_id: locationId,
       reason: missingEnv ? "missing_env" : undefined,
       error: {
-        message: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? err.stack : null
+        name: err instanceof Error ? err.name : "UnknownError"
       },
       requestId
     });

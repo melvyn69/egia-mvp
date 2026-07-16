@@ -3,11 +3,11 @@
 // This enables autocomplete, go to definition, etc.
 
 // Setup type definitions for built-in Supabase Runtime APIs
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import "jsr:@supabase/functions-js@2.110.2/edge-runtime.d.ts";
 import {
   createClient,
   type SupabaseClient
-} from "https://esm.sh/@supabase/supabase-js@2";
+} from "https://esm.sh/@supabase/supabase-js@2.110.2";
 
 type GenerateReplyPayload = {
   businessId?: string;
@@ -62,11 +62,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
-const RATE_LIMIT_MAX = 30;
 const MAX_REQUEST_BYTES = 32 * 1024;
 const MAX_REVIEW_TEXT_LENGTH = 1200;
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const APP_GLOBAL = "00000000-0000-0000-0000-000000000001";
 const DEBUG_MEMORY = Deno.env.get("DEBUG_MEMORY") === "true";
 
@@ -260,16 +257,18 @@ const buildSettingsBlock = (settings: BusinessSettingsRow | null): string => {
   return lines.join("\n");
 };
 
-const getClientIp = (req: Request): string => {
-  const cfConnectingIp = req.headers.get("cf-connecting-ip");
-  if (cfConnectingIp) {
-    return cfConnectingIp;
-  }
-  const forwardedFor = req.headers.get("x-forwarded-for");
-  if (forwardedFor) {
-    return forwardedFor.split(",")[0]?.trim() ?? "unknown";
-  }
-  return "unknown";
+const getAiQuotaLimit = () => {
+  const parsed = Number(Deno.env.get("AI_USER_REQUESTS_PER_HOUR") ?? "");
+  if (!Number.isInteger(parsed) || parsed < 1) return 60;
+  return Math.min(parsed, 1000);
+};
+
+const hashQuotaBucket = async (userId: string) => {
+  const bytes = new TextEncoder().encode(`ai:user:${userId}`);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
 };
 
 const jsonWithCors = (status: number, body: Record<string, unknown>) =>
@@ -301,7 +300,10 @@ Deno.serve(async (req) => {
     : "";
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  if (!supabaseUrl || !supabaseAnonKey) {
+  const serviceRoleKey =
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+    Deno.env.get("SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !supabaseAnonKey || !serviceRoleKey) {
     return jsonWithCors(500, { error: "Server misconfigured", requestId });
   }
   if (!userToken) {
@@ -317,36 +319,10 @@ Deno.serve(async (req) => {
     return jsonWithCors(401, { error: "Unauthorized", requestId });
   }
 
-  const ip = getClientIp(req);
   const apiKeyHeader = req.headers.get("apikey");
   if (!apiKeyHeader) {
     return jsonWithCors(401, { error: "Unauthorized", requestId });
   }
-
-  const now = Date.now();
-  const rateEntry = rateLimitMap.get(ip);
-  if (rateEntry && now < rateEntry.resetAt && rateEntry.count >= RATE_LIMIT_MAX) {
-    console.log(
-      JSON.stringify({
-        requestId,
-        method: req.method,
-        ip,
-        userId,
-        status: 429,
-        reason: "rate_limit"
-      })
-    );
-    return jsonWithCors(429, { error: "Rate limit", requestId });
-  }
-  const nextReset =
-    rateEntry && now < rateEntry.resetAt
-      ? rateEntry.resetAt
-      : now + RATE_LIMIT_WINDOW_MS;
-  const nextCount =
-    rateEntry && now < rateEntry.resetAt
-      ? rateEntry.count + 1
-      : 1;
-  rateLimitMap.set(ip, { count: nextCount, resetAt: nextReset });
 
   try {
     let rawPayload: unknown;
@@ -405,9 +381,6 @@ Deno.serve(async (req) => {
         JSON.stringify({
           requestId,
           method: req.method,
-          ip,
-          userId,
-          reviewId: payload.reviewId ?? null,
           status: 400,
           reason: "reviewText_too_long"
         })
@@ -437,6 +410,31 @@ Deno.serve(async (req) => {
     if (!apiKey) {
       return jsonWithCors(500, { error: "OpenAI key missing.", requestId });
     }
+
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false }
+    });
+    const consumeOpenAiQuota = async () => {
+      const { data, error } = await supabaseAdmin.rpc(
+        "consume_security_rate_limit",
+        {
+          p_bucket_key: await hashQuotaBucket(userId),
+          p_limit: getAiQuotaLimit(),
+          p_window_seconds: 3600,
+          p_cost: 1
+        }
+      );
+      if (error) {
+        console.error("AI quota unavailable", { requestId });
+        return jsonWithCors(503, {
+          error: "Service unavailable",
+          requestId
+        });
+      }
+      return data === true
+        ? null
+        : jsonWithCors(429, { error: "Rate limit", requestId });
+    };
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
@@ -487,6 +485,8 @@ Deno.serve(async (req) => {
     const requestBody = (model: string) =>
       JSON.stringify({
         model,
+        store: false,
+        max_output_tokens: 600,
         input: [
           {
             role: "system",
@@ -508,12 +508,21 @@ Deno.serve(async (req) => {
     };
 
     const openAiStart = Date.now();
+    const initialQuotaFailure = await consumeOpenAiQuota();
+    if (initialQuotaFailure) {
+      return initialQuotaFailure;
+    }
     let response = await fetch("https://api.openai.com/v1/responses", {
       ...requestInit,
       body: requestBody("gpt-5-mini")
     });
 
     if (response.status === 404) {
+      const fallbackQuotaFailure = await consumeOpenAiQuota();
+      if (fallbackQuotaFailure) {
+        await response.body?.cancel();
+        return fallbackQuotaFailure;
+      }
       response = await fetch("https://api.openai.com/v1/responses", {
         ...requestInit,
         body: requestBody("gpt-5")
@@ -528,9 +537,6 @@ Deno.serve(async (req) => {
         JSON.stringify({
           requestId,
           method: req.method,
-          ip,
-          userId,
-          reviewId: payload.reviewId ?? null,
           status: 500,
           openAiDurationMs
         })
@@ -550,9 +556,6 @@ Deno.serve(async (req) => {
         JSON.stringify({
           requestId,
           method: req.method,
-          ip,
-          userId,
-          reviewId: payload.reviewId ?? null,
           status: 500,
           openAiDurationMs
         })
@@ -564,9 +567,6 @@ Deno.serve(async (req) => {
       JSON.stringify({
         requestId,
         method: req.method,
-        ip,
-        userId,
-        reviewId: payload.reviewId ?? null,
         status: 200,
         openAiDurationMs
       })
@@ -581,8 +581,6 @@ Deno.serve(async (req) => {
       JSON.stringify({
         requestId,
         method: req.method,
-        ip: getClientIp(req),
-        userId,
         status: 500
       })
     );

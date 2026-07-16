@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import type { Database, Json } from "../../../database.types.js";
+import type { Database } from "../../../database.types.js";
 import { syncGoogleLocationsForUser } from "../../google/gbp/sync.js";
 import { syncGoogleReviewsForUser } from "../../google/gbp/reviews/sync.js";
 import {
@@ -9,6 +9,9 @@ import {
   logRequest
 } from "../../../api_utils.js";
 import { withRetry } from "../../../utils/withRetry.js";
+import { createProductionSafeConsole } from "../../../safe_console.js";
+
+const console = createProductionSafeConsole("/api/cron/google/sync-replies");
 
 type GoogleReview = {
   reviewId?: string;
@@ -195,15 +198,25 @@ const listReviewsPage = async (
 
 const getCronSecrets = (req: VercelRequest) => {
   const expected = String(cronSecret ?? "").trim();
-  const headerSecret =
-    (req.headers["x-cron-secret"] as string | undefined) ??
-    (req.headers["x-cron-key"] as string | undefined);
-  const auth = (req.headers.authorization as string | undefined) ?? "";
+  const rawHeaderSecret = req.headers["x-cron-secret"];
+  const headerSecret = String(
+    Array.isArray(rawHeaderSecret)
+      ? rawHeaderSecret[0] ?? ""
+      : rawHeaderSecret ?? ""
+  ).trim();
+  const rawAuthorization = req.headers.authorization;
+  const auth = String(
+    Array.isArray(rawAuthorization)
+      ? rawAuthorization[0] ?? ""
+      : rawAuthorization ?? ""
+  );
   const bearer = auth.toLowerCase().startsWith("bearer ")
-    ? auth.slice(7)
+    ? auth.slice(7).trim()
     : "";
-  const provided = String(headerSecret ?? bearer ?? "").trim();
-  return { expected, provided };
+  const authorized =
+    expected.length > 0 &&
+    (headerSecret === expected || bearer === expected);
+  return { expected, authorized };
 };
 
 const JOB_RATE_LIMIT_DELAY_MS = 60_000;
@@ -352,7 +365,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     method,
     route: req.url ?? "/api/cron/google/sync-replies"
   });
-  if (method !== "POST" && method !== "GET") {
+  if (method !== "POST") {
     return sendError(
       res,
       requestId,
@@ -361,8 +374,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
   }
 
-  const { expected, provided } = getCronSecrets(req);
-  if (!expected || !provided || provided !== expected) {
+  const { expected, authorized } = getCronSecrets(req);
+  if (!expected || !authorized) {
     return sendError(
       res,
       requestId,
@@ -380,16 +393,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       { code: "INTERNAL", message: "Server misconfigured" },
       500
     );
-  }
-
-  // GET = healthcheck (évite que cron-job.org ou un navigateur te fasse un sync complet)
-  if (method === "GET") {
-    return res.status(200).json({
-      ok: true,
-      requestId,
-      mode: "healthcheck",
-      message: "Use POST to run the sync."
-    });
   }
 
   const jobStats = await processJobQueue(requestId);
@@ -664,7 +667,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               create_time: review.createTime ? String(review.createTime) : null,
               update_time: review.updateTime ? String(review.updateTime) : null,
               last_synced_at: nowIso,
-              raw: review as unknown as Json
+              raw: null
             };
 
             if (replyComment) {

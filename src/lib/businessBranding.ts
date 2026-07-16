@@ -32,11 +32,32 @@ const getBusinessBrandSeed = async (userId: string) => {
   };
 };
 
-const getSignedLogoUrl = async (path: string | null) => {
-  if (!supabase || !path) return null;
+const getCanonicalLogoPath = (
+  businessId: string,
+  entityId: string,
+  path: string | null
+) => {
+  const expectedPrefix = `business/${businessId}/legal_entities/${entityId}/logo.`;
+  if (
+    !path ||
+    !path.startsWith(expectedPrefix) ||
+    !["png", "jpg", "webp"].includes(path.slice(expectedPrefix.length))
+  ) {
+    return null;
+  }
+  return path;
+};
+
+const getSignedLogoUrl = async (
+  businessId: string,
+  entityId: string,
+  path: string | null
+) => {
+  const canonicalPath = getCanonicalLogoPath(businessId, entityId, path);
+  if (!supabase || !canonicalPath) return null;
   const { data, error } = await supabase.storage
     .from("brand-assets")
-    .createSignedUrl(path, 60);
+    .createSignedUrl(canonicalPath, 60);
   if (error) {
     console.warn("[branding] signed url failed", error);
     return null;
@@ -86,7 +107,7 @@ const getActiveLegalEntityLogo = async (userId: string): Promise<BrandingInfo> =
   };
   const { data: entities, error } = await sb
     .from("legal_entities")
-    .select("id, company_name, legal_name, logo_path, logo_url, is_default, created_at")
+    .select("id, company_name, legal_name, logo_path, is_default, created_at")
     .eq("business_id", businessId)
     .order("is_default", { ascending: false })
     .order("created_at", { ascending: false });
@@ -104,10 +125,10 @@ const getActiveLegalEntityLogo = async (userId: string): Promise<BrandingInfo> =
   const entitiesArr = Array.isArray(entities) ? entities : [];
   const entity = entitiesArr[0] as
     | {
+        id?: string | null;
         company_name?: string | null;
         legal_name?: string | null;
         logo_path?: string | null;
-        logo_url?: string | null;
       }
     | undefined;
   if (!entity) {
@@ -120,14 +141,19 @@ const getActiveLegalEntityLogo = async (userId: string): Promise<BrandingInfo> =
     };
   }
 
-  const logoUrl =
-    entity.logo_url ?? (await getSignedLogoUrl(entity.logo_path ?? null));
+  const entityId = entity.id ?? "";
+  const logoPath = entityId
+    ? getCanonicalLogoPath(businessId, entityId, entity.logo_path ?? null)
+    : null;
+  const logoUrl = entityId
+    ? await getSignedLogoUrl(businessId, entityId, logoPath)
+    : null;
 
   return {
     logoUrl,
     companyName: entity.company_name ?? businessName,
     legalName: entity.legal_name ?? null,
-    logoPath: entity.logo_path ?? null,
+    logoPath,
     businessId
   };
 };

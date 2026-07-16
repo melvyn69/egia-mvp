@@ -37,6 +37,18 @@ La directive fondatrice du `2026-07-13` reprend ce Goal après la clôture de GO
 
 Le P0 historique `claim_review_analyze_jobs` a été corrigé et vérifié par GOAL-003. GOAL-005 a ensuite établi le gate de migration canonique. Le Run 2 passe donc `Blocked → Running`, audite l’état courant du dépôt et prépare un candidat correctif sans présumer son déploiement.
 
+### Avenant fondateur — Run 3 pré-production du 2026-07-13
+
+La directive fondatrice du `2026-07-13` autorise un Run séparé pour relire, corriger, valider et fusionner la PR #35, puis préparer un plan de production déterministe. GOAL-003, GOAL-004 et GOAL-005 sont vérifiés `Done`; le contrat et ses critères restent matériellement applicables.
+
+Cette autorisation distingue strictement l'intégration Git du gate de production : commits, push, passage Draft → Ready, fusion et nettoyage sont autorisés, mais aucune migration, aucun `supabase db push`, aucun déploiement Edge Function ou Vercel, aucune modification distante de secret/configuration/RLS/grant/policy/fonction, aucune invocation mutante et aucun test sur comptes ou données réels ne le sont. Le Run 3 passe donc `Blocked → Ready → Running`; `Done` reste impossible avant un Run de production distinct, explicitement autorisé et prouvé par Evidence.
+
+### Avenant fondateur — reprise du Run 3 le 2026-07-16
+
+Le fondateur tranche le choix produit qui avait arrêté le Run : l'inscription fidélité devient un parcours à validation d'e-mail à usage unique. Avant validation, aucune carte, aucun QR, aucun jeton Wallet ni aucune capacité membre ne peut être créé, affiché ou récupéré. Une demande visant un membre existant reste indistinguable d'une nouvelle demande; après validation, le système crée ou récupère automatiquement le membre puis poursuit le parcours.
+
+Cette décision autorise les corrections locales, tests, revues, commits, push, mise à jour et fusion de la PR #35. Elle n'autorise toujours aucune migration distante, aucun déploiement Edge/Vercel, aucune modification de secret/configuration et aucune opération de production. Le blocage produit est levé sans modifier le gate de production.
+
 ## Sources de vérité
 
 | Source | Portée / règle applicable |
@@ -245,6 +257,12 @@ Le Goal est `Done` seulement lorsque :
 | `2026-07-11` | `Running` → `Blocked` | Work | P0 confirmé sur une fonction SECURITY DEFINER publiquement exécutable ; Run arrêté conformément aux conditions d’arrêt. |
 | `2026-07-13` | `Blocked` → `Running` | Fondateur (Melvyn) | GOAL-003 et GOAL-005 terminés ; Run 2 local correctif, tests d’abus, branche/commits/push/PR autorisés, sans accès ni mutation distante. |
 | `2026-07-13` | `Running` → `Blocked` | Codex | Tout le travail local autorisé, la publication et la CI sont terminés. Pour la troisième continuation consécutive, `Done` reste impossible sans autorisation de déployer puis vérifier la production, tests A/B synthétiques, revue Work et verdict fondateur. Aucun accès distant n’est tenté. |
+| `2026-07-13` | `Blocked` → `Ready` | Fondateur (Melvyn) | Run 3 séparé autorisé après vérification documentaire de GOAL-003, GOAL-004 et GOAL-005 `Done`; contrat inchangé matériellement; revue, corrections et intégration Git séparées explicitement de toute production. |
+| `2026-07-13` | `Ready` → `Running` | Codex | Readiness Check réconcilié; PR #35 existante et mergeable; revues indépendantes, validations locales, corrections et fusion sans mutation de production engagées. |
+| `2026-07-13` | `Running` → `Blocked` | Codex | Arrêt anticipé avant commit/fusion : la revue sécurité interdit l'inscription fidélité anonyme avant preuve de possession de l'e-mail, tandis que le parcours produit délivre immédiatement carte/QR/Wallet et ne possède pas de récupération vérifiée. Le choix entre validation e-mail/OTP et retrait du parcours public est une décision produit matérielle; aucune production n'est mutée. |
+| `2026-07-16` | `Blocked` → `Ready` | Fondateur (Melvyn) | Validation d'e-mail one-shot choisie; comportement nouveau/existant rendu indistinguable avant preuve de possession; autorisations Git/locales renouvelées et production toujours interdite. |
+| `2026-07-16` | `Ready` → `Running` | Codex | Readiness Check confirmé : dépendances Done, décision produit complète, PR #35 mergeable et gate de production inchangé. |
+| `2026-07-16` | `Running` → `Blocked` | Codex | Préflight Vercel passif : le projet `prj_GoGCD7ICIfemLSlegN4Tc8JcoxrT` est connecté au dépôt, `main` est la branche de production et aucun gate Git n'est configuré. Un push de la branche créerait un Preview et une fusion créerait un déploiement Production, tous deux interdits par ce Run. Arrêt avant commit distant, push ou fusion ; aucune mutation Vercel. |
 
 ## Readiness Check
 
@@ -262,10 +280,12 @@ Le Goal est `Done` seulement lorsque :
 
 ## Livraison et clôture
 
-- **Artifacts livrés :** Evidence historique Run 1 `audits/GOAL-002-production-security-validation.md`; rapport du candidat Run 2 `docs/PRODUCTION_SECURITY_VALIDATION.md`; migration restrictive ; 14 contrôles statiques/HTTP locaux ; test SQL d’abus et d’invariants catalogue rejoué depuis une base isolée neuve.
+- **Artifacts livrés :** Evidence historique Run 1 `audits/GOAL-002-production-security-validation.md`; rapport du candidat `docs/PRODUCTION_SECURITY_VALIDATION.md`; migration restrictive ; 30 contrôles statiques/HTTP locaux ; test SQL d’abus et d’invariants catalogue rejoué depuis une base isolée neuve.
 - **Matrice réelle critère → validation → Evidence :** AC-01 à AC-11 sont reliés explicitement à VAL-01 à VAL-11 et EV-01 à EV-11 dans `docs/PRODUCTION_SECURITY_VALIDATION.md`; état déployé, Auth distante et tests synthétiques en production restent non conclus.
 - **Correctifs approfondis :** commit `8044d85` — policy `cron_state` inter-tenant supprimée, mutation de brouillon `service_role` liée au propriétaire, état OAuth Edge consommé atomiquement, déclarations JWT racine complétées et payloads bornés.
 - **Publication vérifiée :** PR brouillon [#35](https://github.com/melvyn69/egia-mvp/pull/35), head d’Evidence `0a8164bd7abd8f5041024758bf90f80452b2efd7`, vers `main`, sans merge ; CI build, Migration History Guard, Vercel et Vercel Preview Comments réussis `4/4`.
-- **Risques résiduels :** le candidat n’est pas déployé ; la migration/grants, les Edge Functions, Vercel, Auth, variables et logs de production ne sont pas vérifiés. Le P0 historique ne peut donc pas être fermé en production. L’inscription fidélité publique ne vérifie pas encore la possession de l’e-mail, sans divulguer désormais les capacités existantes.
+- **Avenant Run 3 :** le candidat comporte 30 contrôles de sécurité, un quota IA durable partagé et une fidélité à validation e-mail one-shot ; la base isolée `goal002_security_test_20260716_final2` valide 43 tables RLS, 14 fonctions privilégiées configurées, six contraintes de scope fidélité et les scénarios nouveau/existant/réutilisation.
+- **Gate Git/Vercel :** la lecture passive du projet confirme `productionBranch=main`, l'absence de commande d'ignorance et le comportement automatique Preview/Production. La mise à jour et la fusion de la PR nécessitent d'abord une autorisation étroite pour désactiver les déploiements Git automatiques de la branche PR et de `main` via la configuration versionnée Vercel.
+- **Risques résiduels :** le candidat n’est pas déployé ; la migration/grants, les Edge Functions, Vercel, Auth, variables et logs de production ne sont pas vérifiés. Le P0 historique ne peut donc pas être fermé en production.
 - **Verdict provisoire obligatoire :** candidat local prêt pour revue ; production `non sûr` jusqu’au déploiement et à la vérification autorisés.
-- **Décision de clôture :** Goal `Blocked`; date de clôture : `N/A`. Reprendre uniquement après autorisation explicite de déploiement/vérification distante et disponibilité des revues requises ; ne pas passer `Done` sans Evidence de production.
+- **Décision de clôture :** Goal `Blocked`; date de clôture : `N/A`. Reprendre d'abord après autorisation explicite du gate versionné `git.deploymentEnabled`, puis après autorisation séparée de déploiement/vérification distante ; ne pas passer `Done` sans Evidence de production.

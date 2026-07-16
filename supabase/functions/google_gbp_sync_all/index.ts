@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.110.2";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -178,7 +178,9 @@ serve(async (req) => {
     .maybeSingle();
 
   if (connectionError) {
-    console.error("google_connections read failed:", connectionError);
+    console.error("google_connections read failed", {
+      code: "CONNECTION_LOOKUP_FAILED"
+    });
     return jsonResponse(500, { error: "Failed to read google connection" }, origin);
   }
 
@@ -347,7 +349,7 @@ serve(async (req) => {
                 comment: (review.comment ?? null) as string | null,
                 create_time: (review.createTime ?? null) as string | null,
                 update_time: (review.updateTime ?? null) as string | null,
-                raw: review,
+                raw: null,
               },
               { onConflict: "user_id,location_id,review_id" }
             );

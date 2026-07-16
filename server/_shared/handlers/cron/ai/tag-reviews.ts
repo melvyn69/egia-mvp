@@ -2,11 +2,15 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../../../database.types.js";
 import { generateAiReply } from "../../../ai_reply.js";
+import { consumeAiUserQuota } from "../../../ai_quota.js";
 import {
   getRequestId,
   sendError,
   logRequest
 } from "../../../api_utils.js";
+import { createProductionSafeConsole } from "../../../safe_console.js";
+
+const console = createProductionSafeConsole("/api/cron/ai/tag-reviews");
 
 type AiTag = {
   name: string;
@@ -97,10 +101,6 @@ const getEnv = (keys: string[]) => {
 const supabaseUrl = getEnv(["SUPABASE_URL", "VITE_SUPABASE_URL"]);
 const serviceRoleKey = getEnv(["SUPABASE_SERVICE_ROLE_KEY"]);
 const cronSecret = getEnv(["CRON_SECRET"]);
-const adminEmails = (process.env.ADMIN_EMAILS ?? "")
-  .split(",")
-  .map((email) => email.trim().toLowerCase())
-  .filter(Boolean);
 
 const getMissingEnv = () => {
   const missing = [];
@@ -202,20 +202,25 @@ const releaseLock = async (userId: string, locationId: string) => {
 };
 const getCronSecrets = (req: VercelRequest) => {
   const expected = String(cronSecret ?? "").trim();
-  const headerSecret =
-    (req.headers["x-cron-secret"] as string | undefined) ??
-    (req.headers["x-cron-key"] as string | undefined);
-  const auth = (req.headers.authorization as string | undefined) ?? "";
+  const rawHeaderSecret = req.headers["x-cron-secret"];
+  const headerSecret = String(
+    Array.isArray(rawHeaderSecret)
+      ? rawHeaderSecret[0] ?? ""
+      : rawHeaderSecret ?? ""
+  ).trim();
+  const rawAuthorization = req.headers.authorization;
+  const auth = String(
+    Array.isArray(rawAuthorization)
+      ? rawAuthorization[0] ?? ""
+      : rawAuthorization ?? ""
+  );
   const bearer = auth.toLowerCase().startsWith("bearer ")
-    ? auth.slice(7)
+    ? auth.slice(7).trim()
     : "";
-  const provided = String(headerSecret ?? bearer ?? "").trim();
-  return { expected, provided };
-};
-
-const getBearerToken = (req: VercelRequest) => {
-  const auth = (req.headers.authorization as string | undefined) ?? "";
-  return auth.toLowerCase().startsWith("bearer ") ? auth.slice(7) : "";
+  const authorized =
+    expected.length > 0 &&
+    (headerSecret === expected || bearer === expected);
+  return { expected, authorized };
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -280,13 +285,36 @@ const normalizeTopics = (topics: AiTag[]) => {
   return normalized;
 };
 
+const toSafeErrorCode = (error: unknown, fallback = "operation_failed") => {
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String((error as { code?: unknown }).code ?? "").trim()
+      : "";
+  if (/^[A-Za-z0-9_-]{1,64}$/.test(code)) {
+    return `database_${code.toLowerCase()}`;
+  }
+  if (error instanceof Error) {
+    if (error.message === "OpenAI request timeout") return "openai_timeout";
+    if (error.message.startsWith("OpenAI request failed")) return "openai_request_failed";
+    if (error.message === "OpenAI response missing") return "openai_response_missing";
+    if (error.message === "OpenAI response missing output_text") {
+      return "openai_output_missing";
+    }
+    if (error.message === "Missing OPENAI_API_KEY") return "openai_not_configured";
+    if (error instanceof SyntaxError) return "openai_invalid_json";
+    const name = error.name.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_");
+    if (name && name !== "error") return name.slice(0, 64);
+  }
+  return fallback;
+};
+
 const analyzeReview = async (
   review: { id: string; comment?: string },
+  userId: string,
   requestId: string,
   debugInfo?: {
     openaiStatus?: number;
     openaiId?: string;
-    outputTextPreview?: string;
     parsedKeys?: string[];
   }
 ) => {
@@ -300,6 +328,8 @@ const analyzeReview = async (
   try {
     const body = JSON.stringify({
       model,
+      store: false,
+      max_output_tokens: 800,
       text: {
         format: {
           type: "json_schema",
@@ -358,6 +388,10 @@ const analyzeReview = async (
     let response: Response | null = null;
     let attempt = 0;
     while (attempt < 2) {
+      const quotaAllowed = await consumeAiUserQuota(supabaseAdmin, userId);
+      if (!quotaAllowed) {
+        throw new Error("OpenAI quota exceeded");
+      }
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
       try {
@@ -420,19 +454,12 @@ const analyzeReview = async (
     try {
       parsed = JSON.parse(outputText) as AiResult;
     } catch (error) {
-      if (debugInfo) {
-        debugInfo.outputTextPreview = outputText.slice(0, 200);
-      }
-      console.error(
-        "[ai-tag]",
-        requestId,
-        "OpenAI JSON parse failed",
-        outputText.slice(0, 300)
-      );
+      console.error("[ai-tag]", requestId, "OpenAI JSON parse failed", {
+        errorType: error instanceof Error ? error.name : "unknown"
+      });
       throw error;
     }
     if (debugInfo) {
-      debugInfo.outputTextPreview = outputText.slice(0, 200);
       debugInfo.parsedKeys = Object.keys(parsed ?? {});
     }
     const sentimentScore = clamp(parsed.sentiment_score, -1, 1);
@@ -453,11 +480,11 @@ const analyzeReview = async (
 
 const analyzeWithRetry = async (
   review: { id: string; comment?: string },
+  userId: string,
   requestId: string,
   debugInfo?: {
     openaiStatus?: number;
     openaiId?: string | null;
-    outputTextPreview?: string;
     parsedKeys?: string[];
   }
 ) => {
@@ -465,7 +492,7 @@ const analyzeWithRetry = async (
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      return await analyzeReview(review, requestId, debugInfo);
+      return await analyzeReview(review, userId, requestId, debugInfo);
     } catch (error) {
       lastError = error;
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -502,10 +529,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   logRequest("[ai]", {
     requestId,
     method,
-    route: req.url ?? "/api/cron/ai/tag-reviews"
+    route: "/api/cron/ai/tag-reviews"
   });
 
-  if (method !== "POST" && method !== "GET") {
+  if (method !== "POST") {
     return sendError(
       res,
       requestId,
@@ -514,54 +541,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
   }
 
-  const { expected, provided } = getCronSecrets(req);
-  const bearerToken = getBearerToken(req);
-  if (!expected || !provided || provided !== expected) {
-    if (!bearerToken) {
-      return sendError(
-        res,
-        requestId,
-        { code: "UNAUTHORIZED", message: "Unauthorized" },
-        401
-      );
-    }
-    try {
-      const { data: authData, error: authError } =
-        await supabaseAdmin.auth.getUser(bearerToken);
-      if (authError || !authData?.user?.id) {
-        return sendError(
-          res,
-          requestId,
-          { code: "UNAUTHORIZED", message: "Unauthorized" },
-          401
-        );
-      }
-      const userEmail = authData.user.email?.toLowerCase() ?? "";
-      const userClient = createClient<Database>(supabaseUrl, serviceRoleKey, {
-        auth: { persistSession: false },
-        global: { headers: { Authorization: `Bearer ${bearerToken}` } }
-      });
-      const dynamicUserClient = userClient as unknown as DynamicSupabaseClient;
-      const { data: isAdminViaRls } = await dynamicUserClient.rpc("is_admin");
-      const isAdmin =
-        Boolean(isAdminViaRls) ||
-        (adminEmails.length > 0 && userEmail && adminEmails.includes(userEmail));
-      if (!isAdmin) {
-        return sendError(
-          res,
-          requestId,
-          { code: "FORBIDDEN", message: "Admin only" },
-          403
-        );
-      }
-    } catch {
-      return sendError(
-        res,
-        requestId,
-        { code: "UNAUTHORIZED", message: "Unauthorized" },
-        401
-      );
-    }
+  const { expected, authorized } = getCronSecrets(req);
+  if (!expected || !authorized) {
+    return sendError(
+      res,
+      requestId,
+      { code: "FORBIDDEN", message: "Unauthorized" },
+      403
+    );
   }
 
   const missingEnv = getMissingEnv();
@@ -573,15 +560,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       { code: "INTERNAL", message: "Server misconfigured" },
       500
     );
-  }
-
-  if (method === "GET") {
-    return res.status(200).json({
-      ok: true,
-      requestId,
-      mode: "healthcheck",
-      message: "Use POST to run the sync."
-    });
   }
 
   const errors: Array<{ reviewId: string; message: string }> = [];
@@ -1361,6 +1339,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         typeof reviewRow.location_name === "string"
           ? reviewRow.location_name
           : null;
+      if (!reviewUserId) {
+        errors.push({
+          reviewId: reviewIdText || reviewPk,
+          message: "Missing user_id"
+        });
+        console.error("[ai-tag]", requestId, "missing user_id");
+        continue;
+      }
       if (!effectiveUpdateTime) {
         errors.push({ reviewId: reviewIdText || reviewPk, message: "Missing source_time" });
         console.error("[ai-tag]", requestId, "missing source_time", reviewIdText || reviewPk);
@@ -1390,6 +1376,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             id: reviewPk,
             comment: reviewText
           },
+          reviewUserId,
           requestId,
           debug
         );
@@ -1412,27 +1399,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
 
         if (insightError) {
-          console.error("[ai]", requestId, "insight upsert failed", insightError);
+          const errorCode = toSafeErrorCode(insightError, "insight_upsert_failed");
+          console.error("[ai]", requestId, "insight upsert failed", { errorCode });
           if (reviewLocationId) {
             errorsByLocation.set(
               reviewLocationId,
               (errorsByLocation.get(reviewLocationId) ?? 0) + 1
             );
-            lastErrorByLocation.set(
-              reviewLocationId,
-              insightError.message ?? "insight upsert failed"
-            );
+            lastErrorByLocation.set(reviewLocationId, errorCode);
           }
-          await markJobError(reviewPk, insightError.message ?? "insight upsert failed");
+          await markJobError(reviewPk, errorCode);
           await supabaseAdmin.from("review_ai_insights").upsert({
             review_pk: reviewPk,
             user_id: reviewUserId,
             location_resource_name: reviewLocationId ?? reviewLocationName,
             processed_at: nowIso,
             source_update_time: effectiveUpdateTime,
-            error: insightError.message ?? "insight upsert failed"
+            error: errorCode
           });
-          errors.push({ reviewId: reviewIdText || reviewPk, message: insightError.message });
+          errors.push({ reviewId: reviewIdText || reviewPk, message: errorCode });
           await saveCursor({
             last_source_time: effectiveUpdateTime,
             last_review_pk: reviewPk
@@ -1451,11 +1436,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .maybeSingle();
 
           if (tagError || !tagRow?.id) {
+            const errorCode = toSafeErrorCode(tagError, "tag_upsert_failed");
             errors.push({
               reviewId: reviewIdText || reviewPk,
-              message: tagError?.message ?? "tag upsert failed"
+              message: errorCode
             });
-            await markJobError(reviewPk, tagError?.message ?? "tag upsert failed");
+            await markJobError(reviewPk, errorCode);
             continue;
           }
 
@@ -1542,7 +1528,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             } catch (replyError) {
               repliesErrors += 1;
               if (debugEnabled) {
-                console.error("[ai-tag]", requestId, "reply generation failed", replyError);
+                console.error("[ai-tag]", requestId, "reply generation failed", {
+                  errorCode: toSafeErrorCode(replyError, "reply_generation_failed")
+                });
               }
             }
           }
@@ -1569,10 +1557,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           last_review_pk: reviewPk
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown error";
-        errors.push({ reviewId: reviewIdText || reviewPk, message });
-        console.error("[ai]", requestId, "review failed", message);
-        if (message === "OpenAI request timeout") {
+        const errorCode = toSafeErrorCode(error, "review_processing_failed");
+        errors.push({ reviewId: reviewIdText || reviewPk, message: errorCode });
+        console.error("[ai]", requestId, "review failed", { errorCode });
+        if (errorCode === "openai_timeout") {
           if (reviewUserId) {
             errorByUser.set(String(reviewUserId), {
               code: "openai_timeout",
@@ -1586,9 +1574,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             reviewLocationId,
             (errorsByLocation.get(reviewLocationId) ?? 0) + 1
           );
-          lastErrorByLocation.set(reviewLocationId, message);
+          lastErrorByLocation.set(reviewLocationId, errorCode);
         }
-        await markJobError(reviewPk, message);
+        await markJobError(reviewPk, errorCode);
         await dynamicSupabase
           .from("google_reviews")
           .update({ ai_tag_status: "error", ai_tag_claimed_at: null })
@@ -1655,15 +1643,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
         updated_at: runAt
       });
-      if (isProd) {
-        console.log(
-          "[ai/tag]",
-          `user=${userId}`,
-          `processed=${reviewsProcessed}`,
-          `missing=${totalMissingInsights}`,
-          `errors=${errors.length}`
-        );
-      } else {
+      if (!isProd) {
         console.log("[cron_state] upsert ai_tag_last_run", userId);
       }
       const lastError = errorByUser.get(userId);
@@ -1800,8 +1780,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    console.error("[ai]", requestId, "fatal error", message);
+    const errorCode = toSafeErrorCode(error, "fatal_error");
+    console.error("[ai]", requestId, "fatal error", { errorCode });
     if (runId) {
       const finishedAt = new Date().toISOString();
       await dynamicSupabase.from("ai_run_history").update({
@@ -1812,7 +1792,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         errors_count: errors.length + 1,
         aborted: false,
         skip_reason: "fatal_error",
-        last_error: message,
+        last_error: errorCode,
         meta: buildRunMeta({
           queue: effectiveRunMode === "queue"
             ? { jobs_processed: jobsProcessed, jobs_errors: jobsErrors }
@@ -1838,7 +1818,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           cursor: null,
           stats: { processed: 0, tagsUpserted: 0 },
           errors_count: 1,
-          last_error: message,
+          last_error: errorCode,
           missing_insights_count: null
         });
         await releaseLock(userId, locationId);
@@ -1847,7 +1827,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return sendError(
       res,
       requestId,
-      { code: "INTERNAL", message },
+      { code: "INTERNAL", message: errorCode },
       500
     );
   } finally {

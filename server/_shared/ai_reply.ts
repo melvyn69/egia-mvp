@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./database.types.js";
+import { consumeAiUserQuota } from "./ai_quota.js";
+import { createProductionSafeConsole } from "./safe_console.js";
+
+const console = createProductionSafeConsole("/api/ai-reply");
 
 type BrandVoiceRow = Database["public"]["Tables"]["brand_voice"]["Row"];
 type BrandVoiceTone = Database["public"]["Enums"]["brand_voice_tone"];
@@ -496,12 +500,13 @@ export const generateAiReply = async ({
   requestId,
   strictIdentity
 }: GenerateAiReplyParams): Promise<GenerateAiReplyResult> => {
+  const resolvedSupabaseAdmin = supabaseAdmin ?? getSharedSupabaseAdmin();
   const { system, user, useEmojis, forbiddenWords, meta } = await buildPromptContext({
     reviewText,
     rating,
     userId,
     locationId,
-    supabaseAdmin,
+    supabaseAdmin: resolvedSupabaseAdmin,
     allowIdentityOverride,
     brandVoiceOverride,
     businessTone,
@@ -513,6 +518,11 @@ export const generateAiReply = async ({
 
   if (!openaiApiKey) {
     return { replyText: DEFAULT_REPLY, meta };
+  }
+
+  const quotaAllowed = await consumeAiUserQuota(resolvedSupabaseAdmin, userId);
+  if (!quotaAllowed) {
+    throw new Error("ai_quota_exceeded");
   }
 
   const controller = new AbortController();
@@ -527,6 +537,7 @@ export const generateAiReply = async ({
       },
       body: JSON.stringify({
         model,
+        store: false,
         messages: [
           { role: "system", content: system },
           { role: "user", content: user }

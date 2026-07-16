@@ -15,6 +15,13 @@ const sectionHeaderClass = "border-b border-slate-100 px-4 py-4 sm:px-6";
 const fieldClass =
   "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
 
+const MAX_LOGO_BYTES = 3 * 1024 * 1024;
+const ALLOWED_LOGO_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp"
+]);
+
 type SettingsEntrepriseProps = {
   session: Session | null;
 };
@@ -252,9 +259,17 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
 
   const handleLogoUpload = async (file: File) => {
     if (!accessToken || !supabase) return;
-    setLogoUploading(true);
     setStatusMessage(null);
     setErrorMessage(null);
+    if (!ALLOWED_LOGO_TYPES.has(file.type)) {
+      setErrorMessage("Format non pris en charge. Utilisez un fichier PNG, JPEG ou WebP.");
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      setErrorMessage("Le logo doit peser au maximum 3 Mio.");
+      return;
+    }
+    setLogoUploading(true);
     let entity = selectedEntity;
     if (!entity?.id) {
       const saved = await saveEntity();
@@ -325,18 +340,59 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
       setLogoPreviewUrl(null);
       return;
     }
-    await saveEntity({
-      id: selectedEntity.id,
-      logo_path: null,
-      logo_url: null
-    });
-    setLogoPreviewUrl(null);
+    if (!accessToken) return;
+    setSaving(true);
+    setErrorMessage(null);
+    try {
+      const response = await fetch("/api/settings", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "legal_entities_logo_remove",
+          legal_entity_id: selectedEntity.id
+        })
+      });
+      if (!response.ok) {
+        throw new Error("Suppression du logo impossible.");
+      }
+      setFormState((prev) => ({ ...prev, logo_path: null, logo_url: null }));
+      setLogoPreviewUrl(null);
+      setStatusMessage("Logo supprimé.");
+      await queryClient.invalidateQueries({
+        queryKey: ["legal-entities", session?.user?.id]
+      });
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Suppression du logo impossible."
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   useEffect(() => {
     let active = true;
     const loadPreview = async () => {
-      if (!supabase || !selectedEntity?.logo_path) {
+      if (
+        !supabase ||
+        !selectedEntity?.id ||
+        !selectedEntity.business_id ||
+        !selectedEntity.logo_path
+      ) {
+        setLogoPreviewUrl(null);
+        return;
+      }
+      const expectedPrefix =
+        `business/${selectedEntity.business_id}/legal_entities/${selectedEntity.id}/logo.`;
+      if (
+        !selectedEntity.logo_path.startsWith(expectedPrefix) ||
+        !["png", "jpg", "webp"].includes(
+          selectedEntity.logo_path.slice(expectedPrefix.length)
+        )
+      ) {
         setLogoPreviewUrl(null);
         return;
       }
@@ -354,7 +410,11 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
     return () => {
       active = false;
     };
-  }, [selectedEntity?.logo_path]);
+  }, [
+    selectedEntity?.business_id,
+    selectedEntity?.id,
+    selectedEntity?.logo_path
+  ]);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1.1fr_1.6fr]">
@@ -582,18 +642,22 @@ const SettingsEntreprise = ({ session }: SettingsEntrepriseProps) => {
                 <p className="text-xs text-slate-500">
                   Utilisé dans les documents PDF et emails.
                 </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  PNG, JPEG ou WebP · 3 Mio maximum.
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <label className="cursor-pointer text-xs font-semibold text-ink">
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/png,image/jpeg,image/webp"
                     className="hidden"
                     onChange={(event) => {
                       const file = event.target.files?.[0];
                       if (file) {
                         void handleLogoUpload(file);
                       }
+                      event.target.value = "";
                     }}
                     disabled={logoUploading}
                   />

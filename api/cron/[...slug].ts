@@ -1,7 +1,10 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { createProductionSafeConsole } from "../../server/_shared/safe_console";
 import handleAiTagReviews from "../../server/_shared/handlers/cron/ai/tag-reviews";
 import handleGoogleSyncReplies from "../../server/_shared/handlers/cron/google/sync-replies";
 import handleMonthlyReports from "../../server/_shared/handlers/cron/monthly-reports-api";
+
+const console = createProductionSafeConsole("/api/cron");
 
 const CRON_ROUTES = {
   "ai/tag-reviews": handleAiTagReviews,
@@ -62,16 +65,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId = getRequestId(req);
   const parts = getRouteParts(req);
   const routeKey = parts.join("/");
+  const routeHandler = CRON_ROUTES[routeKey as keyof typeof CRON_ROUTES];
 
   console.log("[api/cron]", {
-    method: req.method ?? "GET",
-    url: req.url ?? null,
-    parts,
-    routeKey,
-    requestId
+    requestId,
+    route: routeKey || "unknown",
+    status: routeHandler ? "dispatch" : "not_found",
+    code: routeHandler ? "CRON_DISPATCH" : "NOT_FOUND",
+    count: parts.length
   });
 
-  const routeHandler = CRON_ROUTES[routeKey as keyof typeof CRON_ROUTES];
   if (routeHandler) {
     return routeHandler(req, res);
   }

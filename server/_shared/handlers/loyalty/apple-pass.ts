@@ -213,17 +213,23 @@ const resolvePassContext = async (
         .from<LoyaltyMemberRow>("loyalty_members")
         .select("id, first_name, member_code, points_balance, lifetime_points, visits_count")
         .eq("id", walletPass.member_id)
+        .eq("program_id", walletPass.program_id)
+        .eq("user_id", walletPass.user_id)
+        .eq("location_id", walletPass.location_id)
         .eq("status", "active")
         .maybeSingle(),
       supabaseAdmin
         .from<LoyaltyProgramRow>("loyalty_programs")
         .select("id, name, points_per_visit, reward_threshold_points, reward_label, is_enabled")
         .eq("id", walletPass.program_id)
+        .eq("user_id", walletPass.user_id)
+        .eq("location_id", walletPass.location_id)
         .maybeSingle(),
       supabaseAdmin
         .from<GoogleLocationRow>("google_locations")
         .select("id, location_title, location_resource_name")
         .eq("id", walletPass.location_id)
+        .eq("user_id", walletPass.user_id)
         .maybeSingle()
     ]);
 
@@ -236,6 +242,9 @@ const resolvePassContext = async (
     .from<LoyaltyRewardRow>("loyalty_rewards")
     .select("id, reward_label, status")
     .eq("member_id", walletPass.member_id)
+    .eq("program_id", walletPass.program_id)
+    .eq("user_id", walletPass.user_id)
+    .eq("location_id", walletPass.location_id)
     .eq("status", "available")
     .order("unlocked_at", { ascending: false })
     .limit(1)

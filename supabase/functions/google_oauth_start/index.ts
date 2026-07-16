@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.110.2";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -112,17 +112,12 @@ serve(async (req) => {
   const stateExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
   const { error: stateError } = await supabaseAdmin
-    .from("google_connections")
-    .upsert(
-      {
-        user_id: user.id,
-        provider: "google",
-        oauth_state: oauthState,
-        oauth_state_expires_at: stateExpiresAt,
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "user_id,provider" }
-    );
+    .from("google_oauth_states")
+    .insert({
+      user_id: user.id,
+      state: oauthState,
+      expires_at: stateExpiresAt
+    });
 
   if (stateError) {
     console.error("Failed to store oauth state");

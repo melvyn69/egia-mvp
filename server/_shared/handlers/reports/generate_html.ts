@@ -232,9 +232,18 @@ const getPayloadNumber = (source: unknown, keys: string[]) => {
 const getSignedBrandLogoUrl = async (
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabaseAdmin: any,
+  businessId: string,
+  entityId: string,
   logoPath: string | null
 ) => {
-  if (!logoPath) return null;
+  const expectedPrefix = `business/${businessId}/legal_entities/${entityId}/logo.`;
+  if (
+    !logoPath ||
+    !logoPath.startsWith(expectedPrefix) ||
+    !["png", "jpg", "webp"].includes(logoPath.slice(expectedPrefix.length))
+  ) {
+    return null;
+  }
   try {
     const { data, error } = await supabaseAdmin.storage
       .from("brand-assets")
@@ -289,25 +298,30 @@ const resolveReportBranding = async (
 
     const { data: entities } = await supabaseAdmin
       .from("legal_entities")
-      .select("company_name, legal_name, logo_path, logo_url, is_default, created_at")
+      .select("id, company_name, legal_name, logo_path, is_default, created_at")
       .eq("business_id", businessId)
       .order("is_default", { ascending: false })
       .order("created_at", { ascending: true });
     const entity = Array.isArray(entities)
       ? (entities[0] as
           | {
+              id?: string | null;
               company_name?: string | null;
               legal_name?: string | null;
               logo_path?: string | null;
-              logo_url?: string | null;
             }
           | undefined)
       : undefined;
     const companyName = entity?.company_name?.trim() || settingsName || fallback;
     const legalName = entity?.legal_name?.trim() || null;
-    const logoUrl =
-      entity?.logo_url ??
-      (await getSignedBrandLogoUrl(supabaseAdmin, entity?.logo_path ?? null));
+    const logoUrl = entity?.id
+      ? await getSignedBrandLogoUrl(
+          supabaseAdmin,
+          businessId,
+          entity.id,
+          entity.logo_path ?? null
+        )
+      : null;
 
     return {
       businessName: companyName,

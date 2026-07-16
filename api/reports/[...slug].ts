@@ -10,7 +10,10 @@ import {
   parseQuery,
   getParam
 } from "../../server/_shared_dist/api_utils.js";
+import { createProductionSafeConsole } from "../../server/_shared_dist/safe_console.js";
 import { renderPdfFromHtml } from "../../server/_shared_dist/pdf_html.js";
+
+const console = createProductionSafeConsole("/api/reports");
 
 type LocationCenter = {
   lat: number;
@@ -274,9 +277,18 @@ const escapeHtml = (value: string | number | null | undefined) =>
 
 const getSignedBrandLogoUrl = async (
   supabaseAdmin: ReturnType<typeof createSupabaseAdmin>,
+  businessId: string,
+  entityId: string,
   logoPath: string | null
 ) => {
-  if (!logoPath) return null;
+  const expectedPrefix = `business/${businessId}/legal_entities/${entityId}/logo.`;
+  if (
+    !logoPath ||
+    !logoPath.startsWith(expectedPrefix) ||
+    !["png", "jpg", "webp"].includes(logoPath.slice(expectedPrefix.length))
+  ) {
+    return null;
+  }
   try {
     const { data, error } = await supabaseAdmin.storage
       .from("brand-assets")
@@ -314,23 +326,28 @@ const resolveBenchmarkBranding = async (
     }
     const { data: entities } = await supabaseAdmin
       .from("legal_entities")
-      .select("company_name, legal_name, logo_path, logo_url, is_default, created_at")
+      .select("id, company_name, legal_name, logo_path, is_default, created_at")
       .eq("business_id", businessId)
       .order("is_default", { ascending: false })
       .order("created_at", { ascending: true });
     const entity = Array.isArray(entities)
       ? (entities[0] as
           | {
+              id?: string | null;
               company_name?: string | null;
               legal_name?: string | null;
               logo_path?: string | null;
-              logo_url?: string | null;
             }
           | undefined)
       : undefined;
-    const logoUrl =
-      entity?.logo_url ??
-      (await getSignedBrandLogoUrl(supabaseAdmin, entity?.logo_path ?? null));
+    const logoUrl = entity?.id
+      ? await getSignedBrandLogoUrl(
+          supabaseAdmin,
+          businessId,
+          entity.id,
+          entity.logo_path ?? null
+        )
+      : null;
     return {
       companyName: entity?.company_name?.trim() || settingsName || fallback,
       legalName: entity?.legal_name?.trim() || null,
@@ -915,8 +932,6 @@ const getLocationCenter = async (
   }
   console.info("[competitors] resolve_center", {
     requestId,
-    locationId,
-    addressLabel,
     hasLatLngInJson: Boolean(latLng)
   });
   if (latLng) {
@@ -945,9 +960,7 @@ const getLocationCenter = async (
     const encoded = encodeURIComponent(label);
     const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encoded}&key=${apiKey}`;
     console.info("[competitors] geocode_request", {
-      requestId,
-      locationId,
-      address: label
+      requestId
     });
     const payload = await fetchJson(url);
     const status = payload?.status ?? "UNKNOWN";
@@ -956,12 +969,7 @@ const getLocationCenter = async (
     const location = result?.geometry?.location;
     console.info("[competitors] geocode_response", {
       requestId,
-      locationId,
-      status,
-      top_address: result?.formatted_address ?? null,
-      lat: location?.lat ?? null,
-      lng: location?.lng ?? null,
-      error_message: errorMessage
+      status
     });
     return { status, location, errorMessage };
   };
@@ -973,9 +981,7 @@ const getLocationCenter = async (
       const locationName = data.location_resource_name as string;
       const url = `https://mybusinessbusinessinformation.googleapis.com/v1/${locationName}?readMask=storefrontAddress,title`;
       console.info("[competitors] gbp_location_fetch", {
-        requestId,
-        locationId,
-        locationName
+        requestId
       });
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -1740,11 +1746,20 @@ const handleAutomationsRun = async (
     typeof req.headers.authorization === "string"
       ? req.headers.authorization
       : null;
+  const bearerSecret =
+    authHeader?.toLowerCase().startsWith("bearer ")
+      ? authHeader.slice("bearer ".length).trim()
+      : null;
+  const expectedCronSecret = process.env.CRON_SECRET;
+  const hasCronAccess = Boolean(
+    expectedCronSecret &&
+      (cronSecret === expectedCronSecret || bearerSecret === expectedCronSecret)
+  );
 
   let userIds: string[] = [];
   let claimedWorkflowIds: string[] | null = null;
 
-  if (cronSecret && cronSecret === process.env.CRON_SECRET) {
+  if (hasCronAccess) {
     const configuredBatch = Number(process.env.AUTOMATIONS_BATCH_SIZE ?? 25);
     const batchSize = Math.min(
       50,
@@ -1766,7 +1781,7 @@ const handleAutomationsRun = async (
       new Set((workflowUsers ?? []).map((row) => row.user_id))
     );
     claimedWorkflowIds = (workflowUsers ?? []).map((row) => row.id);
-  } else if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
+  } else if (bearerSecret) {
     let authUser;
     try {
       authUser = await requireUser(req, res);

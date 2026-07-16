@@ -40,13 +40,25 @@ const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
 
 const getCronSecrets = (req: VercelRequest) => {
   const expected = String(cronSecret ?? "").trim();
-  const headerSecret =
-    (req.headers["x-cron-secret"] as string | undefined) ??
-    (req.headers["x-cron-key"] as string | undefined);
-  const auth = (req.headers.authorization as string | undefined) ?? "";
-  const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7) : "";
-  const provided = String(headerSecret ?? bearer ?? "").trim();
-  return { expected, provided };
+  const rawHeaderSecret = req.headers["x-cron-secret"];
+  const headerSecret = String(
+    Array.isArray(rawHeaderSecret)
+      ? rawHeaderSecret[0] ?? ""
+      : rawHeaderSecret ?? ""
+  ).trim();
+  const rawAuthorization = req.headers.authorization;
+  const auth = String(
+    Array.isArray(rawAuthorization)
+      ? rawAuthorization[0] ?? ""
+      : rawAuthorization ?? ""
+  );
+  const bearer = auth.toLowerCase().startsWith("bearer ")
+    ? auth.slice(7).trim()
+    : "";
+  const authorized =
+    expected.length > 0 &&
+    (headerSecret === expected || bearer === expected);
+  return { expected, authorized };
 };
 
 const getLastMonthRange = () => {
@@ -113,10 +125,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   logRequest("[cron-monthly]", {
     requestId,
     method,
-    route: req.url ?? "/api/cron/monthly-reports"
+    route: "/api/cron/monthly-reports"
   });
 
-  if (method !== "POST" && method !== "GET") {
+  if (method !== "POST") {
     return sendError(
       res,
       requestId,
@@ -125,8 +137,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
   }
 
-  const { expected, provided } = getCronSecrets(req);
-  if (!expected || !provided || provided !== expected) {
+  const { expected, authorized } = getCronSecrets(req);
+  if (!expected || !authorized) {
     return sendError(
       res,
       requestId,
@@ -143,17 +155,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       { code: "INTERNAL", message: "Server misconfigured" },
       500
     );
-  }
-
-  if (method === "GET") {
-    return res.status(200).json({
-      ok: true,
-      requestId,
-      mode: "healthcheck",
-      message: "Use POST to run monthly reports.",
-      now_utc: now.toISOString(),
-      is_first_day_utc: isFirstDayUtc
-    });
   }
 
   const dryRunParam = req.query?.dry_run;

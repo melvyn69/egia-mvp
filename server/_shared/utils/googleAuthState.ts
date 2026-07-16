@@ -1,3 +1,7 @@
+import { createProductionSafeConsole } from "../safe_console.js";
+
+const console = createProductionSafeConsole("/api/google/auth-state");
+
 type CronStateMutationError = {
   message?: string | null;
 };

@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { createProductionSafeConsole } from "../../server/_shared/safe_console";
 import { resolveDateRange } from "../../server/_shared_dist/_date.js";
 import { parseFilters } from "../../server/_shared_dist/_filters.js";
 import { requireUser } from "../../server/_shared_dist/_auth.js";
@@ -9,6 +10,9 @@ import {
   getParam,
   logRequest
 } from "../../server/_shared_dist/api_utils.js";
+import { consumeAiUserQuota } from "../../server/_shared_dist/ai_quota.js";
+
+const console = createProductionSafeConsole("/api/kpi");
 
 type AnalyticsOverview = {
   scope: {
@@ -926,7 +930,8 @@ const isValidInsightsPayload = (
 const requestAiInsights = async (
   apiKey: string,
   context: Record<string, unknown>,
-  mode: "auto" | "ai" | "basic"
+  mode: "auto" | "ai" | "basic",
+  consumeQuota: () => Promise<boolean>
 ) => {
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
   const systemPrompt =
@@ -952,6 +957,8 @@ const requestAiInsights = async (
   const buildBody = (prompt: string) =>
     JSON.stringify({
       model,
+      store: false,
+      max_output_tokens: 1200,
       input: [
         { role: "system", content: systemPrompt },
         { role: "user", content: prompt }
@@ -959,6 +966,10 @@ const requestAiInsights = async (
     });
 
   const doRequest = async (prompt: string) => {
+    const quotaAllowed = await consumeQuota();
+    if (!quotaAllowed) {
+      throw new Error("ai_quota_exceeded");
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
     try {
@@ -2117,18 +2128,27 @@ const handleInsights = async (
   let used_ai = false;
   let insights = basicInsights;
   if (shouldUseAi) {
-    const context = {
-      periodA: compare.periodA,
-      periodB: compare.periodB,
-      location: locationId ?? "all",
-      metrics: compare.metrics,
-      granularity,
-      timeseries_last_12: timeseriesPoints.slice(-12)
-    };
-    const aiResult = await requestAiInsights(apiKey, context, mode);
-    if (aiResult.insights) {
-      insights = aiResult.insights;
-      used_ai = aiResult.used_ai;
+    try {
+      const context = {
+        periodA: compare.periodA,
+        periodB: compare.periodB,
+        location: locationId ?? "all",
+        metrics: compare.metrics,
+        granularity,
+        timeseries_last_12: timeseriesPoints.slice(-12)
+      };
+      const aiResult = await requestAiInsights(
+        apiKey,
+        context,
+        mode,
+        () => consumeAiUserQuota(supabaseAdmin, userId)
+      );
+      if (aiResult.insights) {
+        insights = aiResult.insights;
+        used_ai = aiResult.used_ai;
+      }
+    } catch {
+      console.error("[analytics/insights] quota unavailable", { requestId });
     }
   }
 
@@ -2874,8 +2894,7 @@ const routeKpi = (req: VercelRequest, res: VercelResponse) => {
   // Helpful debug (kept minimal)
   console.log("[kpi] route", {
     route,
-    url: req.url,
-    query: req.query
+    requestId: getRequestId(req)
   });
 
   if (route === "summary") {

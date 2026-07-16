@@ -15,7 +15,10 @@ const parseBody = (req: VercelRequest) => {
   }
 };
 
-const MAX_LOGO_BYTES = 5 * 1024 * 1024;
+// Vercel Functions reject request bodies above 4.5 MB. The browser sends the
+// image as base64 inside JSON, so 3 MiB keeps the encoded envelope below that
+// platform limit with deterministic headroom.
+const MAX_LOGO_BYTES = 3 * 1024 * 1024;
 const LOGO_TYPES = new Map([
   ["image/png", "png"],
   ["image/jpeg", "jpg"],
@@ -423,8 +426,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       billing_city: payload.billing_city ?? null,
       billing_region: payload.billing_region ?? null,
       billing_country: payload.billing_country ?? "FR",
-      logo_path: payload.logo_path ?? null,
-      logo_url: payload.logo_url ?? null,
       updated_at: new Date().toISOString()
     };
 
@@ -687,6 +688,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       data: { logo_path: path, signed_url: signed?.signedUrl ?? null },
       requestId
     });
+  }
+
+  if (action === "legal_entities_logo_remove") {
+    const entityId = String(payload?.legal_entity_id ?? "").trim();
+    if (!entityId) {
+      return sendError(res, 400, "Missing legal_entity_id", requestId, "BAD_REQUEST");
+    }
+    const { data, error } = await supabaseAdmin
+      .from("legal_entities")
+      .update({
+        logo_path: null,
+        logo_url: null,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", entityId)
+      .eq("business_id", businessId)
+      .select("id, logo_path, logo_url")
+      .maybeSingle();
+    if (error) {
+      logError(requestId, "legal_entities_logo_remove", error);
+      return sendError(res, 500, "Failed to remove logo", requestId, "INTERNAL");
+    }
+    if (!data) {
+      return sendError(res, 404, "Legal entity not found", requestId, "NOT_FOUND");
+    }
+    return res.status(200).json({ ok: true, data, requestId });
   }
 
   return sendError(res, 400, "Unsupported action", requestId, "BAD_REQUEST");

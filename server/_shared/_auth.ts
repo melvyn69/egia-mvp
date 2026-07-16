@@ -27,8 +27,8 @@ const requireUser = async (req: VercelRequest, res: VercelResponse) => {
   }
   logRequest("[auth]", {
     requestId,
-    userId: data.user.id,
-    route: req.url ?? ""
+    status: "authenticated",
+    code: "AUTHENTICATED"
   });
   return {
     userId: data.user.id,

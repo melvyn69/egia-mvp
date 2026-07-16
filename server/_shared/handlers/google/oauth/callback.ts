@@ -61,12 +61,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     return;
   }
 
-  if (oauthState.expires_at) {
-    const expiresAt = new Date(oauthState.expires_at).getTime();
-    if (Number.isFinite(expiresAt) && expiresAt < Date.now()) {
-      res.redirect(buildAppRedirect(appBaseUrl, "error"));
-      return;
-    }
+  const stateExpiresAt = new Date(oauthState.expires_at).getTime();
+  if (!Number.isFinite(stateExpiresAt) || stateExpiresAt <= Date.now()) {
+    res.redirect(buildAppRedirect(appBaseUrl, "error"));
+    return;
   }
 
   const { data: consumedState, error: consumeError } = await supabaseAdmin
@@ -102,6 +100,10 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
 
   const tokenData = await tokenResponse.json();
   const expiresIn = Number(tokenData.expires_in ?? 0);
+  if (!Number.isFinite(expiresIn) || expiresIn <= 0) {
+    res.redirect(buildAppRedirect(appBaseUrl, "error"));
+    return;
+  }
   const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
   const refreshToken = tokenData.refresh_token ?? null;
 
@@ -112,6 +114,12 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
     .eq("provider", "google")
     .maybeSingle();
 
+  const resolvedRefreshToken = refreshToken ?? existingConnection?.refresh_token ?? null;
+  if (!resolvedRefreshToken) {
+    res.redirect(buildAppRedirect(appBaseUrl, "error"));
+    return;
+  }
+
   const { error: upsertError } = await supabaseAdmin
     .from("google_connections")
     .upsert(
@@ -119,7 +127,7 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         user_id: oauthState.user_id,
         provider: "google",
         access_token: tokenData.access_token ?? null,
-        refresh_token: refreshToken ?? existingConnection?.refresh_token ?? null,
+        refresh_token: resolvedRefreshToken,
         token_type: tokenData.token_type ?? null,
         scope: tokenData.scope ?? null,
         expires_at: expiresAt,

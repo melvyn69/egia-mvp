@@ -1,10 +1,13 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
+import { createProductionSafeConsole } from "../../safe_console";
 import {
   generatePremiumReport,
   type PremiumReportPayload
 } from "../reports/generate_html";
+
+const console = createProductionSafeConsole("/api/cron/monthly-reports");
 
 const getRequestId = (req: VercelRequest) => {
   const header = req.headers["x-vercel-id"] ?? req.headers["x-request-id"];
@@ -45,6 +48,24 @@ const respondJson = (
   status: number,
   payload: Record<string, unknown>
 ) => res.status(status).json(payload);
+
+const isCronAuthorized = (req: VercelRequest, expected: string) => {
+  const header = req.headers["x-cron-secret"];
+  const headerSecret = String(
+    Array.isArray(header) ? header[0] ?? "" : header ?? ""
+  ).trim();
+  const authorization = req.headers.authorization;
+  const authValue = Array.isArray(authorization)
+    ? authorization[0] ?? ""
+    : authorization ?? "";
+  const bearer = authValue.toLowerCase().startsWith("bearer ")
+    ? authValue.slice(7).trim()
+    : "";
+  return (
+    expected.length > 0 &&
+    (headerSecret === expected || bearer === expected)
+  );
+};
 
 const isEmail = (value: string | null | undefined) =>
   typeof value === "string" && /.+@.+\..+/.test(value);
@@ -91,13 +112,22 @@ type EmailBrandingPayload = Partial<
     | "companyName"
     | "legalName"
     | "billingLegalName"
-    | "logoUrl"
-    | "billingLogoUrl"
     | "locationsCount"
     | "locationNames"
     | "locationsLabel"
   >
 >;
+
+type EmailAttachment = {
+  filename: string;
+  content: string;
+  contentId?: string;
+};
+
+type ResolvedEmailBranding = {
+  branding: EmailBrandingPayload;
+  logoAttachment: EmailAttachment | null;
+};
 
 const getAppBaseUrl = () => {
   const raw =
@@ -217,16 +247,6 @@ const getLegalDisplayName = (
     "billing_legal_name"
   ]);
 
-const getLogoUrl = (report: PremiumReportPayload | EmailBrandingPayload | null) =>
-  getEmailStringField(report, [
-    "logoUrl",
-    "logo_url",
-    "billingLogoUrl",
-    "billing_logo_url",
-    "companyLogoUrl",
-    "company_logo_url"
-  ]);
-
 const naturalizeEmailInsight = (item: string) => {
   const trimmed = item.trim();
   const ratingMatch = trimmed.match(/^La note moyenne est ([0-9,.]+)\/?5?\.$/i);
@@ -335,18 +355,32 @@ const renderLogo = (logoUrl: string | null, displayName: string) =>
       )}" style="display:block;width:48px;height:48px;border-radius:16px;object-fit:cover;border:1px solid rgba(15,23,42,0.08);" />`
     : "";
 
-const getSignedBrandLogoUrl = async (
+const getBrandLogoAttachment = async (
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabaseAdmin: any,
+  businessId: string,
+  entityId: string,
   logoPath: string | null
 ) => {
-  if (!logoPath) return null;
+  const expectedPrefix = `business/${businessId}/legal_entities/${entityId}/logo.`;
+  if (
+    !logoPath ||
+    !logoPath.startsWith(expectedPrefix) ||
+    !["png", "jpg", "webp"].includes(logoPath.slice(expectedPrefix.length))
+  ) {
+    return null;
+  }
   try {
     const { data, error } = await supabaseAdmin.storage
       .from("brand-assets")
-      .createSignedUrl(logoPath, 60 * 60);
-    if (error) return null;
-    return data?.signedUrl ?? null;
+      .download(logoPath);
+    if (error || !data) return null;
+    const extension = logoPath.slice(expectedPrefix.length);
+    return {
+      filename: `brand-logo.${extension}`,
+      content: toBase64(await data.arrayBuffer()),
+      contentId: "brand-logo"
+    };
   } catch {
     return null;
   }
@@ -356,7 +390,7 @@ const resolveEmailBranding = async (
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabaseAdmin: any,
   userId: string
-): Promise<EmailBrandingPayload> => {
+): Promise<ResolvedEmailBranding> => {
   try {
     const { data: settings } = await supabaseAdmin
       .from("business_settings")
@@ -381,49 +415,58 @@ const resolveEmailBranding = async (
 
     if (!businessId) {
       return {
-        businessName: settingsName,
-        commercialName: settingsName,
-        companyName: settingsName,
-        locationsCount: locationNames.length || null,
-        locationNames
+        branding: {
+          businessName: settingsName,
+          commercialName: settingsName,
+          companyName: settingsName,
+          locationsCount: locationNames.length || null,
+          locationNames
+        },
+        logoAttachment: null
       };
     }
 
     const { data: entities } = await supabaseAdmin
       .from("legal_entities")
-      .select("company_name, legal_name, logo_path, logo_url, is_default, created_at")
+      .select("id, company_name, legal_name, logo_path, is_default, created_at")
       .eq("business_id", businessId)
       .order("is_default", { ascending: false })
       .order("created_at", { ascending: true });
     const entity = Array.isArray(entities)
       ? (entities[0] as
           | {
+              id?: string | null;
               company_name?: string | null;
               legal_name?: string | null;
               logo_path?: string | null;
-              logo_url?: string | null;
             }
           | undefined)
       : undefined;
     const companyName = entity?.company_name?.trim() || settingsName || null;
     const legalName = entity?.legal_name?.trim() || null;
-    const logoUrl =
-      entity?.logo_url ??
-      (await getSignedBrandLogoUrl(supabaseAdmin, entity?.logo_path ?? null));
+    const logoAttachment = entity?.id
+      ? await getBrandLogoAttachment(
+          supabaseAdmin,
+          businessId,
+          entity.id,
+          entity.logo_path ?? null
+        )
+      : null;
 
     return {
-      businessName: companyName,
-      commercialName: companyName,
-      companyName,
-      legalName,
-      billingLegalName: legalName,
-      logoUrl,
-      billingLogoUrl: logoUrl,
-      locationsCount: locationNames.length || null,
-      locationNames
+      branding: {
+        businessName: companyName,
+        commercialName: companyName,
+        companyName,
+        legalName,
+        billingLegalName: legalName,
+        locationsCount: locationNames.length || null,
+        locationNames
+      },
+      logoAttachment
     };
   } catch {
-    return {};
+    return { branding: {}, logoAttachment: null };
   }
 };
 
@@ -434,12 +477,13 @@ const buildMonthlyReportEmailHtml = (opts: {
   appUrl: string;
   report?: PremiumReportPayload | null;
   branding?: EmailBrandingPayload | null;
+  logoSrc?: string | null;
 }) => {
   const report = opts.report ?? null;
   const brandingSource = report ?? opts.branding ?? null;
   const businessName = getBusinessDisplayName(brandingSource);
   const legalName = getLegalDisplayName(brandingSource);
-  const logoUrl = getLogoUrl(brandingSource);
+  const logoSrc = opts.logoSrc ?? null;
   const locationsCount = getLocationsCount(brandingSource);
   const healthScore =
     getEmailKpiNumber(report, [
@@ -566,9 +610,9 @@ const buildMonthlyReportEmailHtml = (opts: {
                   <table role="presentation" style="border-collapse:collapse;">
                     <tr>
                       ${
-                        logoUrl
+                        logoSrc
                           ? `<td style="vertical-align:middle;padding:0 14px 0 0;">${renderLogo(
-                              logoUrl,
+                              logoSrc,
                               businessName
                             )}</td>`
                           : ""
@@ -680,7 +724,7 @@ const sendResendEmail = async (params: {
   subject: string;
   html: string;
   apiKey: string;
-  attachment?: { filename: string; content: string } | null;
+  attachments?: EmailAttachment[];
 }) => {
   const body: Record<string, unknown> = {
     from: params.from,
@@ -688,13 +732,14 @@ const sendResendEmail = async (params: {
     subject: params.subject,
     html: params.html
   };
-  if (params.attachment) {
-    body.attachments = [
-      {
-        filename: params.attachment.filename,
-        content: params.attachment.content
-      }
-    ];
+  if (params.attachments?.length) {
+    body.attachments = params.attachments.map((attachment) => ({
+      filename: attachment.filename,
+      content: attachment.content,
+      ...(attachment.contentId
+        ? { content_id: attachment.contentId }
+        : {})
+    }));
   }
 
   const response = await fetch("https://api.resend.com/emails", {
@@ -725,10 +770,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const expected = String(process.env.CRON_SECRET ?? "").trim();
-  const provided = String(
-    (req.headers["x-cron-secret"] as string | undefined) ?? ""
-  ).trim();
-  if (!expected || !provided || provided !== expected) {
+  if (!isCronAuthorized(req, expected)) {
     return respondJson(res, 403, {
       ok: false,
       error: { message: "Unauthorized", code: "FORBIDDEN" },
@@ -751,7 +793,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     auth: { persistSession: false }
   });
 
-  console.log("[cron][monthly-reports] start", { requestId, route: req.url });
+  console.log("[cron][monthly-reports]", {
+    requestId,
+    route: "/api/cron/monthly-reports",
+    status: "started",
+    code: "CRON_STARTED",
+    count: 0
+  });
 
   try {
     const { start, end, periodKey } = getLastMonthRange();
@@ -993,6 +1041,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let reportUrl: string | null = null;
       let reportEmailPayload: PremiumReportPayload | null = null;
       let emailBranding: EmailBrandingPayload | null = null;
+      let logoAttachment: EmailAttachment | null = null;
       let reason: string | undefined;
 
       console.log("[monthly-report] fetching data for period:", fromIso, toIso);
@@ -1052,9 +1101,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             reason = "no_report_url";
             console.log("[monthly-report] skipped email because:", reason);
           } else {
+            const resolvedBranding = await resolveEmailBranding(
+              supabaseAdmin,
+              userId
+            );
             emailBranding = reportEmailPayload
               ? null
-              : await resolveEmailBranding(supabaseAdmin, userId);
+              : resolvedBranding.branding;
+            logoAttachment = resolvedBranding.logoAttachment;
             const attachmentContent = await fetchPdfAsBase64(reportUrl);
             for (const recipient of recipients) {
               console.log("[monthly-report] sending email", { requestId });
@@ -1064,7 +1118,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 reportUrl,
                 appUrl,
                 report: reportEmailPayload,
-                branding: emailBranding
+                branding: emailBranding,
+                logoSrc: logoAttachment ? "cid:brand-logo" : null
               });
               await sendResendEmail({
                 to: recipient.email,
@@ -1072,10 +1127,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 subject: buildMonthlyReportSubject(periodLabel),
                 html,
                 apiKey: resendApiKey,
-                attachment: {
-                  filename: `rapport-mensuel-${periodKey}.pdf`,
-                  content: attachmentContent
-                }
+                attachments: [
+                  {
+                    filename: `rapport-mensuel-${periodKey}.pdf`,
+                    content: attachmentContent
+                  },
+                  ...(logoAttachment ? [logoAttachment] : [])
+                ]
               });
             }
             emailed = true;
