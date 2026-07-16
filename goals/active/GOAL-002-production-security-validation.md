@@ -3,10 +3,10 @@
 ## Métadonnées
 
 - **ID :** `GOAL-002`
-- **Statut :** `Review`
+- **Statut :** `Done`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-11`
-- **Date de clôture Engineering :** `N/A`
+- **Date de clôture Engineering :** `2026-07-16`
 - **Niveau de risque :** `R3`
 - **Candidat applicatif figé :** `73c40836b58f5663e810de70a169c39ab9627745`
 
@@ -197,9 +197,9 @@ mais ne définissent plus le contrat actif de GOAL-002.
 | `2026-07-16` | `Draft` → `Ready` | Codex | Contrat Engineering, scope, critères, artefacts et protections Git/Vercel réconciliés avec ANES. |
 | `2026-07-16` | `Ready` → `Running` | Codex | Closeout Engineering lancé sur la branche protégée, sans mutation de production. |
 | `2026-07-16` | `Running` → `Review` | Codex | Six revues indépendantes `APPROVED`, validations locales/isolées vertes, CI PR #40 verte, candidat applicatif inchangé et aucun déploiement Vercel créé. |
+| `2026-07-16` | `Review` → `Done` | Fondateur (Melvyn) | Verdict fondateur APPROVED : PR #40 fusionnée en fast-forward au SHA f7e56e176d5f7a48fb45256984d752a7f77f3d08, CI finale 29530008521 verte, six revues Engineering APPROVED, candidat applicatif 73c40836b58f5663e810de70a169c39ab9627745 inchangé, dépôt propre et aucune mutation de production. |
 
-GOAL-002 reste en `Review`. Il ne passe pas à `Done` dans cette mission ; ce
-verdict appartient à l’acceptation ultérieure du résultat Engineering.
+GOAL-002 est `Done` après acceptation fondatrice du résultat Engineering.
 
 ## Readiness Check du closeout
 
@@ -214,3 +214,19 @@ verdict appartient à l’acceptation ultérieure du résultat Engineering.
 
 **Résultat :** le closeout Engineering du Goal peut s’exécuter. Aucune
 autorisation de production n’en découle.
+
+## Définition de Done
+
+**GOAL-002 Engineering est clôturé.**
+
+- Les critères AC-01 à AC-11 sont acceptés.
+- Le candidat figé reste
+  `73c40836b58f5663e810de70a169c39ab9627745`.
+- Le Production Readiness Report est accepté.
+- Le Production Execution Plan est accepté uniquement comme entrée d’un futur
+  Production Run.
+- Les risques distants et post-production appartiennent exclusivement à un
+  futur Production Run.
+- Cette clôture n’autorise aucune production.
+
+La clôture Engineering de GOAL-002 ne crée, n’autorise et n’exécute aucun Production Run.
