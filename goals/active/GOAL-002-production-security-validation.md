@@ -330,6 +330,10 @@ Le Goal est `Done` seulement lorsque :
   `20260716142352_fix_claim_ai_tag_candidates_digest.sql`. L'état
   `HARDENING_ONLY` reste fail-closed et ne permet qu'un roll-forward vers la
   seconde migration.
+- **Release exécutable :**
+  `2682f6cdf13296744d1d79ad0aa272d8c5c4b965`, descendant de `main`
+  `198aea23...`; le commit documentaire enfant ne modifie aucun artefact
+  applicatif, Edge, migration ou recovery.
 - **Risques résiduels :** le candidat n’est pas déployé ; la migration/grants, les Edge Functions, Vercel, Auth, variables et logs de production ne sont pas vérifiés. Le P0 historique ne peut donc pas être fermé en production.
 - **Verdict provisoire obligatoire :** candidat local prêt pour revue ; production `non sûr` jusqu’au déploiement et à la vérification autorisés.
 - **Décision de clôture :** Goal `Running`; date de clôture : `N/A`. Le Run
