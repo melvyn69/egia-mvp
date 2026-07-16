@@ -3,7 +3,7 @@
 ## Métadonnées
 
 - **ID :** `GOAL-002`
-- **Statut :** `Blocked`
+- **Statut :** `Running`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-11`
 - **Date de clôture :** `N/A`
@@ -64,6 +64,25 @@ Le même préflight a reproduit l'échec de
 à `digest`. La correction relève du Goal séparé `GOAL-006`. GOAL-002 reste
 `Blocked` uniquement jusqu'à la clôture de GOAL-006 et ne reprend pas avant
 une décision fondatrice explicite.
+
+### Avenant fondateur — reprise pré-production après GOAL-006
+
+Le `2026-07-16`, GOAL-003, GOAL-004, GOAL-005 et GOAL-006 sont `Done`; la
+branche de la PR #36 peut être réconciliée avec `main` au SHA
+`198aea23fbba9154327453507c010299f28e1da6`. Le Run autorise documentation,
+code de gate, tests locaux, revues indépendantes, commits, push, CI et fusion
+fast-forward, tout en maintenant les protections Vercel de la branche et de
+`main`.
+
+La production reste entièrement hors scope. Le futur gate doit appliquer
+exclusivement les migrations suivantes, sans intercalation :
+
+1. `20260713073853_production_security_hardening.sql`;
+2. `20260716142352_fix_claim_ai_tag_candidates_digest.sql`.
+
+Le Run reprend donc `Blocked → Ready → Running`. `Done` demeure impossible
+avant une autorisation puis une exécution de production distinctes avec
+Evidence.
 
 ## Sources de vérité
 
@@ -279,6 +298,8 @@ Le Goal est `Done` seulement lorsque :
 | `2026-07-16` | `Blocked` → `Ready` | Fondateur (Melvyn) | Validation d'e-mail one-shot choisie; comportement nouveau/existant rendu indistinguable avant preuve de possession; autorisations Git/locales renouvelées et production toujours interdite. |
 | `2026-07-16` | `Ready` → `Running` | Codex | Readiness Check confirmé : dépendances Done, décision produit complète, PR #35 mergeable et gate de production inchangé. |
 | `2026-07-16` | `Running` → `Blocked` | Codex | Préflight Vercel passif : le projet `prj_GoGCD7ICIfemLSlegN4Tc8JcoxrT` est connecté au dépôt, `main` est la branche de production et aucun gate Git n'est configuré. Un push de la branche créerait un Preview et une fusion créerait un déploiement Production, tous deux interdits par ce Run. Arrêt avant commit distant, push ou fusion ; aucune mutation Vercel. |
+| `2026-07-16` | `Blocked` → `Ready` | Fondateur (Melvyn) | GOAL-006 clôturé `Done`; reprise pré-production de la PR #36 autorisée, deux migrations strictement ordonnées et protections Vercel conservées; aucune production autorisée. |
+| `2026-07-16` | `Ready` → `Running` | Codex | Branche PR #36 rebasée sur `main` `198aea23...`; correctif GOAL-006 intégré; runner, inspecteur, runbook, tests et revues à deux migrations engagés sans mutation distante. |
 
 ## Readiness Check
 
@@ -301,7 +322,16 @@ Le Goal est `Done` seulement lorsque :
 - **Correctifs approfondis :** commit `8044d85` — policy `cron_state` inter-tenant supprimée, mutation de brouillon `service_role` liée au propriétaire, état OAuth Edge consommé atomiquement, déclarations JWT racine complétées et payloads bornés.
 - **Publication vérifiée :** PR brouillon [#35](https://github.com/melvyn69/egia-mvp/pull/35), head d’Evidence `0a8164bd7abd8f5041024758bf90f80452b2efd7`, vers `main`, sans merge ; CI build, Migration History Guard, Vercel et Vercel Preview Comments réussis `4/4`.
 - **Avenant Run 3 :** le candidat comporte 30 contrôles de sécurité, un quota IA durable partagé et une fidélité à validation e-mail one-shot ; la base isolée `goal002_security_test_20260716_final2` valide 43 tables RLS, 14 fonctions privilégiées configurées, six contraintes de scope fidélité et les scénarios nouveau/existant/réutilisation.
-- **Gate Git/Vercel :** la lecture passive du projet confirme `productionBranch=main`, l'absence de commande d'ignorance et le comportement automatique Preview/Production. La mise à jour et la fusion de la PR nécessitent d'abord une autorisation étroite pour désactiver les déploiements Git automatiques de la branche PR et de `main` via la configuration versionnée Vercel.
+- **Gate Git/Vercel :** `vercel.json` conserve
+  `git.deploymentEnabled=false` pour `security/goal-002-production-validation`
+  et `main`; tout nouveau Preview ou Production pendant le Run impose l'arrêt.
+- **Chaîne prospective :** le gate de production n'autorise que
+  `20260713073853_production_security_hardening.sql`, puis
+  `20260716142352_fix_claim_ai_tag_candidates_digest.sql`. L'état
+  `HARDENING_ONLY` reste fail-closed et ne permet qu'un roll-forward vers la
+  seconde migration.
 - **Risques résiduels :** le candidat n’est pas déployé ; la migration/grants, les Edge Functions, Vercel, Auth, variables et logs de production ne sont pas vérifiés. Le P0 historique ne peut donc pas être fermé en production.
 - **Verdict provisoire obligatoire :** candidat local prêt pour revue ; production `non sûr` jusqu’au déploiement et à la vérification autorisés.
-- **Décision de clôture :** Goal `Blocked`; date de clôture : `N/A`. Reprendre d'abord après autorisation explicite du gate versionné `git.deploymentEnabled`, puis après autorisation séparée de déploiement/vérification distante ; ne pas passer `Done` sans Evidence de production.
+- **Décision de clôture :** Goal `Running`; date de clôture : `N/A`. Le Run
+  pré-production prépare la fusion de la PR #36 sans déploiement. Ne pas
+  passer `Done` sans autorisation, déploiement et Evidence de production.

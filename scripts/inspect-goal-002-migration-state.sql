@@ -154,32 +154,108 @@ hardening as (
       ))
   ) as checks(ordinal, passed)
 ),
+digest_fix as (
+  select
+    count(*) filter (where passed)::integer as passed,
+    string_agg(case when passed then '1' else '0' end, '' order by ordinal)
+      as vector
+  from (
+    values
+      (1, (
+        pg_catalog.to_regprocedure('extensions.digest(text,text)') is not null
+      )),
+      (2, (
+        select coalesce(
+          p.prosecdef
+          and array_to_string(p.proconfig, ',') = 'search_path=pg_catalog',
+          false
+        )
+        from pg_proc p
+        where p.oid = to_regprocedure(
+          'public.claim_ai_tag_candidates(integer,text,text)'
+        )
+      )),
+      (3, (
+        select
+          (
+            select count(*)
+            from regexp_matches(
+              pg_get_functiondef(p.oid),
+              'extensions[.]digest[[:space:]]*[(]',
+              'g'
+            )
+          ) = 2
+          and pg_get_functiondef(p.oid) !~
+            '(^|[^.[:alnum:]_])digest[[:space:]]*[(]'
+        from pg_proc p
+        where p.oid = to_regprocedure(
+          'public.claim_ai_tag_candidates(integer,text,text)'
+        )
+      )),
+      (4, (
+        coalesce(has_function_privilege(
+          'service_role',
+          to_regprocedure(
+            'public.claim_ai_tag_candidates(integer,text,text)'
+          ),
+          'EXECUTE'
+        ), false)
+        and not coalesce(has_function_privilege(
+          'anon',
+          to_regprocedure(
+            'public.claim_ai_tag_candidates(integer,text,text)'
+          ),
+          'EXECUTE'
+        ), false)
+        and not coalesce(has_function_privilege(
+          'authenticated',
+          to_regprocedure(
+            'public.claim_ai_tag_candidates(integer,text,text)'
+          ),
+          'EXECUTE'
+        ), false)
+      ))
+  ) as checks(ordinal, passed)
+),
 evidence as (
   select
     (
       select count(*)::integer
       from pg_stat_activity
-      where application_name = 'goal002_migration_20260713073853'
+      where application_name =
+        'goal002_migrations_20260713073853_20260716142352'
     ) as active_sessions,
     (
       select count(*)::integer
       from supabase_migrations.schema_migrations
       where version = '20260713073853'
-    ) as ledger_count,
+    ) as hardening_ledger_count,
+    (
+      select count(*)::integer
+      from supabase_migrations.schema_migrations
+      where version = '20260716142352'
+    ) as digest_fix_ledger_count,
     prospective.present as prospective_present,
     10 as prospective_expected,
     hardening.passed as hardening_passed,
     8 as hardening_expected,
-    hardening.vector as hardening_vector
-  from prospective, hardening
+    hardening.vector as hardening_vector,
+    digest_fix.passed as digest_fix_passed,
+    4 as digest_fix_expected,
+    digest_fix.vector as digest_fix_vector
+  from prospective, hardening, digest_fix
 )
 select json_build_object(
   'active_sessions', active_sessions,
-  'ledger_count', ledger_count,
+  'hardening_ledger_count', hardening_ledger_count,
+  'digest_fix_ledger_count', digest_fix_ledger_count,
   'prospective_present', prospective_present,
   'prospective_expected', prospective_expected,
   'hardening_passed', hardening_passed,
   'hardening_expected', hardening_expected,
-  'hardening_vector', hardening_vector
+  'hardening_vector', hardening_vector,
+  'digest_fix_passed', digest_fix_passed,
+  'digest_fix_expected', digest_fix_expected,
+  'digest_fix_vector', digest_fix_vector
 )::text
 from evidence;

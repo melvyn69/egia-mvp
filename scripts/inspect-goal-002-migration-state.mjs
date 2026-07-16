@@ -5,17 +5,32 @@ import pg from "pg";
 export const classifyMigrationState = (evidence) => {
   if (evidence.active_sessions > 0) return "ACTIVE";
   if (
-    evidence.ledger_count === 1 &&
+    evidence.hardening_ledger_count === 1 &&
+    evidence.digest_fix_ledger_count === 1 &&
     evidence.prospective_present === evidence.prospective_expected &&
-    evidence.hardening_passed === evidence.hardening_expected
+    evidence.hardening_passed === evidence.hardening_expected &&
+    evidence.digest_fix_passed === evidence.digest_fix_expected
   ) {
     return "COMMITTED";
   }
   if (
-    evidence.ledger_count === 0 &&
+    evidence.hardening_ledger_count === 1 &&
+    evidence.digest_fix_ledger_count === 0 &&
+    evidence.prospective_present === evidence.prospective_expected &&
+    evidence.hardening_passed === evidence.hardening_expected &&
+    typeof evidence.baseline_digest_fix_vector === "string" &&
+    evidence.digest_fix_vector === evidence.baseline_digest_fix_vector
+  ) {
+    return "HARDENING_ONLY";
+  }
+  if (
+    evidence.hardening_ledger_count === 0 &&
+    evidence.digest_fix_ledger_count === 0 &&
     evidence.prospective_present === 0 &&
     typeof evidence.baseline_hardening_vector === "string" &&
-    evidence.hardening_vector === evidence.baseline_hardening_vector
+    evidence.hardening_vector === evidence.baseline_hardening_vector &&
+    typeof evidence.baseline_digest_fix_vector === "string" &&
+    evidence.digest_fix_vector === evidence.baseline_digest_fix_vector
   ) {
     return "ROLLED_BACK";
   }
@@ -26,13 +41,18 @@ const args = process.argv.slice(2);
 if (args.length === 1 && args[0] === "--self-test") {
   const complete = {
     active_sessions: 0,
-    ledger_count: 1,
+    hardening_ledger_count: 1,
+    digest_fix_ledger_count: 1,
     prospective_present: 10,
     prospective_expected: 10,
     hardening_passed: 8,
     hardening_expected: 8,
     hardening_vector: "11111111",
-    baseline_hardening_vector: "01000000"
+    baseline_hardening_vector: "01000000",
+    digest_fix_passed: 4,
+    digest_fix_expected: 4,
+    digest_fix_vector: "1111",
+    baseline_digest_fix_vector: "0001"
   };
   assert.equal(
     classifyMigrationState({ ...complete, active_sessions: 1 }),
@@ -42,17 +62,30 @@ if (args.length === 1 && args[0] === "--self-test") {
   assert.equal(
     classifyMigrationState({
       ...complete,
-      ledger_count: 0,
+      digest_fix_ledger_count: 0,
+      digest_fix_passed: 1,
+      digest_fix_vector: "0001"
+    }),
+    "HARDENING_ONLY"
+  );
+  assert.equal(
+    classifyMigrationState({
+      ...complete,
+      hardening_ledger_count: 0,
+      digest_fix_ledger_count: 0,
       prospective_present: 0,
       hardening_passed: 1,
-      hardening_vector: "01000000"
+      hardening_vector: "01000000",
+      digest_fix_passed: 1,
+      digest_fix_vector: "0001"
     }),
     "ROLLED_BACK"
   );
   assert.equal(
     classifyMigrationState({
       ...complete,
-      ledger_count: 0,
+      hardening_ledger_count: 0,
+      digest_fix_ledger_count: 0,
       prospective_present: 0,
       hardening_passed: 2,
       hardening_vector: "01100000"
@@ -80,7 +113,8 @@ if (args.length !== 0 && !captureBaseline) {
   process.exit(2);
 }
 
-const authorization = "fhadiwkdznhuxtlgrwfd:20260713073853";
+const authorization =
+  "fhadiwkdznhuxtlgrwfd:20260713073853,20260716142352";
 if (
   process.env.GOAL002_INSPECTION_AUTHORIZED !== authorization ||
   !process.env.SUPABASE_DB_URL
@@ -127,9 +161,12 @@ if (!evidence) process.exit(5);
 
 evidence.baseline_hardening_vector =
   process.env.GOAL002_BASELINE_HARDENING_VECTOR;
+evidence.baseline_digest_fix_vector =
+  process.env.GOAL002_BASELINE_DIGEST_FIX_VECTOR;
 const classification = captureBaseline
   ? evidence.active_sessions === 0 &&
-    evidence.ledger_count === 0 &&
+    evidence.hardening_ledger_count === 0 &&
+    evidence.digest_fix_ledger_count === 0 &&
     evidence.prospective_present === 0
     ? "BASELINE"
     : "INCONSISTENT"
@@ -138,6 +175,7 @@ console.log(JSON.stringify({ classification, ...evidence }));
 process.exitCode =
   classification === "BASELINE" ||
   classification === "COMMITTED" ||
+  classification === "HARDENING_ONLY" ||
   classification === "ROLLED_BACK"
     ? 0
     : classification === "ACTIVE"

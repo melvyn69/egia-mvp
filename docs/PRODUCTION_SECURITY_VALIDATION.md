@@ -4,6 +4,8 @@ Date de l’audit local : `2026-07-16`
 Branche de préparation : `security/goal-002-production-validation`
 Baseline applicative historique : `cb82cc5495a8c298e5dc79fcf33d920609644330`
 `main` après fusion de la PR #35 : `7fad67914f4727d912d6922914e113ed452d137d`
+`main` avant réconciliation de la PR #36 :
+`198aea23fbba9154327453507c010299f28e1da6`
 Commit correctif approfondi : `8044d85` (`security: close remaining tenant and oauth gaps`)
 
 ## Décision
@@ -29,6 +31,19 @@ appels par une action authentifiée, limitée au tenant et au lieu sélectionné
 Il ajoute également une maintenance Vercel globale, sept Edge Functions
 safe-deny et un watchdog transactionnel de 130 secondes sans modifier
 l'historique de migration.
+
+GOAL-006 a corrigé séparément la résolution de
+`claim_ai_tag_candidates` en qualifiant `extensions.digest(text,text)`, avec
+`search_path=pg_catalog` et `EXECUTE` réservé à `service_role`. La PR #36 est
+réconciliée avec ce correctif. Le gate refuse désormais tout plan qui n'est
+pas exactement :
+
+1. `20260713073853_production_security_hardening.sql`;
+2. `20260716142352_fix_claim_ai_tag_candidates_digest.sql`.
+
+Si seule la première migration est validée, l'état `HARDENING_ONLY` maintient
+maintenance, safe-deny et crons suspendus et n'autorise que le roll-forward
+vers la seconde.
 
 La **production n’est pas certifiée** par ce rapport. Aucune migration, Edge
 Function, variable, donnée, fixture ou configuration de production n'a été
@@ -95,6 +110,15 @@ La migration `20260713073853_production_security_hardening.sql` :
 - fixe `is_admin()` à `pg_catalog, public, auth` et toutes les nouvelles fonctions privilégiées ajoutées ici à un `search_path` déterministe ;
 - révoque les default privileges de fonction pour `PUBLIC`, `anon` et `authenticated` afin d’éviter une régression sur les futures fonctions.
 
+La migration `20260716142352_fix_claim_ai_tag_candidates_digest.sql` :
+
+- recrée uniquement `claim_ai_tag_candidates` sans changer sa signature;
+- fixe `search_path=pg_catalog`;
+- qualifie les deux appels `extensions.digest(text,text)`;
+- conserve le claim atomique, le plafond 20 et le filtre de localisation;
+- réapplique les révocations `PUBLIC`/`anon`/`authenticated` et l'accès
+  `service_role` seul.
+
 Le test SQL isolé prouve : anonyme sans ligne ; A voit A mais pas B ; A ne modifie pas B ; A ne lit ni ne modifie l’état cron de B ; l’établissement B est invisible ; A n’est pas admin ; `claim_review_analyze_jobs`, `ensure_user_profile`, les KPI serveur, l’inscription/finalisation fidélité et le quota sont inaccessibles aux rôles normaux ; `service_role` conserve les seules capacités requises. Il vérifie aussi le plafond atomique du quota, la création après preuve e-mail, la récupération stable d’un membre existant et le rejet d’un jeton réutilisé.
 
 ## Routes API, crons et Edge Functions
@@ -141,16 +165,17 @@ La présence et la portée des variables réellement configurées, les logs hist
 | Validation | Résultat du 2026-07-16 |
 | --- | --- |
 | matrice `baseline` sur stack locale isolée | ancien frontend/base actuelle fonctionnel mais vulnérable; nouveau frontend fail-closed `503`; action IA tenant-scoped. |
-| matrice `hardened` sur la même stack synthétique | ancien frontend incompatible et fail-closed; e-mail one-shot nouveau/existant; récupération stable; replay rejeté. |
+| matrice `hardened` après les deux migrations sur la même stack synthétique | ancien frontend incompatible et fail-closed; e-mail one-shot nouveau/existant; récupération stable; replay rejeté; claim IA qualifié et borné. |
 | `npm run test:production-security` | contrôles sécurité et régression réussis après correction. |
-| `supabase/tests/production_security_abuse.sql` après baseline + GOAL-003 + migration GOAL-002 | transaction complète réussie avec `ROLLBACK` dans la base isolée neuve `goal002_security_test_20260716_final2`. |
+| `supabase/tests/production_security_abuse.sql` après baseline + GOAL-003 + les deux migrations | transaction complète réussie avec `ROLLBACK` dans la base isolée neuve. |
+| `supabase/tests/goal002_claim_ai_tag_candidates_postdeploy.sql` | probe transactionnel `GOAL002_SYNTH` : résolution `digest`, ACL, filtre lieu, plafond 20 et `ROLLBACK`. |
 | typage Deno des sept Edge sécurisées et des sept variantes safe-deny | réussi. |
 | `npm run lint` | réussi avec un warning React Hooks préexistant, sans erreur. |
 | `npm run typecheck` | réussi. |
 | `npm run test` | réussi. |
-| validateur d’historique avec `--base origin/main` | réussi : 99 migrations, 5 collisions documentées, checksum baseline vérifié. |
+| validateur d’historique avec `--base origin/main` | réussi : 100 migrations, 5 collisions documentées, checksum baseline vérifié. |
 | `npm run test:migration-history:adversarial` | 29/29 réussis. |
-| canonical bootstrap plan-only + guardrails | chaîne prospective exacte GOAL-003 puis GOAL-002 ; 10/10 guardrails. |
+| canonical bootstrap plan-only + guardrails | chaîne prospective exacte GOAL-003 puis GOAL-002 puis GOAL-006; 10/10 guardrails. |
 | `npm run build` | réussi ; avertissements non bloquants sur Browserslist et la taille du bundle. |
 | `npm audit --omit=dev` | 0 vulnérabilité. |
 | `npm audit` | 0 vulnérabilité. |
@@ -190,9 +215,9 @@ Futurs Goals proposés, sans création : (1) déploiement contrôlé et vérific
   fusionnée vers `main` au SHA `7fad67914...`.
 - `vercel.json` désactive temporairement les déploiements Git pour `main` et
   `security/goal-002-production-validation`.
-- Le correctif de compatibilité et les artefacts de roll-forward sont préparés
-  sur une PR distincte. Leur fusion et tout déploiement restent réservés au
-  futur Run de production.
+- La PR #36 porte le correctif de compatibilité, les artefacts de roll-forward,
+  le helper cron redigé et le gate à deux migrations. Sa fusion ne déploie rien
+  tant que les protections Vercel restent actives.
 
 ## Matrice des tests d’abus
 
@@ -215,8 +240,14 @@ Futurs Goals proposés, sans création : (1) déploiement contrôlé et vérific
 
 ## Risques résiduels et actions requises
 
-1. **Gate Git/Vercel — bloquant avant push et fusion.** Autoriser l'ajout versionné de `git.deploymentEnabled: false` pour la branche PR et `main`, le conserver pendant la fusion, puis vérifier passivement qu'aucun déploiement Vercel n'a été créé.
-2. **Production non déployée/non vérifiée — bloquant pour `Done`.** Après fusion sans déploiement automatique, appliquer la migration prospective par le gate GOAL-005 avec une autorisation explicite. Déployer les Edge Functions et Vercel depuis le commit approuvé.
+1. **Gate Git/Vercel — actif.** Conserver
+   `git.deploymentEnabled=false` pour la branche PR et `main` pendant push,
+   CI et fusion; vérifier passivement l'absence de nouveau déploiement.
+2. **Production non déployée/non vérifiée — bloquant pour `Done`.** Après
+   fusion sans déploiement automatique, appliquer exclusivement les migrations
+   `20260713073853` puis `20260716142352` par le gate GOAL-005, avec une
+   autorisation explicite. Déployer ensuite les Edge Functions et Vercel
+   depuis le commit approuvé.
 3. **Vérification distante — bloquant pour `Done`.** Après autorisation, confirmer les hashes de déploiement, la migration appliquée, les grants/`search_path`, le bucket privé, `verify_jwt`, les en-têtes HTTP, la portée des variables et l’absence de secrets dans les logs récents.
 4. **Tests de production synthétiques — bloquant pour la certification inter-tenant.** Utiliser deux comptes et deux tenants de test sans donnée réelle pour répéter les refus A/B et les rôles. Ne jamais utiliser des tenants clients.
 5. **Auth Supabase — non concluant.** Vérifier politique de mot de passe, MFA, sessions, CAPTCHA/rate limits, URLs de redirection et fournisseurs.
@@ -225,7 +256,7 @@ Futurs Goals proposés, sans création : (1) déploiement contrôlé et vérific
 8. **Logs historiques.** Rechercher et purger/faire expirer selon la politique les anciennes lignes susceptibles de contenir un préfixe JWT, une query OAuth ou un corps d’amont, sans exporter ces valeurs.
 
 Le plan exact, les requêtes passives d'arrêt, l'ordre
-crons → maintenance → safe-deny → migration → Edge → Vercel, les tests
+crons → maintenance → safe-deny → deux migrations → Edge → Vercel, les tests
 synthétiques et la récupération sont versionnés dans
 `docs/runbooks/GOAL-002-production-deployment-gate.md`.
 

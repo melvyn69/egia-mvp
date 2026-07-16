@@ -28,11 +28,11 @@ prévalidés : maintenance Vercel globale et sept Edge Functions safe-deny.
 | État | Application / backend | Résultat fidélité | Crons et fonctions | Compatibilité |
 | --- | --- | --- | --- | --- |
 | 1 | `cb82cc5495...` + base actuelle | `join_loyalty_program` anonyme réussit et retourne immédiatement membre, QR et Wallet. | Le cron IA accepte soit `CRON_SECRET`, soit un JWT admin. Les autres routes planifiées utilisent leur contrat historique; `/api/reports/automations` distingue secret global et JWT utilisateur tenant-scoped. | Fonctionnel, mais vulnérable et non acceptable. |
-| 2 | `cb82cc5495...` + `20260713073853` | L'ancien RPC anonyme est refusé. Les lectures anciennes de `legal_entities.logo_url` sont refusées. Aucune capacité fidélité ne fuit. | L'ancienne `post-reply-google` perd les grants navigateur ; les anciennes fonctions privilégiées ne sont pas un rollback autorisé. | Incompatible fonctionnellement, fail-closed sur les frontières durcies. Acceptable uniquement derrière maintenance. |
+| 2 | `cb82cc5495...` + `20260713073853`, avant `20260716142352` | L'ancien RPC anonyme est refusé. Les lectures anciennes de `legal_entities.logo_url` sont refusées. Aucune capacité fidélité ne fuit. | `claim_ai_tag_candidates` conserve sa résolution `digest` défectueuse. `process-review-analyze` reste obligatoirement safe-deny; aucune ancienne fonction privilégiée n'est un rollback autorisé. | État `HARDENING_ONLY`, incompatible et fail-closed. Acceptable uniquement derrière maintenance jusqu'au roll-forward GOAL-006. |
 | 3 | `cb82cc5495...` + base actuelle + sept nouvelles Edge Functions | Le frontend ancien continue son RPC fidélité vulnérable tant que la migration n'est pas appliquée. | `generate-reply` sécurisé échoue en `503` car `consume_security_rate_limit` est absent. Les deux OAuth doivent être basculées ensemble après un drain de dix minutes. Les cinq autres fonctions sont compatibles avec le schéma actuel, mais cet état mixte n'est pas un steady state autorisé. | Transition seulement, sous maintenance et bornée. |
 | 4 | `7fad67914...` + base actuelle | `/api/loyalty/join` échoue en `503` avant tout e-mail, membre ou Wallet car le quota SQL est absent. | Les boutons manuels IA appellent encore `/api/cron/ai/tag-reviews` avec un JWT utilisateur et reçoivent `403`. | Incompatible ; aucun déploiement de cet état n'est autorisé. |
-| 5 | `7fad67914...` + base durcie + sept nouvelles Edge Functions | Nouvelle/existante reçoivent le même `202`; aucune capacité avant preuve; création/récupération après preuve; replay rejeté. | Crons secret-only et Edge sécurisées compatibles, mais les boutons manuels IA restent cassés. | Sécurité compatible, produit non approuvé. Le release final doit être le correctif enfant. |
-| 6 | Correctif enfant + base durcie + sept Edge sécurisées | Même comportement one-shot validé que l'état 5. | L'action manuelle passe par `/api/reviews?action=queue_analysis`, authentifie l'utilisateur, résout un lieu propre et ne met en file que ses avis. Les crons globaux restent réservés à `CRON_SECRET`. | Seul état final autorisable. |
+| 5 | `7fad67914...` + les deux migrations + sept nouvelles Edge Functions | Nouvelle/existante reçoivent le même `202`; aucune capacité avant preuve; création/récupération après preuve; replay rejeté. | `claim_ai_tag_candidates` est corrigée et les crons secret-only sont compatibles, mais les boutons manuels IA restent cassés. | Sécurité compatible, produit non approuvé. Le release final doit être le correctif enfant. |
+| 6 | Release réconcilié GOAL-002 + GOAL-006 + les deux migrations + sept Edge sécurisées | Même comportement one-shot validé que l'état 5. | L'action manuelle passe par `/api/reviews?action=queue_analysis`; le claim IA utilise `extensions.digest`; les crons globaux restent réservés à `CRON_SECRET`. | Seul état final autorisable. |
 
 ## États intermédiaires de production
 
@@ -42,7 +42,8 @@ prévalidés : maintenance Vercel globale et sept Edge Functions safe-deny.
 | Quatre crons suspendus | 2 min | Comportement applicatif inchangé. | L'API cron-job.org applique uniquement `enabled=false`, dans l'ordre Google, IA, automatisations, rapports; aucune configuration Vercel/Supabase n'est modifiée. | Exactement une tâche `POST` en timezone `Europe/Paris` par URL et schedule observés; snapshot redigé + hash immuable; aucune tâche active. |
 | Maintenance Vercel active, backend actuel | 2 min avant début du safe-deny | Toute nouvelle navigation et toute route Vercel renvoient `503`; un bundle frontend déjà chargé peut encore appeler directement Supabase. | Les crons cron-job.org reçoivent `503`; les anciennes Edge restent présentes très brièvement. | HTTP `/`, `/api/loyalty/join` et les quatre routes cron attendues = `503`, `Retry-After: 120`. |
 | Maintenance + cinq Edge critiques safe-deny, base actuelle | 5 min | L'ancien RPC anonyme existe encore, mais aucun nouveau frontend n'est servi. | `process-review-analyze`, `generate-reply`, `post-reply-google`, `google_oauth_start`, `google_oauth_exchange` = `503`; aucun nouvel état OAuth. | Statut `503` et code `GOAL002_SAFE_DENY` pour chacune. |
-| Maintenance + migration durcie | 5 min de post-check | L'ancien RPC est fermé; aucune capacité avant preuve possible. L'ancien frontend devient matériellement incompatible mais reste bloqué par maintenance. | Crons toujours `503`; OAuth en drain; anciennes sync encore compatibles mais doivent ensuite être safe-deny avant reprise. | Ledger, grants, RLS, contraintes, bucket et RPC contrôlés; tout écart maintient la maintenance. |
+| Maintenance + migration de durcissement seule | état nominal transitoire; 8 min max si récupération | L'ancien RPC est fermé; aucune capacité avant preuve possible. | État `HARDENING_ONLY`; `process-review-analyze` reste safe-deny et le claim IA n'est pas autorisé. | Ledger `20260713073853`, invariants de durcissement et vecteur GOAL-006 préflight; seul le roll-forward vers `20260716142352` est permis. |
+| Maintenance + deux migrations | 5 min de post-check | L'ancien frontend reste bloqué; le backend one-shot et les frontières SQL sont prêts. | Crons toujours `503`; `claim_ai_tag_candidates` qualifié, borné et service-role-only. | Deux ledgers, `search_path=pg_catalog`, `extensions.digest`, ACL et probe SQL `GOAL002_SYNTH`. |
 | Maintenance + sept Edge safe-deny + base durcie | jusqu'à expiration du drain OAuth, 10 min depuis le safe-deny OAuth | Fermée sauf via le futur parcours vérifié, qui n'est pas encore servi. | Tous les appels Edge mutateurs renvoient `503`; crons `503`. | Aucun nouvel état OAuth; attente de dix minutes complètes. |
 | Maintenance + sept Edge sécurisées + base durcie | 14 min maximum | Backend compatible avec le parcours one-shot. | Déploiement et vérification d'une fonction à la fois; le reste demeure safe-deny. | Version/`verify_jwt`, `401/403/405`, absence de `500` et probes synthétiques sans fournisseur réel. |
 | Release correctif actif | 10 min de smoke tests | Nouvelle/existante indistinguables avant e-mail; capacités après preuve seulement. | Action IA manuelle tenant-scoped; les quatre crons restent suspendus jusqu'à leur reprise contrôlée un par un. | HTTP, A/B, quotas, logs redigés, compteurs SQL et absence de fuite inter-tenant. |
@@ -53,8 +54,9 @@ après le post-check de migration. Le Run attend exactement trois déploiements
 Vercel Production : maintenance, release sécurisé manuel, puis réactivation
 Git automatique.
 
-La durée maximale d'indisponibilité Vercel est de 41 minutes. La pause cron
-maximale, suspension et reprise contrôlée incluses, est de 51 minutes. Une
+La durée maximale d'indisponibilité Vercel est de 49 minutes si l'unique
+roll-forward `HARDENING_ONLY` est requis. La pause cron maximale, suspension
+et reprise contrôlée incluses, est de 59 minutes. Une
 étape qui dépasse son plafond ne déclenche jamais un rollback ancien :
 maintenance et safe-deny restent actifs pendant le diagnostic ou le
 roll-forward.
@@ -79,8 +81,9 @@ Résultat attendu :
 }
 ```
 
-Après application transactionnelle locale de
-`20260713073853_production_security_hardening.sql` :
+Après application locale, dans l'ordre, de
+`20260713073853_production_security_hardening.sql` puis
+`20260716142352_fix_claim_ai_tag_candidates_digest.sql` :
 
 ```bash
 npx tsx scripts/test-goal-002-compatibility-matrix.ts hardened
@@ -128,8 +131,9 @@ Le hotfix est versionné et ne restaure aucune capacité vulnérable :
    - aucun client Supabase, aucun RPC, aucun appel Google/OpenAI ;
    - paramètres `verify_jwt` identiques au contrat sécurisé.
 
-Le roll-forward déterministe conserve ou redéploie ces artefacts, corrige
-uniquement un commit enfant du release approuvé, rejoue toute la validation
-locale et déploie la fonction ou l'application corrigée. Il ne modifie ni RLS,
-ni grants, ni policies, ni données et ne réintroduit jamais une ancienne
+Le roll-forward déterministe conserve ces artefacts. Avant le release sécurisé,
+il permet seulement l'unique seconde migration depuis `HARDENING_ONLY`. Après
+le release, une erreur conserve le nouveau code et les safe-deny; un hotfix ou
+un deployment supplémentaire exige une nouvelle autorisation. Il ne modifie ni
+RLS, ni grants, ni policies, ni données et ne réintroduit jamais une ancienne
 version.

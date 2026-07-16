@@ -9,14 +9,17 @@ mutation par lui-même.
 - Vercel : projet `prj_GoGCD7ICIfemLSlegN4Tc8JcoxrT`, nom `egia`,
   équipe `team_zfHqQFVkGjeOVDHZTYvfkMmW`.
 - GitHub : `melvyn69/egia-mvp`.
-- Release : commit approuvé
-  `8b49ad9ea47b8bbfbf4c16b2a4b64218eb6af331`, enfant direct de
-  `7fad67914f4727d912d6922914e113ed452d137d`, contenant le correctif
-  `queue_analysis`, le watchdog de migration et les artefacts de récupération.
-- Migration unique :
-  `20260713073853_production_security_hardening.sql`.
+- Release exécutable approuvé :
+  `GOAL002_EXECUTABLE_RELEASE_SHA`, descendant de
+  `198aea23fbba9154327453507c010299f28e1da6`, contenant le correctif
+  `queue_analysis`, le correctif GOAL-006, le watchdog à deux migrations et les
+  artefacts de récupération.
+- Migrations exclusives, dans cet ordre strict :
+  1. `20260713073853_production_security_hardening.sql`;
+  2. `20260716142352_fix_claim_ai_tag_candidates_digest.sql`.
 
-Toute divergence d'identité, de SHA, d'arbre ou de migration arrête le Run.
+Toute divergence d'identité, de SHA, d'arbre, d'ordre ou de migration arrête
+le Run.
 
 ## Stratégie
 
@@ -41,24 +44,31 @@ Après cette première mutation, sont interdits :
 
 ## Préflight passif
 
-1. Vérifier les trois identités projet et le SHA release.
+1. Vérifier les trois identités projet et le SHA release. Confirmer
+   passivement l'authentification opérateur Supabase (`SUPABASE_ACCESS_TOKEN`
+   ou session CLI existante), Vercel (`VERCEL_TOKEN` ou session CLI existante)
+   et cron-job.org (clé présente dans le trousseau), sans afficher ni copier
+   aucune valeur.
 2. Vérifier que `main` contient toujours
    `git.deploymentEnabled.main = false`; aucun push ne doit créer un
    déploiement avant l'étape explicitement autorisée.
-3. Vérifier le ledger : GOAL-003 présente une fois, GOAL-002 absente.
+3. Vérifier le ledger : GOAL-003 présente une fois; `20260713073853` et
+   `20260716142352` absentes.
 4. Exécuter migration-history guard, bootstrap canonique plan-only, tests,
    lint, typecheck, build, audits et `git diff --check`.
-5. Exécuter `node scripts/run-goal-002-db-push.mjs --dry-run`; seule la
-   migration GOAL-002 doit être proposée.
+5. Exécuter `node scripts/run-goal-002-db-push.mjs --dry-run`; le helper doit
+   refuser tout plan autre que les deux migrations autorisées, exactement
+   dans l'ordre `20260713073853` puis `20260716142352`, sans troisième fichier.
 6. Capturer l'Evidence baseline exacte avant mutation :
 
    ```bash
-   GOAL002_INSPECTION_AUTHORIZED=fhadiwkdznhuxtlgrwfd:20260713073853 \
+   GOAL002_INSPECTION_AUTHORIZED=fhadiwkdznhuxtlgrwfd:20260713073853,20260716142352 \
    node scripts/inspect-goal-002-migration-state.mjs --capture-baseline
    ```
 
    Exiger `classification = BASELINE`, puis conserver le
-   `hardening_vector` à huit bits avec son timestamp et le SHA release.
+   `hardening_vector` à huit bits et le `digest_fix_vector` à quatre bits avec
+   leur timestamp et le SHA release.
 7. Vérifier passivement l'absence des objets prospectifs, l'intégrité
    relationnelle fidélité et les assets de marque. Tous les compteurs
    d'anomalie doivent être zéro.
@@ -102,9 +112,16 @@ L'état `enabled` observé avant le Run peut refléter la suspension temporaire
 des accès Supabase et n'appartient pas à cette configuration immuable. L'état
 cible après succès est `enabled=true` pour les quatre tâches.
 
-Avant la première modification, pour chacun des quatre `jobId`, exécuter
-`GET https://api.cron-job.org/jobs/<jobId>` avec le secret nommé
-`CRON_JOB_ORG_API_KEY`. Conserver une Evidence horodatée contenant :
+Avant la première modification, exécuter uniquement le helper versionné :
+
+```bash
+node scripts/manage-goal-002-cron-jobs.mjs snapshot \
+  --output evidence/goal002-cron-baseline.json
+```
+
+Le helper lit `CRON_JOB_ORG_API_KEY` directement dans le trousseau macOS,
+conserve la réponse brute uniquement en mémoire et n'émet jamais la clé ni une
+valeur d'en-tête. Conserver son Evidence horodatée contenant :
 
 - `jobId`, titre, URL, `enabled`, `requestMethod`, `schedule`,
   `requestTimeout`, `redirectSuccess`, `folderId`, notifications,
@@ -115,23 +132,18 @@ Avant la première modification, pour chacun des quatre `jobId`, exécuter
   `enabled`, `lastStatus`, `lastDuration`, `lastExecution`, `nextExecution`
   et `sslCertExpiry`.
 
-La mutation distante exacte est ensuite, dans l'ordre du tableau, un seul
-appel par tâche :
+La mutation distante exacte est ensuite :
 
 ```bash
-curl --fail-with-body --silent --show-error \
-  --request PATCH \
-  --header 'Content-Type: application/json' \
-  --header "Authorization: Bearer ${CRON_JOB_ORG_API_KEY}" \
-  --data '{"job":{"enabled":false}}' \
-  "https://api.cron-job.org/jobs/${JOB_ID}"
+node scripts/manage-goal-002-cron-jobs.mjs suspend \
+  --baseline evidence/goal002-cron-baseline.json
 ```
 
-Le delta envoyé contient uniquement `enabled=false`. Aucun autre champ n'est
-écrit. Après chaque `PATCH`, relire `GET /jobs/<jobId>` et exiger
-`enabled=false` ainsi qu'un SHA-256 immuable identique à l'Evidence
-pré-mutation. Plafond global : deux minutes. Les quatre tâches doivent être
-désactivées avant de poursuivre.
+Le helper suit l'ordre du tableau et envoie pour chaque tâche exactement
+`{"job":{"enabled":false}}`. Aucun autre champ n'est écrit. Après chaque
+`PATCH`, il relit le job en mémoire, exige `enabled=false`, compare le SHA-256
+immuable au snapshot et n'émet que la configuration redigée. Plafond global :
+deux minutes. Les quatre tâches doivent être désactivées avant de poursuivre.
 
 ### 2. Maintenance Vercel
 
@@ -167,6 +179,19 @@ Dans les deux minutes, vérifier :
 Les tâches cron-job.org sont déjà suspendues. Aucun job réel ne doit être
 réclamé pendant la fenêtre.
 
+Si le build ou le déploiement Maintenance no 1 échoue avant que l'alias Vercel,
+une Edge Function ou la base n'ait été modifié, restaurer exactement les états
+`enabled` du snapshot, y compris les tâches initialement inactives :
+
+```bash
+node scripts/manage-goal-002-cron-jobs.mjs restore \
+  --baseline evidence/goal002-cron-baseline.json
+```
+
+Exiger les quatre hashes immuables identiques, puis arrêter le Run. Cette
+récupération précoce ne force pas l'état cible final actif et ne modifie aucun
+autre champ cron.
+
 ### 3. Safe-deny Edge avant migration — cinq fonctions
 
 Déployer depuis `recovery/goal-002/edge-safe-deny`, dans cet ordre :
@@ -192,6 +217,19 @@ supabase functions deploy <function> \
 Ajouter `--no-verify-jwt` uniquement pour `process-review-analyze`. Capturer le
 SHA Git et les SHA-256 du `config.toml`, du helper et des sept `index.ts`.
 
+Après chaque déploiement, exécuter :
+
+```bash
+node scripts/probe-goal-002-safe-deny.mjs <function>
+```
+
+Le helper lit `SUPABASE_URL` et `SUPABASE_ANON_KEY` sans les afficher. Pour les
+six fonctions avec `verify_jwt=true`, il envoie la clé anonyme à la fois comme
+`apikey` et Bearer afin de franchir le gateway et d'atteindre le safe-deny.
+Pour `process-review-analyze --no-verify-jwt`, il envoie uniquement `apikey`.
+Le seul résultat accepté est `503` JSON avec
+`code=GOAL002_SAFE_DENY` et le nom exact de la fonction.
+
 Cette séparation est technique et définitive :
 
 - `process-review-analyze` réclame et modifie des jobs avec `service_role`;
@@ -205,40 +243,60 @@ Ces cinq fonctions traversent donc une frontière privilégiée, fournisseur ou
 OAuth directement affectée par le durcissement. Elles doivent être `503`
 avant toute modification de la base.
 
-### 4. Migration restrictive
+### 4. Deux migrations strictes et ordonnées
 
-La migration versionnée reste strictement immuable. Exécuter uniquement :
+Les deux migrations versionnées restent strictement immuables. Exécuter
+uniquement :
 
 ```bash
-GOAL002_PRODUCTION_AUTHORIZED=fhadiwkdznhuxtlgrwfd:20260713073853 \
+GOAL002_MIGRATION_MODE=BASELINE_CHAIN \
+GOAL002_PRODUCTION_AUTHORIZED=fhadiwkdznhuxtlgrwfd:20260713073853,20260716142352 \
 node scripts/run-goal-002-db-push.mjs
 ```
 
-Le helper lance exactement `supabase db push --linked`, sans `--include-all`,
-`--include-seed`, `--include-roles` ni `migration repair`. Son watchdog
-envoie `SIGTERM` à 125 secondes puis `SIGKILL` au plafond dur de 130 secondes.
-La connexion est marquée
-`application_name = goal002_migration_20260713073853`.
+Le helper lance d'abord `supabase db push --linked --dry-run`, capture
+uniquement le plan et refuse un fichier absent, supplémentaire ou inversé. Il
+lance ensuite exactement `supabase db push --linked`, sans `--include-all`,
+`--include-seed`, `--include-roles` ni `migration repair`. Supabase applique
+les fichiers selon leur timestamp : le durcissement d'abord, puis le correctif
+GOAL-006. Son watchdog envoie `SIGTERM` à 125 secondes puis `SIGKILL` au
+plafond dur de 130 secondes. La connexion est marquée
+`application_name = goal002_migrations_20260713073853_20260716142352`.
 Le code de sortie `124` ne permet pas de conclure si la transaction a été
-annulée ou validée juste avant la perte de réponse. Il impose de conserver
-maintenance, safe-deny et crons suspendus, puis d'appliquer la classification
-passive décrite dans la section « Arrêt et roll-forward ».
+annulée, si les deux transactions ont été validées ou si seule la première l'a
+été juste avant la perte de réponse. Il impose de conserver maintenance,
+safe-deny et crons suspendus, puis d'appliquer la classification passive
+décrite dans la section « Arrêt et roll-forward ».
 
 Post-check, plafond cinq minutes :
 
-- ledger GOAL-002 présent une fois;
+- ledgers `20260713073853` puis `20260716142352` présents chacun exactement
+  une fois;
 - tables, RLS, vues `security_invoker`, fonctions et `search_path` conformes;
 - `join_loyalty_program`, `finalize_loyalty_enrollment` et
   `consume_security_rate_limit` réservées à `service_role`;
+- `claim_ai_tag_candidates` avec `search_path=pg_catalog`, deux appels
+  `extensions.digest(text,text)` et `EXECUTE` réservé à `service_role`;
 - contraintes de scope fidélité validées;
 - bucket `brand-assets` privé, taille et MIME conformes.
+- exécution transactionnelle exacte :
+
+  ```bash
+  psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 \
+    -f supabase/tests/goal002_claim_ai_tag_candidates_postdeploy.sql
+  ```
+
+  Les seules fixtures sont préfixées `GOAL002_SYNTH` et le fichier se termine
+  par `ROLLBACK`. Il vérifie résolution de `digest`, claim atomique, filtre
+  lieu A/B, plafond 20, résistance au `search_path` attaquant et refus
+  `anon`/`authenticated`.
 
 L'application `cb82cc...` est alors matériellement incompatible. C'est attendu
 et sûr uniquement parce que la maintenance reste active. Un frontend ancien
 déjà en cache obtient un refus sur l'inscription fidélité et sur les grants
 retirés; il ne récupère aucune capacité.
 
-### 5. Safe-deny Edge après migration — deux fonctions
+### 5. Safe-deny Edge après les deux migrations — deux fonctions
 
 Déployer et vérifier :
 
@@ -254,7 +312,7 @@ Ces deux fonctions de synchronisation utilisent uniquement les tables
 des grants navigateur retirés par la migration. Avec les quatre crons
 suspendus et Vercel en maintenance, elles restent compatibles pendant
 l'application transactionnelle du SQL. Elles sont placées en safe-deny
-immédiatement après le post-check afin de réduire la fenêtre de synchronisation
+immédiatement après le post-check des deux migrations afin de réduire la fenêtre de synchronisation
 indisponible sans exposer une frontière incompatible. Cet ordre ne peut pas
 être remplacé par un déploiement des sept fonctions avant migration.
 
@@ -333,19 +391,16 @@ Réactiver une tâche à la fois par l'API cron-job.org, dans cet ordre :
 3. IA — `/api/cron/ai/tag-reviews`;
 4. synchronisation Google — `/api/cron/google/sync-replies`.
 
-Pour chaque `jobId`, exécuter uniquement :
+Exécuter uniquement :
 
 ```bash
-curl --fail-with-body --silent --show-error \
-  --request PATCH \
-  --header 'Content-Type: application/json' \
-  --header "Authorization: Bearer ${CRON_JOB_ORG_API_KEY}" \
-  --data '{"job":{"enabled":true}}' \
-  "https://api.cron-job.org/jobs/${JOB_ID}"
+node scripts/manage-goal-002-cron-jobs.mjs resume \
+  --baseline evidence/goal002-cron-baseline.json
 ```
 
-Plafond : deux minutes par tâche. Après chaque réactivation, vérifier le statut
-HTTP et l'Evidence du premier passage. Relire `GET /jobs/<jobId>` et exiger :
+Le helper suit l'ordre ci-dessus et envoie uniquement
+`{"job":{"enabled":true}}`. Plafond : deux minutes par tâche. Après chaque
+réactivation, il relit la tâche en mémoire et exige :
 
 - `enabled=true`;
 - le même `jobId`;
@@ -382,9 +437,9 @@ doit créer aucun déploiement, car `git.deploymentEnabled.main=false`.
 
 | Numéro | Source attendue | Target | Effet exact sur l'alias Production | Condition de succès | Nécessité |
 | ---: | --- | --- | --- | --- | --- |
-| 1 | Paquet `recovery/goal-002/vercel-maintenance` du SHA `8b49ad9ea47b8bbfbf4c16b2a4b64218eb6af331`, hashes préflight identiques | `production` | L'alias canonique du projet `egia` pointe vers la maintenance globale `503` | Deployment ID capturé; `/`, fidélité et quatre routes cron = `503`; `no-store`; `Retry-After: 120` | Empêche l'ancien frontend d'utiliser le backend pendant les états incompatibles. |
-| 2 | Application sécurisée du SHA `8b49ad9ea47b8bbfbf4c16b2a4b64218eb6af331`, construite et déployée manuellement avec `--prebuilt --prod` | `production` | Le même alias quitte la maintenance et pointe vers le release sécurisé | Deployment ID/SHA exacts; smoke tests synthétiques verts; aucune `5xx` persistante | Restaure le service seulement après base durcie et sept Edge sécurisées. |
-| 3 | Commit enfant de réactivation dont l'unique diff supprime `git.deploymentEnabled.main`; contenu applicatif identique au SHA `8b49ad9...` | `production`, automatique après fusion sur `main` | L'alias est réassigné au build Git du release sécurisé avec l'auto-déploiement de `main` restauré | Exactement un nouveau Deployment ID; CI verte; diff limité; probes identiques au déploiement 2 | Rétablit le contrat Git/Vercel durable; le déploiement manuel 2 ne réactive pas à lui seul les futurs déploiements de `main`. |
+| 1 | Paquet `recovery/goal-002/vercel-maintenance` du SHA `GOAL002_EXECUTABLE_RELEASE_SHA`, hashes préflight identiques | `production` | L'alias canonique du projet `egia` pointe vers la maintenance globale `503` | Deployment ID capturé; `/`, fidélité et quatre routes cron = `503`; `no-store`; `Retry-After: 120` | Empêche l'ancien frontend d'utiliser le backend pendant les états incompatibles. |
+| 2 | Application sécurisée du SHA `GOAL002_EXECUTABLE_RELEASE_SHA`, construite et déployée manuellement avec `--prebuilt --prod` | `production` | Le même alias quitte la maintenance et pointe vers le release sécurisé | Deployment ID/SHA exacts; deux migrations et sept Edge vérifiées; smoke tests synthétiques verts; aucune `5xx` persistante | Restaure le service seulement après base durcie, correctif GOAL-006 et sept Edge sécurisées. |
+| 3 | Commit enfant de réactivation dont l'unique diff supprime `git.deploymentEnabled.main`; contenu applicatif identique au SHA `GOAL002_EXECUTABLE_RELEASE_SHA` | `production`, automatique après fusion sur `main` | L'alias est réassigné au build Git du release sécurisé avec l'auto-déploiement de `main` restauré | Exactement un nouveau Deployment ID; CI verte; diff limité; probes identiques au déploiement 2 | Rétablit le contrat Git/Vercel durable; le déploiement manuel 2 ne réactive pas à lui seul les futurs déploiements de `main`. |
 
 Zéro Preview est attendu. Un quatrième déploiement Production, l'absence de
 l'un des trois, un target différent ou une source différente arrête le Run.
@@ -396,8 +451,10 @@ autorisation fondatrice.
 - suspension des quatre crons : 2 min;
 - maintenance initiale : 2 min;
 - cinq safe-deny critiques : 5 min;
-- migration : 130 s;
-- post-check migration : 5 min;
+- chaîne des deux migrations : 130 s;
+- état `HARDENING_ONLY`, classification et unique roll-forward GOAL-006 :
+  8 min maximum;
+- post-check des deux migrations : 5 min;
 - deux safe-deny restants : 2 min;
 - drain OAuth : dix minutes depuis le safe-deny start, entièrement absorbées
   par la fin du safe-deny, la migration et ses post-checks;
@@ -405,8 +462,9 @@ autorisation fondatrice.
 - release Vercel et smoke tests : 10 min.
 - reprise des quatre crons : 8 min.
 
-Indisponibilité Vercel maximale : 41 minutes, de la maintenance au release.
-Pause cron maximale : 51 minutes, suspension et reprise incluses. Un
+Indisponibilité Vercel maximale : 49 minutes, de la maintenance au release,
+si l'unique récupération `HARDENING_ONLY` est nécessaire. Pause cron maximale :
+59 minutes, suspension et reprise incluses. Un
 dépassement conserve maintenance, safe-deny et crons suspendus; il n'autorise
 aucun rollback ancien.
 
@@ -414,6 +472,8 @@ aucun rollback ancien.
 
 Supabase / Edge :
 
+- `SUPABASE_ACCESS_TOKEN` — credential opérateur CLI, jamais ajouté au projet
+  ni aux Evidence;
 - `SUPABASE_DB_URL`
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
@@ -436,6 +496,8 @@ Ordonnanceur externe :
 
 Vercel :
 
+- `VERCEL_TOKEN` — credential opérateur CLI, jamais ajouté au projet ni aux
+  Evidence;
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 - `SUPABASE_URL`
@@ -486,10 +548,26 @@ donnée client.
 
 ## Arrêt et roll-forward
 
-Après la première mutation, toute erreur conserve ou redéploie :
+Après la première mutation et avant le release sécurisé, toute erreur
+conserve :
 
 - `recovery/goal-002/vercel-maintenance`;
 - les sept fonctions de `recovery/goal-002/edge-safe-deny`.
+
+Après le déploiement Production no 2, aucun quatrième déploiement Vercel n'est
+autorisé. Le recovery maintient le nouveau release sécurisé et les safe-deny
+ciblés. Si une isolation frontend complète est indispensable, exécuter
+exactement :
+
+```bash
+vercel promote "$GOAL002_MAINTENANCE_DEPLOYMENT_ID" --yes --timeout 3m
+```
+
+Cette promotion réutilise le deployment no 1 et ne crée aucun deployment. Le
+Run s'arrête alors : aucune promotion retour, aucun déploiement no 3 et aucun
+hotfix Vercel n'est autorisé sans nouvelle décision fondatrice. Si le release
+no 2 reste servi, tout hotfix applicatif qui créerait un nouveau deployment
+exige également une nouvelle autorisation.
 
 Procédure :
 
@@ -497,39 +575,59 @@ Procédure :
 2. confirmer safe-deny `503` sur toute fonction non fiable;
 3. si le watchdog migration retourne `124`, attendre passivement au maximum
    deux minutes que la session marquée
-   `goal002_migration_20260713073853` disparaisse; tant qu'elle existe, ne
-   lancer aucune autre migration;
+   `goal002_migrations_20260713073853_20260716142352` disparaisse; tant
+   qu'elle existe, ne lancer aucune autre migration;
 4. exécuter exactement l'inspecteur passif versionné :
 
    ```bash
    GOAL002_BASELINE_HARDENING_VECTOR=<valeur-capturée-au-préflight> \
-   GOAL002_INSPECTION_AUTHORIZED=fhadiwkdznhuxtlgrwfd:20260713073853 \
+   GOAL002_BASELINE_DIGEST_FIX_VECTOR=<valeur-capturée-au-préflight> \
+   GOAL002_INSPECTION_AUTHORIZED=fhadiwkdznhuxtlgrwfd:20260713073853,20260716142352 \
    node scripts/inspect-goal-002-migration-state.mjs
    ```
 
    Il utilise le client Node `pg` versionné et uniquement `SUPABASE_DB_URL`,
    marque sa propre connexion `goal002_state_inspector`, puis exécute
    `scripts/inspect-goal-002-migration-state.sql`. L'Evidence JSON compte la
-   session exacte, l'entrée ledger, les dix objets prospectifs et huit
-   invariants de grants, RLS, policies, colonnes et bucket. La connexion est
-   bornée à dix secondes, la requête à trente secondes et le processus à
-   quarante-cinq secondes; tout timeout vaut arrêt fail-closed;
-5. `COMMITTED` signifie : aucune session, ledger `20260713073853` exactement
-   une fois, dix objets prospectifs présents et huit invariants conformes.
-   Ne pas rejouer; reprendre le post-check complet;
-6. `ROLLED_BACK` signifie : aucune session, ledger absent, zéro objet
-   prospectif et vecteur de durcissement strictement identique aux huit bits
-   capturés avant toute mutation. Après correction de la cause externe,
-   rejouer une seule fois la même migration immuable avec le même helper;
-7. si le ledger et le catalogue divergent, si un objet est partiel, si la
+   session exacte, les deux entrées ledger, les dix objets prospectifs, les
+   huit invariants de durcissement et les quatre invariants GOAL-006
+   (signature `extensions.digest`, `SECURITY DEFINER`/`search_path`, appels
+   qualifiés, ACL). La connexion est bornée à dix secondes, la
+   requête à trente secondes et le processus à quarante-cinq secondes; tout
+   timeout vaut arrêt fail-closed;
+5. `COMMITTED` signifie : aucune session, les deux ledgers exactement une
+   fois, dix objets prospectifs présents, huit invariants de durcissement et
+   quatre invariants GOAL-006 conformes. Ne pas rejouer; reprendre le post-check
+   complet;
+6. `HARDENING_ONLY` signifie : `20260713073853` est validée,
+   `20260716142352` est absente, le durcissement est complet et la définition
+   de `claim_ai_tag_candidates` correspond encore exactement au vecteur
+   préflight. Maintenir maintenance, sept safe-deny et crons suspendus; après
+   correction de la cause externe, relancer une seule fois le même helper. Son
+   dry-run doit alors proposer uniquement
+   `20260716142352_fix_claim_ai_tag_candidates_digest.sql`; aucun retour à la
+   base antérieure n'est autorisé. La commande de récupération exacte est :
+
+   ```bash
+   GOAL002_MIGRATION_MODE=HARDENING_ONLY_ROLL_FORWARD \
+   GOAL002_PRODUCTION_AUTHORIZED=fhadiwkdznhuxtlgrwfd:20260713073853,20260716142352 \
+   node scripts/run-goal-002-db-push.mjs
+   ```
+7. `ROLLED_BACK` signifie : aucune session, les deux ledgers absents, zéro
+   objet prospectif et les deux vecteurs strictement identiques au préflight.
+   Après correction de la cause externe, rejouer une seule fois la chaîne
+   immuable avec le même helper;
+8. si un ledger et le catalogue divergent, si un objet est partiel, si la
    classification vaut `ACTIVE`/`INCONSISTENT`, si la session persiste au-delà
-   de deux minutes ou si l'unique rejeu échoue,
+   de deux minutes ou si l'unique roll-forward échoue,
    arrêter le Run en maintenant maintenance, safe-deny et crons suspendus;
-8. pour une erreur applicative ou Edge, ne modifier ni migration, ni grants,
-   ni RLS, ni données; créer un commit enfant minimal du release approuvé;
-9. rejouer tests complets, matrice locale, build et revues;
-10. redéployer uniquement la fonction ou le release corrigé;
-11. reprendre les post-checks depuis l'étape concernée.
+9. pour une erreur applicative ou Edge, ne modifier ni migration, ni grants,
+   ni RLS, ni données; maintenir le release sécurisé ou le safe-deny concerné,
+   préparer un commit enfant minimal et arrêter le Run;
+10. rejouer localement tests complets, matrice, build et revues pour préparer
+    une autorisation de roll-forward séparée;
+11. ne redéployer aucune fonction corrigée et aucun release corrigé dans ce
+    Run sans cette nouvelle autorisation.
 
 Le hotfix de récupération prévalidé et immédiatement disponible est le paquet
 versionné `recovery/goal-002` : maintenance Vercel globale `503` et sept Edge
@@ -547,7 +645,8 @@ et ne justifie jamais la restauration de droits vulnérables.
 - secret obligatoire absent;
 - maintenance non globale;
 - safe-deny non vérifié;
-- migration non atomique ou post-check divergent;
+- ordre de migration divergent, état partiel non classifiable ou post-check
+  divergent;
 - état OAuth encore valide après le drain;
 - fuite inter-tenant ou capacité avant preuve e-mail;
 - déploiement non lié au release;
@@ -558,10 +657,108 @@ et ne justifie jamais la restauration de droits vulnérables.
 ## Evidence de clôture
 
 - PR de release et SHA fusionné;
-- dry-run, ledger et catalogues;
+- dry-run exact, deux ledgers et catalogues;
 - IDs maintenance, sept safe-deny, sept Edge sécurisées, release Vercel et
   déploiement de réactivation;
 - résultats A/B, fidélité one-shot, action IA et crons;
 - logs redigés et absence de donnée réelle;
 - revue indépendante finale `APPROVED FOR PRODUCTION`;
 - GOAL-002 passe `Running → Done` uniquement après toutes ces Evidence.
+
+## Founder Brief — autorisation de production demandée
+
+### Objectif
+
+Déployer le release sécurisé GOAL-002 avec GOAL-006, sans réintroduire un code,
+un droit ou une fonction vulnérable.
+
+### Résultat préparé
+
+- Release exécutable : `GOAL002_EXECUTABLE_RELEASE_SHA`.
+- Supabase : `fhadiwkdznhuxtlgrwfd` / `egia-mvp`.
+- Vercel : `prj_GoGCD7ICIfemLSlegN4Tc8JcoxrT` / `egia`.
+- Quatre crons identifiés et gérés par le helper versionné redigé.
+- Exactement trois déploiements Vercel Production et zéro Preview.
+
+### Mutations de production prévues
+
+1. snapshot redigé puis suspension `enabled=false` des crons Google, IA,
+   Automations, Monthly reports;
+2. déploiement Vercel Production no 1 : maintenance du release
+   `GOAL002_EXECUTABLE_RELEASE_SHA`;
+3. safe-deny, dans l'ordre : `process-review-analyze`,
+   `generate-reply`, `post-reply-google`, `google_oauth_start`,
+   `google_oauth_exchange`;
+4. migrations exclusives, dans l'ordre :
+   `20260713073853_production_security_hardening.sql`, puis
+   `20260716142352_fix_claim_ai_tag_candidates_digest.sql`;
+5. safe-deny : `google_gbp_sync_locations`, puis `google_gbp_sync_all`;
+6. déploiement des sept Edge Functions sécurisées dans l'ordre versionné;
+7. déploiement Vercel Production no 2 : application du release
+   `GOAL002_EXECUTABLE_RELEASE_SHA`;
+8. tests `GOAL002_SYNTH`;
+9. réactivation `enabled=true` des crons Monthly reports, Automations, IA,
+   Google, sans modifier leur autre configuration;
+10. suppression versionnée de `git.deploymentEnabled.main`, CI et fusion;
+11. déploiement Vercel Production no 3 automatique du contenu applicatif
+    identique au release sécurisé.
+
+### Tests prévus
+
+Deux comptes, tenants et lieux synthétiques; isolation A/B; fidélité
+nouvelle/existante indistinguable avant e-mail; absence de carte, QR et Wallet
+avant preuve; replay refusé; claim IA qualifié et borné; invitations, uploads,
+assets, rapports, OAuth et crons; Evidence redigées des ledgers, catalogues,
+versions Edge, deployment IDs, HTTP et hashes cron.
+
+### Risque et récupération
+
+Le risque principal est un état partiel entre les deux migrations ou entre
+backend et frontend. `HARDENING_ONLY` autorise uniquement le roll-forward vers
+GOAL-006. Après la première mutation, aucun retour vers `cb82cc...`,
+`7fad679...`, une ancienne Edge Function, un grant public ou une RLS affaiblie
+n'est permis. Maintenance et safe-deny restent disponibles; après le
+deployment no 2, aucun nouveau deployment/hotfix n'est permis sans nouvelle
+autorisation.
+
+### Décision demandée
+
+> J'autorise le Run de production GOAL-002 sur Supabase
+> `fhadiwkdznhuxtlgrwfd` / `egia-mvp` et Vercel
+> `prj_GoGCD7ICIfemLSlegN4Tc8JcoxrT` / `egia`, exclusivement depuis le release
+> `GOAL002_EXECUTABLE_RELEASE_SHA`. J'autorise la suspension puis la
+> réactivation `enabled` des quatre cronjobs identifiés, sans modification de
+> leurs URL, méthodes, timezones, cadences, headers ou autres champs;
+> exactement trois déploiements Vercel Production et zéro Preview; les cinq
+> safe-deny pré-migration puis les deux safe-deny post-migrations dans l'ordre
+> documenté; exclusivement
+> `20260713073853_production_security_hardening.sql`, puis
+> `20260716142352_fix_claim_ai_tag_candidates_digest.sql`; les sept Edge
+> Functions sécurisées; les tests transactionnels et HTTP `GOAL002_SYNTH`; et
+> la réactivation versionnée finale de `main`. Les noms de credentials,
+> variables et secrets dont la présence et la portée peuvent être vérifiées
+> sont exactement : `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_URL`,
+> `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
+> `SERVICE_ROLE_KEY`, `VERCEL_TOKEN`, `CRON_JOB_ORG_API_KEY`,
+> `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `APP_URL`, `APP_BASE_URL`,
+> `APP_PUBLIC_URL`, `AUTOMATION_REPLY_URL`, `VERCEL_URL`, `RESEND_API_KEY`,
+> `EMAIL_FROM`, `CRON_SECRET`, `PROCESS_REVIEW_ANALYZE_SECRET`,
+> `INTERNAL_API_KEY`, `OPENAI_API_KEY`, `OPENAI_MODEL`,
+> `OPENAI_REPLY_MODEL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+> `ALLOWED_ORIGIN`, `ALLOWED_ORIGINS`, `AI_USER_REQUESTS_PER_HOUR`,
+> `APPLE_PASS_TYPE_IDENTIFIER`, `APPLE_TEAM_IDENTIFIER`,
+> `APPLE_PASS_CERTIFICATE`, `APPLE_PASS_PRIVATE_KEY`,
+> `APPLE_WWDR_CERTIFICATE` et `APPLE_PASS_CERTIFICATE_PASSWORD`; aucune valeur
+> ne doit être affichée, copiée, modifiée ou ajoutée. J'interdis tout compte ou
+> donnée client, toute
+> autre migration, tout quatrième déploiement Vercel, tout Preview, toute
+> restauration d'un SHA ou droit vulnérable et toute modification de secret
+> ou configuration non prévue. Arrêt obligatoire sur identité/SHA divergent,
+> dry-run non exact, secret absent, drift cron, fuite inter-tenant, capacité
+> fidélité avant preuve, état migration `ACTIVE`/`INCONSISTENT`, safe-deny ou
+> post-check non conforme, erreur 5xx persistante ou dépassement des plafonds.
+> J'autorise comme récupération uniquement la restauration exacte des états
+> cron initiaux avant toute mutation backend, l'unique roll-forward GOAL-006
+> depuis `HARDENING_ONLY`, le maintien des safe-deny, ou la promotion du
+> deployment Maintenance no 1 déjà créé; cette dernière action arrête le Run
+> et exige une nouvelle autorisation pour reprendre.

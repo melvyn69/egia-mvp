@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 
 const args = process.argv.slice(2);
@@ -14,11 +15,26 @@ if (!selfTest && !timeoutSelfTest && !dryRun && !productionRun) {
   process.exit(2);
 }
 
+const expectedMigrations = [
+  "20260713073853_production_security_hardening.sql",
+  "20260716142352_fix_claim_ai_tag_candidates_digest.sql"
+];
+const migrationMode =
+  process.env.GOAL002_MIGRATION_MODE ?? "BASELINE_CHAIN";
+const expectedPlan =
+  migrationMode === "BASELINE_CHAIN"
+    ? expectedMigrations
+    : migrationMode === "HARDENING_ONLY_ROLL_FORWARD"
+      ? expectedMigrations.slice(1)
+      : null;
 const authorization =
-  "fhadiwkdznhuxtlgrwfd:20260713073853";
+  "fhadiwkdznhuxtlgrwfd:20260713073853,20260716142352";
+const applicationName =
+  "goal002_migrations_20260713073853_20260716142352";
 if (
   productionRun &&
-  process.env.GOAL002_PRODUCTION_AUTHORIZED !== authorization
+  (process.env.GOAL002_PRODUCTION_AUTHORIZED !== authorization ||
+    expectedPlan === null)
 ) {
   console.error(
     "Refusing production db push without the exact GOAL-002 authorization marker."
@@ -26,60 +42,161 @@ if (
   process.exit(2);
 }
 
-const softTimeoutMs = timeoutSelfTest ? 250 : selfTest ? 2_000 : 125_000;
-const hardTimeoutMs = timeoutSelfTest ? 350 : selfTest ? 7_000 : 130_000;
-const command = selfTest || timeoutSelfTest ? process.execPath : "supabase";
-const commandArgs = selfTest
-  ? ["-e", "process.exit(0)"]
-  : timeoutSelfTest
-    ? [
-        "-e",
-        "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"
-      ]
-  : ["db", "push", "--linked", ...(dryRun ? ["--dry-run"] : [])];
+export const extractMigrationFilenames = (output) => [
+  ...new Set(
+    output.match(/\b\d{14}_[a-z0-9_]+\.sql\b/gi) ?? []
+  )
+];
 
-const child = spawn(command, commandArgs, {
-  stdio: "inherit",
-  env: {
-    ...process.env,
-    PGAPPNAME: "goal002_migration_20260713073853"
-  }
-});
-
-let timedOut = false;
-const softTimeout = setTimeout(() => {
-  timedOut = true;
-  console.error(
-    `GOAL-002 database push exceeded ${softTimeoutMs}ms; terminating the client.`
+export const assertExactMigrationPlan = (output, plan = expectedPlan) => {
+  assert.ok(plan, `Unsupported GOAL002_MIGRATION_MODE: ${migrationMode}`);
+  assert.deepEqual(
+    extractMigrationFilenames(output),
+    plan,
+    `Expected exactly these migrations in order: ${plan.join(", ")}`
   );
-  child.kill("SIGTERM");
-}, softTimeoutMs);
-const hardTimeout = setTimeout(() => {
-  timedOut = true;
-  console.error(
-    `GOAL-002 database push reached the hard ${hardTimeoutMs}ms ceiling.`
+};
+
+if (selfTest) {
+  assertExactMigrationPlan(`
+    Would push these migrations:
+    ${expectedMigrations[0]}
+    ${expectedMigrations[1]}
+  `, expectedMigrations);
+  assertExactMigrationPlan(
+    `Would push this migration: ${expectedMigrations[1]}`,
+    expectedMigrations.slice(1)
   );
-  child.kill("SIGKILL");
-}, hardTimeoutMs);
+  assert.throws(
+    () =>
+      assertExactMigrationPlan(`
+        ${expectedMigrations[1]}
+        ${expectedMigrations[0]}
+      `, expectedMigrations),
+    /Expected exactly these migrations in order/
+  );
+  assert.throws(
+    () =>
+      assertExactMigrationPlan(`
+        ${expectedMigrations[0]}
+        20260717000000_unexpected.sql
+        ${expectedMigrations[1]}
+      `, expectedMigrations),
+    /Expected exactly these migrations in order/
+  );
+  console.log("GOAL-002 exact migration-plan self-test passed.");
+  process.exit(0);
+}
 
-child.on("error", (error) => {
-  clearTimeout(softTimeout);
-  clearTimeout(hardTimeout);
-  console.error(`Unable to start database push: ${error.message}`);
-  process.exitCode = 1;
-});
+const runCommand = ({
+  command,
+  commandArgs,
+  softTimeoutMs,
+  hardTimeoutMs,
+  captureOutput
+}) =>
+  new Promise((resolve) => {
+    const child = spawn(command, commandArgs, {
+      stdio: captureOutput ? ["ignore", "pipe", "pipe"] : "inherit",
+      env: {
+        ...process.env,
+        PGAPPNAME: applicationName
+      }
+    });
 
-child.on("exit", (code, signal) => {
-  clearTimeout(softTimeout);
-  clearTimeout(hardTimeout);
-  if (timedOut) {
-    process.exitCode = 124;
-    return;
-  }
-  if (signal) {
-    console.error(`Database push terminated by signal ${signal}.`);
-    process.exitCode = 1;
-    return;
-  }
-  process.exitCode = code ?? 1;
+    let output = "";
+    if (captureOutput) {
+      child.stdout.on("data", (chunk) => {
+        output += chunk.toString();
+      });
+      child.stderr.on("data", (chunk) => {
+        output += chunk.toString();
+      });
+    }
+
+    let timedOut = false;
+    const softTimeout = setTimeout(() => {
+      timedOut = true;
+      console.error(
+        `GOAL-002 database push exceeded ${softTimeoutMs}ms; terminating the client.`
+      );
+      child.kill("SIGTERM");
+    }, softTimeoutMs);
+    const hardTimeout = setTimeout(() => {
+      timedOut = true;
+      console.error(
+        `GOAL-002 database push reached the hard ${hardTimeoutMs}ms ceiling.`
+      );
+      child.kill("SIGKILL");
+    }, hardTimeoutMs);
+
+    child.on("error", (error) => {
+      clearTimeout(softTimeout);
+      clearTimeout(hardTimeout);
+      console.error(`Unable to start database push: ${error.message}`);
+      resolve({ code: 1, output, timedOut: false });
+    });
+
+    child.on("exit", (code, signal) => {
+      clearTimeout(softTimeout);
+      clearTimeout(hardTimeout);
+      if (timedOut) {
+        resolve({ code: 124, output, timedOut: true });
+        return;
+      }
+      if (signal) {
+        console.error(`Database push terminated by signal ${signal}.`);
+        resolve({ code: 1, output, timedOut: false });
+        return;
+      }
+      resolve({ code: code ?? 1, output, timedOut: false });
+    });
+  });
+
+if (timeoutSelfTest) {
+  const result = await runCommand({
+    command: process.execPath,
+    commandArgs: [
+      "-e",
+      "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"
+    ],
+    softTimeoutMs: 250,
+    hardTimeoutMs: 350,
+    captureOutput: false
+  });
+  process.exit(result.code);
+}
+
+const dryRunResult = await runCommand({
+  command: "supabase",
+  commandArgs: ["db", "push", "--linked", "--dry-run"],
+  softTimeoutMs: 55_000,
+  hardTimeoutMs: 60_000,
+  captureOutput: true
 });
+if (dryRunResult.code !== 0) {
+  console.error("GOAL-002 migration dry-run failed.");
+  process.exit(dryRunResult.code);
+}
+try {
+  assertExactMigrationPlan(dryRunResult.output);
+} catch (error) {
+  console.error(error.message);
+  process.exit(3);
+}
+console.log(
+  `GOAL-002 migration plan verified: ${expectedPlan.join(" -> ")}`
+);
+
+if (dryRun) {
+  process.exit(0);
+}
+
+const pushResult = await runCommand({
+  command: "supabase",
+  commandArgs: ["db", "push", "--linked"],
+  softTimeoutMs: 125_000,
+  hardTimeoutMs: 130_000,
+  captureOutput: false
+});
+process.exit(pushResult.code);

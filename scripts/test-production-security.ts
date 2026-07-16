@@ -788,19 +788,29 @@ check("production recovery artifacts fail closed without vulnerable rollback", (
   assert.match(migrationWatchdog, /130_000/);
   assert.match(
     migrationWatchdog,
-    /PGAPPNAME: "goal002_migration_20260713073853"/
+    /goal002_migrations_20260713073853_20260716142352/
   );
   assert.match(
     migrationWatchdog,
-    /fhadiwkdznhuxtlgrwfd:20260713073853/
+    /fhadiwkdznhuxtlgrwfd:20260713073853,20260716142352/
   );
+  assert.match(migrationWatchdog, /assertExactMigrationPlan/);
   assert.match(
     migrationWatchdog,
-    /\["db", "push", "--linked", \.\.\.\(dryRun \? \["--dry-run"\] : \[\]\)\]/
+    /20260713073853_production_security_hardening\.sql[\s\S]*20260716142352_fix_claim_ai_tag_candidates_digest\.sql/
   );
+  assert.match(migrationWatchdog, /\["db", "push", "--linked", "--dry-run"\]/);
+  assert.match(migrationWatchdog, /\["db", "push", "--linked"\]/);
   assert.match(migrationWatchdog, /child\.kill\("SIGTERM"\)/);
   assert.match(migrationWatchdog, /child\.kill\("SIGKILL"\)/);
-  assert.match(migrationWatchdog, /process\.exitCode = 124/);
+
+  const planResult = spawnSync(
+    process.execPath,
+    ["scripts/run-goal-002-db-push.mjs", "--self-test"],
+    { cwd: root, encoding: "utf8", timeout: 2_000 }
+  );
+  assert.equal(planResult.status, 0);
+  assert.match(planResult.stdout, /exact migration-plan self-test passed/);
 
   const timeoutResult = spawnSync(
     process.execPath,
@@ -838,12 +848,18 @@ check("production recovery artifacts fail closed without vulnerable rollback", (
   );
   assert.match(
     migrationInspection,
-    /application_name = 'goal002_migration_20260713073853'/
+    /goal002_migrations_20260713073853_20260716142352/
   );
   assert.match(migrationInspection, /where version = '20260713073853'/);
+  assert.match(migrationInspection, /where version = '20260716142352'/);
+  assert.match(migrationInspection, /extensions\[.\]digest/);
+  assert.match(migrationInspection, /search_path=pg_catalog/);
+  assert.match(migrationInspection, /claim_ai_tag_candidates/);
   assert.match(migrationInspection, /prospective_expected/);
   assert.match(migrationInspection, /hardening_expected/);
   assert.match(migrationInspection, /hardening_vector/);
+  assert.match(migrationInspection, /digest_fix_expected/);
+  assert.match(migrationInspection, /digest_fix_vector/);
 
   const inspector = read("scripts/inspect-goal-002-migration-state.mjs");
   assert.match(inspector, /connectionTimeoutMillis: 10_000/);
@@ -851,6 +867,8 @@ check("production recovery artifacts fail closed without vulnerable rollback", (
   assert.match(inspector, /statement_timeout: 30_000/);
   assert.match(inspector, /45_000/);
   assert.match(inspector, /GOAL002_BASELINE_HARDENING_VECTOR/);
+  assert.match(inspector, /GOAL002_BASELINE_DIGEST_FIX_VECTOR/);
+  assert.match(inspector, /HARDENING_ONLY/);
 
   const runbook = read("docs/runbooks/GOAL-002-production-deployment-gate.md");
   assert.match(runbook, /première\s+mutation\s+matérielle/);
@@ -876,8 +894,41 @@ check("production recovery artifacts fail closed without vulnerable rollback", (
   );
   assert.match(
     runbook,
-    /Safe-deny Edge après migration[\s\S]*google_gbp_sync_locations[\s\S]*google_gbp_sync_all/
+    /Safe-deny Edge après les deux migrations[\s\S]*google_gbp_sync_locations[\s\S]*google_gbp_sync_all/
   );
+  assert.match(
+    runbook,
+    /20260713073853_production_security_hardening\.sql[\s\S]*20260716142352_fix_claim_ai_tag_candidates_digest\.sql/
+  );
+  assert.match(runbook, /HARDENING_ONLY/);
+  assert.match(runbook, /goal002_claim_ai_tag_candidates_postdeploy\.sql/);
+  assert.match(runbook, /manage-goal-002-cron-jobs\.mjs snapshot/);
+  assert.match(runbook, /probe-goal-002-safe-deny\.mjs/);
+
+  const cronHelper = read("scripts/manage-goal-002-cron-jobs.mjs");
+  assert.match(cronHelper, /payload\.jobDetails \?\? payload\.job/);
+  assert.match(cronHelper, /someFailed/);
+  assert.match(cronHelper, /immutableConfigSha256/);
+  assert.match(cronHelper, /"<redacted>"/);
+  assert.match(cronHelper, /predictions/);
+  assert.doesNotMatch(cronHelper, /console\.log\([^)]*key/);
+
+  const safeDenyProbe = read("scripts/probe-goal-002-safe-deny.mjs");
+  assert.match(safeDenyProbe, /GOAL002_SAFE_DENY/);
+  assert.match(safeDenyProbe, /SUPABASE_ANON_KEY/);
+  assert.match(safeDenyProbe, /verifyJwt/);
+
+  const postdeployProbe = read(
+    "supabase/tests/goal002_claim_ai_tag_candidates_postdeploy.sql"
+  );
+  assert.match(postdeployProbe, /GOAL002_SYNTH/);
+  assert.match(postdeployProbe, /goal002_synth_attacker\.digest/);
+  assert.match(postdeployProbe, /set local role anon/);
+  assert.match(postdeployProbe, /set local role authenticated/);
+  assert.match(postdeployProbe, /set local role service_role/);
+  assert.match(postdeployProbe, /generate_series\(1, 21\)/);
+  assert.match(postdeployProbe, /rollback;/);
+  assert.doesNotMatch(postdeployProbe, /on conflict/i);
   assert.doesNotMatch(runbook, /rollback Vercel vers le dernier|retour à l'ancienne fonction/);
   assert.match(runbook, /restauration de `dpl_5xpfD2E6wbsmAZgkmnkKaVvux5Sd`/);
 });
