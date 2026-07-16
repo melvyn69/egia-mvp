@@ -618,10 +618,8 @@ const Inbox = () => {
   const [aiRunLoading, setAiRunLoading] = useState(false);
   const [aiRunMessage, setAiRunMessage] = useState<string | null>(null);
   const [aiRunStats, setAiRunStats] = useState<{
-    processed?: number;
-    tagsUpserted?: number;
-    errors?: number;
-    skipReason?: string | null;
+    queued?: number;
+    skipped?: number;
   } | null>(null);
   const [prepareDraftLoading, setPrepareDraftLoading] = useState(false);
   const [prepareDraftMessage, setPrepareDraftMessage] = useState<string | null>(
@@ -1347,19 +1345,21 @@ const Inbox = () => {
     setAiRunStats(null);
     try {
       const token = await getAccessToken(supabase);
-      const params = new URLSearchParams({
-        location_id: activeLocationId
+      const response = await fetch("/api/reviews?action=queue_analysis", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          location_id: activeLocationId,
+          mode,
+          limit:
+            typeof limit === "number" && Number.isFinite(limit)
+              ? Math.max(1, Math.floor(limit))
+              : undefined
+        })
       });
-      if (mode) {
-        params.set("mode", mode);
-      }
-      if (typeof limit === "number" && Number.isFinite(limit)) {
-        params.set("limit", String(Math.max(1, Math.floor(limit))));
-      }
-      const response = await fetch(
-        `/api/cron/ai/tag-reviews?${params.toString()}`,
-        { method: "POST", headers: { Authorization: `Bearer ${token}` } }
-      );
       const payload = await response.json().catch(() => null);
       const requestId = payload?.requestId ? ` (requestId: ${payload.requestId})` : "";
       if (response.status === 401) {
@@ -1367,7 +1367,7 @@ const Inbox = () => {
         return;
       }
       if (response.status === 403) {
-        setAiRunMessage(`Accès admin requis${requestId}`);
+        setAiRunMessage(`Accès refusé${requestId}`);
         return;
       }
       if (!response.ok) {
@@ -1375,12 +1375,10 @@ const Inbox = () => {
         return;
       }
       setAiRunStats({
-        processed: payload?.stats?.reviewsProcessed ?? 0,
-        tagsUpserted: payload?.stats?.tagsUpserted ?? 0,
-        errors: payload?.stats?.errors?.length ?? 0,
-        skipReason: payload?.skipReason ?? null
+        queued: payload?.queued ?? 0,
+        skipped: payload?.skipped ?? 0
       });
-      setAiRunMessage("Analyse IA lancée");
+      setAiRunMessage("Analyse IA mise en file");
       queryClient.invalidateQueries({
         queryKey: ["inbox-ai-cron-status", sessionUserId, activeLocationId]
       });
@@ -1478,13 +1476,18 @@ const Inbox = () => {
     setAiRunLocationResult((prev) => ({ ...prev, [locationId]: "" }));
     try {
       const token = await getAccessToken(supabase);
-      const response = await fetch(
-        `/api/cron/ai/tag-reviews?force=1&location_id=${encodeURIComponent(locationId)}`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` }
-        }
-      );
+      const response = await fetch("/api/reviews?action=queue_analysis", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          location_id: locationId,
+          mode: "backlog",
+          limit: 20
+        })
+      });
       const payload = await response.json().catch(() => null);
       const requestId = payload?.requestId ? ` (requestId: ${payload.requestId})` : "";
       if (!response.ok) {
@@ -1498,7 +1501,7 @@ const Inbox = () => {
         if (response.status === 403) {
           setAiRunLocationResult((prev) => ({
             ...prev,
-            [locationId]: `Accès admin requis${requestId}`
+            [locationId]: `Accès refusé${requestId}`
           }));
           return;
         }
@@ -1508,14 +1511,9 @@ const Inbox = () => {
         }));
         return;
       }
-      const processed =
-        payload?.stats?.reviewsProcessed ?? payload?.processed ?? 0;
-      const tags = payload?.stats?.tagsUpserted ?? payload?.tagsUpserted ?? 0;
-      const errorsCount = payload?.stats?.errors?.length ?? payload?.errors ?? 0;
-      const skip = payload?.skipReason ?? null;
-      const msg = `OK • ${processed} traités • ${tags} tags • ${errorsCount} erreurs${
-        skip ? ` • ${skip}` : ""
-      }`;
+      const queued = payload?.queued ?? 0;
+      const skipped = payload?.skipped ?? 0;
+      const msg = `OK • ${queued} en file • ${skipped} ignorés`;
       setAiRunLocationResult((prev) => ({ ...prev, [locationId]: msg }));
       await queryClient.invalidateQueries({
         queryKey: ["inbox-ai-cron-status", sessionUserId, locationId]
@@ -2615,10 +2613,8 @@ const Inbox = () => {
               {aiRunMessage && <span>{aiRunMessage}</span>}
               {aiRunStats && (
                 <span>
-                  {aiRunStats.processed ?? 0} traités •{" "}
-                  {aiRunStats.tagsUpserted ?? 0} tags •{" "}
-                  {aiRunStats.errors ?? 0} erreurs
-                  {aiRunStats.skipReason ? ` • ${aiRunStats.skipReason}` : ""}
+                  {aiRunStats.queued ?? 0} en file •{" "}
+                  {aiRunStats.skipped ?? 0} ignorés
                 </span>
               )}
             </div>

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
@@ -148,7 +149,7 @@ check("review draft service-role paths stay bound to the authenticated tenant", 
   assert.match(locationResolution, /\.eq\("user_id", params\.userId\)/);
   assert.match(locationResolution, /accessConfirmed: Boolean\(resolvedLocationRow && locationsMatch\)/);
   assert.doesNotMatch(locationResolution, /locationRow\?\.id \?\? requestedLocationId/);
-  assert.equal((source.match(/!locationContext\.accessConfirmed/g) ?? []).length, 2);
+  assert.equal((source.match(/!locationContext\.accessConfirmed/g) ?? []).length, 3);
 });
 
 check("private brand assets accept only canonical tenant-owned paths", () => {
@@ -709,6 +710,154 @@ check("all scheduled jobs use POST and one shared cron secret contract", () => {
   )}`;
   assert.match(docs, /cron-job\.org/);
   assert.match(docs, /Authorization: Bearer/);
+});
+
+check("manual AI analysis is authenticated and tenant-scoped without cron access", () => {
+  const reviewsApi = read("api/reviews.ts");
+  const inbox = read("src/pages/Inbox.tsx");
+  const systemHealth = read("src/pages/SystemHealth.tsx");
+  for (const source of [inbox, systemHealth]) {
+    assert.match(source, /\/api\/reviews\?action=queue_analysis/);
+    assert.doesNotMatch(source, /fetch\(\s*[`"]\/api\/cron\/ai\/tag-reviews/);
+  }
+  const actionStart = reviewsApi.indexOf('action === "queue_analysis"');
+  const nextAction = reviewsApi.indexOf(
+    'action === "ensure_draft"',
+    actionStart
+  );
+  assert.ok(actionStart > 0 && nextAction > actionStart);
+  const action = reviewsApi.slice(actionStart, nextAction);
+  assert.match(action, /resolveDraftLocation/);
+  assert.match(action, /\.eq\("user_id", userId\)/);
+  assert.match(action, /\.eq\("location_id", locationContext\.googleLocationResource\)/);
+  assert.match(action, /payload\?\.mode === "recent"/);
+  assert.match(action, /: "backlog"/);
+  assert.match(action, /ai_tag_status\.in\.\(pending,error\)/);
+  assert.match(action, /ai_tag_version\.is\.null/);
+  assert.match(action, /type: "review_analyze"/);
+  assert.match(action, /user_id: userId/);
+  assert.match(action, /location_id: locationContext\.googleLocationResource/);
+  assert.match(action, /status: "pending"/);
+  assert.doesNotMatch(action, /CRON_SECRET|getBearerToken|is_admin/);
+});
+
+check("production recovery artifacts fail closed without vulnerable rollback", () => {
+  const maintenance = read(
+    "recovery/goal-002/vercel-maintenance/api/maintenance.ts"
+  );
+  const maintenanceConfig = JSON.parse(
+    read("recovery/goal-002/vercel-maintenance/vercel.json")
+  ) as {
+    routes?: Array<{ src?: string; dest?: string; handle?: string }>;
+  };
+  assert.match(maintenance, /status\(503\)/);
+  assert.match(maintenance, /Retry-After/);
+  assert.match(maintenance, /Cache-Control/);
+  assert.doesNotMatch(
+    maintenance,
+    /SUPABASE|OPENAI|GOOGLE|fetch\(|createClient|process\.env/
+  );
+  assert.deepEqual(maintenanceConfig.routes?.at(-1), {
+    src: "/(.*)",
+    dest: "/api/maintenance"
+  });
+
+  const safeDenyRoot =
+    "recovery/goal-002/edge-safe-deny/supabase/functions";
+  const helper = read(`${safeDenyRoot}/_shared/safe_deny.ts`);
+  assert.match(helper, /status: 503/);
+  assert.match(helper, /GOAL002_SAFE_DENY/);
+  assert.doesNotMatch(helper, /createClient|\.rpc\(|fetch\(/);
+  for (const name of [
+    "generate-reply",
+    "google_oauth_start",
+    "google_oauth_exchange",
+    "google_gbp_sync_all",
+    "google_gbp_sync_locations",
+    "post-reply-google",
+    "process-review-analyze"
+  ]) {
+    assert.match(
+      read(`${safeDenyRoot}/${name}/index.ts`),
+      new RegExp(`createSafeDenyHandler\\("${name}"\\)`)
+    );
+  }
+
+  const migrationWatchdog = read("scripts/run-goal-002-db-push.mjs");
+  assert.match(migrationWatchdog, /125_000/);
+  assert.match(migrationWatchdog, /130_000/);
+  assert.match(
+    migrationWatchdog,
+    /PGAPPNAME: "goal002_migration_20260713073853"/
+  );
+  assert.match(
+    migrationWatchdog,
+    /fhadiwkdznhuxtlgrwfd:20260713073853/
+  );
+  assert.match(
+    migrationWatchdog,
+    /\["db", "push", "--linked", \.\.\.\(dryRun \? \["--dry-run"\] : \[\]\)\]/
+  );
+  assert.match(migrationWatchdog, /child\.kill\("SIGTERM"\)/);
+  assert.match(migrationWatchdog, /child\.kill\("SIGKILL"\)/);
+  assert.match(migrationWatchdog, /process\.exitCode = 124/);
+
+  const timeoutResult = spawnSync(
+    process.execPath,
+    ["scripts/run-goal-002-db-push.mjs", "--self-test-timeout"],
+    { cwd: root, encoding: "utf8", timeout: 2_000 }
+  );
+  assert.equal(timeoutResult.status, 124);
+  assert.match(timeoutResult.stderr, /terminating the client/);
+  assert.match(timeoutResult.stderr, /hard 350ms ceiling/);
+
+  const markerResult = spawnSync(
+    process.execPath,
+    ["scripts/run-goal-002-db-push.mjs"],
+    {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, GOAL002_PRODUCTION_AUTHORIZED: "" }
+    }
+  );
+  assert.equal(markerResult.status, 2);
+
+  const classificationResult = spawnSync(
+    process.execPath,
+    ["scripts/inspect-goal-002-migration-state.mjs", "--self-test"],
+    { cwd: root, encoding: "utf8" }
+  );
+  assert.equal(classificationResult.status, 0);
+  assert.match(
+    classificationResult.stdout,
+    /migration-state classification self-test passed/
+  );
+
+  const migrationInspection = read(
+    "scripts/inspect-goal-002-migration-state.sql"
+  );
+  assert.match(
+    migrationInspection,
+    /application_name = 'goal002_migration_20260713073853'/
+  );
+  assert.match(migrationInspection, /where version = '20260713073853'/);
+  assert.match(migrationInspection, /prospective_expected/);
+  assert.match(migrationInspection, /hardening_expected/);
+  assert.match(migrationInspection, /hardening_vector/);
+
+  const inspector = read("scripts/inspect-goal-002-migration-state.mjs");
+  assert.match(inspector, /connectionTimeoutMillis: 10_000/);
+  assert.match(inspector, /query_timeout: 30_000/);
+  assert.match(inspector, /statement_timeout: 30_000/);
+  assert.match(inspector, /45_000/);
+  assert.match(inspector, /GOAL002_BASELINE_HARDENING_VECTOR/);
+
+  const runbook = read("docs/runbooks/GOAL-002-production-deployment-gate.md");
+  assert.match(runbook, /première\s+mutation\s+matérielle/);
+  assert.match(runbook, /recovery\/goal-002\/vercel-maintenance/);
+  assert.match(runbook, /recovery\/goal-002\/edge-safe-deny/);
+  assert.doesNotMatch(runbook, /rollback Vercel vers le dernier|retour à l'ancienne fonction/);
+  assert.match(runbook, /restauration de `dpl_5xpfD2E6wbsmAZgkmnkKaVvux5Sd`/);
 });
 
 check("Edge logs exclude tenant identifiers and raw provider errors", () => {

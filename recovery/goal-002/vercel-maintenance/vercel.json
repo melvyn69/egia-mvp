@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/maintenance.ts": {
+      "maxDuration": 5
+    }
+  },
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/api/maintenance"
+    }
+  ]
+}

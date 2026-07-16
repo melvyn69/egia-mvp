@@ -591,25 +591,41 @@ const SystemHealth = ({ session }: SystemHealthProps) => {
     setRunMessage(null);
     const token = session.access_token;
     try {
-      const res = await fetch("/api/cron/ai/tag-reviews", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const payload = await res.json().catch(() => null);
-      const requestId = payload?.requestId ? ` (requestId: ${payload.requestId})` : "";
-      if (res.status === 401) {
-        setRunMessage(`Non connecté${requestId}`);
-        return;
+      let queued = 0;
+      let skipped = 0;
+      for (const location of locations) {
+        const res = await fetch("/api/reviews?action=queue_analysis", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            location_id: location.id,
+            mode: "backlog",
+            limit: 20
+          })
+        });
+        const payload = await res.json().catch(() => null);
+        const requestId = payload?.requestId
+          ? ` (requestId: ${payload.requestId})`
+          : "";
+        if (res.status === 401) {
+          setRunMessage(`Non connecté${requestId}`);
+          return;
+        }
+        if (res.status === 403) {
+          setRunMessage(`Accès refusé${requestId}`);
+          return;
+        }
+        if (!res.ok) {
+          setRunMessage(`Erreur: ${res.status}${requestId}`);
+          return;
+        }
+        queued += payload?.queued ?? 0;
+        skipped += payload?.skipped ?? 0;
       }
-      if (res.status === 403) {
-        setRunMessage(`Accès admin requis${requestId}`);
-        return;
-      }
-      if (!res.ok) {
-        setRunMessage(`Erreur: ${res.status}${requestId}`);
-        return;
-      }
-      setRunMessage("Analyse lancée");
+      setRunMessage(`${queued} analyses en file, ${skipped} ignorées`);
       await load();
       window.setTimeout(() => setRefreshTick((value) => value + 1), 5000);
     } catch {
@@ -625,10 +641,18 @@ const SystemHealth = ({ session }: SystemHealthProps) => {
     setRunLocationMessage((prev) => ({ ...prev, [locationId]: "" }));
     const token = session.access_token;
     try {
-      const res = await fetch(
-        `/api/cron/ai/tag-reviews?location_id=${encodeURIComponent(locationId)}`,
-        { method: "POST", headers: { Authorization: `Bearer ${token}` } }
-      );
+      const res = await fetch("/api/reviews?action=queue_analysis", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          location_id: locationId,
+          mode: "backlog",
+          limit: 20
+        })
+      });
       const payload = await res.json().catch(() => null);
       const requestId = payload?.requestId ? ` (requestId: ${payload.requestId})` : "";
       if (res.status === 401) {
@@ -636,19 +660,18 @@ const SystemHealth = ({ session }: SystemHealthProps) => {
         return;
       }
       if (res.status === 403) {
-        setRunLocationMessage((prev) => ({ ...prev, [locationId]: `Accès admin requis${requestId}` }));
+        setRunLocationMessage((prev) => ({ ...prev, [locationId]: `Accès refusé${requestId}` }));
         return;
       }
       if (!res.ok) {
         setRunLocationMessage((prev) => ({ ...prev, [locationId]: `Erreur: ${res.status}${requestId}` }));
         return;
       }
-      const processed = payload?.stats?.reviewsProcessed ?? payload?.processed ?? 0;
-      const tags = payload?.stats?.tagsUpserted ?? payload?.tagsUpserted ?? 0;
-      const errorsCount = payload?.stats?.errors?.length ?? payload?.errors ?? 0;
+      const queued = payload?.queued ?? 0;
+      const skipped = payload?.skipped ?? 0;
       setRunLocationMessage((prev) => ({
         ...prev,
-        [locationId]: `OK - ${processed} traités - ${tags} tags - ${errorsCount} erreurs`
+        [locationId]: `OK - ${queued} en file - ${skipped} ignorés`
       }));
       await load();
       window.setTimeout(() => setRefreshTick((value) => value + 1), 5000);

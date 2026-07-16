@@ -1,8 +1,9 @@
 # Validation de sécurité de production — GOAL-002
 
 Date de l’audit local : `2026-07-16`
-Branche : `security/goal-002-production-validation`
-Base de comparaison : `main` = `origin/main` = `cb82cc5495a8c298e5dc79fcf33d920609644330`
+Branche de préparation : `security/goal-002-production-validation`
+Baseline applicative historique : `cb82cc5495a8c298e5dc79fcf33d920609644330`
+`main` après fusion de la PR #35 : `7fad67914f4727d912d6922914e113ed452d137d`
 Commit correctif approfondi : `8044d85` (`security: close remaining tenant and oauth gaps`)
 
 ## Décision
@@ -15,9 +16,25 @@ La revue indépendante du Run 3 a ensuite arrêté l'intégration avant commit :
 
 Le `2026-07-16`, le fondateur autorise la variante recommandée : demande uniforme, lien e-mail à usage unique, aucune capacité avant validation, puis création ou récupération automatique du membre. GOAL-002 reprend `Blocked → Ready → Running`; les corrections et la fusion sont autorisées, tandis que toute production reste derrière un gate distinct.
 
-Les revues indépendantes Security, Backend, Data, Product et Production Gate ont approuvé le candidat technique. Un dernier préflight passif a toutefois confirmé que le projet Vercel connecté déploie automatiquement la branche PR en Preview et `main` en Production. Comme tout déploiement Vercel est interdit dans ce Run, l'arrêt intervient avant commit distant, push et fusion.
+Les revues indépendantes Security, Backend, Data, Product et Production Gate
+ont approuvé le candidat technique, puis la protection
+`git.deploymentEnabled = false` a permis la fusion de la PR #35 sans
+déploiement Vercel. GOAL-002 reste `Running`.
 
-La **production n’est pas certifiée** par ce rapport. Aucune migration, Edge Function, variable, donnée ou configuration distante n’a été modifiée ; seule la métadonnée Vercel nécessaire à établir le side effect Git a été lue passivement. Les corrections de cette branche ne sont donc pas présumées déployées. Le verdict de production reste `non sûr` jusqu’au déploiement autorisé, puis à une vérification distante redigée et à des tests inter-tenant sur des comptes synthétiques autorisés.
+La revue de compatibilité finale a ensuite démontré que le rollback historique
+vers `cb82cc...` est interdit après migration et que `7fad679...` conserve une
+régression produit : les déclenchements IA manuels appellent le cron avec un
+JWT utilisateur et reçoivent `403`. Le correctif de roll-forward remplace ces
+appels par une action authentifiée, limitée au tenant et au lieu sélectionné.
+Il ajoute également une maintenance Vercel globale, sept Edge Functions
+safe-deny et un watchdog transactionnel de 130 secondes sans modifier
+l'historique de migration.
+
+La **production n’est pas certifiée** par ce rapport. Aucune migration, Edge
+Function, variable, donnée, fixture ou configuration de production n'a été
+modifiée pendant le Run de compatibilité. Les corrections ne sont pas
+présumées déployées. Le verdict de production reste `non sûr` jusqu'au Run
+contrôlé défini par le nouveau gate.
 
 ## Périmètre et méthode
 
@@ -123,9 +140,11 @@ La présence et la portée des variables réellement configurées, les logs hist
 
 | Validation | Résultat du 2026-07-16 |
 | --- | --- |
-| `npm run test:production-security` | 30 contrôles réussis. |
+| matrice `baseline` sur stack locale isolée | ancien frontend/base actuelle fonctionnel mais vulnérable; nouveau frontend fail-closed `503`; action IA tenant-scoped. |
+| matrice `hardened` sur la même stack synthétique | ancien frontend incompatible et fail-closed; e-mail one-shot nouveau/existant; récupération stable; replay rejeté. |
+| `npm run test:production-security` | contrôles sécurité et régression réussis après correction. |
 | `supabase/tests/production_security_abuse.sql` après baseline + GOAL-003 + migration GOAL-002 | transaction complète réussie avec `ROLLBACK` dans la base isolée neuve `goal002_security_test_20260716_final2`. |
-| `npm run test:edge-types` sur les sept Edge Functions modifiées | réussi avec lockfile gelé. |
+| typage Deno des sept Edge sécurisées et des sept variantes safe-deny | réussi. |
 | `npm run lint` | réussi avec un warning React Hooks préexistant, sans erreur. |
 | `npm run typecheck` | réussi. |
 | `npm run test` | réussi. |
@@ -167,9 +186,13 @@ Futurs Goals proposés, sans création : (1) déploiement contrôlé et vérific
 
 ## Publication et CI
 
-- Pull request brouillon : [#35 — security: validate production trust boundaries](https://github.com/melvyn69/egia-mvp/pull/35), vers `main`, sans fusion autonome.
-- Commits publiés : correctif approfondi `8044d85`, puis matrice d’Evidence `0a8164b`. Sur le head `0a8164bd7abd8f5041024758bf90f80452b2efd7`, CI build, Migration History Guard, Vercel et Vercel Preview Comments ont réussi, `4/4`.
-- Le candidat du `2026-07-16` reste local : aucun push n'est effectué, car le projet Vercel connecté créerait automatiquement un Preview. La fusion vers `main` créerait automatiquement un déploiement Production. Les deux effets sont hors autorisation.
+- [PR #35 — security: validate production trust boundaries](https://github.com/melvyn69/egia-mvp/pull/35)
+  fusionnée vers `main` au SHA `7fad67914...`.
+- `vercel.json` désactive temporairement les déploiements Git pour `main` et
+  `security/goal-002-production-validation`.
+- Le correctif de compatibilité et les artefacts de roll-forward sont préparés
+  sur une PR distincte. Leur fusion et tout déploiement restent réservés au
+  futur Run de production.
 
 ## Matrice des tests d’abus
 
@@ -201,13 +224,16 @@ Futurs Goals proposés, sans création : (1) déploiement contrôlé et vérific
 7. **CSP — validation navigateur post-déploiement.** Vérifier la console CSP sur les parcours connexion, Supabase Realtime, Google OAuth, rapports et Wallet ; n’élargir une directive qu’avec Evidence d’un besoin précis.
 8. **Logs historiques.** Rechercher et purger/faire expirer selon la politique les anciennes lignes susceptibles de contenir un préfixe JWT, une query OAuth ou un corps d’amont, sans exporter ces valeurs.
 
-Le plan exact, les requêtes passives d'arrêt, l'ordre migration → Edge →
-Vercel, les tests synthétiques et la récupération sont versionnés dans
+Le plan exact, les requêtes passives d'arrêt, l'ordre
+crons → maintenance → safe-deny → migration → Edge → Vercel, les tests
+synthétiques et la récupération sont versionnés dans
 `docs/runbooks/GOAL-002-production-deployment-gate.md`.
 
 ## Verdict final du Run local
 
-**Candidat local : revues techniques prêtes ; intégration Git bloquée par le déploiement Vercel automatique.**
+**Candidat de roll-forward : prêt localement, production non mutée.**
 **Production : `non sûr` tant que le candidat n’est pas déployé et vérifié.**
 
-GOAL-002 est `Blocked`, jamais `Done`, jusqu’à autorisation puis réalisation des actions 1 à 4 et à l’absence confirmée de vulnérabilité critique ou élevée dans l’environnement réellement déployé.
+GOAL-002 est `Running`, jamais `Done`, jusqu'à autorisation puis exécution du
+gate corrigé et à l'absence confirmée de vulnérabilité critique ou élevée dans
+l'environnement réellement déployé.

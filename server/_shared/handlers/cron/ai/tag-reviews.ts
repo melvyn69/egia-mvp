@@ -1874,8 +1874,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 // Manual test plan:
 // 1) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews?location_id=%2Faccounts%2F123%2Flocations%2F456&debug=1" -H "x-cron-secret: <secret>"
 // 2) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews?location_id=all" -H "x-cron-secret: <secret>"
-// 3) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews" -H "Authorization: Bearer <token>" (admin email) -> 200
-// 4) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews?debug=1" -H "x-cron-secret: <secret>" (queue mode)
+// 3) curl -s -X POST "https://egia-six.vercel.app/api/cron/ai/tag-reviews?debug=1" -H "x-cron-secret: <secret>" (queue mode)
 // Queue SQL checks:
 // select status, count(*) from public.ai_jobs group by status;
 // select * from public.ai_jobs order by created_at desc limit 5;

@@ -62,6 +62,12 @@ type PrepareDraftResultItem = {
     | "enqueue_error";
 };
 
+type QueueAnalysisResultItem = {
+  review_id: string;
+  queued: boolean;
+  skipped_reason?: "already_queued" | "enqueue_error";
+};
+
 type ReviewToReplyRpcRow = {
   review_pk: string;
   user_id: string;
@@ -664,6 +670,159 @@ const handler = async (req: VercelRequest, res: VercelResponse) => {
         return res.status(404).json({ error: "Alert not found" });
       }
       return res.status(200).json({ ok: true, alert: data });
+    }
+
+    if (action === "queue_analysis") {
+      if (req.method !== "POST") {
+        return res.status(405).json({ error: "Method not allowed" });
+      }
+      const payload = parseBody(req);
+      const requestedLocationId = normalizeStringId(payload?.location_id);
+      const mode =
+        payload?.mode === "retry_errors"
+          ? "retry_errors"
+          : payload?.mode === "recent"
+            ? "recent"
+            : "backlog";
+      const limit = Math.min(
+        25,
+        Math.max(1, Number.parseInt(String(payload?.limit ?? 20), 10) || 20)
+      );
+      if (!requestedLocationId) {
+        return res.status(400).json({ error: "Missing location_id" });
+      }
+
+      const locationContext = await resolveDraftLocation({
+        supabaseAdmin,
+        userId,
+        requestedLocationId,
+        action: "queue_analysis",
+        requestId
+      });
+      if (
+        !locationContext.accessConfirmed ||
+        !locationContext.googleLocationId ||
+        !locationContext.googleLocationResource
+      ) {
+        return res.status(404).json({ error: "Location not found" });
+      }
+
+      let retryReviewIds: string[] | null = null;
+      if (mode === "retry_errors") {
+        const { data: retryRows, error: retryError } = await supabaseAdmin
+          .from("review_ai_insights")
+          .select("review_pk")
+          .eq("user_id", userId)
+          .eq(
+            "location_resource_name",
+            locationContext.googleLocationResource
+          )
+          .or("error.not.is.null,processed_at.is.null")
+          .limit(limit);
+        if (retryError) {
+          return res.status(500).json({ error: "Failed to load retry candidates" });
+        }
+        retryReviewIds = (retryRows ?? [])
+          .map((row: { review_pk?: string | null }) =>
+            normalizeStringId(row.review_pk)
+          )
+          .filter((id): id is string => Boolean(id));
+        if (retryReviewIds.length === 0) {
+          return res.status(200).json({
+            ok: true,
+            queued: 0,
+            skipped: 0,
+            mode,
+            results: [] as QueueAnalysisResultItem[]
+          });
+        }
+      }
+
+      let candidatesQuery = supabaseAdmin
+        .from("google_reviews")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("location_id", locationContext.googleLocationResource)
+        .not("comment", "is", null)
+        .neq("comment", "");
+      if (retryReviewIds) {
+        candidatesQuery = candidatesQuery.in("id", retryReviewIds);
+      }
+      if (mode === "backlog") {
+        candidatesQuery = candidatesQuery.or(
+          "ai_tag_status.in.(pending,error),ai_tag_status.is.null,ai_tag_version.is.null,ai_tag_version.neq.v1"
+        );
+      }
+      candidatesQuery = candidatesQuery
+        .order("update_time", {
+          ascending: mode === "backlog",
+          nullsFirst: false
+        })
+        .order("create_time", {
+          ascending: mode === "backlog",
+          nullsFirst: false
+        })
+        .limit(limit);
+      const { data: candidates, error: candidatesError } =
+        await candidatesQuery;
+      if (candidatesError) {
+        return res.status(500).json({ error: "Failed to load reviews" });
+      }
+
+      const jobsTable = supabaseAdmin as unknown as {
+        from: (table: string) => {
+          insert: (values: Record<string, unknown>) => Promise<{
+            error?: { message?: string | null; code?: string | null } | null;
+          }>;
+        };
+      };
+      let queued = 0;
+      let skipped = 0;
+      let failed = 0;
+      const results: QueueAnalysisResultItem[] = [];
+      for (const candidate of candidates ?? []) {
+        const reviewId = normalizeStringId(candidate.id);
+        if (!reviewId) {
+          continue;
+        }
+        const { error: enqueueError } = await jobsTable.from("ai_jobs").insert({
+          type: "review_analyze",
+          payload: {
+            review_id: reviewId,
+            location_id: locationContext.googleLocationResource,
+            google_location_resource_name:
+              locationContext.googleLocationResource,
+            business_id: locationContext.businessId,
+            requested_location_id: locationContext.requestedLocationId,
+            user_id: userId
+          },
+          status: "pending"
+        });
+        if (!enqueueError) {
+          queued += 1;
+          results.push({ review_id: reviewId, queued: true });
+          continue;
+        }
+        skipped += 1;
+        if (enqueueError.code !== "23505") {
+          failed += 1;
+        }
+        results.push({
+          review_id: reviewId,
+          queued: false,
+          skipped_reason:
+            enqueueError.code === "23505" ? "already_queued" : "enqueue_error"
+        });
+      }
+
+      return res.status(failed > 0 ? 500 : 200).json({
+        ok: failed === 0,
+        queued,
+        skipped,
+        failed,
+        mode,
+        results
+      });
     }
 
     if (action === "ensure_draft") {
