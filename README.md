@@ -2,6 +2,23 @@
 
 Ce repo contient le MVP EGIA : synchronisation des avis Google Business Profile, inbox de traitement, génération de réponses (IA) et envoi des réponses sur Google.
 
+## Gouvernance Engineering et production
+
+Un Goal EGIA est un objet Engineering. Il peut produire un candidat figé, des
+migrations prêtes, des tests, des Evidence, un Production Readiness Report et
+un Production Execution Plan, mais il ne contient jamais une mutation de
+production.
+
+Toute production exige un Production Run ANES indépendant et explicitement
+autorisé par le Founder.
+
+GOAL-002 :
+
+- [contrat Engineering](goals/active/GOAL-002-production-security-validation.md)
+- [Production Readiness Report](docs/production/GOAL-002-production-readiness-report.md)
+- [Production Execution Plan](docs/production/GOAL-002-production-execution-plan.md)
+- [Evidence locale de compatibilité](audits/GOAL-002-engineering-compatibility-matrix.md)
+
 ## ✅ Ce qui fonctionne (v0.1 stable)
 - Sync des avis Google (pagination) → Supabase `google_reviews`
 - Affichage Inbox (filtres statut + lieu)

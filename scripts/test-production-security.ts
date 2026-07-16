@@ -705,9 +705,7 @@ check("all scheduled jobs use POST and one shared cron secret contract", () => {
     `${ai}\n${google}\n${legacyMonthly}`,
     /method !== "POST" && method !== "GET"/
   );
-  const docs = `${read("docs/SUPABASE_EGRESS_AUDIT.md")}\n${read(
-    "docs/PRODUCTION_SECURITY_VALIDATION.md"
-  )}`;
+  const docs = read("docs/SUPABASE_EGRESS_AUDIT.md");
   assert.match(docs, /cron-job\.org/);
   assert.match(docs, /Authorization: Bearer/);
 });
@@ -870,40 +868,36 @@ check("production recovery artifacts fail closed without vulnerable rollback", (
   assert.match(inspector, /GOAL002_BASELINE_DIGEST_FIX_VECTOR/);
   assert.match(inspector, /HARDENING_ONLY/);
 
-  const runbook = read("docs/runbooks/GOAL-002-production-deployment-gate.md");
-  assert.match(runbook, /première\s+mutation\s+matérielle/);
-  assert.match(runbook, /recovery\/goal-002\/vercel-maintenance/);
-  assert.match(runbook, /recovery\/goal-002\/edge-safe-deny/);
-  assert.match(runbook, /exactement \*\*trois\*\* déploiements Vercel/);
-  assert.match(runbook, /"enabled":false/);
-  assert.match(runbook, /"enabled":true/);
-  assert.match(runbook, /CRON_JOB_ORG_API_KEY/);
-  assert.match(runbook, /requestMethod = 1/);
-  assert.match(runbook, /timezone `Europe\/Paris`/);
-  for (const [path, cadence] of [
-    ["/api/cron/google/sync-replies", "0 \\* \\* \\* \\*"],
-    ["/api/cron/ai/tag-reviews", "0 \\*/2 \\* \\* \\*"],
-    ["/api/reports/automations", "0,30 \\* \\* \\* \\*"],
-    ["/api/cron/monthly-reports", "0 8 1 \\* \\*"]
-  ]) {
-    assert.match(runbook, new RegExp(`${path}[\\s\\S]*${cadence}`));
-  }
-  assert.match(
-    runbook,
-    /process-review-analyze[\s\S]*generate-reply[\s\S]*post-reply-google[\s\S]*google_oauth_start[\s\S]*google_oauth_exchange/
+  const executionPlan = read(
+    "docs/production/GOAL-002-production-execution-plan.md"
   );
   assert.match(
-    runbook,
-    /Safe-deny Edge après les deux migrations[\s\S]*google_gbp_sync_locations[\s\S]*google_gbp_sync_all/
+    executionPlan,
+    /73c40836b58f5663e810de70a169c39ab9627745/
   );
-  assert.match(
-    runbook,
-    /20260713073853_production_security_hardening\.sql[\s\S]*20260716142352_fix_claim_ai_tag_candidates_digest\.sql/
+  assert.match(executionPlan, /fhadiwkdznhuxtlgrwfd/);
+  assert.match(executionPlan, /prj_GoGCD7ICIfemLSlegN4Tc8JcoxrT/);
+  const operations = executionPlan
+    .split("\n")
+    .filter((line) => /^\d+\./.test(line));
+  assert.deepEqual(operations, [
+    "1. Snapshot redigé et suspension des quatre crons.",
+    "2. Déploiement Vercel Production nº 1 : maintenance globale `503`.",
+    "3. Déploiement des cinq safe-deny pré-migration.",
+    "4. Application de `20260713073853_production_security_hardening.sql`.",
+    "5. Application de `20260716142352_fix_claim_ai_tag_candidates_digest.sql`.",
+    "6. Déploiement des deux safe-deny Google GBP et drain OAuth.",
+    "7. Déploiement des sept Edge Functions sécurisées.",
+    "8. Déploiement Vercel Production nº 2 du candidat figé.",
+    "9. Exécution des tests `GOAL002_SYNTH`.",
+    "10. Réactivation inchangée des quatre crons.",
+    "11. Réactivation versionnée de `git.deploymentEnabled.main`, CI et fusion.",
+    "12. Déploiement Vercel Production nº 3 automatique et vérifications finales."
+  ]);
+  assert.doesNotMatch(
+    executionPlan,
+    /Founder Brief|autorisation|Evidence|Risque|récupération|```/
   );
-  assert.match(runbook, /HARDENING_ONLY/);
-  assert.match(runbook, /goal002_claim_ai_tag_candidates_postdeploy\.sql/);
-  assert.match(runbook, /manage-goal-002-cron-jobs\.mjs snapshot/);
-  assert.match(runbook, /probe-goal-002-safe-deny\.mjs/);
 
   const cronHelper = read("scripts/manage-goal-002-cron-jobs.mjs");
   assert.match(cronHelper, /payload\.jobDetails \?\? payload\.job/);
@@ -932,8 +926,17 @@ check("production recovery artifacts fail closed without vulnerable rollback", (
   assert.match(postdeployProbe, /generate_series\(1, 21\)/);
   assert.match(postdeployProbe, /rollback;/);
   assert.doesNotMatch(postdeployProbe, /on conflict/i);
-  assert.doesNotMatch(runbook, /rollback Vercel vers le dernier|retour à l'ancienne fonction/);
-  assert.match(runbook, /restauration de `dpl_5xpfD2E6wbsmAZgkmnkKaVvux5Sd`/);
+  const compatibilityEvidence = read(
+    "audits/GOAL-002-engineering-compatibility-matrix.md"
+  );
+  assert.match(
+    compatibilityEvidence,
+    /aucune ancienne fonction privilégiée n'est un rollback autorisé/
+  );
+  assert.match(
+    compatibilityEvidence,
+    /cb82cc\.\.\.`?[\s\S]*7fad679\.\.\.`? sans correctif et toute[\s\S]*ancienne Edge Function sont interdits comme récupération/
+  );
 });
 
 check("Edge logs exclude tenant identifiers and raw provider errors", () => {

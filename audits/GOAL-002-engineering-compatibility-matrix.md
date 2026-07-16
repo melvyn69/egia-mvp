@@ -1,4 +1,13 @@
-# GOAL-002 — Matrice de compatibilité de production
+# GOAL-002 — Evidence Engineering de compatibilité
+
+> **Statut documentaire : Evidence historique non contractuelle.**
+>
+> Cette matrice démontre localement les contraintes de compatibilité utilisées
+> pour construire le candidat figé. Elle n’est ni un Production Readiness
+> Report actif, ni un Production Execution Plan, ni un contrat de Production
+> Run. Les deux seuls artefacts de production actifs sont
+> `docs/production/GOAL-002-production-readiness-report.md` et
+> `docs/production/GOAL-002-production-execution-plan.md`.
 
 Date : `2026-07-16`
 
