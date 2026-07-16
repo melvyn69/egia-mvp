@@ -39,13 +39,19 @@ prévalidés : maintenance Vercel globale et sept Edge Functions safe-deny.
 | État intermédiaire | Durée maximale | Fidélité | Crons / OAuth / Edge | Détection d'incompatibilité |
 | --- | ---: | --- | --- | --- |
 | Production actuelle, avant gate | aucune mutation | Ancien comportement vulnérable encore présent. | Vérification passive des quatre cibles cron-job.org exactes, sans les invoquer. | Préflight passif seulement. |
-| Quatre crons suspendus | 2 min | Comportement applicatif inchangé. | Google, IA, automatisations et rapports sont désactivés et leur état est relu. | Exactement une tâche par URL et schedule; aucune tâche active. |
+| Quatre crons suspendus | 2 min | Comportement applicatif inchangé. | L'API cron-job.org applique uniquement `enabled=false`, dans l'ordre Google, IA, automatisations, rapports; aucune configuration Vercel/Supabase n'est modifiée. | Exactement une tâche POST/UTC par URL et schedule; snapshot redigé + hash immuable; aucune tâche active. |
 | Maintenance Vercel active, backend actuel | 2 min avant début du safe-deny | Toute nouvelle navigation et toute route Vercel renvoient `503`; un bundle frontend déjà chargé peut encore appeler directement Supabase. | Les crons cron-job.org reçoivent `503`; les anciennes Edge restent présentes très brièvement. | HTTP `/`, `/api/loyalty/join` et les quatre routes cron attendues = `503`, `Retry-After: 120`. |
 | Maintenance + cinq Edge critiques safe-deny, base actuelle | 5 min | L'ancien RPC anonyme existe encore, mais aucun nouveau frontend n'est servi. | `process-review-analyze`, `generate-reply`, `post-reply-google`, `google_oauth_start`, `google_oauth_exchange` = `503`; aucun nouvel état OAuth. | Statut `503` et code `GOAL002_SAFE_DENY` pour chacune. |
 | Maintenance + migration durcie | 5 min de post-check | L'ancien RPC est fermé; aucune capacité avant preuve possible. L'ancien frontend devient matériellement incompatible mais reste bloqué par maintenance. | Crons toujours `503`; OAuth en drain; anciennes sync encore compatibles mais doivent ensuite être safe-deny avant reprise. | Ledger, grants, RLS, contraintes, bucket et RPC contrôlés; tout écart maintient la maintenance. |
 | Maintenance + sept Edge safe-deny + base durcie | jusqu'à expiration du drain OAuth, 10 min depuis le safe-deny OAuth | Fermée sauf via le futur parcours vérifié, qui n'est pas encore servi. | Tous les appels Edge mutateurs renvoient `503`; crons `503`. | Aucun nouvel état OAuth; attente de dix minutes complètes. |
 | Maintenance + sept Edge sécurisées + base durcie | 14 min maximum | Backend compatible avec le parcours one-shot. | Déploiement et vérification d'une fonction à la fois; le reste demeure safe-deny. | Version/`verify_jwt`, `401/403/405`, absence de `500` et probes synthétiques sans fournisseur réel. |
 | Release correctif actif | 10 min de smoke tests | Nouvelle/existante indistinguables avant e-mail; capacités après preuve seulement. | Action IA manuelle tenant-scoped; les quatre crons restent suspendus jusqu'à leur reprise contrôlée un par un. | HTTP, A/B, quotas, logs redigés, compteurs SQL et absence de fuite inter-tenant. |
+
+L'ordre safe-deny est unique : cinq fonctions privilégiées/fournisseur/OAuth
+avant migration, puis `google_gbp_sync_locations` et `google_gbp_sync_all`
+après le post-check de migration. Le Run attend exactement trois déploiements
+Vercel Production : maintenance, release sécurisé manuel, puis réactivation
+Git automatique.
 
 La durée maximale d'indisponibilité Vercel est de 41 minutes. La pause cron
 maximale, suspension et reprise contrôlée incluses, est de 51 minutes. Une

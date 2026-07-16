@@ -856,6 +856,27 @@ check("production recovery artifacts fail closed without vulnerable rollback", (
   assert.match(runbook, /première\s+mutation\s+matérielle/);
   assert.match(runbook, /recovery\/goal-002\/vercel-maintenance/);
   assert.match(runbook, /recovery\/goal-002\/edge-safe-deny/);
+  assert.match(runbook, /exactement \*\*trois\*\* déploiements Vercel/);
+  assert.match(runbook, /"enabled":false/);
+  assert.match(runbook, /"enabled":true/);
+  assert.match(runbook, /CRON_JOB_ORG_API_KEY/);
+  assert.match(runbook, /requestMethod = 1/);
+  for (const [path, cadence] of [
+    ["/api/cron/google/sync-replies", "0 \\* \\* \\* \\*"],
+    ["/api/cron/ai/tag-reviews", "10 \\*/2 \\* \\* \\*"],
+    ["/api/reports/automations", "20,50 \\* \\* \\* \\*"],
+    ["/api/cron/monthly-reports", "0 6 1 \\* \\*"]
+  ]) {
+    assert.match(runbook, new RegExp(`${path}[\\s\\S]*${cadence}`));
+  }
+  assert.match(
+    runbook,
+    /process-review-analyze[\s\S]*generate-reply[\s\S]*post-reply-google[\s\S]*google_oauth_start[\s\S]*google_oauth_exchange/
+  );
+  assert.match(
+    runbook,
+    /Safe-deny Edge après migration[\s\S]*google_gbp_sync_locations[\s\S]*google_gbp_sync_all/
+  );
   assert.doesNotMatch(runbook, /rollback Vercel vers le dernier|retour à l'ancienne fonction/);
   assert.match(runbook, /restauration de `dpl_5xpfD2E6wbsmAZgkmnkKaVvux5Sd`/);
 });

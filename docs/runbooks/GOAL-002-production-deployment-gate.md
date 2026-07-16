@@ -9,9 +9,10 @@ mutation par lui-même.
 - Vercel : projet `prj_GoGCD7ICIfemLSlegN4Tc8JcoxrT`, nom `egia`,
   équipe `team_zfHqQFVkGjeOVDHZTYvfkMmW`.
 - GitHub : `melvyn69/egia-mvp`.
-- Release : commit approuvé, enfant de `7fad67914f4727d912d6922914e113ed452d137d`,
-  contenant le correctif `queue_analysis`, le watchdog de migration et les
-  artefacts de récupération.
+- Release : commit approuvé
+  `8b49ad9ea47b8bbfbf4c16b2a4b64218eb6af331`, enfant direct de
+  `7fad67914f4727d912d6922914e113ed452d137d`, contenant le correctif
+  `queue_analysis`, le watchdog de migration et les artefacts de récupération.
 - Migration unique :
   `20260713073853_production_security_hardening.sql`.
 
@@ -67,13 +68,11 @@ Après cette première mutation, sont interdits :
    rollback applicatif et sans lancer de restauration.
 10. Construire localement le release, la maintenance Vercel et les sept
    safe-deny. Capturer hashes et inventaire.
-11. Vérifier passivement cron-job.org. Il doit exister exactement une tâche
-    active pour chacune des cibles, sur l'origine canonique `APP_BASE_URL` :
-    - `/api/cron/google/sync-replies`, `0 * * * *`;
-    - `/api/cron/ai/tag-reviews`, `10 */2 * * *`;
-    - `/api/reports/automations`, `20,50 * * * *`;
-    - `/api/cron/monthly-reports`, `0 6 1 * *`.
-    Toute URL, origine, duplication ou schedule divergent arrête le Run.
+11. Vérifier passivement les quatre tâches cron-job.org selon le contrat
+    versionné ci-dessous. `GET /jobs` doit répondre `someFailed = false`, puis
+    chaque cible doit correspondre à exactement un `jobId`. Toute URL,
+    duplication, méthode, timezone, cadence, header attendu ou configuration
+    divergente arrête le Run.
 
 Si un point échoue, arrêter avant toute mutation. Aucune récupération n'est
 nécessaire.
@@ -82,9 +81,50 @@ nécessaire.
 
 ### 1. Suspension cron-job.org — première mutation
 
-Désactiver les quatre tâches exactes identifiées au préflight, sans modifier
-URL, méthode, headers ou schedule. Plafond : deux minutes. Relire leur statut :
-les quatre doivent être désactivées avant de poursuivre.
+Les quatre crons ne sont pas des Vercel Cron Jobs. Ils sont déclenchés par
+l'ordonnanceur externe `cron-job.org`. Leur suspension ne requiert aucune
+modification du projet Vercel, aucun déploiement, aucune variable Vercel ou
+Supabase, ni aucune modification de `vercel.json` ou d'un autre fichier.
+
+Contrat exact, timezone `UTC`, méthode `POST` (`requestMethod = 1`) :
+
+| Ordre de suspension | Nom canonique | Cible exacte sur `APP_BASE_URL` | Cadence | Objet `schedule` cron-job.org |
+| ---: | --- | --- | --- | --- |
+| 1 | Google — synchronisation des réponses | `/api/cron/google/sync-replies` | `0 * * * *`, toutes les heures à `:00` | `timezone=UTC`, `expiresAt=0`, `hours=[-1]`, `minutes=[0]`, `mdays=[-1]`, `months=[-1]`, `wdays=[-1]` |
+| 2 | IA — étiquetage des avis | `/api/cron/ai/tag-reviews` | `10 */2 * * *`, toutes les deux heures à `:10` | `timezone=UTC`, `expiresAt=0`, `hours=[0,2,4,6,8,10,12,14,16,18,20,22]`, `minutes=[10]`, `mdays=[-1]`, `months=[-1]`, `wdays=[-1]` |
+| 3 | Automatisations de réponses | `/api/reports/automations` | `20,50 * * * *`, deux fois par heure | `timezone=UTC`, `expiresAt=0`, `hours=[-1]`, `minutes=[20,50]`, `mdays=[-1]`, `months=[-1]`, `wdays=[-1]` |
+| 4 | Rapports mensuels | `/api/cron/monthly-reports` | `0 6 1 * *`, premier jour du mois à `06:00 UTC` | `timezone=UTC`, `expiresAt=0`, `hours=[6]`, `minutes=[0]`, `mdays=[1]`, `months=[-1]`, `wdays=[-1]` |
+
+Avant la première modification, pour chacun des quatre `jobId`, exécuter
+`GET https://api.cron-job.org/jobs/<jobId>` avec le secret nommé
+`CRON_JOB_ORG_API_KEY`. Conserver une Evidence horodatée contenant :
+
+- `jobId`, titre, URL, `enabled`, `requestMethod`, `schedule`,
+  `requestTimeout`, `redirectSuccess`, `folderId`, notifications,
+  `saveResponses`, `auth.enable` et les noms des headers;
+- les valeurs de headers remplacées par `<redacted>`;
+- un SHA-256 calculé en mémoire sur la configuration canonique complète,
+  valeurs de headers incluses, après exclusion des seuls champs volatils
+  `enabled`, `lastStatus`, `lastDuration`, `lastExecution`, `nextExecution`
+  et `sslCertExpiry`.
+
+La mutation distante exacte est ensuite, dans l'ordre du tableau, un seul
+appel par tâche :
+
+```bash
+curl --fail-with-body --silent --show-error \
+  --request PATCH \
+  --header 'Content-Type: application/json' \
+  --header "Authorization: Bearer ${CRON_JOB_ORG_API_KEY}" \
+  --data '{"job":{"enabled":false}}' \
+  "https://api.cron-job.org/jobs/${JOB_ID}"
+```
+
+Le delta envoyé contient uniquement `enabled=false`. Aucun autre champ n'est
+écrit. Après chaque `PATCH`, relire `GET /jobs/<jobId>` et exiger
+`enabled=false` ainsi qu'un SHA-256 immuable identique à l'Evidence
+pré-mutation. Plafond global : deux minutes. Les quatre tâches doivent être
+désactivées avant de poursuivre.
 
 ### 2. Maintenance Vercel
 
@@ -120,7 +160,7 @@ Dans les deux minutes, vérifier :
 Les tâches cron-job.org sont déjà suspendues. Aucun job réel ne doit être
 réclamé pendant la fenêtre.
 
-### 3. Safe-deny Edge critique
+### 3. Safe-deny Edge avant migration — cinq fonctions
 
 Déployer depuis `recovery/goal-002/edge-safe-deny`, dans cet ordre :
 
@@ -144,6 +184,19 @@ supabase functions deploy <function> \
 
 Ajouter `--no-verify-jwt` uniquement pour `process-review-analyze`. Capturer le
 SHA Git et les SHA-256 du `config.toml`, du helper et des sept `index.ts`.
+
+Cette séparation est technique et définitive :
+
+- `process-review-analyze` réclame et modifie des jobs avec `service_role`;
+- `generate-reply` appelle OpenAI et sa version sécurisée dépend du RPC
+  `consume_security_rate_limit` créé par la migration;
+- `post-reply-google` rafraîchit un token et publie chez Google;
+- `google_oauth_start` crée un état OAuth;
+- `google_oauth_exchange` consomme cet état et persiste des credentials.
+
+Ces cinq fonctions traversent donc une frontière privilégiée, fournisseur ou
+OAuth directement affectée par le durcissement. Elles doivent être `503`
+avant toute modification de la base.
 
 ### 4. Migration restrictive
 
@@ -178,7 +231,7 @@ et sûr uniquement parce que la maintenance reste active. Un frontend ancien
 déjà en cache obtient un refus sur l'inscription fidélité et sur les grants
 retirés; il ne récupère aucune capacité.
 
-### 5. Safe-deny Edge restant
+### 5. Safe-deny Edge après migration — deux fonctions
 
 Déployer et vérifier :
 
@@ -187,6 +240,16 @@ Déployer et vérifier :
 
 Toutes les sept fonctions doivent alors être fail-closed. Aucun appel Google
 ou OpenAI n'est effectué.
+
+Ces deux fonctions de synchronisation utilisent uniquement les tables
+`google_connections`, `google_accounts`, `google_locations` et
+`google_reviews`; elles ne dépendent ni des nouveaux RPC de quota/fidélité ni
+des grants navigateur retirés par la migration. Avec les quatre crons
+suspendus et Vercel en maintenance, elles restent compatibles pendant
+l'application transactionnelle du SQL. Elles sont placées en safe-deny
+immédiatement après le post-check afin de réduire la fenêtre de synchronisation
+indisponible sans exposer une frontière incompatible. Cet ordre ne peut pas
+être remplacé par un déploiement des sept fonctions avant migration.
 
 ### 6. Drain OAuth
 
@@ -256,18 +319,39 @@ Les crons restent suspendus pendant les smoke tests.
 
 ### 9. Reprise contrôlée des crons
 
-Réactiver une tâche à la fois dans cet ordre :
+Réactiver une tâche à la fois par l'API cron-job.org, dans cet ordre :
 
-1. rapports mensuels;
-2. automatisations;
-3. IA;
-4. synchronisation Google.
+1. rapports mensuels — `/api/cron/monthly-reports`;
+2. automatisations — `/api/reports/automations`;
+3. IA — `/api/cron/ai/tag-reviews`;
+4. synchronisation Google — `/api/cron/google/sync-replies`.
+
+Pour chaque `jobId`, exécuter uniquement :
+
+```bash
+curl --fail-with-body --silent --show-error \
+  --request PATCH \
+  --header 'Content-Type: application/json' \
+  --header "Authorization: Bearer ${CRON_JOB_ORG_API_KEY}" \
+  --data '{"job":{"enabled":true}}' \
+  "https://api.cron-job.org/jobs/${JOB_ID}"
+```
 
 Plafond : deux minutes par tâche. Après chaque réactivation, vérifier le statut
-HTTP et l'Evidence du premier passage. Les invocations manuelles avec secret
-restent limitées aux tenants synthétiques; le cron Google global est observé
-passivement. Toute mutation inattendue suspend immédiatement la tâche
-concernée sans modifier son code ou ses droits.
+HTTP et l'Evidence du premier passage. Relire `GET /jobs/<jobId>` et exiger :
+
+- `enabled=true`;
+- le même `jobId`;
+- le SHA-256 immuable strictement identique au snapshot pré-mutation;
+- URL, méthode `POST`, timezone, cadence, headers, timeout, notifications et
+  tous les autres champs non volatils identiques;
+- les trois prédictions retournées par `GET /jobs/<jobId>/history` conformes à
+  la cadence du tableau.
+
+Les invocations manuelles avec secret restent limitées aux tenants
+synthétiques; le cron Google global est observé passivement. Toute dérive
+suspend immédiatement la tâche concernée avec le même `PATCH enabled=false`.
+La reprise ne modifie toujours ni Vercel, ni Supabase, ni secret, ni fichier.
 
 ### 10. Réactivation Git Vercel
 
@@ -281,6 +365,24 @@ verte avant fusion. La fusion crée l'unique déploiement Production automatique
 de réactivation. Vérifier que le contenu applicatif est identique au release
 sécurisé, hors configuration Git, et répéter les probes HTTP. Toute autre
 modification interdit la fusion.
+
+## Décompte fermé des déploiements Vercel Production
+
+Le Run doit créer exactement **trois** déploiements Vercel avec
+`target=production`. Un build local `vercel build --prod` n'est pas un
+déploiement et n'entre pas dans ce total. La fusion initiale de la PR #36 ne
+doit créer aucun déploiement, car `git.deploymentEnabled.main=false`.
+
+| Numéro | Source attendue | Target | Effet exact sur l'alias Production | Condition de succès | Nécessité |
+| ---: | --- | --- | --- | --- | --- |
+| 1 | Paquet `recovery/goal-002/vercel-maintenance` du SHA `8b49ad9ea47b8bbfbf4c16b2a4b64218eb6af331`, hashes préflight identiques | `production` | L'alias canonique du projet `egia` pointe vers la maintenance globale `503` | Deployment ID capturé; `/`, fidélité et quatre routes cron = `503`; `no-store`; `Retry-After: 120` | Empêche l'ancien frontend d'utiliser le backend pendant les états incompatibles. |
+| 2 | Application sécurisée du SHA `8b49ad9ea47b8bbfbf4c16b2a4b64218eb6af331`, construite et déployée manuellement avec `--prebuilt --prod` | `production` | Le même alias quitte la maintenance et pointe vers le release sécurisé | Deployment ID/SHA exacts; smoke tests synthétiques verts; aucune `5xx` persistante | Restaure le service seulement après base durcie et sept Edge sécurisées. |
+| 3 | Commit enfant de réactivation dont l'unique diff supprime `git.deploymentEnabled.main`; contenu applicatif identique au SHA `8b49ad9...` | `production`, automatique après fusion sur `main` | L'alias est réassigné au build Git du release sécurisé avec l'auto-déploiement de `main` restauré | Exactement un nouveau Deployment ID; CI verte; diff limité; probes identiques au déploiement 2 | Rétablit le contrat Git/Vercel durable; le déploiement manuel 2 ne réactive pas à lui seul les futurs déploiements de `main`. |
+
+Zéro Preview est attendu. Un quatrième déploiement Production, l'absence de
+l'un des trois, un target différent ou une source différente arrête le Run.
+Aucun redéploiement compensatoire supplémentaire n'est autorisé sans nouvelle
+autorisation fondatrice.
 
 ## Durées maximales
 
@@ -320,6 +422,10 @@ Supabase / Edge :
 - `ALLOWED_ORIGIN`
 - `ALLOWED_ORIGINS`
 - `AI_USER_REQUESTS_PER_HOUR`
+
+Ordonnanceur externe :
+
+- `CRON_JOB_ORG_API_KEY`
 
 Vercel :
 
