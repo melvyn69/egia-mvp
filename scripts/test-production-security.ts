@@ -911,6 +911,9 @@ check("production recovery artifacts fail closed without vulnerable rollback", (
   assert.match(cronHelper, /immutableConfigSha256/);
   assert.match(cronHelper, /"<redacted>"/);
   assert.match(cronHelper, /predictions/);
+  assert.match(cronHelper, /failClosed/);
+  assert.match(cronHelper, /missing cron authentication header/);
+  assert.match(cronHelper, /await patch\(false\)/);
   assert.doesNotMatch(cronHelper, /console\.log\([^)]*key/);
 
   const safeDenyProbe = read("scripts/probe-goal-002-safe-deny.mjs");

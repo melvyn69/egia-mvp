@@ -412,7 +412,10 @@ réactivation, il relit la tâche en mémoire et exige :
 
 Les invocations manuelles avec secret restent limitées aux tenants
 synthétiques; le cron Google global est observé passivement. Toute dérive
-suspend immédiatement la tâche concernée avec le même `PATCH enabled=false`.
+suspend immédiatement la tâche concernée avec le même `PATCH enabled=false`;
+le helper confirme ensuite `enabled=false` et le hash initial avant de remonter
+l'erreur. Si cette compensation ne peut pas être confirmée, il retourne une
+erreur agrégée et le Run s'arrête sans réactiver la tâche suivante.
 La reprise ne modifie toujours ni Vercel, ni Supabase, ni secret, ni fichier.
 
 ### 10. Réactivation Git Vercel

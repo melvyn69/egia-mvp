@@ -147,6 +147,29 @@ const validateJob = (expected, job) => {
     expected.schedule,
     `unexpected schedule for ${expected.jobId}`
   );
+  assert.equal(
+    Boolean(job.auth?.enable),
+    false,
+    `unexpected Basic Auth for ${expected.jobId}`
+  );
+  const rawHeaders = job.headers ?? job.extendedData?.headers ?? {};
+  const headerEntries = Array.isArray(rawHeaders)
+    ? rawHeaders.map((header) => [header.name, header.value])
+    : Object.entries(rawHeaders);
+  const cronCredential = headerEntries.find(([name]) =>
+    ["x-cron-secret", "authorization"].includes(String(name).toLowerCase())
+  );
+  assert.ok(
+    cronCredential && String(cronCredential[1] ?? "").length > 0,
+    `missing cron authentication header for ${expected.jobId}`
+  );
+  if (String(cronCredential[0]).toLowerCase() === "authorization") {
+    assert.match(
+      String(cronCredential[1]),
+      /^Bearer\s+\S+$/i,
+      `invalid bearer cron authentication for ${expected.jobId}`
+    );
+  }
 };
 
 const validatePredictions = (expected, predictions) => {
@@ -218,6 +241,22 @@ const readKey = () =>
 const unwrapPayload = (payload) =>
   payload.jobDetails ?? payload.job ?? payload;
 
+const failClosed = async (operation, recovery) => {
+  try {
+    return await operation();
+  } catch (error) {
+    try {
+      await recovery();
+    } catch (recoveryError) {
+      throw new AggregateError(
+        [error, recoveryError],
+        "Cron operation failed and fail-closed recovery was not confirmed."
+      );
+    }
+    throw error;
+  }
+};
+
 let lastRequestAt = 0;
 const request = async (key, path, init = {}) => {
   const waitMs = Math.max(0, 220 - (Date.now() - lastRequestAt));
@@ -241,26 +280,45 @@ const request = async (key, path, init = {}) => {
 };
 
 const setEnabled = async (key, expected, enabled, beforeHash) => {
-  await request(key, `jobs/${expected.jobId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ job: { enabled } })
-  });
-  const after = await request(key, `jobs/${expected.jobId}`);
-  validateJob(expected, after);
-  assert.equal(after.enabled, enabled, `enabled mismatch for ${expected.jobId}`);
-  assert.equal(
-    fingerprint(after),
-    beforeHash,
-    `immutable cron configuration drift for ${expected.jobId}`
+  const patch = (target) =>
+    request(key, `jobs/${expected.jobId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ job: { enabled: target } })
+    });
+  const readExpected = async (target) => {
+    const job = await request(key, `jobs/${expected.jobId}`);
+    validateJob(expected, job);
+    assert.equal(job.enabled, target, `enabled mismatch for ${expected.jobId}`);
+    assert.equal(
+      fingerprint(job),
+      beforeHash,
+      `immutable cron configuration drift for ${expected.jobId}`
+    );
+    return job;
+  };
+
+  if (!enabled) {
+    await patch(false);
+    return { job: await readExpected(false), predictions: undefined };
+  }
+
+  return failClosed(
+    async () => {
+      await patch(true);
+      const job = await readExpected(true);
+      const history = await request(key, `jobs/${expected.jobId}/history`);
+      const predictions = history.predictions ?? [];
+      validatePredictions(expected, predictions);
+      return { job, predictions };
+    },
+    async () => {
+      await patch(false);
+      await readExpected(false);
+    }
   );
-  if (!enabled) return { job: after, predictions: undefined };
-  const history = await request(key, `jobs/${expected.jobId}/history`);
-  const predictions = history.predictions ?? [];
-  validatePredictions(expected, predictions);
-  return { job: after, predictions };
 };
 
-const selfTest = () => {
+const selfTest = async () => {
   const sample = {
     jobId: jobs.google.jobId,
     title: jobs.google.title,
@@ -268,7 +326,7 @@ const selfTest = () => {
     enabled: true,
     requestMethod: 1,
     schedule: jobs.google.schedule,
-    auth: { enable: true, user: "never-print-user", password: "never-print" },
+    auth: { enable: false, user: "never-print-user", password: "never-print" },
     extendedData: {
       headers: [{ name: "x-cron-secret", value: "never-print-this" }]
     }
@@ -281,7 +339,7 @@ const selfTest = () => {
   );
   const evidence = evidenceFor(jobs.google, sample);
   assert.equal(evidence.headers[0].value, "<redacted>");
-  assert.deepEqual(evidence.auth, { enable: true });
+  assert.deepEqual(evidence.auth, { enable: false });
   assert.doesNotMatch(
     JSON.stringify(evidence),
     /never-print-this|never-print-user|never-print/
@@ -297,12 +355,33 @@ const selfTest = () => {
   const future = Math.floor(Date.now() / 1000) + 3600;
   const nextHour = future - (future % 3600);
   validatePredictions(jobs.google, [nextHour, nextHour + 3600, nextHour + 7200]);
+  assert.throws(
+    () =>
+      validateJob(jobs.google, {
+        ...sample,
+        extendedData: { headers: {} }
+      }),
+    /missing cron authentication header/
+  );
+  let recoveryCount = 0;
+  await assert.rejects(
+    failClosed(
+      async () => {
+        throw new Error("synthetic resume validation failure");
+      },
+      async () => {
+        recoveryCount += 1;
+      }
+    ),
+    /synthetic resume validation failure/
+  );
+  assert.equal(recoveryCount, 1);
   console.log("GOAL-002 cron redaction and drift self-test passed.");
 };
 
 const command = process.argv[2];
 if (command === "--self-test") {
-  selfTest();
+  await selfTest();
   process.exit(0);
 }
 const option = process.argv[3];
