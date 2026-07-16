@@ -4,12 +4,12 @@ Date : `2026-07-16`
 
 ## 1. Verdict
 
-`NOT READY`
+`READY FOR A SEPARATELY AUTHORIZED PRODUCTION RUN`
 
-Le dossier Engineering est réconcilié avec l’architecture ANES. Le verdict
-passera à `READY FOR A SEPARATELY AUTHORIZED PRODUCTION RUN` seulement après
-réexécution des validations, approbation des six revues indépendantes, CI
-verte et vérification Git/Vercel finale du closeout.
+Le dossier Engineering est réconcilié avec l’architecture ANES, les
+validations sont vertes, les six revues indépendantes sont `APPROVED`, la CI
+de la PR #40 est verte et le candidat applicatif demeure inchangé. Ce verdict
+n’autorise aucune production.
 
 ## 2. Candidat figé
 
@@ -114,7 +114,7 @@ La seconde migration qualifie `extensions.digest(text,text)`, fixe
 | Build | `PASSED` — application et maintenance ; warnings bundle/Browserslist non bloquants. |
 | Audit des dépendances complet et production | `PASSED` — 0 vulnérabilité. |
 | Recherche de secrets | `PASSED` — aucune signature de credential serveur dans les fichiers suivis du périmètre. |
-| CI GitHub | `PENDING` |
+| CI GitHub | `PASSED` — PR #40 : CI `29529645091`, Migration History Guard `29529645153`. |
 | `git diff --check` | `PASSED`. |
 
 Toutes les validations sont locales, isolées ou passives. Aucun compte ou
@@ -134,10 +134,13 @@ datum client n’est utilisé.
 ## 6. État Git
 
 - **Branche du closeout :** `docs/goal-002-engineering-closeout`.
-- **Commit(s) :** `PENDING`.
-- **Pull request :** `PENDING`.
-- **CI :** `PENDING`.
-- **Propreté :** à confirmer après intégration.
+- **Commits principaux :**
+  `47cbddd252c3a4e9a5e2b63721338dd0bd8e90af` et
+  `41370c0a315cbeeb2c467cc2f550674007218860`.
+- **Pull request :** [#40](https://github.com/melvyn69/egia-mvp/pull/40).
+- **CI :** verte avant la transition finale ; le commit de transition doit
+  repasser les mêmes checks avant fusion.
+- **Propreté :** exigée au commit final et après fusion fast-forward.
 - **Protections Vercel héritées de `main` :**
   `security/goal-002-production-validation=false`,
   `codex/goal-006-fix-pgcrypto-digest=false`,

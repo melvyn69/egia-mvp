@@ -3,7 +3,7 @@
 ## Métadonnées
 
 - **ID :** `GOAL-002`
-- **Statut :** `Running`
+- **Statut :** `Review`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-11`
 - **Date de clôture Engineering :** `N/A`
@@ -196,10 +196,10 @@ mais ne définissent plus le contrat actif de GOAL-002.
 | `2026-07-16` | `Running` → `Draft` | Codex | `Séparation architecturale entre Goal Engineering et Production Run.` |
 | `2026-07-16` | `Draft` → `Ready` | Codex | Contrat Engineering, scope, critères, artefacts et protections Git/Vercel réconciliés avec ANES. |
 | `2026-07-16` | `Ready` → `Running` | Codex | Closeout Engineering lancé sur la branche protégée, sans mutation de production. |
+| `2026-07-16` | `Running` → `Review` | Codex | Six revues indépendantes `APPROVED`, validations locales/isolées vertes, CI PR #40 verte, candidat applicatif inchangé et aucun déploiement Vercel créé. |
 
-La transition `Running → Review` sera consignée uniquement après validations,
-revues, CI, Evidence et propreté Git conformes. GOAL-002 ne passe pas à
-`Done` dans cette mission.
+GOAL-002 reste en `Review`. Il ne passe pas à `Done` dans cette mission ; ce
+verdict appartient à l’acceptation ultérieure du résultat Engineering.
 
 ## Readiness Check du closeout
 
