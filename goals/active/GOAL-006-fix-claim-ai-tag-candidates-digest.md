@@ -3,7 +3,7 @@
 ## Métadonnées
 
 - **ID :** `GOAL-006`
-- **Statut :** `Running`
+- **Statut :** `Review`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-16`
 - **Risque :** `R2` — correctif SQL local et versionné, sans mutation distante.
@@ -86,6 +86,7 @@ et fonctionnelle; elle ne doit être ni déplacée, ni recréée.
 | `2026-07-16` | N/A → `Draft` | Goal séparé demandé par le fondateur. |
 | `2026-07-16` | `Draft` → `Ready` | Cause reproductible, scope et interdictions établis. |
 | `2026-07-16` | `Ready` → `Running` | Implémentation locale, tests, revue et intégration Git autorisés. |
+| `2026-07-16` | `Running` → `Review` | Correctif local vert et revue indépendante `APPROVED`; soumis au verdict fondateur après intégration Git. |
 
 ## Définition de Done
 

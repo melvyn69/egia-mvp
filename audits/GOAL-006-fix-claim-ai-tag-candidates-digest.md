@@ -37,12 +37,27 @@ Cette forme évite de faire confiance à `public`, `extensions` ou au
 | --- | --- |
 | Reproduction locale avant correctif | `digest(text, unknown) does not exist`. |
 | Inventaire local | `pgcrypto` dans `extensions`; signature `digest(text,text)` présente. |
-| Test statique GOAL-006 | En attente d'exécution finale. |
-| Test SQL transactionnel et abus | En attente d'exécution finale. |
-| Migration-history et bootstrap | En attente d'exécution finale. |
-| Tests projet, lint, typecheck, build | En attente d'exécution finale. |
-| Revue indépendante | Première revue : `CHANGES REQUIRED`; exigences intégrées, revue finale requise. |
+| Test statique GOAL-006 | `10/10` réussi et ajouté à la CI. |
+| Test SQL transactionnel et abus | Réussi sur Supabase local : appel effectif, hash, filtre localisation, contenu inchangé/modifié, plafond 20, refus `anon`/`authenticated` et schéma attaquant; `ROLLBACK` final. |
+| Lint SQL local | Aucun défaut dans les schémas `extensions` et `public`. |
+| Migration-history et bootstrap | 100 migrations, 5 collisions documentées, baseline vérifiée; chaîne prospective GOAL-003 → GOAL-002 → GOAL-006; adversarial `29/29`, bootstrap guards `10/10`. |
+| Tests projet et sécurité | `npm test`, sécurité production `30/30`, types Edge et `git diff --check` réussis. |
+| Qualité et build | Typecheck, build et audits npm complets/production réussis; 0 vulnérabilité. Un warning lint React Hooks préexistant hors scope demeure dans `useCoachResult.ts:227`. |
+| Revue indépendante | Première revue `CHANGES REQUIRED`, exigences intégrées; revue finale `APPROVED`, aucune demande ouverte. |
 | Mutation distante | Aucune. |
+
+## Verdict de revue
+
+`APPROVED FOR MERGE`.
+
+La revue indépendante confirme :
+
+- la qualification des deux appels `extensions.digest`;
+- le `search_path=pg_catalog`;
+- la conservation de la signature et du claim atomique;
+- les ACL limitées au propriétaire et à `service_role`;
+- la résistance à un homonyme attaquant dans le chemin de l'appelant;
+- l'absence de modification de baseline, migration gelée ou extension.
 
 ## Compatibilité et récupération
 
