@@ -13,6 +13,7 @@
     "typecheck": "tsc -b --pretty false",
     "test": "node scripts/test-egress-guardrails.mjs",
     "test:production-security": "tsx scripts/test-production-security.ts",
+    "test:goal-006": "node scripts/test-goal-006-claim-ai-tag-candidates.mjs",
     "test:edge-types": "npx --yes deno@2.9.2 check --config=supabase/functions/deno.json --frozen supabase/functions/generate-reply/index.ts supabase/functions/google_gbp_sync_all/index.ts supabase/functions/google_gbp_sync_locations/index.ts supabase/functions/google_oauth_exchange/index.ts supabase/functions/google_oauth_start/index.ts supabase/functions/post-reply-google/index.ts supabase/functions/process-review-analyze/index.ts",
     "test:migration-history": "node scripts/validate-supabase-migration-history.mjs",
     "test:migration-history:adversarial": "node scripts/test-supabase-migration-history-validator.mjs",

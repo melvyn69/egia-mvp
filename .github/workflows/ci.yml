@@ -47,6 +47,9 @@ jobs:
       - name: Test production security guardrails
         run: npm run test:production-security
 
+      - name: Test GOAL-006 SQL guardrails
+        run: npm run test:goal-006
+
       - name: Typecheck Edge Functions
         run: npm run test:edge-types
 
