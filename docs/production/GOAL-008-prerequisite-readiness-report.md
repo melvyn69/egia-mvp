@@ -13,7 +13,7 @@ Event Founder ultérieur acceptant explicitement GOAL-008 en `Done`.
 
 - Goal source : `GOAL-008`.
 - Statut Engineering maximal de cette mission : `Review`.
-- Candidat applicatif : `À_FIGER_GOAL_008`.
+- Candidat applicatif figé : `fed08f9be3954084c036a26355225f184896ba31`.
 - Feature flag contractuel : `APPLE_WALLET_ENABLED=false`.
 - GOAL-007 reste `Done`; son candidat et ses Evidence historiques ne sont pas modifiés.
 

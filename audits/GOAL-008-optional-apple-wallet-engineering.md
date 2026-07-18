@@ -56,7 +56,7 @@ EGIA et le reste du parcours fidélité restent indépendants.
 | AC-11 | Suites, types, lint, builds et audits locaux verts; CI reste gate de fusion. | Satisfait sous gate CI |
 | AC-12 | Tests locaux et matériaux synthétiques; aucune cible distante mutée. | Satisfait |
 | AC-13 | Aucun Event Founder ou Production Run créé ou autorisé. | Satisfait |
-| AC-14 | Candidat `À_FIGER_GOAL_008`; descendants documentaires à vérifier. | Sous gate de gel |
+| AC-14 | Candidat `fed08f9be3954084c036a26355225f184896ba31`; descendants uniquement documentaires. | Satisfait |
 
 ## Tests Engineering
 
@@ -106,6 +106,7 @@ GOAL-008 reste `Review` dans cette mission; aucun futur Prerequisite ou
 Deployment Run ne peut être créé avant son acceptation explicite en `Done` par
 un Event Founder ultérieur, puis un Event Founder distinct propre à chaque Run.
 
-Le candidat complet code/tests/artefacts sera figé au SHA
-`À_FIGER_GOAL_008`. Après ce SHA, seuls les documents, le Goal et les Evidence
-pourront changer.
+Le candidat complet code/tests/artefacts est figé au SHA
+`fed08f9be3954084c036a26355225f184896ba31`. Après ce SHA, seuls les documents,
+le Goal et les Evidence peuvent changer. Le diff descendant est contrôlé avant
+push puis après fusion.

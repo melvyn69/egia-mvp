@@ -13,7 +13,8 @@ Run ou Production Deployment Run ne peut être créé, autorisé ou exécuté av
 un Event Founder ultérieur acceptant GOAL-008 en `Done`; chaque futur Run exige
 ensuite un Event Founder distinct.
 
-Le candidat GOAL-008 est `À_FIGER_GOAL_008`. Le présent document n’est aucune
+Le candidat GOAL-008 est figé au SHA
+`fed08f9be3954084c036a26355225f184896ba31`. Le présent document n’est aucune
 autorisation de production.
 
 ## Préconditions supplémentaires

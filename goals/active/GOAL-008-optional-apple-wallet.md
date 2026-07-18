@@ -3,11 +3,11 @@
 ## Métadonnées
 
 - **ID :** `GOAL-008`
-- **Statut :** `Running`
+- **Statut :** `Review`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-18`
 - **Niveau de risque :** `R3` — Engineering de feature gating, sécurité cryptographique, parcours fidélité et contrats de futurs Runs; quatre revues indépendantes obligatoires.
-- **Candidat applicatif :** à figer pendant l’exécution.
+- **Candidat applicatif figé :** `fed08f9be3954084c036a26355225f184896ba31`.
 
 ## Valeur business
 
@@ -245,6 +245,7 @@ Founder distinct.
 | `2026-07-18` | `N/A → Draft` | Codex | Création explicitement autorisée par le Founder; aucune mutation de production. |
 | `2026-07-18` | `Draft → Ready` | Codex | Readiness Check complet : architecture, frontières, dépendances, critères, validations, Evidence et conditions d’arrêt sont explicites et vérifiables localement. |
 | `2026-07-18` | `Ready → Running` | Codex | Phase 0 fusionnée en fast-forward via PR #45, CI PR et post-fusion vertes, protections Vercel actives et aucun déploiement créé; début de l’implémentation Engineering locale. |
+| `2026-07-18` | `Running → Review` | Codex | AC-01 à AC-14 satisfaits sous gates de livraison, validations locales vertes, quatre revues indépendantes `APPROVED` et candidat figé au SHA `fed08f9be3954084c036a26355225f184896ba31`; push, CI, PR, fusion fast-forward et contrôles post-fusion restent à consigner sans autoriser `Done`. |
 
 ## Livraison attendue
 
@@ -255,3 +256,12 @@ Founder distinct.
 - `docs/production/GOAL-008-deployment-execution-plan.draft.md`.
 - `audits/GOAL-008-optional-apple-wallet-engineering.md`.
 - Candidat applicatif figé et closeout documentaire en `Review`.
+
+## Closeout Engineering soumis
+
+- **Statut :** `Review`; aucun passage à `Done` autorisé dans cette mission.
+- **Candidat figé :** `fed08f9be3954084c036a26355225f184896ba31`.
+- **Revues :** architecture/gating, sécurité Apple, frontend/fidélité et séparation des Runs `APPROVED`.
+- **Validations locales :** GOAL-008, GOAL-007 complet, sécurité, egress, migrations, bootstrap, types application/serveur/Edge, lint, builds et audits dépendances verts.
+- **Gel :** tout descendant du candidat est limité au Goal, aux documents et aux Evidence.
+- **Production :** aucune mutation, aucun déploiement, aucun Preview et aucun nouveau Production Run.

@@ -12,7 +12,7 @@ ce Run.
 
 ## Variante obligatoire
 
-- Candidat : `À_FIGER_GOAL_008`.
+- Candidat figé : `fed08f9be3954084c036a26355225f184896ba31`.
 - `APPLE_WALLET_ENABLED=false`.
 - Les six variables `APPLE_*` de GOAL-007 sont hors du payload et hors de la
   checklist; elles ne sont jamais lues ou écrites.
