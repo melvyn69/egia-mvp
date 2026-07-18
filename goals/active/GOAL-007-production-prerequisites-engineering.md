@@ -3,10 +3,10 @@
 ## Métadonnées
 
 - **ID :** `GOAL-007`
-- **Statut :** `Review`
+- **Statut :** `Done`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-18`
-- **Date de clôture :** N/A
+- **Date de clôture :** `2026-07-18`
 - **Niveau de risque :** `R3` — Engineering de sécurité touchant les frontières Vercel, Supabase, Apple Wallet et les fixtures synthétiques ; six revues indépendantes obligatoires.
 
 ## Valeur business
@@ -51,7 +51,6 @@ Le protocole A/B, les helpers sécurisés, la validation Apple, l'accès DB born
 - Tout compte, fixture ou datum de production.
 - Tout Event Founder ou Production Run.
 - Toute modification de `PROD-RUN-001`, de GOAL-002 ou de leurs Evidence historiques.
-- Le passage de GOAL-007 à `Done`.
 
 ## Contraintes d'architecture
 
@@ -87,7 +86,7 @@ Le protocole A/B, les helpers sécurisés, la validation Apple, l'accès DB born
 | Baseline ANES | prête, lecture seule | `main=origin/main=6d44b940bc94fd6d51002b752032164973238fef`, dépôt propre, package préparatoire présent. |
 | Autorisation Production | absente | Non nécessaire et explicitement hors-scope. |
 
-Le Goal est `Ready` : valeur, résultat, scope, hors-scope, architecture, dépendances, critères, validations, Evidence et conditions d'arrêt sont explicites; aucune mutation distante n'est requise.
+Au terme du Readiness Check initial, le Goal était `Ready` : valeur, résultat, scope, hors-scope, architecture, dépendances, critères, validations, Evidence et conditions d'arrêt étaient explicites; aucune mutation distante n'était requise.
 
 ## Critères d'acceptation
 
@@ -144,7 +143,17 @@ Le Goal est `Ready` : valeur, résultat, scope, hors-scope, architecture, dépen
 
 ## Définition de Done
 
-GOAL-007 n'atteint pas `Done` dans cette mission. Il peut atteindre `Review` uniquement lorsque AC-01 à AC-14 sont satisfaits, toutes les validations sont vertes, les six revues rendent `APPROVED`, le candidat est figé et le diff ultérieur est exclusivement documentaire. Le passage `Review → Done` exige une revue fondatrice ultérieure.
+GOAL-007 Engineering est clôturé.
+
+- Les critères AC-01 à AC-14 sont acceptés.
+- Le candidat final reste figé au SHA `e6958b647d50c3690cb147a5df8eaa2fdf3136f9`.
+- Le premier gel `198d82c0d9fad0134f8400d6c2e03ceec9d1eeb2` reste superseded et uniquement conservé comme Evidence historique.
+- Les six revues indépendantes `APPROVED`, les validations locales et les CI GitHub sont acceptées.
+- Les risques résiduels Apple Wallet v0.1 — absence de service de mise à jour distante et absence d'expiration métier — sont connus et acceptés pour ce candidat.
+- Le Production Prerequisite Readiness Report et les plans Prerequisite et Deployment restent des entrées préparatoires non autorisantes.
+- Toute production exige toujours un Production Prerequisite Run et un Production Deployment Run ANES séparés, chacun lié à un Event Founder distinct.
+
+La clôture Engineering de GOAL-007 ne crée, n’autorise et n’exécute aucun Production Run.
 
 ## Journal de statut
 
@@ -154,6 +163,7 @@ GOAL-007 n'atteint pas `Done` dans cette mission. Il peut atteindre `Review` uni
 | `2026-07-18` | `Draft → Ready` | Codex | Readiness Check complet : architecture et frontières figées, dépendances disponibles, validations et conditions d'arrêt vérifiables localement. |
 | `2026-07-18` | `Ready → Running` | Codex | Début de l'implémentation Engineering locale après intégration des protections Vercel; aucune mutation distante. |
 | `2026-07-18` | `Running → Review` | Codex | AC-01 à AC-14 satisfaits, validations Engineering locales vertes, six revues indépendantes `APPROVED` et candidat applicatif figé au SHA `e6958b647d50c3690cb147a5df8eaa2fdf3136f9`; CI GitHub et gel documentaire restent des gates de fusion. |
+| `2026-07-18` | `Review → Done` | Fondateur (Melvyn) | Verdict fondateur APPROVED : PR #43 fusionnée en fast-forward au SHA 234726cd60626eb0322afc92cc5f605c641a5f54, CI PR et post-fusion vertes, AC-01 à AC-14 satisfaits, six revues indépendantes APPROVED, candidat applicatif final e6958b647d50c3690cb147a5df8eaa2fdf3136f9 figé et descendants exclusivement documentaires, sans Preview, déploiement ni mutation distante. |
 
 ## Livraison et clôture
 
@@ -163,4 +173,4 @@ GOAL-007 n'atteint pas `Done` dans cette mission. Il peut atteindre `Review` uni
 - **Gel superseded :** `198d82c0d9fad0134f8400d6c2e03ceec9d1eeb2` reste une Evidence historique du premier gel et n'est pas le candidat final.
 - **Risques résiduels :** absence de service de mise à jour Apple Wallet v0.1 et absence d'expiration métier v0.1.
 - **Verdict de revue :** six revues indépendantes `APPROVED` (A/B; secrets; Supabase; Apple Wallet; synthétique/teardown; séparation des Runs).
-- **Décision de clôture :** `Review` maximum dans cette mission; verdict Founder requis pour `Done`.
+- **Décision de clôture :** verdict Founder `APPROVED`; transition `Review → Done` acceptée le `2026-07-18`, sans autorisation de production.
