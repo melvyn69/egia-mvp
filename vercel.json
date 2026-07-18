@@ -5,6 +5,8 @@
       "security/goal-002-production-validation": false,
       "codex/goal-006-fix-pgcrypto-digest": false,
       "docs/goal-002-engineering-closeout": false,
+      "engineering/goal-007-production-prerequisites": false,
+      "docs/goal-007-engineering-closeout": false,
       "main": false
     }
   },
