@@ -5,7 +5,10 @@ import {
   createVerify,
   X509Certificate
 } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { closeSync, constants, mkdtempSync, openSync, rmSync, writeSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import yauzl from "yauzl";
 
 const REQUIRED_EXTENSION_HEX = {
@@ -123,7 +126,16 @@ const readZipEntries = (buffer) =>
 
 const verifyDetachedCms = ({ signature, manifest }) =>
   new Promise((resolve, reject) => {
-    const fdRoot = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
+    if (!Buffer.isBuffer(signature) || signature.length < 2 || signature[0] !== 0x30) {
+      return reject(new Error("verification_failed"));
+    }
+    const pipeDirectory = mkdtempSync(join(tmpdir(), "goal007-cms-pipe-"));
+    const contentPipe = join(pipeDirectory, "manifest.fifo");
+    const pipeSetup = spawnSync("mkfifo", [contentPipe], { stdio: "ignore" });
+    if (pipeSetup.status !== 0) {
+      rmSync(pipeDirectory, { recursive: true, force: true });
+      return reject(new Error("pipe_setup_failed"));
+    }
     const child = spawn("openssl", [
       "cms",
       "-verify",
@@ -131,23 +143,53 @@ const verifyDetachedCms = ({ signature, manifest }) =>
       "DER",
       "-binary",
       "-in",
-      `${fdRoot}/3`,
+      "-",
       "-content",
-      `${fdRoot}/4`,
+      contentPipe,
       "-noverify",
       "-out",
       "/dev/null"
-    ], { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] });
+    ], { stdio: ["pipe", "ignore", "pipe"] });
     let stderr = "";
+    let settled = false;
+    let writerTimer = null;
+    const settle = (callback) => {
+      if (settled) return;
+      settled = true;
+      if (writerTimer) clearTimeout(writerTimer);
+      rmSync(pipeDirectory, { recursive: true, force: true });
+      callback();
+    };
+    const writeManifest = () => {
+      if (settled) return;
+      let descriptor;
+      try {
+        descriptor = openSync(contentPipe, constants.O_WRONLY | constants.O_NONBLOCK);
+        let offset = 0;
+        while (offset < manifest.length) {
+          offset += writeSync(descriptor, manifest, offset, manifest.length - offset);
+        }
+        closeSync(descriptor);
+        descriptor = undefined;
+      } catch (error) {
+        if (descriptor !== undefined) {
+          try { closeSync(descriptor); } catch { /* already closed */ }
+        }
+        if (error?.code === "ENXIO") {
+          writerTimer = setTimeout(writeManifest, 1);
+          return;
+        }
+        settle(() => reject(new Error("pipe_write_failed")));
+      }
+    };
     child.stderr.on("data", () => { stderr = "verification_failed"; });
     // OpenSSL can close either input early for an intentionally invalid CMS.
     // The child exit status is the authoritative, redacted verification result.
-    child.stdio[3].on("error", () => {});
-    child.stdio[4].on("error", () => {});
-    child.on("error", reject);
-    child.on("close", (status) => status === 0 ? resolve(true) : reject(new Error(stderr)));
-    child.stdio[3].end(signature);
-    child.stdio[4].end(manifest);
+    child.stdin.on("error", () => {});
+    child.on("error", () => settle(() => reject(new Error("verification_failed"))));
+    child.on("close", (status) => settle(() => status === 0 ? resolve(true) : reject(new Error(stderr))));
+    child.stdin.end(signature);
+    writeManifest();
   });
 
 const encryptedPrivateKey = (value) =>
@@ -322,7 +364,7 @@ export const validateAppleWalletPreflight = async ({
       entries.set("manifest.json", Buffer.from("{invalid", "utf8"));
     } else if (archiveMutationForTest === "signature") {
       const signature = Buffer.from(entries.get("signature"));
-      signature[0] ^= 0xff;
+      signature[1] ^= 0xff;
       entries.set("signature", signature);
     } else if (archiveMutationForTest === "pass-json" || archiveMutationForTest === "qr") {
       const mutated = JSON.parse(entries.get("pass.json").toString("utf8"));
