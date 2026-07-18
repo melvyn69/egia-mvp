@@ -153,13 +153,13 @@ GOAL-007 n'atteint pas `Done` dans cette mission. Il peut atteindre `Review` uni
 | `2026-07-18` | `N/A → Draft` | Codex | Création autorisée par le Founder; aucune mutation de production. |
 | `2026-07-18` | `Draft → Ready` | Codex | Readiness Check complet : architecture et frontières figées, dépendances disponibles, validations et conditions d'arrêt vérifiables localement. |
 | `2026-07-18` | `Ready → Running` | Codex | Début de l'implémentation Engineering locale après intégration des protections Vercel; aucune mutation distante. |
-| `2026-07-18` | `Running → Review` | Codex | AC-01 à AC-14 satisfaits, validations Engineering locales vertes, six revues indépendantes `APPROVED` et candidat applicatif figé au SHA `198d82c0d9fad0134f8400d6c2e03ceec9d1eeb2`; CI GitHub et gel documentaire restent des gates de fusion. |
+| `2026-07-18` | `Running → Review` | Codex | AC-01 à AC-14 satisfaits, validations Engineering locales vertes, six revues indépendantes `APPROVED` et candidat applicatif figé au SHA `2d341bbca3bb49bfa6d69b607d039ffc17079071`; CI GitHub et gel documentaire restent des gates de fusion. |
 
 ## Livraison et clôture
 
 - **Artifacts livrés :** protocole A/B, provisioner zéro-copie, canal DB borné, préflight Apple Wallet, runner `GOAL002_SYNTH`, tests, rapport de readiness et plans séparés.
 - **Matrice critère → validation → Evidence :** `audits/GOAL-007-engineering-evidence-matrix.md`.
-- **Candidat applicatif figé :** `198d82c0d9fad0134f8400d6c2e03ceec9d1eeb2`.
+- **Candidat applicatif figé :** `2d341bbca3bb49bfa6d69b607d039ffc17079071`.
 - **Risques résiduels :** absence de service de mise à jour Apple Wallet v0.1 et absence d'expiration métier v0.1.
 - **Verdict de revue :** six revues indépendantes `APPROVED` (A/B; secrets; Supabase; Apple Wallet; synthétique/teardown; séparation des Runs).
 - **Décision de clôture :** `Review` maximum dans cette mission; verdict Founder requis pour `Done`.

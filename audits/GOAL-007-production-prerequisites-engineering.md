@@ -44,7 +44,7 @@ Aucun fichier de migration, schéma ou recovery historique n'est modifié. La ba
 
 ## Candidat
 
-Le candidat applicatif GOAL-007 est figé au SHA `198d82c0d9fad0134f8400d6c2e03ceec9d1eeb2`. Tout descendant autorisé est exclusivement documentaire.
+Le candidat applicatif GOAL-007 est figé au SHA `2d341bbca3bb49bfa6d69b607d039ffc17079071`. Tout descendant autorisé est exclusivement documentaire. Ce SHA inclut la gestion portable et fail-closed de la fermeture anticipée des pipes OpenSSL constatée par la CI Linux; la revue Apple a reconfirmé `APPROVED`.
 
 ## Validations finales
 
