@@ -123,6 +123,7 @@ const readZipEntries = (buffer) =>
 
 const verifyDetachedCms = ({ signature, manifest }) =>
   new Promise((resolve, reject) => {
+    const fdRoot = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
     const child = spawn("openssl", [
       "cms",
       "-verify",
@@ -130,23 +131,23 @@ const verifyDetachedCms = ({ signature, manifest }) =>
       "DER",
       "-binary",
       "-in",
-      "/dev/stdin",
+      `${fdRoot}/3`,
       "-content",
-      "/dev/fd/3",
+      `${fdRoot}/4`,
       "-noverify",
       "-out",
       "/dev/null"
-    ], { stdio: ["pipe", "ignore", "pipe", "pipe"] });
+    ], { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] });
     let stderr = "";
     child.stderr.on("data", () => { stderr = "verification_failed"; });
     // OpenSSL can close either input early for an intentionally invalid CMS.
     // The child exit status is the authoritative, redacted verification result.
-    child.stdin.on("error", () => {});
     child.stdio[3].on("error", () => {});
+    child.stdio[4].on("error", () => {});
     child.on("error", reject);
     child.on("close", (status) => status === 0 ? resolve(true) : reject(new Error(stderr)));
-    child.stdin.end(signature);
-    child.stdio[3].end(manifest);
+    child.stdio[3].end(signature);
+    child.stdio[4].end(manifest);
   });
 
 const encryptedPrivateKey = (value) =>
