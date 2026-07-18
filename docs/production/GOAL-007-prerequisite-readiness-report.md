@@ -8,7 +8,7 @@ Ce rapport est un livrable Engineering non autorisant. Il ne crée ni ne nomme a
 
 - Goal source : `GOAL-007`.
 - Statut attendu à la livraison : `Review`.
-- Candidat applicatif figé : `2d341bbca3bb49bfa6d69b607d039ffc17079071`.
+- Candidat applicatif figé : `baaf5eac5d767722c15c63c4ca799ab5c79e67a7`.
 - Candidat historique GOAL-002 `73c40836b58f5663e810de70a169c39ab9627745` : Evidence historique uniquement, non candidat au futur déploiement.
 - Environnements préparés : Supabase `fhadiwkdznhuxtlgrwfd` / `egia-mvp`, Vercel `prj_GoGCD7ICIfemLSlegN4Tc8JcoxrT` / `egia`.
 
