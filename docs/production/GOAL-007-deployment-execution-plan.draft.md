@@ -4,7 +4,7 @@
 
 Ce brouillon remplace, pour tout futur déploiement, le plan historique GOAL-002. Il ne modifie pas l'Evidence historique, ne porte aucun identifiant officiel de Production Run et reste **NON EXÉCUTABLE** tant qu'un Production Prerequisite Run séparé n'a pas réussi, été vérifié et été clôturé conformément à ANES.
 
-Il exige ensuite un Production Deployment Run ANES distinct, un nouvel Event Founder, le candidat GOAL-007 figé `baaf5eac5d767722c15c63c4ca799ab5c79e67a7` et des hashes recalculés. Le présent document n'est aucune autorisation.
+Il exige ensuite un Production Deployment Run ANES distinct, un nouvel Event Founder, le candidat GOAL-007 figé `e6958b647d50c3690cb147a5df8eaa2fdf3136f9` et des hashes recalculés. Le présent document n'est aucune autorisation.
 
 ## Préconditions supplémentaires obligatoires
 
