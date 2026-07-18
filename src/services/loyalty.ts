@@ -135,9 +135,8 @@ export type LoyaltyHighlights = {
   availableRewards: LoyaltyAvailableReward[];
 };
 
-export type AppleWalletStatus = {
-  configured: boolean;
-  missing: string[];
+export type PublicCapabilities = {
+  appleWalletEnabled: boolean;
 };
 
 const UUID_RE =
@@ -475,26 +474,18 @@ export const verifyLoyaltyEnrollment = async (
   return payload.data;
 };
 
-export const getAppleWalletStatus = async (
-  walletPublicToken?: string | null
-): Promise<AppleWalletStatus> => {
-  const params = new URLSearchParams({ status: "1" });
-  if (walletPublicToken) {
-    params.set("token", walletPublicToken);
-  }
-  const response = await fetch(`/api/loyalty/apple-pass?${params.toString()}`);
-  if (!response.ok && response.status !== 404) {
-    return { configured: false, missing: [] };
-  }
+export const getPublicCapabilities = async (): Promise<PublicCapabilities> => {
+  const response = await fetch("/api/capabilities");
+  if (!response.ok) return { appleWalletEnabled: false };
   const payload = (await response.json().catch(() => null)) as
     | {
-        configured?: boolean;
-        missing?: string[];
+        data?: {
+          appleWalletEnabled?: boolean;
+        };
       }
     | null;
   return {
-    configured: Boolean(payload?.configured),
-    missing: Array.isArray(payload?.missing) ? payload.missing : []
+    appleWalletEnabled: payload?.data?.appleWalletEnabled === true
   };
 };
 

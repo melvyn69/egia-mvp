@@ -122,6 +122,14 @@ Contexte IA :
 - Un projet Supabase configuré
 - Variables d’environnement (Vercel/local)
 
+### Apple Wallet (optionnel)
+
+`APPLE_WALLET_ENABLED` est une configuration exclusivement serveur. Elle est
+désactivée lorsqu’elle est absente ou égale à `false`; toute autre valeur que
+`true` ou `false` échoue fermée. La valeur `true` n’active la capacité que si
+les six entrées Apple sont complètes et cryptographiquement valides. Ne jamais
+préfixer ce flag avec `VITE_` ni exposer les entrées Apple au frontend.
+
 ### Install
 ```bash
 npm ci

@@ -21,7 +21,7 @@ import {
   fetchLoyaltyProgram,
   fetchLoyaltyStats,
   fetchRecentLoyaltyMembers,
-  getAppleWalletStatus,
+  getPublicCapabilities,
   saveLoyaltyProgram,
   type LoyaltyProgramForm
 } from "../services/loyalty";
@@ -210,13 +210,13 @@ const Loyalty = ({
     placeholderData: (prev) => prev
   });
 
-  const appleWalletQuery = useQuery({
-    queryKey: ["apple-wallet-status"],
+  const capabilitiesQuery = useQuery({
+    queryKey: ["public-capabilities"],
     queryFn: ({ queryKey }) =>
       instrumentQueryFetch({
         page: "Loyalty",
         queryKey,
-        queryFn: () => getAppleWalletStatus()
+        queryFn: () => getPublicCapabilities()
       }),
     retry: false
   });
@@ -573,14 +573,12 @@ const Loyalty = ({
               Ce lien peut être envoyé après un avis, affiché sur un QR comptoir
               ou partagé par SMS. Aucune récompense n’est liée à la note donnée.
             </div>
-            <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 text-sm">
-              <span className="font-medium text-slate-700">Apple Wallet</span>
-              {appleWalletQuery.data?.configured ? (
+            {capabilitiesQuery.data?.appleWalletEnabled && (
+              <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 text-sm">
+                <span className="font-medium text-slate-700">Apple Wallet</span>
                 <Badge variant="success">Prêt</Badge>
-              ) : (
-                <Badge variant="neutral">Non configuré</Badge>
-              )}
-            </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

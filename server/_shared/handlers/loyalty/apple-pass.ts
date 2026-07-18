@@ -1,7 +1,14 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
-import { createPrivateKey, X509Certificate } from "node:crypto";
 import { getRequestId, sendError } from "../../api_utils";
+import {
+  getAppleWalletRuntimeConfig,
+  readProcessEnvironment,
+  type EnabledAppleWalletConfig,
+  type EnvironmentReader
+} from "../../apple_wallet_config";
+
+export { validateAppleWalletRuntimeMaterial } from "../../apple_wallet_config";
 
 type QueryResult<T = unknown> = {
   data: T;
@@ -79,148 +86,22 @@ const fallbackPng = Buffer.from(
   "base64"
 );
 
-const getEnv = (keys: string[]) => {
+const getEnv = (keys: string[], readEnvironment: EnvironmentReader) => {
   for (const key of keys) {
-    const value = process.env[key]?.trim();
+    const value = readEnvironment(key)?.trim();
     if (value) return value;
   }
   return "";
 };
 
-const normalizeCertificate = (value: string) => {
-  const normalized = value.replace(/\\n/g, "\n").trim();
-  if (normalized.includes("-----BEGIN")) return normalized;
-  try {
-    return Buffer.from(normalized, "base64").toString("utf8").trim();
-  } catch {
-    return normalized;
-  }
-};
-
-const isEncryptedPrivateKey = (value: string) =>
-  /-----BEGIN ENCRYPTED PRIVATE KEY-----/.test(value) ||
-  (value.includes(["-----BEGIN", "RSA PRIVATE KEY-----"].join(" ")) &&
-    /Proc-Type:\s*4,ENCRYPTED/i.test(value));
-
-const hasExactDnAttribute = (subject: string, key: string, expected: string) =>
-  subject
-    .split(/\n|,\s*(?=[A-Z][A-Z0-9.]*=)/)
-    .some((entry) => entry.trim() === `${key}=${expected}`);
-
-export const validateAppleWalletRuntimeMaterial = (input: {
-  passTypeIdentifier: string;
-  teamIdentifier: string;
-  signerCert: string;
-  signerKey: string;
-  signerKeyPassphrase: string;
-  wwdr: string;
-}) => {
-  if (!isEncryptedPrivateKey(input.signerKey) || !input.signerKeyPassphrase) {
-    return false;
-  }
-  try {
-    const signerCertificate = new X509Certificate(input.signerCert);
-    const wwdrCertificate = new X509Certificate(input.wwdr);
-    const privateKey = createPrivateKey({
-      key: input.signerKey,
-      passphrase: input.signerKeyPassphrase
-    });
-    if (
-      privateKey.asymmetricKeyType !== "rsa" ||
-      (privateKey.asymmetricKeyDetails?.modulusLength ?? 0) < 2048
-    ) {
-      return false;
-    }
-    if (!signerCertificate.checkPrivateKey(privateKey)) return false;
-    if (
-      !hasExactDnAttribute(signerCertificate.subject, "UID", input.passTypeIdentifier) ||
-      !hasExactDnAttribute(signerCertificate.subject, "OU", input.teamIdentifier)
-    ) {
-      return false;
-    }
-    const now = Date.now();
-    if (
-      now < new Date(signerCertificate.validFrom).valueOf() ||
-      now >= new Date(signerCertificate.validTo).valueOf()
-    ) return false;
-    if (
-      !signerCertificate.checkIssued(wwdrCertificate) ||
-      !signerCertificate.verify(wwdrCertificate.publicKey)
-    ) {
-      return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const getAppleWalletConfig = () => {
-  const passTypeIdentifier = getEnv(["APPLE_PASS_TYPE_IDENTIFIER"]);
-  const teamIdentifier = getEnv(["APPLE_TEAM_IDENTIFIER"]);
-  const certificateRaw = getEnv(["APPLE_PASS_CERTIFICATE"]);
-  const privateKeyRaw = getEnv(["APPLE_PASS_PRIVATE_KEY"]);
-  const certificatePassword = getEnv(["APPLE_PASS_CERTIFICATE_PASSWORD"]);
-  const wwdrRaw = getEnv(["APPLE_WWDR_CERTIFICATE"]);
-  const publicUrl = getEnv([
-    "APP_PUBLIC_URL",
-    "APP_BASE_URL",
-    "VITE_APP_BASE_URL",
-    "VERCEL_PROJECT_PRODUCTION_URL",
-    "VERCEL_URL"
-  ]);
-
-  const certificate = certificateRaw
-    ? normalizeCertificate(certificateRaw)
-    : "";
-  const privateKey = privateKeyRaw ? normalizeCertificate(privateKeyRaw) : "";
-  const wwdr = wwdrRaw ? normalizeCertificate(wwdrRaw) : "";
-  const signerCert = certificate;
-  const signerKey = privateKey;
-
-  const missing = [
-    !passTypeIdentifier ? "APPLE_PASS_TYPE_IDENTIFIER" : null,
-    !teamIdentifier ? "APPLE_TEAM_IDENTIFIER" : null,
-    !signerCert ? "APPLE_PASS_CERTIFICATE" : null,
-    !signerKey ? "APPLE_PASS_PRIVATE_KEY" : null,
-    !certificatePassword ? "APPLE_PASS_CERTIFICATE_PASSWORD" : null,
-    !wwdr ? "APPLE_WWDR_CERTIFICATE" : null,
-    !publicUrl ? "APP_PUBLIC_URL|APP_BASE_URL" : null
-  ].filter((value): value is string => Boolean(value));
-
-  const baseUrl =
-    publicUrl && !publicUrl.startsWith("http")
-      ? `https://${publicUrl}`
-      : publicUrl;
-
-  const materialValid =
-    missing.length === 0 &&
-    validateAppleWalletRuntimeMaterial({
-      passTypeIdentifier,
-      teamIdentifier,
-      signerCert,
-      signerKey,
-      signerKeyPassphrase: certificatePassword,
-      wwdr
-    });
-
-  return {
-    configured: missing.length === 0 && materialValid,
-    invalid: missing.length === 0 && !materialValid,
-    missing,
-    passTypeIdentifier,
-    teamIdentifier,
-    signerCert,
-    signerKey,
-    signerKeyPassphrase: certificatePassword,
-    wwdr,
-    publicUrl: baseUrl
-  };
-};
-
-const createSupabaseAdmin = (): SupabaseAdmin => {
-  const supabaseUrl = getEnv(["SUPABASE_URL", "VITE_SUPABASE_URL"]);
-  const serviceRoleKey = getEnv(["SUPABASE_SERVICE_ROLE_KEY"]);
+const createSupabaseAdmin = (
+  readEnvironment: EnvironmentReader
+): SupabaseAdmin => {
+  const supabaseUrl = getEnv(
+    ["SUPABASE_URL", "VITE_SUPABASE_URL"],
+    readEnvironment
+  );
+  const serviceRoleKey = getEnv(["SUPABASE_SERVICE_ROLE_KEY"], readEnvironment);
   if (!supabaseUrl || !serviceRoleKey) {
     throw new Error("Missing Supabase service role env");
   }
@@ -344,12 +225,11 @@ const resolvePassContext = async (
   };
 };
 
-const buildPassBuffer = async (context: PassContext) => {
+const buildPassBuffer = async (
+  context: PassContext,
+  config: EnabledAppleWalletConfig
+) => {
   const { PKPass } = await import("passkit-generator");
-  const config = getAppleWalletConfig();
-  if (!config.configured) {
-    return { buffer: null, missing: config.missing };
-  }
 
   const locationName = formatLocationName(context.location);
   const rewardText =
@@ -468,37 +348,37 @@ const buildPassBuffer = async (context: PassContext) => {
     altText: context.member.member_code
   });
 
-  return { buffer: pass.getAsBuffer(), missing: [] };
+  return pass.getAsBuffer();
 };
 
-const sendConfiguredStatus = async (
+const sendEnabledStatus = async (
   req: VercelRequest,
   res: VercelResponse,
-  requestId: string
+  requestId: string,
+  readEnvironment: EnvironmentReader
 ) => {
   const token = typeof req.query.token === "string" ? req.query.token : null;
-  const config = getAppleWalletConfig();
 
   if (!token) {
     return res.status(200).json({
       ok: true,
-      configured: config.configured,
-      missing: config.configured ? [] : config.missing,
+      appleWalletEnabled: true,
       requestId
     });
   }
 
-  const supabaseAdmin = createSupabaseAdmin();
+  const supabaseAdmin = createSupabaseAdmin(readEnvironment);
   const walletPass = await findWalletPass(supabaseAdmin, token);
   return res.status(walletPass ? 200 : 404).json({
     ok: Boolean(walletPass),
-    configured: config.configured,
-    missing: config.configured ? [] : config.missing,
+    appleWalletEnabled: true,
     requestId
   });
 };
 
-const handleApplePass = async (req: VercelRequest, res: VercelResponse) => {
+export const createApplePassHandler = (
+  readEnvironment: EnvironmentReader = readProcessEnvironment
+) => async (req: VercelRequest, res: VercelResponse) => {
   const requestId = getRequestId(req);
   if (req.method !== "GET") {
     return sendError(
@@ -509,9 +389,22 @@ const handleApplePass = async (req: VercelRequest, res: VercelResponse) => {
     );
   }
 
+  const config = getAppleWalletRuntimeConfig(readEnvironment);
+  if (!config.appleWalletEnabled) {
+    return sendError(
+      res,
+      requestId,
+      {
+        code: "APPLE_WALLET_DISABLED",
+        message: "Capability not available"
+      },
+      404
+    );
+  }
+
   const statusParam = req.query.status;
   if (statusParam === "1" || statusParam === "true") {
-    return sendConfiguredStatus(req, res, requestId);
+    return sendEnabledStatus(req, res, requestId, readEnvironment);
   }
 
   const token = typeof req.query.token === "string" ? req.query.token : "";
@@ -525,20 +418,7 @@ const handleApplePass = async (req: VercelRequest, res: VercelResponse) => {
   }
 
   try {
-    const config = getAppleWalletConfig();
-    if (!config.configured) {
-      return res.status(503).json({
-        ok: false,
-        error: {
-          code: "WALLET_NOT_CONFIGURED",
-          message: "Apple Wallet is not configured",
-          missing: config.missing
-        },
-        requestId
-      });
-    }
-
-    const supabaseAdmin = createSupabaseAdmin();
+    const supabaseAdmin = createSupabaseAdmin(readEnvironment);
     const context = await resolvePassContext(supabaseAdmin, token);
     if (!context) {
       return sendError(
@@ -549,18 +429,7 @@ const handleApplePass = async (req: VercelRequest, res: VercelResponse) => {
       );
     }
 
-    const { buffer, missing } = await buildPassBuffer(context);
-    if (!buffer) {
-      return res.status(503).json({
-        ok: false,
-        error: {
-          code: "WALLET_NOT_CONFIGURED",
-          message: "Apple Wallet is not configured",
-          missing
-        },
-        requestId
-      });
-    }
+    const buffer = await buildPassBuffer(context, config);
 
     const filename = `${context.member.member_code}.pkpass`;
     res.setHeader("Content-Type", "application/vnd.apple.pkpass");
@@ -583,5 +452,7 @@ const handleApplePass = async (req: VercelRequest, res: VercelResponse) => {
     );
   }
 };
+
+const handleApplePass = createApplePassHandler();
 
 export default handleApplePass;

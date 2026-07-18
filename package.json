@@ -22,6 +22,7 @@
     "test:goal-007:postdeploy-probes": "node scripts/test-goal-007-postdeploy-probes.mjs",
     "test:goal-007:synthetic-rate-limit": "tsx scripts/test-goal-007-synthetic-rate-limit.ts",
     "test:goal-007": "npm run test:goal-007:internal-key && npm run test:goal-007:db-channel && npm run test:goal-007:provisioner && npm run test:goal-007:apple-wallet && npm run test:goal-007:synth && npm run test:goal-007:postdeploy-probes && npm run test:goal-007:synthetic-rate-limit",
+    "test:goal-008": "tsx --tsconfig tsconfig.app.json scripts/test-goal-008-optional-apple-wallet.tsx",
     "test:edge-types": "npx --yes deno@2.9.2 check --config=supabase/functions/deno.json --frozen supabase/functions/generate-reply/index.ts supabase/functions/google_gbp_sync_all/index.ts supabase/functions/google_gbp_sync_locations/index.ts supabase/functions/google_oauth_exchange/index.ts supabase/functions/google_oauth_start/index.ts supabase/functions/post-reply-google/index.ts supabase/functions/process-review-analyze/index.ts",
     "test:migration-history": "node scripts/validate-supabase-migration-history.mjs",
     "test:migration-history:adversarial": "node scripts/test-supabase-migration-history-validator.mjs",

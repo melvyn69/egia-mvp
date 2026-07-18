@@ -3,7 +3,7 @@
 ## Métadonnées
 
 - **ID :** `GOAL-008`
-- **Statut :** `Ready`
+- **Statut :** `Running`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-18`
 - **Niveau de risque :** `R3` — Engineering de feature gating, sécurité cryptographique, parcours fidélité et contrats de futurs Runs; quatre revues indépendantes obligatoires.
@@ -224,15 +224,19 @@ localement avec des matériaux synthétiques et sans mutation distante.
 ## Définition de Review
 
 GOAL-008 peut passer à `Review` lorsque AC-01 à AC-14 sont satisfaits, les
-validations locales et la CI sont vertes, les quatre revues indépendantes sont
-`APPROVED`, le candidat applicatif est figé, ses descendants sont uniquement
-documentaires, la PR est fusionnée en fast-forward et zéro Preview, zéro
-déploiement, zéro mutation distante et zéro Production Run nouveau sont
-confirmés.
+validations locales sont vertes, les quatre revues indépendantes sont
+`APPROVED`, le candidat applicatif est figé, le closeout est documentaire et
+zéro Preview, zéro déploiement, zéro mutation distante et zéro Production Run
+nouveau sont confirmés. Push, PR, CI GitHub, fusion fast-forward, nettoyage et
+contrôles post-fusion restent des gates de livraison; ils ne font jamais passer
+le Goal à `Done` et son statut final dans cette mission reste `Review`.
 
 GOAL-008 ne passe pas à `Done` dans cette mission. Seul un Event Founder
 ultérieur peut décider de sa clôture Engineering; cette clôture n’autoriserait
-toujours aucune production.
+toujours aucune production. Aucun Production Prerequisite Run ou Production
+Deployment Run ne peut être créé, autorisé ou exécuté avant cette acceptation
+explicite de GOAL-008 en `Done`; chaque Run exige ensuite son propre Event
+Founder distinct.
 
 ## Journal de statut
 
@@ -240,6 +244,7 @@ toujours aucune production.
 | --- | --- | --- | --- |
 | `2026-07-18` | `N/A → Draft` | Codex | Création explicitement autorisée par le Founder; aucune mutation de production. |
 | `2026-07-18` | `Draft → Ready` | Codex | Readiness Check complet : architecture, frontières, dépendances, critères, validations, Evidence et conditions d’arrêt sont explicites et vérifiables localement. |
+| `2026-07-18` | `Ready → Running` | Codex | Phase 0 fusionnée en fast-forward via PR #45, CI PR et post-fusion vertes, protections Vercel actives et aucun déploiement créé; début de l’implémentation Engineering locale. |
 
 ## Livraison attendue
 

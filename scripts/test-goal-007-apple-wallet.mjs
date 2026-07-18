@@ -151,8 +151,9 @@ try {
   assert.doesNotMatch(redacted, /PRIVATE KEY|synthetic-passphrase/);
 
   const runtime = readFileSync("server/_shared/handlers/loyalty/apple-pass.ts", "utf8");
+  const runtimeConfig = readFileSync("server/_shared/apple_wallet_config.ts", "utf8");
   assert.match(runtime, /sharingProhibited:\s*true/);
-  assert.match(runtime, /APPLE_PASS_CERTIFICATE_PASSWORD/);
+  assert.match(runtimeConfig, /APPLE_PASS_CERTIFICATE_PASSWORD/);
   assert.doesNotMatch(runtime, /sharingProhibited:\s*false/);
   console.log("GOAL-007 Apple Wallet synthetic checks passed: 33/33.");
 } finally {

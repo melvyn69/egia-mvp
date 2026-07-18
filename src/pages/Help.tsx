@@ -50,7 +50,6 @@ type HelpIcon =
   | "qr"
   | "reports"
   | "loyalty"
-  | "wallet"
   | "settings"
   | "members"
   | "team"
@@ -129,7 +128,6 @@ const iconMap: Record<HelpIcon, LucideIcon> = {
   qr: QrCode,
   reports: FileText,
   loyalty: WalletCards,
-  wallet: WalletCards,
   settings: Settings,
   members: UserPlus,
   team: Users,
@@ -277,7 +275,7 @@ const categories: HelpCategory[] = [
     title: "Croissance locale",
     description:
       "Collectez plus d'avis, activez la fidélité, utilisez les QR Codes et simplifiez le retour client.",
-    guideIds: ["review-collection", "qr-code", "loyalty", "wallet"]
+    guideIds: ["review-collection", "qr-code", "loyalty"]
   },
   {
     id: "operations",
@@ -662,44 +660,6 @@ const guides: HelpGuide[] = [
     ],
     cta: { label: "Configurer la fidélité", to: "/loyalty" },
     keywords: ["fidélité", "points", "récompense", "visite", "client"]
-  },
-  {
-    id: "wallet",
-    categoryId: "growth",
-    icon: "wallet",
-    title: "Wallet",
-    description:
-      "Wallet permet au client de conserver une carte ou un accès fidélité directement sur son téléphone lorsque la configuration est disponible.",
-    objective:
-      "Simplifier l'identification client et rendre le programme fidélité plus pratique.",
-    duration: "7 min",
-    level: "Intermédiaire",
-    steps: [
-      "Vérifiez que la fidélité est activée.",
-      "Vérifiez l'état Wallet dans le module Fidélité.",
-      "Partagez le lien client.",
-      "Demandez au client d'ajouter la carte à son téléphone.",
-      "Utilisez le scanner ou le code membre lors d'une visite.",
-      "Vérifiez que les points sont bien ajoutés."
-    ],
-    bestPractices: [
-      "Activez d'abord un programme fidélité simple.",
-      "Testez le parcours sur un téléphone.",
-      "Proposez Wallet comme une option pratique.",
-      "Gardez une alternative si le client ne souhaite pas l'utiliser."
-    ],
-    commonMistakes: [
-      "Présenter Wallet avant d'avoir configuré la fidélité.",
-      "Ne pas tester l'ajout sur mobile.",
-      "Confondre Wallet et paiement.",
-      "Ne pas expliquer l'intérêt au client."
-    ],
-    usefulLinks: [
-      { label: "Fidélité", to: "/loyalty" },
-      { label: "App mobile", to: "/settings?tab=mobile" }
-    ],
-    cta: { label: "Vérifier Wallet", to: "/loyalty" },
-    keywords: ["wallet", "apple", "mobile", "carte", "fidélité"]
   },
   {
     id: "settings",

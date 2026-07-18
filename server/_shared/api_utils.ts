@@ -6,6 +6,7 @@ type ErrorCode =
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "NOT_FOUND"
+  | "APPLE_WALLET_DISABLED"
   | "BAD_REQUEST"
   | "INTERNAL";
 

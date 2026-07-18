@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle, Copy, Gift, Sparkles, WalletCards } from "lucide-react";
+import { CheckCircle, Copy, Gift, Sparkles } from "lucide-react";
+import { AppleWalletCta } from "../components/loyalty/AppleWalletCta";
 import { LoyaltyQrCode } from "../components/loyalty/LoyaltyQrCode";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import {
   getAppleWalletPassUrl,
-  getAppleWalletStatus,
+  getPublicCapabilities,
   verifyLoyaltyEnrollment,
   type JoinLoyaltyResult
 } from "../services/loyalty";
@@ -48,9 +49,9 @@ const LoyaltyVerify = () => {
 
   const member =
     verification.status === "success" ? verification.member : null;
-  const appleWalletQuery = useQuery({
-    queryKey: ["apple-wallet-status", member?.wallet_public_token ?? null],
-    queryFn: () => getAppleWalletStatus(member?.wallet_public_token),
+  const capabilitiesQuery = useQuery({
+    queryKey: ["public-capabilities"],
+    queryFn: () => getPublicCapabilities(),
     enabled: Boolean(member?.wallet_public_token),
     retry: false
   });
@@ -72,12 +73,8 @@ const LoyaltyVerify = () => {
     }
   };
 
-  const walletConfigured = Boolean(appleWalletQuery.data?.configured);
-  const walletLoading = Boolean(
-    member?.wallet_public_token &&
-      appleWalletQuery.isLoading &&
-      !appleWalletQuery.data
-  );
+  const appleWalletEnabled =
+    capabilitiesQuery.data?.appleWalletEnabled === true;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-sand via-white to-clay px-4 py-6">
@@ -196,27 +193,10 @@ const LoyaltyVerify = () => {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <Button
-                    type="button"
-                    size="lg"
-                    variant={walletConfigured ? "default" : "outline"}
-                    className="w-full"
-                    onClick={handleWallet}
-                    disabled={!walletConfigured || walletLoading}
-                  >
-                    <WalletCards size={18} />
-                    {walletLoading
-                      ? "Vérification Apple Wallet..."
-                      : "Ajouter à Apple Wallet"}
-                  </Button>
-                  {!walletConfigured && !walletLoading && (
-                    <p className="mt-3 text-center text-sm text-slate-500">
-                      Apple Wallet sera bientôt disponible. Votre QR code EGIA
-                      reste utilisable dès maintenant.
-                    </p>
-                  )}
-                </div>
+                <AppleWalletCta
+                  enabled={appleWalletEnabled}
+                  onAdd={handleWallet}
+                />
               </>
             )}
           </CardContent>

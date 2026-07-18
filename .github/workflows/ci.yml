@@ -53,6 +53,9 @@ jobs:
       - name: Test GOAL-007 engineering guardrails
         run: npm run test:goal-007
 
+      - name: Test GOAL-008 optional Apple Wallet guardrails
+        run: npm run test:goal-008
+
       - name: Typecheck Edge Functions
         run: npm run test:edge-types
 
