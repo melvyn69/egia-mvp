@@ -3,9 +3,10 @@
 ## Métadonnées
 
 - **ID :** `GOAL-008`
-- **Statut :** `Review`
+- **Statut :** `Done`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-18`
+- **Date de clôture :** `2026-07-18`
 - **Niveau de risque :** `R3` — Engineering de feature gating, sécurité cryptographique, parcours fidélité et contrats de futurs Runs; quatre revues indépendantes obligatoires.
 - **Candidat applicatif figé :** `fed08f9be3954084c036a26355225f184896ba31`.
 
@@ -45,7 +46,7 @@ Wallet est explicitement désactivé.
 | Source | Portée / règle applicable |
 | --- | --- |
 | `AGENTS.md` | Un Goal EGIA ne contient jamais de mutation de production. |
-| Autorisation fondatrice du `2026-07-18` | Création et exécution de GOAL-008 jusqu’à `Review`, jamais `Done` dans cette mission. |
+| Autorisations fondatrices du `2026-07-18` | Création et exécution initiales jusqu’à `Review`, puis verdict `APPROVED` distinct autorisant la clôture `Review → Done`, sans autorisation de production. |
 | `goals/active/GOAL-007-production-prerequisites-engineering.md` | Contrôles Apple Wallet existants et candidat historique figé. |
 | `audits/GOAL-007-production-prerequisites-engineering.md` | Evidence Engineering historique immuable. |
 | `docs/production/GOAL-007-*` | Contrats actifs à remplacer par une variante GOAL-008 sans réécriture historique. |
@@ -221,22 +222,27 @@ localement avec des matériaux synthétiques et sans mutation distante.
 - Mutation distante, Preview, déploiement ou nouveau Production Run créé.
 - Modification non documentaire après gel du candidat.
 
-## Définition de Review
+## Définition de Done
 
-GOAL-008 peut passer à `Review` lorsque AC-01 à AC-14 sont satisfaits, les
-validations locales sont vertes, les quatre revues indépendantes sont
-`APPROVED`, le candidat applicatif est figé, le closeout est documentaire et
-zéro Preview, zéro déploiement, zéro mutation distante et zéro Production Run
-nouveau sont confirmés. Push, PR, CI GitHub, fusion fast-forward, nettoyage et
-contrôles post-fusion restent des gates de livraison; ils ne font jamais passer
-le Goal à `Done` et son statut final dans cette mission reste `Review`.
+GOAL-008 Engineering est clôturé. Apple Wallet est officiellement optionnel et
+désactivé par défaut; les six credentials Apple ne sont pas requis pour la
+variante sans Wallet. Le contrat `404 / APPLE_WALLET_DISABLED`, la capability
+publique limitée au booléen non sensible, le masquage frontend et le parcours
+fidélité non-Wallet sont acceptés.
 
-GOAL-008 ne passe pas à `Done` dans cette mission. Seul un Event Founder
-ultérieur peut décider de sa clôture Engineering; cette clôture n’autoriserait
-toujours aucune production. Aucun Production Prerequisite Run ou Production
-Deployment Run ne peut être créé, autorisé ou exécuté avant cette acceptation
-explicite de GOAL-008 en `Done`; chaque Run exige ensuite son propre Event
-Founder distinct.
+- AC-01 à AC-14 sont acceptés.
+- Le candidat final reste figé au SHA
+  `fed08f9be3954084c036a26355225f184896ba31`.
+- Les quatre revues indépendantes `APPROVED` sont acceptées.
+- Les validations locales, la CI PR et la CI post-fusion sont acceptées.
+- Les descendants du candidat restent exclusivement documentaires.
+- L’activation ultérieure d’Apple Wallet exige un nouveau Goal Engineering ou
+  Goal d’activation explicitement accepté, puis un Production Run distinct
+  explicitement autorisé.
+- Les futurs Production Prerequisite et Production Deployment Runs sans Apple
+  restent séparés et exigent chacun leur propre Event Founder.
+
+La clôture Engineering de GOAL-008 ne crée, n’autorise et n’exécute aucun Production Run.
 
 ## Journal de statut
 
@@ -246,6 +252,7 @@ Founder distinct.
 | `2026-07-18` | `Draft → Ready` | Codex | Readiness Check complet : architecture, frontières, dépendances, critères, validations, Evidence et conditions d’arrêt sont explicites et vérifiables localement. |
 | `2026-07-18` | `Ready → Running` | Codex | Phase 0 fusionnée en fast-forward via PR #45, CI PR et post-fusion vertes, protections Vercel actives et aucun déploiement créé; début de l’implémentation Engineering locale. |
 | `2026-07-18` | `Running → Review` | Codex | AC-01 à AC-14 satisfaits sous gates de livraison, validations locales vertes, quatre revues indépendantes `APPROVED` et candidat figé au SHA `fed08f9be3954084c036a26355225f184896ba31`; push, CI, PR, fusion fast-forward et contrôles post-fusion restent à consigner sans autoriser `Done`. |
+| `2026-07-18` | `Review → Done` | Fondateur (Melvyn) | Verdict fondateur APPROVED : PR #46 fusionnée en fast-forward au SHA 1a5268e81225e7149fcb6b1a1ee0c45ba202e0e2, CI PR et post-fusion vertes, AC-01 à AC-14 satisfaits, quatre revues indépendantes APPROVED, candidat applicatif fed08f9be3954084c036a26355225f184896ba31 figé et descendants exclusivement documentaires, sans Preview, déploiement ni mutation distante. |
 
 ## Livraison attendue
 
@@ -255,13 +262,13 @@ Founder distinct.
 - `docs/production/GOAL-008-prerequisite-execution-plan.md`.
 - `docs/production/GOAL-008-deployment-execution-plan.draft.md`.
 - `audits/GOAL-008-optional-apple-wallet-engineering.md`.
-- Candidat applicatif figé et closeout documentaire en `Review`.
+- Candidat applicatif figé et closeout documentaire accepté en `Done`.
 
-## Closeout Engineering soumis
+## Clôture Engineering
 
-- **Statut :** `Review`; aucun passage à `Done` autorisé dans cette mission.
+- **Statut :** `Done`; verdict Founder `APPROVED` du `2026-07-18`.
 - **Candidat figé :** `fed08f9be3954084c036a26355225f184896ba31`.
 - **Revues :** architecture/gating, sécurité Apple, frontend/fidélité et séparation des Runs `APPROVED`.
-- **Validations locales :** GOAL-008, GOAL-007 complet, sécurité, egress, migrations, bootstrap, types application/serveur/Edge, lint, builds et audits dépendances verts.
+- **Validations acceptées :** GOAL-008, GOAL-007 complet, sécurité, egress, migrations, bootstrap, types application/serveur/Edge, lint, builds, audits dépendances et CI GitHub verts.
 - **Gel :** tout descendant du candidat est limité au Goal, aux documents et aux Evidence.
 - **Production :** aucune mutation, aucun déploiement, aucun Preview et aucun nouveau Production Run.
