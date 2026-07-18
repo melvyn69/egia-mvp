@@ -139,6 +139,10 @@ const verifyDetachedCms = ({ signature, manifest }) =>
     ], { stdio: ["pipe", "ignore", "pipe", "pipe"] });
     let stderr = "";
     child.stderr.on("data", () => { stderr = "verification_failed"; });
+    // OpenSSL can close either input early for an intentionally invalid CMS.
+    // The child exit status is the authoritative, redacted verification result.
+    child.stdin.on("error", () => {});
+    child.stdio[3].on("error", () => {});
     child.on("error", reject);
     child.on("close", (status) => status === 0 ? resolve(true) : reject(new Error(stderr)));
     child.stdin.end(signature);
