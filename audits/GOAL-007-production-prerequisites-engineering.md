@@ -36,7 +36,7 @@ Risques v0.1 acceptés : pas de service de mise à jour distante, pas d'expirati
 
 `prerequisite` prouve setup, ownership, isolation minimale, programme fidélité désactivé, aucune capacité Wallet, teardown et zéro résidu. `postdeploy` recrée un jeu distinct et branche une mailbox one-shot. Son adaptateur Production versionné borne les cibles exactes, utilise exclusivement les JWT A/B pour les assertions et réserve le service role au setup et au teardown. L'absence de membre pour l'e-mail synthétique avant preuve, combinée à la FK `wallet_passes.member_id NOT NULL` vers `loyalty_members`, prouve qu'aucune capacité Wallet ne peut exister. Les quotas fidélité synthétiques emploient un préfixe accepté seulement après validation du JWT et de l'`app_metadata`; ils restent ainsi inventoriables sans dépendre de l'IP vue par Vercel. L'adaptateur prépare aussi le quota IA synthétique et exécute les 23 probes métier et sécurité. Ces probes sont testées sur transports locaux simulés et ne sont pas exécutées contre une cible distante pendant GOAL-007.
 
-Le `finally` révoque globalement les sessions et prouve le refus des anciens refresh tokens, supprime Storage, Database, demandes d'enrôlement, buckets de rate limit préplanifiés ou préfixés et Auth, vide la mailbox distante par préfixe, puis inventorie le préfixe et échoue si une suppression ou le total final diverge. Les chemins Storage et clés de quotas restent disponibles jusqu'après cette preuve. Le provider HTTPS d'inspection des logs n'accepte qu'un execution ID et un timestamp et ne retourne qu'un résumé Vercel/Supabase Edge; le runner exige zéro correspondance sensible et zéro 5xx inattendu. Le cleanup TTL est paginé, conserve les clés d'inventaire dans les métadonnées synthétiques et couvre tout état interrompu de plus de 24 heures. Les deux exécutions locales isolées ont terminé avec teardown vrai et résidu nul; A a lu son asset et B a été refusé.
+Le `finally` révoque globalement les sessions et prouve le refus des anciens refresh tokens, supprime Storage, Database, demandes d'enrôlement, buckets de rate limit préplanifiés ou préfixés et Auth, vide la mailbox distante par préfixe, puis inventorie le préfixe et échoue si une suppression ou le total final diverge. L'Auth est conservée comme index de récupération si Storage ou Database échoue. Les chemins Storage sont persistés avant upload et les clés de quotas avant création des buckets. Le provider HTTPS d'inspection des logs n'accepte qu'un execution ID et un timestamp et ne retourne qu'un résumé Vercel/Supabase Edge; le runner exige zéro correspondance sensible et zéro 5xx inattendu. Le cleanup TTL est paginé et reconstruit l'inventaire depuis les métadonnées synthétiques. Les exécutions locales isolées finales `b8f7edca-77e9-4e36-8f15-d93bd54c834a` (`prerequisite`) et `5d092006-05ed-4921-b35f-efac5f46365f` (`postdeploy`) ont terminé avec `teardown=true` et `residueCount=0`; A a lu son asset et B a été refusé.
 
 ## Absence de migration et frontière de livraison
 
@@ -44,4 +44,25 @@ Aucun fichier de migration, schéma ou recovery historique n'est modifié. La ba
 
 ## Candidat
 
-Le SHA du candidat applicatif GOAL-007 sera ajouté dans le commit documentaire final après gel. Tout descendant autorisé sera exclusivement documentaire.
+Le candidat applicatif GOAL-007 est figé au SHA `198d82c0d9fad0134f8400d6c2e03ceec9d1eeb2`. Tout descendant autorisé est exclusivement documentaire.
+
+## Validations finales
+
+- Tests existants, sécurité production et GOAL-006 : verts (`32` contrôles sécurité, `10/10` GOAL-006).
+- GOAL-007 : A/B `24/24`, DB `13/13`, provisioner `53/53`, Apple `33/33`, lifecycle `41/41`, probes postdeploy `23/23`, quotas synthétiques `5/5`.
+- Migration history `100` migrations et adversarial `29/29`; bootstrap canonique et garde-fous `10/10`.
+- Typechecks Node et Edge, build application et build maintenance : verts.
+- Lint : zéro erreur; un warning préexistant hors périmètre dans `src/services/coach/useCoachResult.ts`.
+- Audits complet et production : zéro vulnérabilité; recherches credentials et usage actif du nom legacy : propres; `git diff --check` : vert.
+- Stack Supabase locale isolée : deux modes verts et inventaires finaux nuls. Aucune cible distante n'a été mutée.
+
+## Revues indépendantes
+
+| Domaine | Verdict |
+| --- | --- |
+| Architecture et protocole A/B | `APPROVED` |
+| Sécurité des secrets et zéro-copie | `APPROVED` |
+| Supabase/Auth/Database/Storage | `APPROVED` |
+| Apple Wallet | `APPROVED` |
+| Runner synthétique et teardown | `APPROVED` |
+| Séparation Engineering / Prerequisite Run / Deployment Run | `APPROVED` |
