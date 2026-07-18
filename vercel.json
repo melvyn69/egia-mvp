@@ -7,6 +7,8 @@
       "docs/goal-002-engineering-closeout": false,
       "engineering/goal-007-production-prerequisites": false,
       "docs/goal-007-engineering-closeout": false,
+      "engineering/goal-008-optional-apple-wallet": false,
+      "docs/goal-008-engineering-closeout": false,
       "main": false
     }
   },
