@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
+import { createPrivateKey, X509Certificate } from "node:crypto";
 import { getRequestId, sendError } from "../../api_utils";
 
 type QueryResult<T = unknown> = {
@@ -96,17 +97,62 @@ const normalizeCertificate = (value: string) => {
   }
 };
 
-const splitCertificateBundle = (certificate: string) => {
-  const certMatch = certificate.match(
-    /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/
-  );
-  const keyMatch = certificate.match(
-    /-----BEGIN (?:RSA |EC |)PRIVATE KEY-----[\s\S]+?-----END (?:RSA |EC |)PRIVATE KEY-----/
-  );
-  return {
-    signerCert: certMatch?.[0] ?? certificate,
-    signerKey: keyMatch?.[0] ?? ""
-  };
+const isEncryptedPrivateKey = (value: string) =>
+  /-----BEGIN ENCRYPTED PRIVATE KEY-----/.test(value) ||
+  (value.includes(["-----BEGIN", "RSA PRIVATE KEY-----"].join(" ")) &&
+    /Proc-Type:\s*4,ENCRYPTED/i.test(value));
+
+const hasExactDnAttribute = (subject: string, key: string, expected: string) =>
+  subject
+    .split(/\n|,\s*(?=[A-Z][A-Z0-9.]*=)/)
+    .some((entry) => entry.trim() === `${key}=${expected}`);
+
+export const validateAppleWalletRuntimeMaterial = (input: {
+  passTypeIdentifier: string;
+  teamIdentifier: string;
+  signerCert: string;
+  signerKey: string;
+  signerKeyPassphrase: string;
+  wwdr: string;
+}) => {
+  if (!isEncryptedPrivateKey(input.signerKey) || !input.signerKeyPassphrase) {
+    return false;
+  }
+  try {
+    const signerCertificate = new X509Certificate(input.signerCert);
+    const wwdrCertificate = new X509Certificate(input.wwdr);
+    const privateKey = createPrivateKey({
+      key: input.signerKey,
+      passphrase: input.signerKeyPassphrase
+    });
+    if (
+      privateKey.asymmetricKeyType !== "rsa" ||
+      (privateKey.asymmetricKeyDetails?.modulusLength ?? 0) < 2048
+    ) {
+      return false;
+    }
+    if (!signerCertificate.checkPrivateKey(privateKey)) return false;
+    if (
+      !hasExactDnAttribute(signerCertificate.subject, "UID", input.passTypeIdentifier) ||
+      !hasExactDnAttribute(signerCertificate.subject, "OU", input.teamIdentifier)
+    ) {
+      return false;
+    }
+    const now = Date.now();
+    if (
+      now < new Date(signerCertificate.validFrom).valueOf() ||
+      now >= new Date(signerCertificate.validTo).valueOf()
+    ) return false;
+    if (
+      !signerCertificate.checkIssued(wwdrCertificate) ||
+      !signerCertificate.verify(wwdrCertificate.publicKey)
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 const getAppleWalletConfig = () => {
@@ -114,6 +160,7 @@ const getAppleWalletConfig = () => {
   const teamIdentifier = getEnv(["APPLE_TEAM_IDENTIFIER"]);
   const certificateRaw = getEnv(["APPLE_PASS_CERTIFICATE"]);
   const privateKeyRaw = getEnv(["APPLE_PASS_PRIVATE_KEY"]);
+  const certificatePassword = getEnv(["APPLE_PASS_CERTIFICATE_PASSWORD"]);
   const wwdrRaw = getEnv(["APPLE_WWDR_CERTIFICATE"]);
   const publicUrl = getEnv([
     "APP_PUBLIC_URL",
@@ -128,15 +175,15 @@ const getAppleWalletConfig = () => {
     : "";
   const privateKey = privateKeyRaw ? normalizeCertificate(privateKeyRaw) : "";
   const wwdr = wwdrRaw ? normalizeCertificate(wwdrRaw) : "";
-  const split = certificate ? splitCertificateBundle(certificate) : null;
-  const signerCert = split?.signerCert ?? "";
-  const signerKey = privateKey || split?.signerKey || "";
+  const signerCert = certificate;
+  const signerKey = privateKey;
 
   const missing = [
     !passTypeIdentifier ? "APPLE_PASS_TYPE_IDENTIFIER" : null,
     !teamIdentifier ? "APPLE_TEAM_IDENTIFIER" : null,
     !signerCert ? "APPLE_PASS_CERTIFICATE" : null,
     !signerKey ? "APPLE_PASS_PRIVATE_KEY" : null,
+    !certificatePassword ? "APPLE_PASS_CERTIFICATE_PASSWORD" : null,
     !wwdr ? "APPLE_WWDR_CERTIFICATE" : null,
     !publicUrl ? "APP_PUBLIC_URL|APP_BASE_URL" : null
   ].filter((value): value is string => Boolean(value));
@@ -146,15 +193,26 @@ const getAppleWalletConfig = () => {
       ? `https://${publicUrl}`
       : publicUrl;
 
+  const materialValid =
+    missing.length === 0 &&
+    validateAppleWalletRuntimeMaterial({
+      passTypeIdentifier,
+      teamIdentifier,
+      signerCert,
+      signerKey,
+      signerKeyPassphrase: certificatePassword,
+      wwdr
+    });
+
   return {
-    configured: missing.length === 0,
+    configured: missing.length === 0 && materialValid,
+    invalid: missing.length === 0 && !materialValid,
     missing,
     passTypeIdentifier,
     teamIdentifier,
     signerCert,
     signerKey,
-    signerKeyPassphrase:
-      process.env.APPLE_PASS_CERTIFICATE_PASSWORD?.trim() || undefined,
+    signerKeyPassphrase: certificatePassword,
     wwdr,
     publicUrl: baseUrl
   };
@@ -319,7 +377,7 @@ const buildPassBuffer = async (context: PassContext) => {
           foregroundColor: "rgb(15, 23, 42)",
           backgroundColor: "rgb(248, 250, 252)",
           labelColor: "rgb(100, 116, 139)",
-          sharingProhibited: false,
+          sharingProhibited: true,
           userInfo: {
             provider: "egia",
             walletPassToken: context.applePass.public_token,
@@ -512,10 +570,10 @@ const handleApplePass = async (req: VercelRequest, res: VercelResponse) => {
     );
     res.setHeader("Cache-Control", "private, no-store");
     return res.status(200).send(buffer);
-  } catch (error) {
+  } catch {
     console.error("[loyalty/apple-pass]", {
       requestId,
-      message: error instanceof Error ? error.message : String(error)
+      code: "APPLE_PASS_GENERATION_FAILED"
     });
     return sendError(
       res,

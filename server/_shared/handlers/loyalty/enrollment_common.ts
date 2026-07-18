@@ -3,6 +3,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 type AdminClient = SupabaseClient;
+const SYNTHETIC_EXECUTION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const getEnv = (keys: string[]) => {
   for (const key of keys) {
@@ -80,14 +81,24 @@ const createBucketKey = (serviceRoleKey: string, material: string) =>
 const consumeRateLimit = async (params: {
   supabaseAdmin: AdminClient;
   serviceRoleKey: string;
-  material: string;
+  material?: string;
+  syntheticBucketKey?: string;
   limit: number;
   windowSeconds: number;
 }) => {
+  const bucketKey = params.syntheticBucketKey ?? (
+    params.material ? createBucketKey(params.serviceRoleKey, params.material) : ""
+  );
+  if (
+    !bucketKey ||
+    (params.syntheticBucketKey && !/^GOAL002_SYNTH_POSTDEPLOY_[0-9a-f-]{36}:[a-z0-9:_-]+$/i.test(bucketKey))
+  ) {
+    throw new Error("rate_limit_bucket_invalid");
+  }
   const { data, error } = await params.supabaseAdmin.rpc(
     "consume_security_rate_limit",
     {
-      p_bucket_key: createBucketKey(params.serviceRoleKey, params.material),
+      p_bucket_key: bucketKey,
       p_limit: params.limit,
       p_window_seconds: params.windowSeconds,
       p_cost: 1
@@ -97,6 +108,37 @@ const consumeRateLimit = async (params: {
     throw new Error("rate_limit_unavailable");
   }
   return data === true;
+};
+
+const getSyntheticRateLimitPrefix = async (params: {
+  req: VercelRequest;
+  supabaseAdmin: AdminClient;
+  expectedEmail?: string;
+}) => {
+  const rawExecution = params.req.headers["x-goal002-synth-execution-id"];
+  const executionId = Array.isArray(rawExecution) ? rawExecution[0] : rawExecution;
+  if (!executionId) return null;
+  if (!SYNTHETIC_EXECUTION_PATTERN.test(executionId)) {
+    throw new Error("synthetic_execution_invalid");
+  }
+  const authorization = params.req.headers.authorization;
+  const bearer = Array.isArray(authorization) ? authorization[0] : authorization;
+  const jwt = bearer?.startsWith("Bearer ") ? bearer.slice(7).trim() : "";
+  if (!jwt) throw new Error("synthetic_auth_missing");
+  const { data, error } = await params.supabaseAdmin.auth.getUser(jwt);
+  const user = data?.user;
+  const prefix = `GOAL002_SYNTH_POSTDEPLOY_${executionId}`;
+  if (
+    error ||
+    !user ||
+    user.app_metadata?.goal002_synthetic !== true ||
+    user.app_metadata?.goal002_mode !== "postdeploy" ||
+    user.app_metadata?.goal002_prefix !== prefix ||
+    (params.expectedEmail && !params.expectedEmail.startsWith(`${prefix.toLowerCase()}.`))
+  ) {
+    throw new Error("synthetic_auth_invalid");
+  }
+  return prefix;
 };
 
 const getBaseUrl = () => {
@@ -185,6 +227,7 @@ export {
   getBaseUrl,
   getClientIp,
   getLoyaltyEnvironment,
+  getSyntheticRateLimitPrefix,
   hashToken,
   isEmail,
   isUuid,

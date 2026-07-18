@@ -487,7 +487,7 @@ const testHardened = async () => {
       url: "/api/loyalty/verify",
       body: { token: newToken }
     });
-    assert.equal(replay.statusCode, 400);
+    assert.equal(replay.statusCode, 410);
 
     const { data: legacyMember, error: legacyMemberError } = await admin
       .from("loyalty_members")

@@ -50,6 +50,9 @@ jobs:
       - name: Test GOAL-006 SQL guardrails
         run: npm run test:goal-006
 
+      - name: Test GOAL-007 engineering guardrails
+        run: npm run test:goal-007
+
       - name: Typecheck Edge Functions
         run: npm run test:edge-types
 

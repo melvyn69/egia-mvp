@@ -6,6 +6,7 @@ import {
   isMissingAiIdentityError
 } from "../../ai_reply";
 import { createProductionSafeConsole } from "../../safe_console";
+import { authorizeInternalApiKey } from "../../internal_api_key";
 
 const console = createProductionSafeConsole("/api/google/reply");
 
@@ -43,7 +44,6 @@ const googleClientSecret = getEnv([
 ]);
 const openaiApiKey = process.env.OPENAI_API_KEY ?? "";
 const openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
-const internalApiKey = (process.env.INTERNAL_API_KEY ?? "").trim();
 const MAX_REPLY_REQUEST_BYTES = 32 * 1024;
 const MAX_REVIEW_TEXT_LENGTH = 1200;
 const MAX_REPLY_TEXT_LENGTH = 4096;
@@ -326,8 +326,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : internalHeader ?? "";
     const isInternalAutomationRequest =
       mode === "automation" &&
-      internalApiKey.length > 0 &&
-      internalHeaderValue.trim() === internalApiKey;
+      authorizeInternalApiKey(internalHeaderValue, process.env);
     let userId = "";
     if (isInternalAutomationRequest) {
       const internalUserId =

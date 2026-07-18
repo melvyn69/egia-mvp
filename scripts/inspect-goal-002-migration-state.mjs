@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import pg from "pg";
+import {
+  consumeGoal007DbUrl,
+  redactDbError,
+  withGoal007DbWatchdog
+} from "./lib/goal007-db-channel.mjs";
 
 export const classifyMigrationState = (evidence) => {
   if (evidence.active_sessions > 0) return "ACTIVE";
@@ -130,12 +135,20 @@ const hardStop = setTimeout(() => {
   process.exit(5);
 }, 45_000);
 
+let dbChannel;
+try {
+  dbChannel = consumeGoal007DbUrl(process.env);
+} catch (error) {
+  console.error(JSON.stringify(redactDbError(error)));
+  process.exit(2);
+}
+
 const sql = readFileSync(
   new URL("./inspect-goal-002-migration-state.sql", import.meta.url),
   "utf8"
 );
 const client = new pg.Client({
-  connectionString: process.env.SUPABASE_DB_URL,
+  connectionString: dbChannel.connectionString,
   application_name: "goal002_state_inspector",
   connectionTimeoutMillis: 10_000,
   query_timeout: 30_000,
@@ -144,13 +157,13 @@ const client = new pg.Client({
 
 let evidence;
 try {
-  await client.connect();
-  const result = await client.query(sql);
+  await withGoal007DbWatchdog(client.connect(), 10_000);
+  const result = await withGoal007DbWatchdog(client.query(sql), 30_000);
   const rawEvidence = result.rows[0].json_build_object;
   evidence =
     typeof rawEvidence === "string" ? JSON.parse(rawEvidence) : rawEvidence;
 } catch (error) {
-  console.error(`Passive migration inspection failed: ${error.message}`);
+  console.error(JSON.stringify(redactDbError(error)));
   process.exitCode = 5;
 } finally {
   await client.end().catch(() => {});

@@ -14,6 +14,14 @@
     "test": "node scripts/test-egress-guardrails.mjs",
     "test:production-security": "tsx scripts/test-production-security.ts",
     "test:goal-006": "node scripts/test-goal-006-claim-ai-tag-candidates.mjs",
+    "test:goal-007:internal-key": "tsx scripts/test-goal-007-internal-api-key.ts",
+    "test:goal-007:db-channel": "node scripts/test-goal-007-db-channel.mjs",
+    "test:goal-007:provisioner": "node scripts/test-goal-007-secret-provisioner.mjs",
+    "test:goal-007:apple-wallet": "node scripts/test-goal-007-apple-wallet.mjs",
+    "test:goal-007:synth": "node scripts/test-goal-007-synth-runner.mjs",
+    "test:goal-007:postdeploy-probes": "node scripts/test-goal-007-postdeploy-probes.mjs",
+    "test:goal-007:synthetic-rate-limit": "tsx scripts/test-goal-007-synthetic-rate-limit.ts",
+    "test:goal-007": "npm run test:goal-007:internal-key && npm run test:goal-007:db-channel && npm run test:goal-007:provisioner && npm run test:goal-007:apple-wallet && npm run test:goal-007:synth && npm run test:goal-007:postdeploy-probes && npm run test:goal-007:synthetic-rate-limit",
     "test:edge-types": "npx --yes deno@2.9.2 check --config=supabase/functions/deno.json --frozen supabase/functions/generate-reply/index.ts supabase/functions/google_gbp_sync_all/index.ts supabase/functions/google_gbp_sync_locations/index.ts supabase/functions/google_oauth_exchange/index.ts supabase/functions/google_oauth_start/index.ts supabase/functions/post-reply-google/index.ts supabase/functions/process-review-analyze/index.ts",
     "test:migration-history": "node scripts/validate-supabase-migration-history.mjs",
     "test:migration-history:adversarial": "node scripts/test-supabase-migration-history-validator.mjs",
@@ -27,6 +35,7 @@
     "preview": "vite preview",
     "sync:db-types": "cp src/database.types.ts server/_shared/database.types.ts",
     "smoke:auth": "node scripts/smoke-auth.mjs",
+    "test:goal-007:synth:local": "node scripts/goal002-synth.mjs",
     "pdf:smoke": "tsx scripts/pdf-smoke.ts",
     "smoke:reports": "tsx scripts/smoke-reports-html.ts"
   },
@@ -46,7 +55,8 @@
     "react-dom": "^19.2.0",
     "react-icons": "^5.5.0",
     "react-router-dom": "^6.30.2",
-    "tailwind-merge": "^3.4.0"
+    "tailwind-merge": "^3.4.0",
+    "yauzl": "2.10.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

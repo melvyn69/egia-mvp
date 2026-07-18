@@ -3,7 +3,7 @@
 ## Métadonnées
 
 - **ID :** `GOAL-007`
-- **Statut :** `Ready`
+- **Statut :** `Running`
 - **Propriétaire :** Fondateur (Melvyn)
 - **Date de création :** `2026-07-18`
 - **Date de clôture :** N/A
@@ -152,6 +152,7 @@ GOAL-007 n'atteint pas `Done` dans cette mission. Il peut atteindre `Review` uni
 | --- | --- | --- | --- |
 | `2026-07-18` | `N/A → Draft` | Codex | Création autorisée par le Founder; aucune mutation de production. |
 | `2026-07-18` | `Draft → Ready` | Codex | Readiness Check complet : architecture et frontières figées, dépendances disponibles, validations et conditions d'arrêt vérifiables localement. |
+| `2026-07-18` | `Ready → Running` | Codex | Début de l'implémentation Engineering locale après intégration des protections Vercel; aucune mutation distante. |
 
 ## Livraison et clôture
 

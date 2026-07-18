@@ -7,6 +7,7 @@ import {
   getBaseUrl,
   getClientIp,
   getLoyaltyEnvironment,
+  getSyntheticRateLimitPrefix,
   hashToken,
   isEmail,
   isUuid,
@@ -84,25 +85,34 @@ export default async function handleLoyaltyJoin(
 
   try {
     const ip = getClientIp(req);
+    const syntheticPrefix = await getSyntheticRateLimitPrefix({
+      req,
+      supabaseAdmin,
+      expectedEmail: email
+    });
+    const syntheticEmailSuffix = hashToken(email).slice(0, 16);
     const [ipAllowed, emailAllowed, programAllowed] = await Promise.all([
       consumeRateLimit({
         supabaseAdmin,
         serviceRoleKey: environment.serviceRoleKey,
-        material: `loyalty-enrollment:ip:${ip}`,
+        material: syntheticPrefix ? undefined : `loyalty-enrollment:ip:${ip}`,
+        syntheticBucketKey: syntheticPrefix ? `${syntheticPrefix}:loyalty:ip` : undefined,
         limit: 20,
         windowSeconds: 3600
       }),
       consumeRateLimit({
         supabaseAdmin,
         serviceRoleKey: environment.serviceRoleKey,
-        material: `loyalty-enrollment:email:${publicToken}:${email}`,
+        material: syntheticPrefix ? undefined : `loyalty-enrollment:email:${publicToken}:${email}`,
+        syntheticBucketKey: syntheticPrefix ? `${syntheticPrefix}:loyalty:email:${syntheticEmailSuffix}` : undefined,
         limit: 3,
         windowSeconds: 3600
       }),
       consumeRateLimit({
         supabaseAdmin,
         serviceRoleKey: environment.serviceRoleKey,
-        material: `loyalty-enrollment:program:${publicToken}`,
+        material: syntheticPrefix ? undefined : `loyalty-enrollment:program:${publicToken}`,
+        syntheticBucketKey: syntheticPrefix ? `${syntheticPrefix}:loyalty:program` : undefined,
         limit: 500,
         windowSeconds: 86400
       })

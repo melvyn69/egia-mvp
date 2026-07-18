@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js@2.110.2/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.110.2";
+import { selectInternalApiKey } from "../_shared/internal_api_key.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Headers": "content-type, x-process-secret",
@@ -58,6 +59,7 @@ const getAutomationReplyUrl = () => {
 };
 
 const invokeAutomationReply = async (params: {
+  internalApiKey: string;
   requestId: string;
   reviewId: string;
   reviewGoogleId: string | null;
@@ -68,15 +70,11 @@ const invokeAutomationReply = async (params: {
   if (!automationReplyUrl) {
     throw new Error("Missing AUTOMATION_REPLY_URL/APP_URL/VERCEL_URL");
   }
-  const internalApiKey = getEnv(["INTERNAL_API_KEY"]);
-  if (!internalApiKey) {
-    throw new Error("Missing INTERNAL_API_KEY");
-  }
   const response = await fetch(automationReplyUrl, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-internal-api-key": internalApiKey,
+      "x-internal-api-key": params.internalApiKey,
       "x-request-id": params.requestId
     },
     body: JSON.stringify({
@@ -127,6 +125,14 @@ Deno.serve(async (req) => {
     }
     if (!providedSecret || providedSecret !== processSecret) {
       return json(401, { ok: false, error: "Unauthorized" });
+    }
+    let selectedInternalApiKey: string;
+    try {
+      selectedInternalApiKey = selectInternalApiKey(
+        (name) => Deno.env.get(name)
+      ).value;
+    } catch {
+      return json(500, { ok: false, error: "Server misconfigured" });
     }
     const key = (Deno.env.get("SERVICE_ROLE_KEY") ?? "").trim();
     const present = Boolean(key);
@@ -269,6 +275,7 @@ Deno.serve(async (req) => {
 
         if (!existingText) {
           const { draftText, meta } = await invokeAutomationReply({
+            internalApiKey: selectedInternalApiKey,
             requestId: `${jobId}:${reviewId}`,
             reviewId,
             reviewGoogleId: reviewRow.review_id ?? null,

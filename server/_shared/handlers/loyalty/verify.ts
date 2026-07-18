@@ -5,6 +5,7 @@ import {
   createSupabaseAdmin,
   getClientIp,
   getLoyaltyEnvironment,
+  getSyntheticRateLimitPrefix,
   hashToken,
   parseBody
 } from "./enrollment_common.js";
@@ -50,10 +51,12 @@ export default async function handleLoyaltyVerify(
   );
 
   try {
+    const syntheticPrefix = await getSyntheticRateLimitPrefix({ req, supabaseAdmin });
     const allowed = await consumeRateLimit({
       supabaseAdmin,
       serviceRoleKey: environment.serviceRoleKey,
-      material: `loyalty-verification:ip:${getClientIp(req)}`,
+      material: syntheticPrefix ? undefined : `loyalty-verification:ip:${getClientIp(req)}`,
+      syntheticBucketKey: syntheticPrefix ? `${syntheticPrefix}:loyalty:verification` : undefined,
       limit: 30,
       windowSeconds: 3600
     });
@@ -72,7 +75,7 @@ export default async function handleLoyaltyVerify(
     );
     const row = Array.isArray(data) ? data[0] : data;
     if (error || !row) {
-      return res.status(400).json({
+      return res.status(410).json({
         ok: false,
         error: { code: "INVALID_TOKEN", message: "Invalid or expired link" },
         requestId
