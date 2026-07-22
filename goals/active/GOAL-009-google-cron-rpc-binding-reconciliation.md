@@ -3,7 +3,7 @@
 ## Identité et statut
 
 - **Prompt :** `PROMPT_VERSION=GOAL009_RECONCILIATION_V2`
-- **Statut :** `Running`
+- **Statut :** `Review`
 - **Date :** `2026-07-22`
 - **Type :** réconciliation Engineering et durcissement de gouvernance
 - **Risque :** `R1` — changements de configuration, CI et documentation; aucune
@@ -119,6 +119,12 @@ Le candidat est le dernier commit contenant `vercel.json`,
 Goal et `audits/GOAL-009-google-cron-rpc-binding-reconciliation.md` peuvent
 évoluer.
 
+Le candidat figé est
+`4e249c63c6c338939080fb91daa3f8525b0801af`. Toutes les validations obligatoires
+sont vertes. L'essai adversarial isolé réintroduisant l'ancienne extraction
+détachée échoue sur l'assertion d'appel direct, comme attendu. Les trois revues
+indépendantes ont rendu `APPROVED` sans finding bloquant.
+
 ## Risques résiduels et conditions d'arrêt
 
 - un appel réel du cron reste requis dans un futur Production Run pour une
@@ -137,6 +143,7 @@ Goal et `audits/GOAL-009-google-cron-rpc-binding-reconciliation.md` peuvent
 | `2026-07-22` | `Draft → Blocked` | Dépôt non propre : doublon local non suivi `scripts/test-google-cron-rpc-binding 2.ts`; arrêt avant modification. |
 | `2026-07-22` | `Blocked → Ready` | Autorisation Founder explicite; doublon confirmé `IDENTICAL`, seul doublon supprimé, fichier canonique conservé et dépôt propre. |
 | `2026-07-22` | `Ready → Running` | Premier commit `bbaeabb...` créé localement avec le garde-fou Vercel global, la règle normative et le contrat en `Ready`; lancement de la CI et de l'audit sans push ni déploiement. |
+| `2026-07-22` | `Running → Review` | Matrice obligatoire verte, test adversarial probant, blobs applicatifs/migrations/lockfile inchangés, candidat `4e249c63c6c338939080fb91daa3f8525b0801af` figé et trois revues indépendantes `APPROVED`. |
 
-GOAL-009 reste `Running` pendant les validations, revues et contrôles de
-livraison. Aucun statut de ce Goal n'autorise une mutation de production.
+GOAL-009 reste `Review`; la transition `Review → Done` est interdite dans cette
+mission. Aucun statut de ce Goal n'autorise une mutation de production.

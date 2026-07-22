@@ -3,7 +3,7 @@
 ## Statut et frontière
 
 - **Prompt :** `PROMPT_VERSION=GOAL009_RECONCILIATION_V2`
-- **Statut documentaire :** audit Engineering en cours (`Running`)
+- **Statut documentaire :** audit Engineering soumis à `Review`
 - **Baseline initiale obligatoire :**
   `84131b53043af124d09898540589dce3f2c0d003`
 - **Production :** aucune mutation autorisée ou exécutée par GOAL-009
@@ -52,9 +52,10 @@ supabaseAdmin.rpc("claim_google_sync_connections", {
 ```
 
 Le test canonique contient à la fois une assertion positive sur cet appel direct
-et une assertion négative interdisant l'extraction de `supabaseAdmin.rpc`. Sa
-capacité adversariale doit encore être prouvée par une exécution isolée avant
-`Review`.
+et une assertion négative interdisant l'extraction de `supabaseAdmin.rpc`. Dans
+une copie temporaire isolée du candidat, l'ancienne extraction a été réintroduite
+et le test a échoué exactement sur l'assertion exigeant l'appel direct. La copie
+temporaire a ensuite été supprimée; le dépôt principal est resté propre.
 
 ## Périmètre applicatif historique figé
 
@@ -204,32 +205,52 @@ n'est pas une mutation distante.
 
 ## Validations GOAL-009
 
-Les résultats seront consignés après exécution de la matrice obligatoire :
-
 | Validation | Résultat |
 | --- | --- |
-| `npm ci` | en attente |
-| `npm run test:google-cron-rpc-binding` | en attente |
-| `npm test` | en attente |
-| `npm run test:production-security` | en attente |
-| `npm run test:migration-history` | en attente |
-| `npm run typecheck` | en attente |
-| `npm run build:server` | en attente |
-| `npm run build` | en attente |
-| `npm run lint` | en attente |
-| `npm run test:goal-008` | en attente |
-| `git diff --check` | en attente |
-| détection adversariale de l'ancienne extraction | en attente |
-| migrations, lockfile et cinq fichiers figés | en attente |
-| secrets réels | en attente |
+| `npm ci` | `PASS` — 443 paquets installés depuis le lockfile |
+| `npm run test:google-cron-rpc-binding` | `PASS` — binding, no-candidate, erreur RPC et `CRON_SECRET` |
+| `npm test` | `PASS` — garde-fous egress Supabase |
+| `npm run test:production-security` | `PASS` — 32 contrôles |
+| `npm run test:migration-history` | `PASS` — 100 migrations, cinq collisions documentées, checksum baseline vérifié |
+| `npm run typecheck` | `PASS` |
+| `npm run build:server` | `PASS` |
+| `npm run build` | `PASS` — avertissement de taille de chunk non bloquant |
+| `npm run lint` | `PASS` — zéro erreur, un avertissement préexistant `react-hooks/exhaustive-deps` |
+| `npm run test:goal-008` | `PASS` |
+| `git diff --check` | `PASS` |
+| détection adversariale de l'ancienne extraction | `PASS` — test rouge attendu sur l'assertion d'appel direct |
+| migrations, lockfile et cinq fichiers figés | `PASS` — blob/tree IDs identiques à `84131b5...` |
+| secrets réels | `PASS` — test sécurité et scan du diff sans littéral de credential |
+
+La cohérence RPC est confirmée : la migration
+`20260711120000_supabase_egress_guardrails.sql` expose
+`claim_google_sync_connections(p_limit int default 5)`, accorde l'exécution au
+`service_role`, les deux fichiers de types exposent `p_limit?: number`, et
+l'appel fournit `p_limit: connectionBatch` borné.
 
 ## Revues indépendantes
 
 | Revue | Verdict |
 | --- | --- |
-| Runtime et capacité du test à détecter la régression | en attente |
-| Chronologie Production et gouvernance sans autorisation rétroactive | en attente |
-| CI et prévention de tous les déploiements Engineering | en attente |
+| Runtime et capacité du test à détecter la régression | `APPROVED` — cause reproduite, appel direct et détection de l'ancien source confirmés |
+| Chronologie Production et gouvernance sans autorisation rétroactive | `APPROVED` — chronologie et quatre Runs `blocked` confirmés, aucune autorisation rétroactive |
+| CI et prévention de tous les déploiements Engineering | `APPROVED` — garde-fou global, règle normative, gate CI et scope confirmés |
+
+Les trois revues ont été conduites indépendamment en lecture seule et n'ont
+produit ni modification locale, ni action distante.
+
+## Candidat figé
+
+Le premier commit `bbaeabb...` contient déjà le garde-fou Vercel global,
+`AGENTS.md` et le Goal en `Ready`, avant tout push. Le dernier commit contenant
+les trois fichiers de contrôle `vercel.json`, `.github/workflows/ci.yml` et
+`AGENTS.md`, donc le candidat figé, est :
+
+```text
+4e249c63c6c338939080fb91daa3f8525b0801af
+```
+
+Après ce SHA, seuls le Goal et le présent audit peuvent évoluer.
 
 ## Risques résiduels
 
@@ -243,7 +264,7 @@ Les résultats seront consignés après exécution de la matrice obligatoire :
 
 ## État provisoire
 
-Le correctif historique est réconcilié, les deux garde-fous de déploiement et le
-gate CI sont préparés localement. GOAL-009 reste `Running` jusqu'aux validations,
-aux trois verdicts `APPROVED`, à la livraison linéaire et aux contrôles finaux de
-zéro nouveau Preview et zéro nouveau Production.
+Le correctif historique est réconcilié, les validations sont vertes et les trois
+revues sont `APPROVED`. GOAL-009 est en `Review`. La livraison linéaire et les
+contrôles finaux de zéro nouveau Preview et zéro nouveau Production restent à
+consigner, sans autoriser `Review → Done`.
