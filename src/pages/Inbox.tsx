@@ -23,6 +23,14 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { supabase, supabaseUrl } from "../lib/supabase";
 import { isAdminUser } from "../lib/admin";
+import {
+  REVIEW_REPLIES_HISTORY_LIMIT,
+  REVIEW_REPLIES_RETRY_DELAY_MS,
+  REVIEW_REPLIES_STALE_TIME_MS,
+  ReviewRepliesQueryError,
+  reviewRepliesQueryKey,
+  shouldRetryReviewReplies
+} from "../lib/reviewRepliesQuery";
 import { cn } from "../lib/utils";
 
 const statusTabs = [
@@ -196,6 +204,8 @@ const initialActivityEvents = [
   },
   { id: "a3", label: "Tag “Service” ajouté", timestamp: "Hier" }
 ];
+
+const EMPTY_REVIEW_REPLIES: ReviewReply[] = [];
 
 const formatDate = (iso: string): string => {
   const date = new Date(iso);
@@ -588,13 +598,12 @@ const Inbox = () => {
   const [sessionPreview, setSessionPreview] = useState("—");
   const [sessionExp, setSessionExp] = useState<string | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
-  const [replyHistory, setReplyHistory] = useState<ReviewReply[]>([]);
-  const [replyHistoryLoading, setReplyHistoryLoading] = useState(false);
-  const [replyHistoryError, setReplyHistoryError] = useState<string | null>(null);
   const [draftReplyId, setDraftReplyId] = useState<string | null>(null);
   const [replySaving, setReplySaving] = useState(false);
   const [replySending, setReplySending] = useState(false);
-  const [draftByReview, setDraftByReview] = useState<Record<string, boolean>>({});
+  const [draftStatusOverridesByReview, setDraftStatusOverridesByReview] = useState<
+    Record<string, boolean>
+  >({});
   const [autoDraftStatusByReview, setAutoDraftStatusByReview] = useState<
     Record<string, "idle" | "loading" | "ready" | "error">
   >({});
@@ -995,6 +1004,19 @@ const Inbox = () => {
     return typeof first?.total === "number" ? first.total : null;
   }, [reviewsQuery.data]);
 
+  const draftByReview = useMemo(() => {
+    const nextMap: Record<string, boolean> = {};
+    reviews.forEach((review: Review) => {
+      if (review.hasDraft || review.draftStatus === "draft") {
+        nextMap[review.id] = true;
+      }
+    });
+    Object.entries(draftStatusOverridesByReview).forEach(([reviewId, hasDraft]) => {
+      nextMap[reviewId] = hasDraft;
+    });
+    return nextMap;
+  }, [draftStatusOverridesByReview, reviews]);
+
   const locationReviewCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     reviews.forEach((review: Review) => {
@@ -1162,6 +1184,44 @@ const Inbox = () => {
   const selectedReview = useMemo(() => {
     return reviews.find((review: Review) => review.id === selectedReviewId) ?? null;
   }, [reviews, selectedReviewId]);
+  const selectedReviewExternalId = selectedReview?.reviewId ?? null;
+  const replyHistoryQuery = useQuery({
+    queryKey: reviewRepliesQueryKey(sessionUserId, selectedReviewId || null),
+    queryFn: async () => {
+      if (!supabase || !sessionUserId || !selectedReviewId) {
+        return EMPTY_REVIEW_REPLIES;
+      }
+      const reviewIds = Array.from(
+        new Set([selectedReviewId, selectedReviewExternalId].filter(Boolean))
+      ) as string[];
+      const { data, error, status } = await supabase
+        .from("review_replies")
+        .select("id, review_id, reply_text, status, created_at, sent_at")
+        .eq("user_id", sessionUserId)
+        .in("review_id", reviewIds)
+        .order("created_at", { ascending: false })
+        .limit(REVIEW_REPLIES_HISTORY_LIMIT);
+      if (error) {
+        throw new ReviewRepliesQueryError(
+          error.message || "Failed to load review replies",
+          typeof status === "number" ? status : null
+        );
+      }
+      return (data ?? []) as ReviewReply[];
+    },
+    enabled: Boolean(supabase && sessionUserId && selectedReviewId),
+    staleTime: REVIEW_REPLIES_STALE_TIME_MS,
+    retry: shouldRetryReviewReplies,
+    retryDelay: REVIEW_REPLIES_RETRY_DELAY_MS,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchInterval: false
+  });
+  const replyHistory = replyHistoryQuery.data ?? EMPTY_REVIEW_REPLIES;
+  const replyHistoryLoading = replyHistoryQuery.isLoading;
+  const replyHistoryError = replyHistoryQuery.isError
+    ? "Impossible de charger l'historique."
+    : null;
   const selectedReviewIndex = useMemo(
     () =>
       filteredReviews.findIndex(
@@ -1612,8 +1672,6 @@ const Inbox = () => {
     setGenerationError(null);
     toneTouchedRef.current = false;
     lengthTouchedRef.current = false;
-    setReplyHistory([]);
-    setReplyHistoryError(null);
     setDraftReplyId(null);
 
     const supabaseClient = supabase;
@@ -1657,47 +1715,27 @@ const Inbox = () => {
   }, [selectedReview, selectedReviewId]);
 
   useEffect(() => {
-    const supabaseClient = supabase;
-    if (!selectedReview || !supabaseClient) {
-      setReplyHistory([]);
-      setDraftByReview({});
+    if (!selectedReviewId || !replyHistoryQuery.isSuccess) {
       return;
     }
-
-    const loadReplies = async () => {
-      setReplyHistoryLoading(true);
-      setReplyHistoryError(null);
-      const { data, error } = await supabaseClient
-        .from("review_replies")
-        .select("id, review_id, reply_text, status, created_at, sent_at")
-        .in(
-          "review_id",
-          Array.from(
-            new Set([selectedReview.id, selectedReview.reviewId].filter(Boolean))
-          ) as string[]
-        )
-        .order("created_at", { ascending: false });
-
-      if (error) {
-        setReplyHistoryError("Impossible de charger l'historique.");
-        setReplyHistory([]);
-      } else {
-        const rows = (data ?? []) as ReviewReply[];
-        setReplyHistory(rows);
-        const latestDraft = rows.find((item: ReviewReply) => item.status === "draft");
-        setDraftReplyId(latestDraft?.id ?? null);
-        if (latestDraft?.reply_text) {
-          setDrafts((prev) => ({
-            ...prev,
-            [selectedReview.id]: latestDraft.reply_text
-          }));
-        }
-      }
-      setReplyHistoryLoading(false);
-    };
-
-    void loadReplies();
-  }, [selectedReview, selectedReviewId]);
+    const latestDraft = replyHistory.find(
+      (item: ReviewReply) => item.status === "draft"
+    );
+    setDraftReplyId(latestDraft?.id ?? null);
+    setDraftStatusOverridesByReview((prev) => {
+      const hasDraft = Boolean(latestDraft);
+      return prev[selectedReviewId] === hasDraft
+        ? prev
+        : { ...prev, [selectedReviewId]: hasDraft };
+    });
+    if (latestDraft?.reply_text) {
+      setDrafts((prev) =>
+        prev[selectedReviewId] === latestDraft.reply_text
+          ? prev
+          : { ...prev, [selectedReviewId]: latestDraft.reply_text }
+      );
+    }
+  }, [replyHistory, replyHistoryQuery.isSuccess, selectedReviewId]);
 
   useEffect(() => {
     const supabaseClient = supabase;
@@ -1814,30 +1852,6 @@ const Inbox = () => {
   ]);
 
   useEffect(() => {
-    const supabaseClient = supabase;
-    const reviewIds = filteredReviews.map((review: Review) => review.id);
-    if (!supabaseClient || reviewIds.length === 0) {
-      setDraftByReview({});
-      return;
-    }
-    const loadDrafts = async () => {
-      const { data } = await supabaseClient
-        .from("review_replies")
-        .select("review_id, status")
-        .in("review_id", reviewIds)
-        .eq("status", "draft");
-      const nextMap: Record<string, boolean> = {};
-      (data ?? []).forEach((row) => {
-        if (row.review_id) {
-          nextMap[row.review_id] = true;
-        }
-      });
-      setDraftByReview(nextMap);
-    };
-    void loadDrafts();
-  }, [filteredReviews]);
-
-  useEffect(() => {
     if (!import.meta.env.DEV || !supabase) {
       return;
     }
@@ -1943,12 +1957,18 @@ const Inbox = () => {
         return false;
       }
       const row = inserted as ReviewReply;
-      setReplyHistory((prev) => [row, ...prev]);
+      queryClient.setQueryData<ReviewReply[]>(
+        reviewRepliesQueryKey(sessionData.session.user.id, review.id),
+        (prev) => [row, ...(prev ?? EMPTY_REVIEW_REPLIES)]
+      );
       setDraftReplyId(row.id);
-      setDraftByReview((prev) => ({ ...prev, [review.id]: true }));
+      setDraftStatusOverridesByReview((prev) => ({
+        ...prev,
+        [review.id]: true
+      }));
       return true;
     },
-    []
+    [queryClient]
   );
 
   const requestBrandVoiceDraft = useCallback(
@@ -2181,12 +2201,14 @@ const Inbox = () => {
           setGenerationError("Impossible de sauvegarder le brouillon.");
           return;
         }
-        setReplyHistory((prev) =>
-          prev.map((item) =>
-            item.id === draftReplyId
-              ? { ...item, reply_text: replyText }
-              : item
-          )
+        queryClient.setQueryData<ReviewReply[]>(
+          reviewRepliesQueryKey(sessionUserId, selectedReview.id),
+          (prev) =>
+            (prev ?? EMPTY_REVIEW_REPLIES).map((item) =>
+              item.id === draftReplyId
+                ? { ...item, reply_text: replyText }
+                : item
+            )
         );
       }
       const now = new Date();
@@ -2287,15 +2309,20 @@ const Inbox = () => {
         setGenerationError("Réponse envoyée, mais statut non mis à jour.");
       } else {
         // 1) Marquer le brouillon comme envoyé dans l'historique
-        setReplyHistory((prev) =>
-          prev.map((item) =>
-            item.id === draftReplyId
-              ? { ...item, status: "sent", sent_at: sentAt }
-              : item
-          )
+        queryClient.setQueryData<ReviewReply[]>(
+          reviewRepliesQueryKey(sessionUserId, selectedReview.id),
+          (prev) =>
+            (prev ?? EMPTY_REVIEW_REPLIES).map((item) =>
+              item.id === draftReplyId
+                ? { ...item, status: "sent", sent_at: sentAt }
+                : item
+            )
         );
         setDraftReplyId(null);
-        setDraftByReview((prev) => ({ ...prev, [selectedReview.id]: false }));
+        setDraftStatusOverridesByReview((prev) => ({
+          ...prev,
+          [selectedReview.id]: false
+        }));
 
         // 2) Mettre à jour le statut de l'avis dans la DB (google_reviews)
         // selectedReview.id = id (uuid) de la table google_reviews (pas review_id)
