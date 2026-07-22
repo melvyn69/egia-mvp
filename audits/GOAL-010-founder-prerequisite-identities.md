@@ -112,10 +112,14 @@ hors scope et non bloquant pour GOAL-010.
 
 ## Gel du candidat
 
-- SHA candidat : à consigner après le commit applicatif final.
-- SHA descendant documentaire : à consigner après la transition à `Review`.
-- Diff candidat → descendant : devra contenir uniquement les deux documents
-  GOAL-010.
+- SHA candidat : `338066d7537c23e4b5208bed3456ac61566ebecd`.
+- Le candidat contient le code final, les validations et les trois revues
+  `APPROVED`.
+- Après ce SHA, seuls les deux documents GOAL-010 sont autorisés à évoluer.
+- Le SHA du descendant documentaire portant la transition `Running → Review`
+  est consigné à l'itération documentaire suivante.
+
+GOAL-010 est soumis en `Review`; aucune transition vers `Done` n'est effectuée.
 
 ## Mutations distantes
 

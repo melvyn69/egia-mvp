@@ -3,7 +3,7 @@
 ## Identité et statut
 
 - **Prompt :** `PROMPT_VERSION=GOAL010_FOUNDER_PREREQUISITE_IDENTITIES_V1`
-- **Statut :** `Running`
+- **Statut :** `Review`
 - **Date :** `2026-07-22`
 - **Type :** correctif Engineering du runner synthétique prerequisite
 - **Risque :** `R3` — identités Founder, Auth Admin, reprise, teardown et
@@ -13,6 +13,8 @@
 - **Baseline ANES en lecture seule :**
   `46446dd31d7c5991ddb45953db1162579c2d879f`
 - **Branche :** `engineering/goal-010-founder-prerequisite-identities`
+- **Candidat applicatif figé :**
+  `338066d7537c23e4b5208bed3456ac61566ebecd`
 
 ## Objet
 
@@ -117,8 +119,9 @@ requise. Le Goal peut donc passer à `Ready`, puis `Running`.
   canaux de contrôle inchangés.
 - Revues indépendantes finales : identités/confidentialité `APPROVED`,
   prerequisite/postdeploy `APPROVED`, production/non-régression `APPROVED`.
-- Candidat applicatif et descendant documentaire : consignés après gel dans
-  l'audit, avant la transition `Running → Review`.
+- Candidat applicatif figé avant la transition `Running → Review`; le
+  descendant documentaire portant cette transition est consigné dans l'audit
+  à l'itération documentaire suivante.
 
 ## Journal de statut
 
@@ -127,3 +130,7 @@ requise. Le Goal peut donc passer à `Ready`, puis `Running`.
 | `2026-07-22` | `N/A → Draft` | Goal créé sur la baseline obligatoire, scope R3 borné et séparation Engineering/production explicite. |
 | `2026-07-22` | `Draft → Ready` | Baselines et dépendances conformes; quatre fichiers applicatifs et deux documents suffisent; CI existante couvre le test agrégé. |
 | `2026-07-22` | `Ready → Running` | Implémentation locale autorisée, sans production, déploiement, appel distant ni nouveau Production Run. |
+| `2026-07-22` | `Running → Review` | Candidat `338066d7537c23e4b5208bed3456ac61566ebecd` figé après validations intégrales et trois revues finales `APPROVED`; aucune mutation distante. |
+
+GOAL-010 reste en `Review`. La transition `Review → Done` demeure hors scope et
+requiert un verdict Founder séparé.
