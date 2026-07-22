@@ -262,9 +262,37 @@ Après ce SHA, seuls le Goal et le présent audit peuvent évoluer.
 4. Le garde-fou versionné doit être fusionné pour protéger durablement `main`;
    tout nouveau déploiement pendant la livraison impose l'arrêt.
 
-## État provisoire
+## État de livraison
 
-Le correctif historique est réconcilié, les validations sont vertes et les trois
-revues sont `APPROVED`. GOAL-009 est en `Review`. La livraison linéaire et les
-contrôles finaux de zéro nouveau Preview et zéro nouveau Production restent à
-consigner, sans autoriser `Review → Done`.
+La PR #49 a été ouverte depuis
+`governance/goal-009-rpc-reconciliation` vers `main`. Son head
+`76a6819c6bd014e6186e8e00dec90d5388f2384d` ne contient, après le candidat, que
+les deux documents GOAL-009. Les checks PR suivants ont terminé `SUCCESS` :
+
+- CI `29913429387`, incluant le nouveau gate de binding;
+- Migration History Guard `29913429406`.
+
+La PR #49 a été fusionnée par squash linéaire le `2026-07-22T10:52:46Z`. Le SHA
+matériel intégré est :
+
+```text
+b21beab4a6227be20084325ef70d00448da5d071
+```
+
+Le run CI post-fusion `29913594099` a terminé `success`; son étape
+`Test Google cron Supabase RPC binding` a réussi. Après push, ouverture de PR,
+fusion et CI post-fusion, la liste Vercel reste inchangée : son déploiement le
+plus récent demeure la Production CLI préexistante
+`dpl_GCLNEGuqqJQjtQxpGkC4cjbxRX1b`. GOAL-009 a donc créé zéro Preview et zéro
+Production.
+
+La branche `governance/goal-009-rpc-reconciliation` a été supprimée localement
+et à distance après synchronisation de `main`. Le présent descendant ne modifie
+que les deux documents GOAL-009 afin d'intégrer cette Evidence de livraison;
+aucun fichier du candidat n'évolue après `4e249c6...`.
+
+Le correctif historique est réconcilié, les validations sont vertes, les trois
+revues sont `APPROVED`, et les protections Engineering sont intégrées. Les
+contrôles passifs n'observent aucune nouvelle mutation Vercel ou Supabase.
+GOAL-009 reste `Review`; aucune transition `Review → Done` ni aucune autorisation
+de production n'est accordée.
