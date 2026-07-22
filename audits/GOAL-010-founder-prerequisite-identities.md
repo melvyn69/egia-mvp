@@ -116,8 +116,10 @@ hors scope et non bloquant pour GOAL-010.
 - Le candidat contient le code final, les validations et les trois revues
   `APPROVED`.
 - Après ce SHA, seuls les deux documents GOAL-010 sont autorisés à évoluer.
-- Le SHA du descendant documentaire portant la transition `Running → Review`
-  est consigné à l'itération documentaire suivante.
+- SHA du descendant documentaire initial portant la transition
+  `Running → Review` : `c23330bbc9921a3d415d48717ddbfca4c54f685b`.
+- `git diff --name-only 338066d7537c23e4b5208bed3456ac61566ebecd..c23330bbc9921a3d415d48717ddbfca4c54f685b`
+  retourne uniquement le Goal et le présent audit.
 
 GOAL-010 est soumis en `Review`; aucune transition vers `Done` n'est effectuée.
 

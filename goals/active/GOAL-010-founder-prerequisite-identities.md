@@ -15,6 +15,8 @@
 - **Branche :** `engineering/goal-010-founder-prerequisite-identities`
 - **Candidat applicatif figé :**
   `338066d7537c23e4b5208bed3456ac61566ebecd`
+- **Descendant documentaire initial :**
+  `c23330bbc9921a3d415d48717ddbfca4c54f685b`
 
 ## Objet
 
@@ -120,8 +122,8 @@ requise. Le Goal peut donc passer à `Ready`, puis `Running`.
 - Revues indépendantes finales : identités/confidentialité `APPROVED`,
   prerequisite/postdeploy `APPROVED`, production/non-régression `APPROVED`.
 - Candidat applicatif figé avant la transition `Running → Review`; le
-  descendant documentaire portant cette transition est consigné dans l'audit
-  à l'itération documentaire suivante.
+  descendant `c23330bbc9921a3d415d48717ddbfca4c54f685b` porte uniquement les deux
+  documents GOAL-010.
 
 ## Journal de statut
 
