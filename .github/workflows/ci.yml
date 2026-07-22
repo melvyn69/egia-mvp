@@ -47,6 +47,9 @@ jobs:
       - name: Test production security guardrails
         run: npm run test:production-security
 
+      - name: Test Google cron Supabase RPC binding
+        run: npm run test:google-cron-rpc-binding
+
       - name: Test GOAL-006 SQL guardrails
         run: npm run test:goal-006
 
