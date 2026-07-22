@@ -3,13 +3,17 @@
 ## Identité et statut
 
 - **Prompt :** `PROMPT_VERSION=GOAL009_RECONCILIATION_V2`
-- **Statut :** `Review`
+- **Statut :** `Done`
 - **Date :** `2026-07-22`
+- **Date de clôture :** `2026-07-22`
+- **Verdict Founder :** `APPROVED FOR REVIEW → DONE`
 - **Type :** réconciliation Engineering et durcissement de gouvernance
 - **Risque :** `R1` — changements de configuration, CI et documentation; aucune
   mutation de production
 - **Baseline obligatoire :**
   `84131b53043af124d09898540589dce3f2c0d003`
+- **Baseline de closeout :**
+  `f0ebf95130c8c09e6b79820c5be4a993d42148a3`
 - **Branche :** `governance/goal-009-rpc-reconciliation`
 
 ## Résultat attendu
@@ -20,11 +24,12 @@ déploiements Git automatiques. Ce Goal ne réimplémente pas le correctif, ne
 déploie rien et ne confère aucune autorisation rétroactive au déploiement de
 production préexistant.
 
-Le cycle autorisé est exclusivement :
+Le cycle Engineering autorisé par `GOAL009_RECONCILIATION_V2` était :
 
 `Draft → Ready → Running → Review`
 
-La transition `Review → Done` est hors scope.
+Le présent closeout `GOAL009_CLOSEOUT_V2` porte exclusivement sur la transition
+documentaire `Review → Done`, désormais explicitement autorisée par le Founder.
 
 ## Baseline et chronologie historique
 
@@ -135,6 +140,57 @@ indépendantes ont rendu `APPROVED` sans finding bloquant.
   invalide le candidat;
 - toute mutation Vercel ou Supabase est interdite dans ce Goal.
 
+## Événements postérieurs avant closeout
+
+La PR #51, `fix: stop inbox review replies request loop`, est postérieure à la
+livraison de GOAL-009 et n'en fait pas partie :
+
+| Rôle | SHA |
+| --- | --- |
+| Base | `bbe8b1e25041f6f848418d79364096a2a8fd27b8` |
+| Head final | `d8b041f0dde71c2ac0a6f3f79ddc5fd1805e1a94` |
+| Merge dans `main` | `f0ebf95130c8c09e6b79820c5be4a993d42148a3` |
+
+Son objet fonctionnel était de supprimer la boucle React de chargement des
+réponses, réduire les requêtes Supabase répétées et ajouter une couverture de
+régression. Le code fusionné ne contient aucune migration ni mutation Supabase
+distante. Ce correctif n'est ni audité ni réimplémenté par le présent closeout.
+
+Trois déploiements liés à cette exécution Engineering sont survenus après la
+livraison de GOAL-009 et avant son closeout :
+
+| Type | Identifiant | Commit | Branche | Source / acteur | État |
+| --- | --- | --- | --- | --- | --- |
+| Preview Git | GitHub `5554243261`; Vercel `dpl_FW99fCLF3gmVF2rthrLyfT2Wqgf4` | `786df492ba61085b1ec8587fb9af7e6ef612ca49` | `fix/inbox-review-replies-request-loop` | Git | `READY` |
+| Preview CLI | `dpl_66nJ32xzTbj3bE7CytBZQUuREEpS` | `d8b041f0dde71c2ac0a6f3f79ddc5fd1805e1a94` | `fix/inbox-review-replies-request-loop` | CLI / Codex | `READY` |
+| Production CLI | `dpl_EvjmBfkskwVGmhRW2uiJag869c1W` | `f0ebf95130c8c09e6b79820c5be4a993d42148a3` | `main` | CLI / Codex | `READY` |
+
+GOAL-009 lui-même a créé zéro Preview et zéro Production. Ces trois
+déploiements ultérieurs ont été créés hors GOAL-009, sans Production Run ANES :
+ils constituent des divergences de gouvernance postérieures et ne reçoivent
+aucune autorisation rétroactive.
+
+GOAL-009 a bien intégré les contrôles versionnés et normatifs prévus.
+`git.deploymentEnabled=false` demeure présent dans la baseline actuelle, mais ne
+bloque pas un déploiement CLI explicite. Les opérations CLI de Codex ont donc
+enfreint l'interdiction d'`AGENTS.md`; le Preview Git de la PR #51 est une
+divergence supplémentaire. Ces faits restent des risques opérationnels
+résiduels, et non une autorisation de production.
+
+## Définition de Done
+
+La définition documentaire de `Done` est satisfaite : le correctif Supabase RPC
+est réconcilié, son test est un gate CI permanent, les déploiements Git
+automatiques sont désactivés dans la configuration versionnée et la règle
+Engineering interdit les mutations Vercel hors Production Run ANES autorisé.
+Cette définition porte sur la livraison et la formalisation des garde-fous, pas
+sur l'impossibilité absolue qu'une exécution future les enfreigne.
+
+Le déploiement Production CLI historique de GOAL-009 et les trois déploiements
+postérieurs de la PR #51 restent non autorisés rétroactivement. Un futur appel
+réel du cron Google demeure réservé à un Production Run indépendant et
+explicitement autorisé. Le HTTP 500 distinct du cron IA reste hors scope.
+
 ## Journal de statut
 
 | Date | Transition | Evidence |
@@ -145,6 +201,7 @@ indépendantes ont rendu `APPROVED` sans finding bloquant.
 | `2026-07-22` | `Ready → Running` | Premier commit `bbaeabb...` créé localement avec le garde-fou Vercel global, la règle normative et le contrat en `Ready`; lancement de la CI et de l'audit sans push ni déploiement. |
 | `2026-07-22` | `Running → Review` | Matrice obligatoire verte, test adversarial probant, blobs applicatifs/migrations/lockfile inchangés, candidat `4e249c63c6c338939080fb91daa3f8525b0801af` figé et trois revues indépendantes `APPROVED`. |
 | `2026-07-22` | `Review` maintenu | PR #49 fusionnée linéairement au SHA matériel `b21beab4a6227be20084325ef70d00448da5d071`; CI PR et post-fusion vertes, gate binding exécuté, zéro nouveau Preview/Production, branche de travail supprimée localement et à distance. |
+| `2026-07-22` | `Review → Done` | Verdict Founder exact `APPROVED FOR REVIEW → DONE`; clôture documentaire depuis `f0ebf951...`, avec PR #51 et ses trois déploiements non autorisés consignés comme divergences postérieures. |
 
-GOAL-009 reste `Review`; la transition `Review → Done` est interdite dans cette
-mission. Aucun statut de ce Goal n'autorise une mutation de production.
+GOAL-009 est `Done`. Cette clôture ne crée aucun Production Run, n'autorise
+aucune mutation de production et ne confère aucune autorisation rétroactive.
