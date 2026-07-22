@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -b --pretty false",
     "test": "node scripts/test-egress-guardrails.mjs",
+    "test:inbox-review-replies-loop": "vitest run src/pages/Inbox.reviewRepliesLoop.test.tsx",
     "test:google-cron-rpc-binding": "tsx scripts/test-google-cron-rpc-binding.ts",
     "test:production-security": "tsx scripts/test-production-security.ts",
     "test:goal-006": "node scripts/test-goal-006-claim-ai-tag-candidates.mjs",
@@ -63,6 +64,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@tanstack/react-query-devtools": "^5.62.7",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
@@ -73,12 +75,14 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "jsdom": "^26.1.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.21.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
-    "vite": "^7.2.4"
+    "vite": "^7.2.4",
+    "vitest": "^3.2.7"
   },
   "overrides": {
     "@vercel/static-config": {
