@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 export const SYNTHETIC_PREFIX = "GOAL002_SYNTH";
 export const SYNTHETIC_TTL_MS = 24 * 60 * 60 * 1000;
+const FOUNDER_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export class SyntheticRunnerError extends Error {
   constructor(code) {
@@ -10,6 +11,42 @@ export class SyntheticRunnerError extends Error {
     this.code = code;
   }
 }
+
+const validateFounderEmails = (founderEmails) => {
+  if (
+    !founderEmails ||
+    typeof founderEmails.A !== "string" ||
+    typeof founderEmails.B !== "string" ||
+    founderEmails.A.length === 0 ||
+    founderEmails.B.length === 0
+  ) {
+    throw new SyntheticRunnerError("FOUNDER_EMAILS_REQUIRED");
+  }
+  if (
+    founderEmails.A.length > 254 ||
+    founderEmails.B.length > 254 ||
+    !FOUNDER_EMAIL_PATTERN.test(founderEmails.A) ||
+    !FOUNDER_EMAIL_PATTERN.test(founderEmails.B)
+  ) {
+    throw new SyntheticRunnerError("FOUNDER_EMAILS_INVALID");
+  }
+  if (founderEmails.A.toLowerCase() === founderEmails.B.toLowerCase()) {
+    throw new SyntheticRunnerError("FOUNDER_EMAILS_NOT_DISTINCT");
+  }
+  return founderEmails;
+};
+
+export const consumeFounderPrerequisiteEmails = (env = process.env) => {
+  const founderEmails = {
+    A: env.SUPABASE_TEST_EMAIL_A,
+    B: env.SUPABASE_TEST_EMAIL_B
+  };
+  delete env.SUPABASE_TEST_EMAIL_A;
+  delete env.SUPABASE_TEST_EMAIL_B;
+  return validateFounderEmails(founderEmails);
+};
+
+export const modeRequiresRemoteMailbox = (mode) => mode === "postdeploy";
 
 export class LocalSyntheticMailbox {
   #messages = new Map();
@@ -37,11 +74,18 @@ export class LocalSyntheticMailbox {
   }
 }
 
-export const createSyntheticIdentitySet = (mode, { emailDomain = "goal002.invalid" } = {}) => {
+export const createSyntheticIdentitySet = (
+  mode,
+  { emailDomain = "goal002.invalid", founderEmails } = {}
+) => {
   if (mode !== "prerequisite" && mode !== "postdeploy") {
     throw new SyntheticRunnerError("MODE_INVALID");
   }
-  if (!/^[a-z0-9.-]+$/i.test(emailDomain)) {
+  const explicitFounderEmails = founderEmails ? validateFounderEmails(founderEmails) : null;
+  if (explicitFounderEmails && mode !== "prerequisite") {
+    throw new SyntheticRunnerError("FOUNDER_EMAILS_INVALID");
+  }
+  if (!explicitFounderEmails && !/^[a-z0-9.-]+$/i.test(emailDomain)) {
     throw new SyntheticRunnerError("MAILBOX_DOMAIN_INVALID");
   }
   const executionId = randomUUID();
@@ -53,9 +97,16 @@ export const createSyntheticIdentitySet = (mode, { emailDomain = "goal002.invali
     prefix,
     mode,
     createdAt: new Date().toISOString(),
+    emailSource: explicitFounderEmails ? "founder" : "generated",
     users: {
-      A: { email: `${mailboxPrefix}.a@${emailDomain}`, password: password() },
-      B: { email: `${mailboxPrefix}.b@${emailDomain}`, password: password() }
+      A: {
+        email: explicitFounderEmails?.A ?? `${mailboxPrefix}.a@${emailDomain}`,
+        password: password()
+      },
+      B: {
+        email: explicitFounderEmails?.B ?? `${mailboxPrefix}.b@${emailDomain}`,
+        password: password()
+      }
     }
   };
 };
@@ -66,13 +117,17 @@ const safeErrorCode = (error) =>
 export const runGoal002Synthetic = async ({
   mode,
   adapter,
-  mailbox = new LocalSyntheticMailbox(),
-  emailDomain = "goal002.invalid"
+  mailbox,
+  emailDomain = "goal002.invalid",
+  founderEmails
 }) => {
   if (!adapter || (adapter.isProduction === true && adapter.productionAuthorized !== true)) {
     throw new SyntheticRunnerError("PRODUCTION_ADAPTER_FORBIDDEN");
   }
-  const identitySet = createSyntheticIdentitySet(mode, { emailDomain });
+  const identitySet = createSyntheticIdentitySet(mode, { emailDomain, founderEmails });
+  const activeMailbox = modeRequiresRemoteMailbox(mode)
+    ? (mailbox ?? new LocalSyntheticMailbox())
+    : undefined;
   const evidence = {
     ok: false,
     mode,
@@ -88,14 +143,14 @@ export const runGoal002Synthetic = async ({
     await adapter.cleanupExpired({ prefix: SYNTHETIC_PREFIX, ttlMs: SYNTHETIC_TTL_MS });
     const initial = await adapter.inventory({ prefix: identitySet.prefix });
     if (initial.total !== 0) throw new SyntheticRunnerError("INITIAL_RESIDUE");
-    await adapter.setup({ identitySet, mailbox });
+    await adapter.setup({ identitySet, mailbox: activeMailbox });
     evidence.setup = true;
     await adapter.verifyOwnership({ identitySet });
     evidence.ownership = true;
     if (mode === "prerequisite") {
-      await adapter.assertPrerequisite({ identitySet, mailbox });
+      await adapter.assertPrerequisite({ identitySet });
     } else {
-      await adapter.assertPostdeploy({ identitySet, mailbox });
+      await adapter.assertPostdeploy({ identitySet, mailbox: activeMailbox });
     }
     evidence.assertions = true;
     evidence.ok = true;
@@ -121,14 +176,16 @@ export const runGoal002Synthetic = async ({
     } else {
       teardownStepFailed = true;
     }
-    let mailboxResidue = -1;
-    try {
-      const clearedResidue = await mailbox.clear(identitySet);
-      mailboxResidue = Number.isInteger(clearedResidue)
-        ? clearedResidue
-        : await Promise.resolve(mailbox.residueCount(identitySet));
-    } catch {
-      teardownStepFailed = true;
+    let mailboxResidue = 0;
+    if (modeRequiresRemoteMailbox(mode)) {
+      try {
+        const clearedResidue = await activeMailbox.clear(identitySet);
+        mailboxResidue = Number.isInteger(clearedResidue)
+          ? clearedResidue
+          : await Promise.resolve(activeMailbox.residueCount(identitySet));
+      } catch {
+        teardownStepFailed = true;
+      }
     }
     const finalInventory = await adapter.inventory({ prefix: identitySet.prefix }).catch(() => ({ total: -1 }));
     evidence.residueCount = finalInventory.total;
@@ -144,6 +201,8 @@ export const runGoal002Synthetic = async ({
     }
     identitySet.users.A.password = "";
     identitySet.users.B.password = "";
+    identitySet.users.A.email = "";
+    identitySet.users.B.email = "";
   }
   return Object.freeze(evidence);
 };

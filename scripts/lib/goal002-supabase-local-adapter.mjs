@@ -32,6 +32,51 @@ const expectOk = (result, code) => {
   return result.data;
 };
 
+const SYNTHETIC_PREREQUISITE_PREFIX =
+  /^GOAL002_SYNTH_PREREQUISITE_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export const isRecoverableFounderSyntheticUser = (user) => {
+  const metadata = user?.app_metadata;
+  return Boolean(
+    user?.id &&
+    metadata?.goal002_synthetic === true &&
+    metadata?.goal002_mode === "prerequisite" &&
+    ["A", "B"].includes(metadata?.goal002_side) &&
+    typeof metadata?.goal002_prefix === "string" &&
+    SYNTHETIC_PREREQUISITE_PREFIX.test(metadata.goal002_prefix)
+  );
+};
+
+export const recoverFounderSyntheticUsers = async ({ identitySet, users, cleanup }) => {
+  if (identitySet.emailSource !== "founder") return 0;
+  const recoverable = [];
+  for (const side of ["A", "B"]) {
+    const email = identitySet.users[side].email;
+    const existing = users.find(
+      (user) => typeof user.email === "string" && user.email.toLowerCase() === email.toLowerCase()
+    );
+    if (!existing) continue;
+    if (!isRecoverableFounderSyntheticUser(existing)) {
+      throw new SyntheticRunnerError("FOUNDER_EMAIL_ALREADY_IN_USE");
+    }
+    recoverable.push(existing);
+  }
+  for (const existing of recoverable) {
+    const metadata = existing.app_metadata;
+    await cleanup({
+      prefix: metadata.goal002_prefix,
+      userIds: [existing.id],
+      rateLimitBucketKeys: Array.isArray(metadata.goal002_rate_limit_bucket_keys)
+        ? metadata.goal002_rate_limit_bucket_keys
+        : [],
+      storagePaths: Array.isArray(metadata.goal002_storage_paths)
+        ? metadata.goal002_storage_paths
+        : []
+    });
+  }
+  return recoverable.length;
+};
+
 export class SupabaseLocalSyntheticAdapter {
   isProduction;
   productionAuthorized;
@@ -111,6 +156,17 @@ export class SupabaseLocalSyntheticAdapter {
       }
     });
     if (error) throw new SyntheticRunnerError("AUTH_METADATA_UPDATE_FAILED");
+  }
+
+  async #recoverFounderIdentities(identitySet) {
+    if (identitySet.emailSource !== "founder") return;
+    const users = await this.#listSyntheticUsers();
+    await recoverFounderSyntheticUsers({
+      identitySet,
+      users,
+      cleanup: ({ prefix, userIds, rateLimitBucketKeys, storagePaths }) =>
+        this.#cleanupPrefix(prefix, userIds, rateLimitBucketKeys, storagePaths)
+    });
   }
 
   async #businessInventory(prefix) {
@@ -271,6 +327,7 @@ export class SupabaseLocalSyntheticAdapter {
       rateLimitBucketKeys: [],
     };
     this.#contexts.set(identitySet.executionId, context);
+    await this.#recoverFounderIdentities(identitySet);
     for (const side of ["A", "B"]) {
       const identity = identitySet.users[side];
       const created = expectOk(
@@ -288,7 +345,9 @@ export class SupabaseLocalSyntheticAdapter {
         "AUTH_CREATE_FAILED"
       );
       if (!created.user?.id) throw new SyntheticRunnerError("AUTH_USER_MISSING");
-      const emailDomain = identity.email.split("@").at(-1);
+      const fixtureEmailDomain = identitySet.emailSource === "founder"
+        ? "goal002.invalid"
+        : identity.email.split("@").at(-1);
       context.users[side] = {
         id: created.user.id,
         client: null,
@@ -299,8 +358,8 @@ export class SupabaseLocalSyntheticAdapter {
         locationId: null,
         programId: null,
         existingMemberId: null,
-        existingMemberEmail: `${identitySet.prefix.toLowerCase()}.${side}.existing-member@${emailDomain}`,
-        newMemberEmail: `${identitySet.prefix.toLowerCase()}.${side}.new-member@${emailDomain}`
+        existingMemberEmail: `${identitySet.prefix.toLowerCase()}.${side}.existing-member@${fixtureEmailDomain}`,
+        newMemberEmail: `${identitySet.prefix.toLowerCase()}.${side}.new-member@${fixtureEmailDomain}`
       };
       const client = createClient(this.#url, this.#anonKey, {
         auth: { persistSession: false, autoRefreshToken: false }
@@ -319,7 +378,9 @@ export class SupabaseLocalSyntheticAdapter {
 
     for (const side of ["A", "B"]) {
       const user = context.users[side];
-      const emailDomain = identitySet.users[side].email.split("@").at(-1);
+      const fixtureEmailDomain = identitySet.emailSource === "founder"
+        ? "goal002.invalid"
+        : identitySet.users[side].email.split("@").at(-1);
       expectOk(
         await this.#admin.from("business_settings").insert({
           business_id: user.businessId,
@@ -410,7 +471,7 @@ export class SupabaseLocalSyntheticAdapter {
         await user.client.from("team_invitations").insert({
           owner_user_id: user.id,
           invited_by: user.id,
-          email: `${identitySet.prefix.toLowerCase()}.${side}.invite@${emailDomain}`,
+          email: `${identitySet.prefix.toLowerCase()}.${side}.invite@${fixtureEmailDomain}`,
           first_name: `${identitySet.prefix}_${side}_INVITE`,
           role: "editor",
           token: randomBytes(24).toString("base64url"),
