@@ -3,7 +3,7 @@
 ## Identité et statut
 
 - **Prompt :** `PROMPT_VERSION=GOAL009_RECONCILIATION_V2`
-- **Statut :** `Ready`
+- **Statut :** `Running`
 - **Date :** `2026-07-22`
 - **Type :** réconciliation Engineering et durcissement de gouvernance
 - **Risque :** `R1` — changements de configuration, CI et documentation; aucune
@@ -136,6 +136,7 @@ Goal et `audits/GOAL-009-google-cron-rpc-binding-reconciliation.md` peuvent
 | `2026-07-22` | `N/A → Draft` | Mission de réconciliation V2 créée depuis la baseline `84131b5...`; aucune mutation de production. |
 | `2026-07-22` | `Draft → Blocked` | Dépôt non propre : doublon local non suivi `scripts/test-google-cron-rpc-binding 2.ts`; arrêt avant modification. |
 | `2026-07-22` | `Blocked → Ready` | Autorisation Founder explicite; doublon confirmé `IDENTICAL`, seul doublon supprimé, fichier canonique conservé et dépôt propre. |
+| `2026-07-22` | `Ready → Running` | Premier commit `bbaeabb...` créé localement avec le garde-fou Vercel global, la règle normative et le contrat en `Ready`; lancement de la CI et de l'audit sans push ni déploiement. |
 
-GOAL-009 reste `Ready` jusqu'au lancement documenté de la réconciliation. Aucun
-statut de ce Goal n'autorise une mutation de production.
+GOAL-009 reste `Running` pendant les validations, revues et contrôles de
+livraison. Aucun statut de ce Goal n'autorise une mutation de production.
