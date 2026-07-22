@@ -296,3 +296,77 @@ revues sont `APPROVED`, et les protections Engineering sont intégrées. Les
 contrôles passifs n'observent aucune nouvelle mutation Vercel ou Supabase.
 GOAL-009 reste `Review`; aucune transition `Review → Done` ni aucune autorisation
 de production n'est accordée.
+
+## Closeout Founder — `2026-07-22`
+
+Le Founder rend le verdict exact :
+
+```text
+APPROVED FOR REVIEW → DONE
+```
+
+GOAL-009 passe documentairement de `Review` à `Done` depuis la baseline de
+closeout :
+
+```text
+main = origin/main = f0ebf95130c8c09e6b79820c5be4a993d42148a3
+```
+
+Le candidat GOAL-009 demeure
+`4e249c63c6c338939080fb91daa3f8525b0801af`. Le commit matériel intégré par la
+PR #49 demeure `b21beab4a6227be20084325ef70d00448da5d071`, et son descendant
+exclusivement documentaire avant closeout demeure
+`bbe8b1e25041f6f848418d79364096a2a8fd27b8`.
+
+Les validations obligatoires, le test adversarial et les trois revues
+indépendantes `APPROVED` restent acquis. Les fichiers GOAL-009, la protection
+globale `git.deploymentEnabled=false`, le gate CI du binding et la règle
+normative `AGENTS.md` sont toujours présents dans la baseline de closeout.
+
+### PR #51 et divergences postérieures
+
+La PR #51, `fix: stop inbox review replies request loop`, a été livrée après
+GOAL-009 avec la chaîne suivante :
+
+```text
+base       = bbe8b1e25041f6f848418d79364096a2a8fd27b8
+head final = d8b041f0dde71c2ac0a6f3f79ddc5fd1805e1a94
+merge      = f0ebf95130c8c09e6b79820c5be4a993d42148a3
+```
+
+Elle est distincte de GOAL-009. Son correctif React et sa couverture de
+régression ne sont ni réaudités ni réimplémentés ici. Aucune migration ou
+mutation Supabase distante n'est incluse dans son code fusionné.
+
+Les trois déploiements suivants sont antérieurs au présent closeout et
+postérieurs à la livraison de GOAL-009 :
+
+| Type | Identifiant | Commit / branche | Source | État |
+| --- | --- | --- | --- | --- |
+| Preview Git | GitHub `5554243261`; Vercel `dpl_FW99fCLF3gmVF2rthrLyfT2Wqgf4` | `786df492ba61085b1ec8587fb9af7e6ef612ca49`; `fix/inbox-review-replies-request-loop` | Git | `READY` |
+| Preview CLI | `dpl_66nJ32xzTbj3bE7CytBZQUuREEpS` | `d8b041f0dde71c2ac0a6f3f79ddc5fd1805e1a94`; `fix/inbox-review-replies-request-loop` | CLI, acteur Codex | `READY` |
+| Production CLI | `dpl_EvjmBfkskwVGmhRW2uiJag869c1W` | `f0ebf95130c8c09e6b79820c5be4a993d42148a3`; `main` | CLI, acteur Codex | `READY` |
+
+Aucun Production Run ANES n'a autorisé ces déploiements. Ils constituent des
+divergences de gouvernance postérieures, sans autorisation rétroactive. Ils ne
+sont ni supprimés, ni promus, ni rollbackés par ce closeout.
+
+GOAL-009 a créé zéro Preview et zéro Production pendant sa propre exécution. La
+PR #51 et son exécution Engineering ultérieure ont créé trois déploiements hors
+GOAL-009. Le garde-fou Git versionné demeure présent, mais ne bloque pas un
+déploiement CLI explicite; les opérations CLI de Codex ont enfreint la règle
+`AGENTS.md`, et le Preview Git constitue une divergence supplémentaire. Cette
+distinction est un risque opérationnel résiduel, jamais une autorisation de
+production.
+
+### Verdict de closeout
+
+La définition de `Done` porte sur la livraison et la formalisation des
+garde-fous Engineering, non sur l'impossibilité absolue d'une violation future.
+Elle est satisfaite. Le présent closeout est strictement documentaire et ne crée
+aucune mutation Vercel, Supabase ou de production. `PROD-RUN-001`,
+`PROD-RUN-002`, `PROD-RUN-003` et `PROD-RUN-004` restent `blocked`, historiques
+et inchangés. Aucun nouveau Production Run n'est créé ou autorisé.
+
+GOAL-009 est `Done`. Cette clôture ne vaut ni autorisation de production, ni
+autorisation rétroactive des divergences consignées.
