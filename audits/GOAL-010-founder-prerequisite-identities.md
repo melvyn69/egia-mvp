@@ -127,3 +127,33 @@ GOAL-010 est soumis en `Review`; aucune transition vers `Done` n'est effectuée.
 
 Aucune mutation Vercel, Supabase ou applicative n'est autorisée ni exécutée par
 GOAL-010.
+
+## Closeout Founder final
+
+- **Verdict Founder :** `APPROVED FOR REVIEW → DONE`.
+- **Transition :** `Review → Done`.
+- **Date de clôture :** `2026-07-22`.
+- **Baseline de closeout :**
+  `d59e3339ea725afc4104a90d6e87d5fa8937a75f`.
+- **Candidat Engineering figé :**
+  `338066d7537c23e4b5208bed3456ac61566ebecd`.
+- **Commit intégré dans `main` par la PR #53 :**
+  `d59e3339ea725afc4104a90d6e87d5fa8937a75f`.
+
+Le candidat `338066d7…` porte l'arbre applicatif final validé. Le commit
+`d59e3339…` est son intégration dans `main` et la baseline applicative du
+closeout. Le commit produit par ce closeout et tout descendant associé restent
+exclusivement documentaires. Le futur contrat de production devra donc partir
+de `d59e3339…` ou de son descendant documentaire de closeout, jamais des
+anciens candidats `f0ebf951…` ou `fed08f9…`.
+
+Les Evidence acquises demeurent inchangées : matrice GOAL-010 `20/20`, cycle
+synthétique `41/41`, provisioner `53/53`, internal-key `24/24`, db-channel
+`13/13`, production-security `32/32`, inbox loop `19/19` et toutes les autres
+validations obligatoires vertes. Les trois revues finales restent
+`APPROVED`.
+
+Ce closeout crée zéro Preview, zéro Production et zéro mutation Vercel,
+Supabase ou applicative. Les deux tokens de contrôle `VERCEL_API_TOKEN` et
+`SUPABASE_ACCESS_TOKEN` restent absents et hors scope. `PROD-RUN-001` à
+`PROD-RUN-004` restent inchangés; `PROD-RUN-005` n'est ni créé ni autorisé.
