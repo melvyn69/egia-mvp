@@ -144,6 +144,7 @@ indépendantes ont rendu `APPROVED` sans finding bloquant.
 | `2026-07-22` | `Blocked → Ready` | Autorisation Founder explicite; doublon confirmé `IDENTICAL`, seul doublon supprimé, fichier canonique conservé et dépôt propre. |
 | `2026-07-22` | `Ready → Running` | Premier commit `bbaeabb...` créé localement avec le garde-fou Vercel global, la règle normative et le contrat en `Ready`; lancement de la CI et de l'audit sans push ni déploiement. |
 | `2026-07-22` | `Running → Review` | Matrice obligatoire verte, test adversarial probant, blobs applicatifs/migrations/lockfile inchangés, candidat `4e249c63c6c338939080fb91daa3f8525b0801af` figé et trois revues indépendantes `APPROVED`. |
+| `2026-07-22` | `Review` maintenu | PR #49 fusionnée linéairement au SHA matériel `b21beab4a6227be20084325ef70d00448da5d071`; CI PR et post-fusion vertes, gate binding exécuté, zéro nouveau Preview/Production, branche de travail supprimée localement et à distance. |
 
 GOAL-009 reste `Review`; la transition `Review → Done` est interdite dans cette
 mission. Aucun statut de ce Goal n'autorise une mutation de production.
