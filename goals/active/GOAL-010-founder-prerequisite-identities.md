@@ -3,8 +3,10 @@
 ## Identité et statut
 
 - **Prompt :** `PROMPT_VERSION=GOAL010_FOUNDER_PREREQUISITE_IDENTITIES_V1`
-- **Statut :** `Review`
+- **Statut :** `Done`
 - **Date :** `2026-07-22`
+- **Date de clôture :** `2026-07-22`
+- **Verdict Founder :** `APPROVED FOR REVIEW → DONE`
 - **Type :** correctif Engineering du runner synthétique prerequisite
 - **Risque :** `R3` — identités Founder, Auth Admin, reprise, teardown et
   frontière prerequisite/postdeploy
@@ -17,6 +19,8 @@
   `338066d7537c23e4b5208bed3456ac61566ebecd`
 - **Descendant documentaire initial :**
   `c23330bbc9921a3d415d48717ddbfca4c54f685b`
+- **Baseline de closeout et commit intégré par la PR #53 :**
+  `d59e3339ea725afc4104a90d6e87d5fa8937a75f`
 
 ## Objet
 
@@ -125,6 +129,27 @@ requise. Le Goal peut donc passer à `Ready`, puis `Running`.
   descendant `c23330bbc9921a3d415d48717ddbfca4c54f685b` porte uniquement les deux
   documents GOAL-010.
 
+## Closeout Founder
+
+Le Founder rend le verdict `APPROVED FOR REVIEW → DONE` le `2026-07-22`.
+Le candidat Engineering figé reste
+`338066d7537c23e4b5208bed3456ac61566ebecd`; il porte l'arbre applicatif
+validé. La PR #53 a intégré cet arbre dans `main` au commit
+`d59e3339ea725afc4104a90d6e87d5fa8937a75f`, qui constitue la baseline de
+closeout. Tout descendant ultérieur de cette baseline dans ce closeout doit
+rester exclusivement documentaire. Les anciens candidats `f0ebf951…` et
+`fed08f9…` ne sont plus des candidats finaux admissibles après GOAL-010.
+
+La définition de Done est satisfaite : le mode `prerequisite` consomme
+exactement les identités A/B et n'exige plus de mailbox; `postdeploy` conserve
+son provider HTTPS one-shot; les utilisateurs non synthétiques restent
+protégés; interruption, reprise et teardown demeurent couverts. Les deux
+tokens de contrôle `VERCEL_API_TOKEN` et `SUPABASE_ACCESS_TOKEN` restent
+absents et constituent un prérequis opérationnel futur hors scope.
+
+Cette clôture ne crée ni n'autorise aucun Production Run. `PROD-RUN-001` à
+`PROD-RUN-004` restent inchangés et `PROD-RUN-005` n'est pas créé.
+
 ## Journal de statut
 
 | Date | Transition | Evidence |
@@ -133,6 +158,7 @@ requise. Le Goal peut donc passer à `Ready`, puis `Running`.
 | `2026-07-22` | `Draft → Ready` | Baselines et dépendances conformes; quatre fichiers applicatifs et deux documents suffisent; CI existante couvre le test agrégé. |
 | `2026-07-22` | `Ready → Running` | Implémentation locale autorisée, sans production, déploiement, appel distant ni nouveau Production Run. |
 | `2026-07-22` | `Running → Review` | Candidat `338066d7537c23e4b5208bed3456ac61566ebecd` figé après validations intégrales et trois revues finales `APPROVED`; aucune mutation distante. |
+| `2026-07-22` | `Review → Done` | Verdict Founder `APPROVED FOR REVIEW → DONE`; PR #53 intégrée dans `main` au SHA `d59e3339ea725afc4104a90d6e87d5fa8937a75f`, sans Preview, Production ni mutation distante. |
 
-GOAL-010 reste en `Review`. La transition `Review → Done` demeure hors scope et
-requiert un verdict Founder séparé.
+GOAL-010 est `Done`. Le closeout est exclusivement documentaire; il ne crée
+aucune autorisation de production et ne modifie pas le candidat applicatif.
