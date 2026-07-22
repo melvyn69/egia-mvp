@@ -32,11 +32,6 @@ type GoogleReview = {
 type GoogleReviewUpsert =
   Database["public"]["Tables"]["google_reviews"]["Insert"];
 type JobQueueRow = Database["public"]["Tables"]["job_queue"]["Row"];
-type ClaimedGoogleConnection = {
-  user_id: string;
-  refresh_token: string;
-  sync_cursor: string | null;
-};
 
 const CURSOR_KEY = "google_sync_replies_cursor_v1";
 const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000;
@@ -409,15 +404,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       10,
       Math.max(1, Number.isFinite(configuredConnectionBatch) ? configuredConnectionBatch : 5)
     );
-    const claimConnections = supabaseAdmin.rpc as unknown as (
-      fn: string,
-      params: { p_limit: number }
-    ) => PromiseLike<{
-      data: ClaimedGoogleConnection[] | null;
-      error: { message: string } | null;
-    }>;
     const { data: connections, error: connectionsError } = await withSupabaseRetry(
-      () => claimConnections("claim_google_sync_connections", { p_limit: connectionBatch }),
+      () =>
+        supabaseAdmin.rpc("claim_google_sync_connections", {
+          p_limit: connectionBatch
+        }),
       {
         requestId,
         label: "google_connections.load_for_cron"

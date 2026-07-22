@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -b --pretty false",
     "test": "node scripts/test-egress-guardrails.mjs",
+    "test:google-cron-rpc-binding": "tsx scripts/test-google-cron-rpc-binding.ts",
     "test:production-security": "tsx scripts/test-production-security.ts",
     "test:goal-006": "node scripts/test-goal-006-claim-ai-tag-candidates.mjs",
     "test:goal-007:internal-key": "tsx scripts/test-goal-007-internal-api-key.ts",

@@ -1029,6 +1029,14 @@ export type Database = {
       }
     }
     Functions: {
+      claim_google_sync_connections: {
+        Args: { p_limit?: number }
+        Returns: {
+          refresh_token: string
+          sync_cursor: string
+          user_id: string
+        }[]
+      }
       job_queue_claim: {
         Args: { max_jobs: number }
         Returns: Database["public"]["Tables"]["job_queue"]["Row"][]
